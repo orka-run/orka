@@ -363,9 +363,11 @@ async function cmdRetry(): Promise<void> {
 
   const newSession = await spawnSession({
     prompt: task.prompt,
-    projectPath: session.workingDir,
+    title: task.title,
+    projectPath: session.projectPath || session.workingDir,
     backend: session.backend,
     mode: session.mode,
+    model: task.model || undefined,
   });
 
   console.log(`retried session ${session.id} → ${newSession.id}`);
@@ -402,6 +404,8 @@ async function cmdShow(): Promise<void> {
   console.log(`  status:    ${session.status}`);
   console.log(`  backend:   ${session.backend}`);
   console.log(`  mode:      ${session.mode}`);
+  if (task?.model) console.log(`  model:     ${task.model}`);
+  console.log(`  project:   ${session.projectPath || "(unknown)"}`);
   console.log(`  workdir:   ${session.workingDir}`);
   console.log(`  tmux:      ${session.tmuxSessionName}`);
   console.log(`  log:       ${session.logFile}`);
@@ -412,7 +416,7 @@ async function cmdShow(): Promise<void> {
 
   if (task) {
     console.log("");
-    console.log(`  title:     ${task.title ?? "(none)"}`);
+    console.log(`  title:     ${task.title}`);
     console.log(`  prompt:    ${task.prompt}`);
   }
 }
