@@ -323,6 +323,11 @@ async function cmdStop(): Promise<void> {
     process.exit(1);
   }
 
+  if (session.status !== "running" && session.status !== "preparing") {
+    console.error(`session ${session.id} is already ${session.status}`);
+    process.exit(1);
+  }
+
   await stopSession(session.id);
   console.log(`stopped session ${session.id}`);
 }
@@ -340,12 +345,18 @@ async function cmdDiff(): Promise<void> {
     process.exit(1);
   }
 
-  const status = await $`git -C ${session.workingDir} status`.text();
-  console.log(status);
+  try {
+    const status = await $`git -C ${session.workingDir} status`.text();
+    console.log(status);
 
-  const diff = await $`git -C ${session.workingDir} diff`.text();
-  if (diff) {
-    console.log(diff);
+    const diff = await $`git -C ${session.workingDir} diff`.text();
+    if (diff) {
+      console.log(diff);
+    }
+  } catch {
+    console.error(`error: cannot read git status in ${session.workingDir}`);
+    console.error("  (worktree may have been cleaned up)");
+    process.exit(1);
   }
 }
 
@@ -359,6 +370,11 @@ async function cmdRetry(): Promise<void> {
   const session = findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  if (session.status === "running") {
+    console.error(`session ${session.id} is still running — stop it first`);
     process.exit(1);
   }
 
