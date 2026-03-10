@@ -15,6 +15,7 @@ import {
   tmuxCapture,
   tmuxHas,
   deleteSessions,
+  getConfig,
 } from "@orka/daemon";
 
 const command = process.argv[2];
@@ -82,10 +83,10 @@ async function cmdSpawn(): Promise<void> {
   const args = parseArgs({
     args: process.argv.slice(3),
     options: {
-      project: { type: "string", short: "p", default: "." },
-      backend: { type: "string", short: "b", default: "claude-code" },
+      project: { type: "string", short: "p" },
+      backend: { type: "string", short: "b" },
       prompt: { type: "string" },
-      mode: { type: "string", short: "m", default: "interactive" },
+      mode: { type: "string", short: "m" },
       branch: { type: "string" },
       title: { type: "string" },
     },
@@ -99,12 +100,14 @@ async function cmdSpawn(): Promise<void> {
     process.exit(1);
   }
 
+  const config = getConfig();
+
   const session = await spawnSession({
     prompt,
     title: args.values.title,
-    projectPath: args.values.project!,
-    backend: args.values.backend as BackendKind,
-    mode: args.values.mode as SessionMode,
+    projectPath: args.values.project ?? config.defaults.project ?? ".",
+    backend: (args.values.backend ?? config.defaults.backend ?? "claude-code") as BackendKind,
+    mode: (args.values.mode ?? config.defaults.mode ?? "interactive") as SessionMode,
     branch: args.values.branch,
   });
 

@@ -1,6 +1,8 @@
 export { spawnSession, stopSession, reapSessions } from "./orchestrator";
 export { tmuxList, tmuxAttach, tmuxCapture, tmuxHas } from "./tmux";
 export { getDb, getOrkaHome } from "./db";
+export { getConfig } from "./config";
+export type { OrkaConfig } from "./config";
 export {
   getSession,
   listSessions,
