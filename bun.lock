@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "orka",
+      "dependencies": {
+        "zod": "^4.3.6",
+      },
     },
     "packages/cli": {
       "name": "@orka/cli",
@@ -34,5 +37,7 @@
     "@orka/core": ["@orka/core@workspace:packages/core"],
 
     "@orka/daemon": ["@orka/daemon@workspace:packages/daemon"],
+
+    "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
   }
 }

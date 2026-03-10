@@ -54,6 +54,9 @@ switch (command) {
   case "workdir":
     await cmdWorkdir();
     break;
+  case "wait":
+    await cmdWait();
+    break;
   case "prune":
     await cmdPrune();
     break;
@@ -75,6 +78,7 @@ function printUsage(): void {
   console.log("  diff    Show git changes in a session worktree");
   console.log("  show    Show full details for a session");
   console.log("  workdir Print session working directory");
+  console.log("  wait    Wait for session(s) to complete");
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
   console.log("");
@@ -459,6 +463,60 @@ async function cmdWorkdir(): Promise<void> {
 
   // Print only the path — usable in shell: cd $(orka workdir <id>)
   console.log(session.workingDir);
+}
+
+async function cmdWait(): Promise<void> {
+  const ids = process.argv.slice(3);
+  const allFlag = ids.includes("--all");
+
+  if (ids.length === 0) {
+    console.error("usage: orka wait <session-id...> | --all");
+    process.exit(1);
+  }
+
+  const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
+  let targets: string[];
+
+  if (allFlag) {
+    const running = listSessions().filter((s) => !terminalStatuses.has(s.status));
+    targets = running.map((s) => s.id);
+    if (targets.length === 0) {
+      console.log("no running sessions to wait for");
+      return;
+    }
+  } else {
+    targets = ids.map((id) => {
+      const s = findSession(id);
+      if (!s) {
+        console.error(`session not found: ${id}`);
+        process.exit(1);
+      }
+      return s.id;
+    });
+  }
+
+  console.log(`waiting for ${targets.length} session(s)...`);
+  const pending = new Set(targets);
+  let anyFailed = false;
+
+  while (pending.size > 0) {
+    await reapSessions();
+    for (const id of [...pending]) {
+      const s = getSession(id);
+      if (!s || terminalStatuses.has(s.status)) {
+        pending.delete(id);
+        const status = s?.status ?? "unknown";
+        const task = s ? getTask(s.taskId) : null;
+        const label = task?.title?.slice(0, 50) ?? id;
+        console.log(`  ${id}  ${status}  ${label}`);
+        if (status === "failed") anyFailed = true;
+      }
+    }
+    if (pending.size > 0) await Bun.sleep(2000);
+  }
+
+  console.log("all sessions finished");
+  if (anyFailed) process.exit(1);
 }
 
 async function cmdPrune(): Promise<void> {
