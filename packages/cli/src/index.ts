@@ -114,7 +114,8 @@ function printUsage(): void {
   console.log("ps options:");
   console.log("  --status       Filter by status (e.g. running, completed, failed, cancelled)");
   console.log("  --backend      Filter by backend (e.g. claude-code, codex, aider, shell)");
-  console.log("  --verbose, -v  Show cost, duration, and token usage");
+  console.log("  --project      Filter by project (name or full path)");
+  console.log("  --verbose, -v  Show cost, duration, tokens, and project column");
   console.log("");
   console.log("logs options:");
   console.log("  --follow, -f  Stream live output (polls tmux or tail -f log)");
@@ -220,6 +221,7 @@ async function cmdPs(): Promise<void> {
     options: {
       status: { type: "string" },
       backend: { type: "string" },
+      project: { type: "string" },
       verbose: { type: "boolean", short: "v", default: false },
     },
     allowPositionals: false,
@@ -231,6 +233,12 @@ async function cmdPs(): Promise<void> {
   }
   if (args.values.backend) {
     sessions = sessions.filter((s) => s.backend === args.values.backend);
+  }
+  if (args.values.project) {
+    const proj = args.values.project;
+    sessions = sessions.filter((s) =>
+      s.projectPath === proj || projectName(s.projectPath) === proj,
+    );
   }
 
   if (sessions.length === 0) {
@@ -255,6 +263,10 @@ async function cmdPs(): Promise<void> {
   };
 
   const verbose = args.values.verbose ?? false;
+  const uniqueProjects = new Set(sessions.map((s) => s.projectPath));
+  const multiProject = uniqueProjects.size > 1;
+  const showProject = multiProject || verbose;
+
   const running = sessions.filter((s) => s.status === "running").length;
   console.log(c("1", `${running} running / ${sessions.length} total`));
   console.log("");
@@ -262,14 +274,16 @@ async function cmdPs(): Promise<void> {
   let header =
     padR("ID", 16) +
     padR("STATUS", 20) +
-    padR("AGE", 10) +
-    padR("BACKEND", 14);
+    padR("AGE", 10);
+  if (showProject) header += padR("PROJECT", 14);
+  header += padR("BACKEND", 14);
   if (verbose) {
     header += padR("COST", 10) + padR("DURATION", 10) + padR("TOKENS", 14);
   }
   header += "TITLE";
+  const lineWidth = 76 + (showProject ? 14 : 0) + (verbose ? 34 : 0);
   console.log(header);
-  console.log("-".repeat(verbose ? 110 : 76));
+  console.log("-".repeat(lineWidth));
 
   for (const s of sessions) {
     const task = getTask(s.taskId);
@@ -280,8 +294,10 @@ async function cmdPs(): Promise<void> {
     let line =
       padR(s.id, 16) +
       colored.padEnd(statusPad) +
-      padR(formatAge(s.createdAt), 10) +
-      padR(s.backend, 14);
+      padR(formatAge(s.createdAt), 10);
+
+    if (showProject) line += padR(projectName(s.projectPath), 14);
+    line += padR(s.backend, 14);
 
     if (verbose) {
       const result = s.logFile ? parseSessionResult(s.logFile) : null;
@@ -823,6 +839,12 @@ function shortNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+function projectName(path: string): string {
+  if (!path) return "-";
+  const parts = path.split("/");
+  return parts[parts.length - 1] || path;
 }
 
 function padR(s: string, n: number): string {
