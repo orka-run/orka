@@ -275,13 +275,13 @@ async function cmdPs(): Promise<void> {
     padR("ID", 16) +
     padR("STATUS", 20) +
     padR("AGE", 10);
-  if (showProject) header += padR("PROJECT", 14);
+  if (showProject) header += padR("PROJECT", 30);
   header += padR("BACKEND", 14);
   if (verbose) {
     header += padR("COST", 10) + padR("DURATION", 10) + padR("TOKENS", 14);
   }
   header += "TITLE";
-  const lineWidth = 76 + (showProject ? 14 : 0) + (verbose ? 34 : 0);
+  const lineWidth = 76 + (showProject ? 30 : 0) + (verbose ? 34 : 0);
   console.log(header);
   console.log("-".repeat(lineWidth));
 
@@ -296,7 +296,7 @@ async function cmdPs(): Promise<void> {
       colored.padEnd(statusPad) +
       padR(formatAge(s.createdAt), 10);
 
-    if (showProject) line += padR(projectName(s.projectPath), 14);
+    if (showProject) line += padR(s.projectPath || "-", 30);
     line += padR(s.backend, 14);
 
     if (verbose) {
