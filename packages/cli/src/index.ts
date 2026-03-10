@@ -81,6 +81,9 @@ function printUsage(): void {
   console.log("  --status    Filter by status (e.g. running, completed, failed, cancelled)");
   console.log("  --backend   Filter by backend (e.g. claude-code, codex, aider, shell)");
   console.log("");
+  console.log("logs options:");
+  console.log("  --follow, -f  Stream live output (polls tmux or tail -f log)");
+  console.log("");
   console.log("prune options:");
   console.log("  --age       Max age to keep (default: 24h)");
   console.log("");
@@ -231,9 +234,19 @@ async function cmdAttach(): Promise<void> {
 async function cmdLogs(): Promise<void> {
   const sessionId = process.argv[3];
   if (!sessionId) {
-    console.error("usage: orka logs <session-id>");
+    console.error("usage: orka logs <session-id> [--follow]");
     process.exit(1);
   }
+
+  const args = parseArgs({
+    args: process.argv.slice(4),
+    options: {
+      follow: { type: "boolean", short: "f", default: false },
+    },
+    allowPositionals: false,
+  });
+
+  const follow = args.values.follow ?? false;
 
   const session = findSession(sessionId);
   if (!session) {
@@ -241,17 +254,48 @@ async function cmdLogs(): Promise<void> {
     process.exit(1);
   }
 
-  // Try live tmux capture first
+  if (!follow) {
+    // One-shot: try live tmux capture first
+    if (await tmuxHas(session.tmuxSessionName)) {
+      const output = await tmuxCapture(session.tmuxSessionName);
+      console.log(output);
+      return;
+    }
+
+    // Fall back to log file
+    if (session.logFile && existsSync(session.logFile)) {
+      const content = readFileSync(session.logFile, "utf-8");
+      console.log(content);
+      return;
+    }
+
+    console.error("no logs available (session ended, no log file found)");
+    process.exit(1);
+  }
+
+  // --follow mode
   if (await tmuxHas(session.tmuxSessionName)) {
-    const output = await tmuxCapture(session.tmuxSessionName);
-    console.log(output);
+    // Poll tmux pane every 500ms, printing new output as it arrives
+    let offset = 0;
+    while (true) {
+      const output = await tmuxCapture(session.tmuxSessionName);
+      if (output.length > offset) {
+        process.stdout.write(output.slice(offset));
+        offset = output.length;
+      }
+      if (!(await tmuxHas(session.tmuxSessionName))) break;
+      await Bun.sleep(500);
+    }
     return;
   }
 
-  // Fall back to log file
+  // tmux dead — stream log file with tail -f
   if (session.logFile && existsSync(session.logFile)) {
-    const content = readFileSync(session.logFile, "utf-8");
-    console.log(content);
+    const proc = Bun.spawn(["tail", "-f", session.logFile], {
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    await proc.exited;
     return;
   }
 
