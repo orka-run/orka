@@ -30,6 +30,11 @@ import {
   setSessionKept,
   initTracing,
   shutdownTracing,
+  addProject,
+  removeProject,
+  listProjects,
+  resolveProject,
+  projectNameForPath,
 } from "@orka/daemon";
 
 // Initialize OpenTelemetry tracing
@@ -80,6 +85,9 @@ switch (command) {
   case "merge":
     await cmdMerge();
     break;
+  case "project":
+    await cmdProject();
+    break;
   case "prune":
     await cmdPrune();
     break;
@@ -108,6 +116,7 @@ function printUsage(): void {
   console.log("  result  Show final result from a background session");
   console.log("  keep    Protect a session's worktree from auto-cleanup");
   console.log("  merge   Merge session worktree branch into current branch");
+  console.log("  project Register/list/remove project aliases");
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
   console.log("");
@@ -190,7 +199,7 @@ async function cmdSpawn(): Promise<void> {
     session = await spawnSession({
       prompt,
       title: args.values.title,
-      projectPath: args.values.project!,
+      projectPath: resolveProject(args.values.project!),
       backend: args.values.backend as BackendKind,
       mode: args.values.mode as SessionMode,
       model: args.values.model || cfg.model || undefined,
@@ -236,8 +245,9 @@ async function cmdPs(): Promise<void> {
   }
   if (args.values.project) {
     const proj = args.values.project;
+    const resolved = resolveProject(proj);
     sessions = sessions.filter((s) =>
-      s.projectPath === proj || projectName(s.projectPath) === proj,
+      s.projectPath === resolved || s.projectPath === proj || projectName(s.projectPath) === proj,
     );
   }
 
@@ -275,13 +285,13 @@ async function cmdPs(): Promise<void> {
     padR("ID", 16) +
     padR("STATUS", 20) +
     padR("AGE", 10);
-  if (showProject) header += padR("PROJECT", 30);
+  if (showProject) header += padR("PROJECT", 36);
   header += padR("BACKEND", 14);
   if (verbose) {
     header += padR("COST", 10) + padR("DURATION", 10) + padR("TOKENS", 14);
   }
   header += "TITLE";
-  const lineWidth = 76 + (showProject ? 30 : 0) + (verbose ? 34 : 0);
+  const lineWidth = 76 + (showProject ? 36 : 0) + (verbose ? 34 : 0);
   console.log(header);
   console.log("-".repeat(lineWidth));
 
@@ -296,7 +306,11 @@ async function cmdPs(): Promise<void> {
       colored.padEnd(statusPad) +
       padR(formatAge(s.createdAt), 10);
 
-    if (showProject) line += padR(s.projectPath || "-", 30);
+    if (showProject) {
+      const alias = projectNameForPath(s.projectPath);
+      const label = alias ? `${s.projectPath} (${alias})` : s.projectPath || "-";
+      line += padR(label, 36);
+    }
     line += padR(s.backend, 14);
 
     if (verbose) {
@@ -747,6 +761,57 @@ async function cmdMerge(): Promise<void> {
     console.error(`error: ${e.message}`);
     process.exit(1);
   }
+}
+
+async function cmdProject(): Promise<void> {
+  const sub = process.argv[3];
+
+  if (sub === "add") {
+    const name = process.argv[4];
+    const path = process.argv[5] || ".";
+    if (!name) {
+      console.error("usage: orka project add <name> [path]");
+      process.exit(1);
+    }
+    const entry = addProject(name, path);
+    console.log(`registered project ${entry.name} → ${entry.path}`);
+    return;
+  }
+
+  if (sub === "remove" || sub === "rm") {
+    const name = process.argv[4];
+    if (!name) {
+      console.error("usage: orka project remove <name>");
+      process.exit(1);
+    }
+    if (removeProject(name)) {
+      console.log(`removed project ${name}`);
+    } else {
+      console.error(`project not found: ${name}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (sub === "list" || sub === "ls" || !sub) {
+    const projects = listProjects();
+    if (projects.length === 0) {
+      console.log("no registered projects");
+      console.log("");
+      console.log("register with: orka project add <name> [path]");
+      return;
+    }
+    for (const p of projects) {
+      console.log(`${p.name.padEnd(20)} ${p.path}`);
+    }
+    return;
+  }
+
+  console.error("usage: orka project <add|remove|list>");
+  console.error("  add <name> [path]  — register project (default path: .)");
+  console.error("  remove <name>      — unregister project");
+  console.error("  list               — show registered projects");
+  process.exit(1);
 }
 
 async function cmdPrune(): Promise<void> {

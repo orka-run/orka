@@ -25,3 +25,11 @@ export {
   deleteBranch,
   getWorktreeDir,
 } from "./worktree";
+export {
+  addProject,
+  removeProject,
+  listProjects,
+  resolveProject,
+  projectNameForPath,
+} from "./projects";
+export type { ProjectEntry } from "./projects";
