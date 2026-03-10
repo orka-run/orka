@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { z } from "zod/v4";
 
 // --- IDs ---
 
@@ -12,17 +13,21 @@ export function generateId(prefix: string): string {
 
 // --- Enums ---
 
-export type BackendKind = "claude-code" | "codex" | "aider" | "shell";
+export const BackendKindSchema = z.enum(["claude-code", "codex", "aider", "shell"]);
+export type BackendKind = z.infer<typeof BackendKindSchema>;
 
-export type SessionMode = "interactive" | "background";
+export const SessionModeSchema = z.enum(["interactive", "background"]);
+export type SessionMode = z.infer<typeof SessionModeSchema>;
 
-export type SessionStatus =
-  | "queued"
-  | "preparing"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export const SessionStatusSchema = z.enum([
+  "queued",
+  "preparing",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 
 export type WorkspaceKind = "repo" | "worktree";
 

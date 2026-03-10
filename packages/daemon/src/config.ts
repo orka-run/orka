@@ -1,30 +1,25 @@
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
+import { z } from "zod/v4";
 import { getOrkaHome } from "./db";
 
-export interface OrkaConfig {
-  defaults: {
-    backend: string;
-    mode: string;
-    model: string;
-    project: string;
-  };
-  limits: {
-    maxConcurrent: number;
-  };
-}
+export const ConfigSchema = z.object({
+  defaults: z
+    .object({
+      backend: z.string().default("claude-code"),
+      mode: z.string().default("interactive"),
+      model: z.string().default(""),
+      project: z.string().default("."),
+    })
+    .default({}),
+  limits: z
+    .object({
+      maxConcurrent: z.number().default(0),
+    })
+    .default({}),
+});
 
-const DEFAULT_CONFIG: OrkaConfig = {
-  defaults: {
-    backend: "claude-code",
-    mode: "interactive",
-    model: "",
-    project: ".",
-  },
-  limits: {
-    maxConcurrent: 0, // 0 = unlimited
-  },
-};
+export type OrkaConfig = z.infer<typeof ConfigSchema>;
 
 let _config: OrkaConfig | null = null;
 
@@ -33,26 +28,22 @@ export function getConfig(): OrkaConfig {
 
   const configPath = join(getOrkaHome(), "config.toml");
   if (!existsSync(configPath)) {
-    _config = DEFAULT_CONFIG;
+    _config = ConfigSchema.parse({});
     return _config;
   }
 
   try {
     const raw = readFileSync(configPath, "utf-8");
-    const parsed = parseSimpleToml(raw);
-    _config = {
-      defaults: {
-        backend: parsed.defaults?.backend ?? DEFAULT_CONFIG.defaults.backend,
-        mode: parsed.defaults?.mode ?? DEFAULT_CONFIG.defaults.mode,
-        model: parsed.defaults?.model ?? DEFAULT_CONFIG.defaults.model,
-        project: parsed.defaults?.project ?? DEFAULT_CONFIG.defaults.project,
-      },
-      limits: {
-        maxConcurrent: parseInt(parsed.limits?.max_concurrent ?? "0", 10) || 0,
-      },
-    };
+    const toml = parseSimpleToml(raw);
+    _config = ConfigSchema.parse({
+      defaults: toml.defaults,
+      limits:
+        toml.limits?.max_concurrent !== undefined
+          ? { maxConcurrent: parseInt(toml.limits.max_concurrent, 10) || 0 }
+          : undefined,
+    });
   } catch {
-    _config = DEFAULT_CONFIG;
+    _config = ConfigSchema.parse({});
   }
 
   return _config;
