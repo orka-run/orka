@@ -1,5 +1,7 @@
 # Orka — Agent Session Orchestrator
 
+See also: [AGENTS.md](./AGENTS.md) for issue tracking and agent workflow conventions.
+
 ## Commit Policy
 
 **MANDATORY: After completing each task/issue, create a git commit BEFORE moving to the next task.**
@@ -14,10 +16,26 @@
 
 ```
 packages/
-  core/     — @orka/core: domain types (Session, Task, SpawnRequest, etc.)
-  daemon/   — @orka/daemon: tmux runtime, git worktree, SQLite storage, backends, orchestrator
-  cli/      — @orka/cli: CLI entry point (spawn, ps, attach, logs, stop, diff)
+  core/     — @orka/core: domain types, zod schemas (Session, Task, BackendKind, etc.)
+  daemon/   — @orka/daemon: orchestrator, tmux, git worktree, SQLite, backends, config
+  cli/      — @orka/cli: CLI entry point (13 commands)
 orka        — shell wrapper for global CLI access
+```
+
+## CLI Commands
+
+```
+spawn   — Spawn an agent session (--backend, --mode, --model, --branch, --title)
+ps      — List sessions (--status, --backend filters)
+attach  — Attach to running tmux session
+logs    — View session output (--follow/-f for live streaming)
+stop    — Stop a running session
+diff    — Show git changes in session worktree
+show    — Full session detail view (status, project, model, prompt, etc.)
+workdir — Print session working directory (for shell: cd $(orka workdir <id>))
+wait    — Block until session(s) complete (supports --all)
+retry   — Re-run a session with same prompt/model/title
+prune   — Remove old completed sessions (--age, also cleans orphaned worktrees)
 ```
 
 ## Import Policy
@@ -31,10 +49,22 @@ orka        — shell wrapper for global CLI access
 
 - **Runtime**: Bun
 - **Language**: TypeScript (strict mode)
-- **Storage**: SQLite via bun:sqlite (~/.orka/orka.db)
+- **Validation**: zod — enum schemas in core/types.ts, config validation, DB row parsing
+- **Storage**: SQLite via bun:sqlite (~/.orka/orka.db), versioned migrations in db.ts
 - **Session runtime**: tmux (sessions prefixed `orka-`)
+- **Worktrees**: ~/.orka/worktrees/<session-id> (OUTSIDE main repo for isolation)
 - **Logs**: ~/.orka/logs/<session-id>.log
+- **Scripts**: ~/.orka/scripts/<session-id>.sh (command written to file, not inline bash -c)
+- **Config**: ~/.orka/config.toml (optional, TOML with [defaults] and [limits] sections)
 - **Issue tracking**: beads (`bd` CLI)
+
+## Key Architecture Decisions
+
+- **Worktrees outside main repo**: Background sessions get worktrees at `~/.orka/worktrees/` so `git rev-parse --show-toplevel` returns the worktree path, not the parent repo. This prevents agents from accidentally editing the main repo.
+- **Script files for tmux**: Commands are written to `~/.orka/scripts/<id>.sh` and tmux runs `bash <path>` — avoids nested `bash -c` shell escaping issues.
+- **Session stores projectPath**: The original repo root is stored in the session record, separate from workingDir (which may be a worktree). Used for retry and worktree cleanup.
+- **Auto-reap on every CLI invocation**: `reapSessions()` runs before every command, marking dead tmux sessions as completed and cleaning up worktrees.
+- **Concurrent limits**: Configurable via `[limits] max_concurrent = "5"` in config.toml (0 = unlimited).
 
 ## Development Commands
 
@@ -56,3 +86,4 @@ bd list --status=open
 - Interactive sessions use: `claude <prompt>`
 - All sessions get `--append-system-prompt "[orka session: <id>]"` for traceability
 - Logs are tee'd to ~/.orka/logs/ for post-mortem reading
+- Background sessions automatically get isolated worktrees at ~/.orka/worktrees/
