@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "node:util";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { $ } from "bun";
 import type { BackendKind, SessionMode } from "@orka/core";
 import {
@@ -15,6 +15,7 @@ import {
   tmuxHas,
   updateSessionStatus,
   tmuxList,
+  deleteSessions,
 } from "@orka/daemon";
 
 const command = process.argv[2];
@@ -38,6 +39,12 @@ switch (command) {
   case "diff":
     await cmdDiff();
     break;
+  case "retry":
+    await cmdRetry();
+    break;
+  case "prune":
+    await cmdPrune();
+    break;
   default:
     printUsage();
 }
@@ -54,6 +61,7 @@ function printUsage(): void {
   console.log("  logs    View session logs");
   console.log("  stop    Stop a session");
   console.log("  diff    Show git changes in a session worktree");
+  console.log("  retry   Re-run a session with the same prompt");
   console.log("");
   console.log("spawn options:");
   console.log("  --project, -p   Project directory (default: .)");
@@ -260,6 +268,46 @@ async function cmdDiff(): Promise<void> {
   const diff = await $`git -C ${session.workingDir} diff`.text();
   if (diff) {
     console.log(diff);
+  }
+}
+
+async function cmdRetry(): Promise<void> {
+  const sessionId = process.argv[3];
+  if (!sessionId) {
+    console.error("usage: orka retry <session-id>");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  const task = getTask(session.taskId);
+  if (!task) {
+    console.error(`task not found for session: ${session.id}`);
+    process.exit(1);
+  }
+
+  const newSession = await spawnSession({
+    prompt: task.prompt,
+    projectPath: session.workingDir,
+    backend: session.backend,
+    mode: session.mode,
+  });
+
+  console.log(`retried session ${session.id} → ${newSession.id}`);
+  console.log(`  backend:  ${newSession.backend}`);
+  console.log(`  mode:     ${newSession.mode}`);
+  console.log(`  workdir:  ${newSession.workingDir}`);
+  console.log(`  tmux:     ${newSession.tmuxSessionName}`);
+  console.log(`  log:      ${newSession.logFile}`);
+
+  if (newSession.mode === "interactive") {
+    console.log("");
+    console.log("attaching... (detach: Ctrl-b d)");
+    await tmuxAttach(newSession.tmuxSessionName);
   }
 }
 
