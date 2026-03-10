@@ -104,8 +104,9 @@ function printUsage(): void {
   console.log("  prune   Remove old completed/cancelled/failed sessions");
   console.log("");
   console.log("ps options:");
-  console.log("  --status    Filter by status (e.g. running, completed, failed, cancelled)");
-  console.log("  --backend   Filter by backend (e.g. claude-code, codex, aider, shell)");
+  console.log("  --status       Filter by status (e.g. running, completed, failed, cancelled)");
+  console.log("  --backend      Filter by backend (e.g. claude-code, codex, aider, shell)");
+  console.log("  --verbose, -v  Show cost, duration, and token usage");
   console.log("");
   console.log("logs options:");
   console.log("  --follow, -f  Stream live output (polls tmux or tail -f log)");
@@ -211,6 +212,7 @@ async function cmdPs(): Promise<void> {
     options: {
       status: { type: "string" },
       backend: { type: "string" },
+      verbose: { type: "boolean", short: "v", default: false },
     },
     allowPositionals: false,
   });
@@ -244,31 +246,45 @@ async function cmdPs(): Promise<void> {
     }
   };
 
+  const verbose = args.values.verbose ?? false;
   const running = sessions.filter((s) => s.status === "running").length;
   console.log(c("1", `${running} running / ${sessions.length} total`));
   console.log("");
 
-  console.log(
+  let header =
     padR("ID", 16) +
     padR("STATUS", 20) +
     padR("AGE", 10) +
-    padR("BACKEND", 14) +
-    "TITLE",
-  );
-  console.log("-".repeat(76));
+    padR("BACKEND", 14);
+  if (verbose) {
+    header += padR("COST", 10) + padR("DURATION", 10) + padR("TOKENS", 14);
+  }
+  header += "TITLE";
+  console.log(header);
+  console.log("-".repeat(verbose ? 110 : 76));
 
   for (const s of sessions) {
     const task = getTask(s.taskId);
     const statusText = s.kept ? `${s.status} [kept]` : s.status;
     const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
     const statusPad = 20 - statusText.length + colored.length;
-    console.log(
+
+    let line =
       padR(s.id, 16) +
       colored.padEnd(statusPad) +
       padR(formatAge(s.createdAt), 10) +
-      padR(s.backend, 14) +
-      (task?.title ?? "").slice(0, 50),
-    );
+      padR(s.backend, 14);
+
+    if (verbose) {
+      const result = s.logFile ? parseSessionResult(s.logFile) : null;
+      const cost = result?.costUsd != null ? `$${result.costUsd.toFixed(2)}` : "-";
+      const duration = result ? formatDuration(result.durationMs) : "-";
+      const tokens = result ? `${shortNum(result.outputTokens)} out` : "-";
+      line += padR(cost, 10) + padR(duration, 10) + padR(tokens, 14);
+    }
+
+    line += (task?.title ?? "").slice(0, verbose ? 40 : 50);
+    console.log(line);
   }
 }
 
@@ -793,6 +809,12 @@ function formatAge(isoDate: string): string {
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
+}
+
+function shortNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 function padR(s: string, n: number): string {
