@@ -19,6 +19,13 @@ import {
   deleteSessions,
   getOrkaHome,
   cleanupOrphanedWorktrees,
+  worktreeMerge,
+  worktreeRemove,
+  worktreeBranch,
+  worktreeHasCommitsAhead,
+  worktreeHasChanges,
+  deleteBranch,
+  getWorktreeDir,
 } from "@orka/daemon";
 
 const command = process.argv[2];
@@ -57,6 +64,9 @@ switch (command) {
   case "wait":
     await cmdWait();
     break;
+  case "merge":
+    await cmdMerge();
+    break;
   case "prune":
     await cmdPrune();
     break;
@@ -79,6 +89,7 @@ function printUsage(): void {
   console.log("  show    Show full details for a session");
   console.log("  workdir Print session working directory");
   console.log("  wait    Wait for session(s) to complete");
+  console.log("  merge   Merge session worktree branch into current branch");
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
   console.log("");
@@ -517,6 +528,52 @@ async function cmdWait(): Promise<void> {
 
   console.log("all sessions finished");
   if (anyFailed) process.exit(1);
+}
+
+async function cmdMerge(): Promise<void> {
+  const args = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      cleanup: { type: "boolean", default: true },
+    },
+    allowPositionals: true,
+  });
+
+  const sessionId = args.positionals[0];
+  if (!sessionId) {
+    console.error("usage: orka merge <session-id> [--no-cleanup]");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  const wtDir = getWorktreeDir();
+  if (!session.workingDir.startsWith(wtDir)) {
+    console.error(`session ${session.id} is not using a worktree`);
+    process.exit(1);
+  }
+
+  try {
+    const { branch, commits } = await worktreeMerge(session.projectPath, session.workingDir);
+    console.log(`merged ${commits} commit(s) from ${branch}`);
+
+    if (args.values.cleanup !== false) {
+      try {
+        await worktreeRemove(session.projectPath, session.workingDir);
+        await deleteBranch(session.projectPath, branch);
+        console.log(`cleaned up worktree and branch ${branch}`);
+      } catch {
+        console.log(`note: could not clean up worktree/branch (manual cleanup may be needed)`);
+      }
+    }
+  } catch (e: any) {
+    console.error(`error: ${e.message}`);
+    process.exit(1);
+  }
 }
 
 async function cmdPrune(): Promise<void> {

@@ -37,7 +37,9 @@ export async function worktreeCreate(
       await $`git -C ${repoPath} worktree add -b ${branch} ${wtPath}`.quiet();
     }
   } else {
-    await $`git -C ${repoPath} worktree add --detach ${wtPath}`.quiet();
+    // Auto-create a named branch so commits are not lost on detached HEAD
+    const autoBranch = `orka/${sessionSlug}`;
+    await $`git -C ${repoPath} worktree add -b ${autoBranch} ${wtPath}`.quiet();
   }
 
   return wtPath;
@@ -78,6 +80,71 @@ export async function worktreeList(
   }
 
   return worktrees;
+}
+
+/** Check if a worktree has commits ahead of the main branch (i.e. has new work). */
+export async function worktreeHasCommitsAhead(
+  repoPath: string,
+  wtPath: string,
+): Promise<boolean> {
+  try {
+    // Get the HEAD of the main repo
+    const mainHead = (await $`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+    // Get the HEAD of the worktree
+    const wtHead = (await $`git -C ${wtPath} rev-parse HEAD`.quiet().text()).trim();
+    if (mainHead === wtHead) return false;
+    // Count commits in worktree that aren't in main
+    const count = (await $`git -C ${wtPath} rev-list --count ${mainHead}..${wtHead}`.quiet().text()).trim();
+    return parseInt(count, 10) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Check if a worktree has uncommitted changes. */
+export async function worktreeHasChanges(wtPath: string): Promise<boolean> {
+  try {
+    const status = (await $`git -C ${wtPath} status --porcelain`.quiet().text()).trim();
+    return status.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Get the branch name of a worktree. */
+export async function worktreeBranch(wtPath: string): Promise<string | null> {
+  try {
+    const branch = (await $`git -C ${wtPath} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+    return branch === "HEAD" ? null : branch;
+  } catch {
+    return null;
+  }
+}
+
+/** Merge a worktree's branch into the current branch of the main repo. */
+export async function worktreeMerge(
+  repoPath: string,
+  wtPath: string,
+): Promise<{ branch: string; commits: number }> {
+  const branch = await worktreeBranch(wtPath);
+  if (!branch) throw new Error("Worktree is on detached HEAD — cannot merge");
+
+  // Count commits to merge
+  const mainHead = (await $`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+  const wtHead = (await $`git -C ${wtPath} rev-parse HEAD`.quiet().text()).trim();
+  const countStr = (await $`git -C ${repoPath} rev-list --count ${mainHead}..${wtHead}`.quiet().text()).trim();
+  const commits = parseInt(countStr, 10);
+  if (commits === 0) throw new Error(`No commits to merge from branch ${branch}`);
+
+  // Merge the branch
+  await $`git -C ${repoPath} merge ${branch} --no-edit`.quiet();
+
+  return { branch, commits };
+}
+
+/** Delete the git branch associated with a worktree (after worktree removal). */
+export async function deleteBranch(repoPath: string, branch: string): Promise<void> {
+  await $`git -C ${repoPath} branch -d ${branch}`.quiet();
 }
 
 /** Check if repo is a valid git repository. */

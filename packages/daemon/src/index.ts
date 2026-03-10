@@ -11,3 +11,12 @@ export {
 } from "./db";
 export { getConfig } from "./config";
 export type { OrkaConfig } from "./config";
+export {
+  worktreeMerge,
+  worktreeRemove,
+  worktreeBranch,
+  worktreeHasCommitsAhead,
+  worktreeHasChanges,
+  deleteBranch,
+  getWorktreeDir,
+} from "./worktree";

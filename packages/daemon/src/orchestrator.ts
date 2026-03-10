@@ -8,7 +8,7 @@ import {
 } from "@orka/core";
 import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
-import { worktreeCreate, worktreeRemove, getWorktreeDir } from "./worktree";
+import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges } from "./worktree";
 import { buildBackendCommand } from "./backends";
 import { getConfig } from "./config";
 
@@ -147,13 +147,18 @@ export async function stopSession(sessionId: string): Promise<void> {
   await tryCleanupWorktree(session);
 }
 
-/** Remove worktree if the session was using one. */
+/** Remove worktree if the session was using one.
+ *  Preserves worktrees that have uncommitted changes or commits ahead of parent.
+ */
 async function tryCleanupWorktree(session: Session): Promise<void> {
   const wtDir = getWorktreeDir();
   if (!session.workingDir.startsWith(wtDir)) return;
   const repoPath = session.projectPath;
   if (!repoPath) return;
   try {
+    // Don't remove if there's valuable work
+    if (await worktreeHasChanges(session.workingDir)) return;
+    if (await worktreeHasCommitsAhead(repoPath, session.workingDir)) return;
     await worktreeRemove(repoPath, session.workingDir);
   } catch {
     // Cleanup failure should not break reap/stop
