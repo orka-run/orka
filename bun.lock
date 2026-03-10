@@ -1,0 +1,38 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "orka",
+    },
+    "packages/cli": {
+      "name": "@orka/cli",
+      "version": "0.0.1",
+      "bin": {
+        "orka": "src/index.ts",
+      },
+      "dependencies": {
+        "@orka/core": "workspace:*",
+        "@orka/daemon": "workspace:*",
+      },
+    },
+    "packages/core": {
+      "name": "@orka/core",
+      "version": "0.0.1",
+    },
+    "packages/daemon": {
+      "name": "@orka/daemon",
+      "version": "0.0.1",
+      "dependencies": {
+        "@orka/core": "workspace:*",
+      },
+    },
+  },
+  "packages": {
+    "@orka/cli": ["@orka/cli@workspace:packages/cli"],
+
+    "@orka/core": ["@orka/core@workspace:packages/core"],
+
+    "@orka/daemon": ["@orka/daemon@workspace:packages/daemon"],
+  }
+}

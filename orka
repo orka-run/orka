@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+export PATH="$HOME/.bun/bin:$PATH"
+exec bun run "$(dirname "$(realpath "$0")")/packages/cli/src/index.ts" "$@"

@@ -1,0 +1,12 @@
+{
+  "name": "@orka/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "orka": "src/index.ts"
+  },
+  "dependencies": {
+    "@orka/core": "workspace:*",
+    "@orka/daemon": "workspace:*"
+  }
+}

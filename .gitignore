@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.orka/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

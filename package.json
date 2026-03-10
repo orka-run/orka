@@ -1,0 +1,7 @@
+{
+  "name": "orka",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}
