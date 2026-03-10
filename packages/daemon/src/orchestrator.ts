@@ -10,6 +10,7 @@ import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
 import { worktreeCreate, worktreeRemove, getWorktreeDir } from "./worktree";
 import { buildBackendCommand } from "./backends";
+import { getConfig } from "./config";
 
 /** Parse the exit code written by the backend into the log file.
  *  Looks for a line matching `[orka] exit_code=N` in the last 20 lines.
@@ -27,6 +28,18 @@ function parseExitCode(logFile: string): number | undefined {
 
 /** Spawn a new agent session. Returns the created session. */
 export async function spawnSession(req: SpawnRequest): Promise<Session> {
+  // Check concurrent session limit
+  const { maxConcurrent } = getConfig().limits;
+  if (maxConcurrent > 0) {
+    const running = listSessions("running");
+    if (running.length >= maxConcurrent) {
+      throw new Error(
+        `Concurrent session limit reached (${running.length}/${maxConcurrent}). ` +
+        `Stop a session or increase limits.max_concurrent in config.toml.`,
+      );
+    }
+  }
+
   const projectPath = resolve(req.projectPath);
   const taskId = generateId("task");
   const sessionId = generateId("sess");

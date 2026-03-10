@@ -121,15 +121,21 @@ async function cmdSpawn(): Promise<void> {
     process.exit(1);
   }
 
-  const session = await spawnSession({
-    prompt,
-    title: args.values.title,
-    projectPath: args.values.project!,
-    backend: args.values.backend as BackendKind,
-    mode: args.values.mode as SessionMode,
-    model: args.values.model || cfg.model || undefined,
-    branch: args.values.branch,
-  });
+  let session;
+  try {
+    session = await spawnSession({
+      prompt,
+      title: args.values.title,
+      projectPath: args.values.project!,
+      backend: args.values.backend as BackendKind,
+      mode: args.values.mode as SessionMode,
+      model: args.values.model || cfg.model || undefined,
+      branch: args.values.branch,
+    });
+  } catch (e: any) {
+    console.error(`error: ${e.message}`);
+    process.exit(1);
+  }
 
   console.log(`spawned session ${session.id}`);
   console.log(`  backend:  ${session.backend}`);

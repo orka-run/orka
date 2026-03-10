@@ -9,6 +9,9 @@ export interface OrkaConfig {
     model: string;
     project: string;
   };
+  limits: {
+    maxConcurrent: number;
+  };
 }
 
 const DEFAULT_CONFIG: OrkaConfig = {
@@ -17,6 +20,9 @@ const DEFAULT_CONFIG: OrkaConfig = {
     mode: "interactive",
     model: "",
     project: ".",
+  },
+  limits: {
+    maxConcurrent: 0, // 0 = unlimited
   },
 };
 
@@ -40,6 +46,9 @@ export function getConfig(): OrkaConfig {
         mode: parsed.defaults?.mode ?? DEFAULT_CONFIG.defaults.mode,
         model: parsed.defaults?.model ?? DEFAULT_CONFIG.defaults.model,
         project: parsed.defaults?.project ?? DEFAULT_CONFIG.defaults.project,
+      },
+      limits: {
+        maxConcurrent: parseInt(parsed.limits?.max_concurrent ?? "0", 10) || 0,
       },
     };
   } catch {
