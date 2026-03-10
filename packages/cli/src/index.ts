@@ -11,6 +11,7 @@ import {
   listSessions,
   getSession,
   getTask,
+  getConfig,
   tmuxAttach,
   tmuxCapture,
   tmuxHas,
@@ -79,13 +80,14 @@ function printUsage(): void {
 }
 
 async function cmdSpawn(): Promise<void> {
+  const cfg = getConfig().defaults;
   const args = parseArgs({
     args: process.argv.slice(3),
     options: {
-      project: { type: "string", short: "p", default: "." },
-      backend: { type: "string", short: "b", default: "claude-code" },
+      project: { type: "string", short: "p", default: cfg.project },
+      backend: { type: "string", short: "b", default: cfg.backend },
       prompt: { type: "string" },
-      mode: { type: "string", short: "m", default: "interactive" },
+      mode: { type: "string", short: "m", default: cfg.mode },
       branch: { type: "string" },
       title: { type: "string" },
     },
@@ -152,9 +154,9 @@ async function cmdPs(): Promise<void> {
 
   console.log(
     padR("ID", 16) +
-    padR("STATUS", 20) +  // extra for ANSI codes
+    padR("STATUS", 20) +
+    padR("AGE", 10) +
     padR("BACKEND", 14) +
-    padR("MODE", 14) +
     "TITLE",
   );
   console.log("-".repeat(76));
@@ -162,13 +164,12 @@ async function cmdPs(): Promise<void> {
   for (const s of sessions) {
     const task = getTask(s.taskId);
     const colored = statusColor(s.status);
-    // Pad based on visible length (status word), not ANSI-encoded length
     const statusPad = 20 - s.status.length + colored.length;
     console.log(
       padR(s.id, 16) +
       colored.padEnd(statusPad) +
+      padR(formatAge(s.createdAt), 10) +
       padR(s.backend, 14) +
-      padR(s.mode, 14) +
       (task?.title ?? "").slice(0, 50),
     );
   }
@@ -368,6 +369,16 @@ function findSession(query: string) {
     process.exit(1);
   }
   return null;
+}
+
+function formatAge(isoDate: string): string {
+  const ms = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function padR(s: string, n: number): string {
