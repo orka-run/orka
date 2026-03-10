@@ -47,6 +47,12 @@ switch (command) {
   case "retry":
     await cmdRetry();
     break;
+  case "show":
+    await cmdShow();
+    break;
+  case "workdir":
+    await cmdWorkdir();
+    break;
   case "prune":
     await cmdPrune();
     break;
@@ -66,8 +72,14 @@ function printUsage(): void {
   console.log("  logs    View session logs");
   console.log("  stop    Stop a session");
   console.log("  diff    Show git changes in a session worktree");
+  console.log("  show    Show full details for a session");
+  console.log("  workdir Print session working directory");
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
+  console.log("");
+  console.log("ps options:");
+  console.log("  --status    Filter by status (e.g. running, completed, failed, cancelled)");
+  console.log("  --backend   Filter by backend (e.g. claude-code, codex, aider, shell)");
   console.log("");
   console.log("prune options:");
   console.log("  --age       Max age to keep (default: 24h)");
@@ -130,7 +142,22 @@ async function cmdSpawn(): Promise<void> {
 }
 
 async function cmdPs(): Promise<void> {
-  const sessions = listSessions();
+  const args = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      status: { type: "string" },
+      backend: { type: "string" },
+    },
+    allowPositionals: false,
+  });
+
+  let sessions = listSessions();
+  if (args.values.status) {
+    sessions = sessions.filter((s) => s.status === args.values.status);
+  }
+  if (args.values.backend) {
+    sessions = sessions.filter((s) => s.backend === args.values.backend);
+  }
 
   if (sessions.length === 0) {
     console.log("no sessions");
@@ -309,6 +336,58 @@ async function cmdRetry(): Promise<void> {
     console.log("attaching... (detach: Ctrl-b d)");
     await tmuxAttach(newSession.tmuxSessionName);
   }
+}
+
+async function cmdShow(): Promise<void> {
+  const sessionId = process.argv[3];
+  if (!sessionId) {
+    console.error("usage: orka show <session-id>");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  const task = getTask(session.taskId);
+
+  console.log(`session ${session.id}`);
+  console.log("");
+  console.log(`  status:    ${session.status}`);
+  console.log(`  backend:   ${session.backend}`);
+  console.log(`  mode:      ${session.mode}`);
+  console.log(`  workdir:   ${session.workingDir}`);
+  console.log(`  tmux:      ${session.tmuxSessionName}`);
+  console.log(`  log:       ${session.logFile}`);
+  console.log(`  created:   ${session.createdAt}`);
+  console.log(`  started:   ${session.startedAt ?? "(not started)"}`);
+  console.log(`  finished:  ${session.finishedAt ?? "(not finished)"}`);
+  console.log(`  exit code: ${session.exitCode ?? "(none)"}`);
+
+  if (task) {
+    console.log("");
+    console.log(`  title:     ${task.title ?? "(none)"}`);
+    console.log(`  prompt:    ${task.prompt}`);
+  }
+}
+
+async function cmdWorkdir(): Promise<void> {
+  const sessionId = process.argv[3];
+  if (!sessionId) {
+    console.error("usage: orka workdir <session-id>");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  // Print only the path — usable in shell: cd $(orka workdir <id>)
+  console.log(session.workingDir);
 }
 
 async function cmdPrune(): Promise<void> {
