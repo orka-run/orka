@@ -88,6 +88,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     startedAt: null,
     finishedAt: null,
     exitCode: null,
+    kept: false,
   };
   insertSession(session);
 
@@ -156,7 +157,8 @@ async function tryCleanupWorktree(session: Session): Promise<void> {
   const repoPath = session.projectPath;
   if (!repoPath) return;
   try {
-    // Don't remove if there's valuable work
+    // Don't remove if explicitly kept or has valuable work
+    if (session.kept) return;
     if (await worktreeHasChanges(session.workingDir)) return;
     if (await worktreeHasCommitsAhead(repoPath, session.workingDir)) return;
     await worktreeRemove(repoPath, session.workingDir);

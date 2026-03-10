@@ -66,6 +66,7 @@ export interface Session {
   startedAt: string | null;
   finishedAt: string | null;
   exitCode: number | null;
+  kept: boolean;
 }
 
 // --- Spawn Request ---

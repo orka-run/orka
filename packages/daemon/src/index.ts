@@ -8,6 +8,7 @@ export {
   updateSessionStatus,
   findSessionByTmux,
   deleteSessions,
+  setSessionKept,
 } from "./db";
 export { getConfig } from "./config";
 export type { OrkaConfig } from "./config";

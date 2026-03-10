@@ -27,6 +27,7 @@ import {
   deleteBranch,
   getWorktreeDir,
   parseSessionResult,
+  setSessionKept,
 } from "@orka/daemon";
 
 const command = process.argv[2];
@@ -68,6 +69,9 @@ switch (command) {
   case "result":
     await cmdResult();
     break;
+  case "keep":
+    await cmdKeep();
+    break;
   case "merge":
     await cmdMerge();
     break;
@@ -94,6 +98,7 @@ function printUsage(): void {
   console.log("  workdir Print session working directory");
   console.log("  wait    Wait for session(s) to complete");
   console.log("  result  Show final result from a background session");
+  console.log("  keep    Protect a session's worktree from auto-cleanup");
   console.log("  merge   Merge session worktree branch into current branch");
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
@@ -254,8 +259,9 @@ async function cmdPs(): Promise<void> {
 
   for (const s of sessions) {
     const task = getTask(s.taskId);
-    const colored = statusColor(s.status);
-    const statusPad = 20 - s.status.length + colored.length;
+    const statusText = s.kept ? `${s.status} [kept]` : s.status;
+    const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
+    const statusPad = 20 - statusText.length + colored.length;
     console.log(
       padR(s.id, 16) +
       colored.padEnd(statusPad) +
@@ -485,6 +491,7 @@ async function cmdShow(): Promise<void> {
   console.log(`  started:   ${session.startedAt ?? "(not started)"}`);
   console.log(`  finished:  ${session.finishedAt ?? "(not finished)"}`);
   console.log(`  exit code: ${session.exitCode ?? "(none)"}`);
+  if (session.kept) console.log(`  kept:      yes (worktree protected)`);
 
   if (task) {
     console.log("");
@@ -562,6 +569,23 @@ async function cmdWait(): Promise<void> {
 
   console.log("all sessions finished");
   if (anyFailed) process.exit(1);
+}
+
+async function cmdKeep(): Promise<void> {
+  const sessionId = process.argv[3];
+  if (!sessionId) {
+    console.error("usage: orka keep <session-id>");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  setSessionKept(session.id, true);
+  console.log(`session ${session.id} marked as kept (worktree protected from cleanup)`);
 }
 
 async function cmdResult(): Promise<void> {

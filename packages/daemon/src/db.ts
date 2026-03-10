@@ -30,6 +30,7 @@ const SessionRowSchema = z.object({
   started_at: z.string().nullable(),
   finished_at: z.string().nullable(),
   exit_code: z.number().nullable(),
+  kept: z.number().default(0),
 });
 
 const ORKA_DIR = ".orka";
@@ -61,6 +62,7 @@ const MIGRATIONS = [
   { version: 1, sql: `ALTER TABLE sessions ADD COLUMN log_file TEXT NOT NULL DEFAULT ''` },
   { version: 2, sql: `ALTER TABLE sessions ADD COLUMN project_path TEXT NOT NULL DEFAULT ''` },
   { version: 3, sql: `ALTER TABLE tasks ADD COLUMN model TEXT` },
+  { version: 4, sql: `ALTER TABLE sessions ADD COLUMN kept INTEGER NOT NULL DEFAULT 0` },
 ];
 
 function migrate(db: Database): void {
@@ -138,8 +140,8 @@ export function getTask(id: string): Task | null {
 export function insertSession(session: Session): void {
   getDb()
     .prepare(
-      `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code)
-       VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode)`,
+      `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept)
+       VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept)`,
     )
     .run({
       $id: session.id,
@@ -156,6 +158,7 @@ export function insertSession(session: Session): void {
       $startedAt: session.startedAt,
       $finishedAt: session.finishedAt,
       $exitCode: session.exitCode,
+      $kept: session.kept ? 1 : 0,
     });
 }
 
@@ -183,6 +186,12 @@ export function updateSessionStatus(
   getDb()
     .prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = $id`)
     .run(params);
+}
+
+export function setSessionKept(id: string, kept: boolean): void {
+  getDb()
+    .prepare("UPDATE sessions SET kept = ? WHERE id = ?")
+    .run(kept ? 1 : 0, id);
 }
 
 export function getSession(id: string): Session | null {
@@ -263,5 +272,6 @@ function rowToSession(row: unknown): Session {
     startedAt: data.started_at,
     finishedAt: data.finished_at,
     exitCode: data.exit_code,
+    kept: data.kept === 1,
   };
 }
