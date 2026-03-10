@@ -1,5 +1,5 @@
 import { resolve, join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import {
   generateId,
   type Session,
@@ -65,8 +65,14 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
   // 5. Build backend command (with log tee)
   const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model });
 
-  // 6. Spawn tmux session
-  await tmuxSpawn(tmuxName, command, workingDir);
+  // 6. Write command to script file (avoids bash -c escaping hell)
+  const scriptsDir = join(getOrkaHome(), "scripts");
+  mkdirSync(scriptsDir, { recursive: true });
+  const scriptPath = join(scriptsDir, `${sessionId}.sh`);
+  writeFileSync(scriptPath, `#!/usr/bin/env bash\n${command}\n`);
+
+  // 7. Spawn tmux session
+  await tmuxSpawn(tmuxName, scriptPath, workingDir);
   updateSessionStatus(sessionId, "running", { startedAt: new Date().toISOString() });
 
   return { ...session, status: "running", startedAt: new Date().toISOString() };

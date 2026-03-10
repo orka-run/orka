@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "node:util";
+import { join } from "node:path";
 import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { $ } from "bun";
 import type { BackendKind, SessionMode } from "@orka/core";
@@ -16,6 +17,7 @@ import {
   tmuxCapture,
   tmuxHas,
   deleteSessions,
+  getOrkaHome,
 } from "@orka/daemon";
 
 const command = process.argv[2];
@@ -331,10 +333,15 @@ async function cmdPrune(): Promise<void> {
     return;
   }
 
-  // Delete log files
+  // Delete log files and script files
+  const scriptsDir = join(getOrkaHome(), "scripts");
   for (const s of sessions) {
     if (s.logFile && existsSync(s.logFile)) {
       unlinkSync(s.logFile);
+    }
+    const scriptFile = join(scriptsDir, `${s.id}.sh`);
+    if (existsSync(scriptFile)) {
+      unlinkSync(scriptFile);
     }
   }
 

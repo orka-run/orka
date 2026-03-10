@@ -10,14 +10,13 @@ export interface TmuxSession {
   height: number;
 }
 
-/** Spawn a new tmux session running `command` in `cwd`. */
+/** Spawn a new tmux session running a script in `cwd`. */
 export async function tmuxSpawn(
   sessionName: string,
-  command: string,
+  scriptPath: string,
   cwd: string,
 ): Promise<void> {
-  // Use bash -c so pipes/redirects/complex commands work properly
-  await $`tmux new-session -d -s ${sessionName} -c ${cwd} bash -c ${command}`.quiet();
+  await $`tmux new-session -d -s ${sessionName} -c ${cwd} bash ${scriptPath}`.quiet();
 }
 
 /** List orka-prefixed tmux sessions. */
