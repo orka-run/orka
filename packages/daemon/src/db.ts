@@ -1,7 +1,36 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
+import { z } from "zod";
 import type { Session, Task, SessionStatus } from "@orka/core";
+import { BackendKindSchema, SessionModeSchema, SessionStatusSchema } from "@orka/core";
+
+const TaskRowSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  prompt: z.string(),
+  backend: BackendKindSchema,
+  mode: SessionModeSchema,
+  model: z.string().nullable().default(null),
+  created_at: z.string(),
+});
+
+const SessionRowSchema = z.object({
+  id: z.string(),
+  task_id: z.string(),
+  workspace_id: z.string(),
+  status: SessionStatusSchema,
+  backend: BackendKindSchema,
+  mode: SessionModeSchema,
+  tmux_session_name: z.string(),
+  project_path: z.string().default(""),
+  working_dir: z.string(),
+  log_file: z.string().default(""),
+  created_at: z.string(),
+  started_at: z.string().nullable(),
+  finished_at: z.string().nullable(),
+  exit_code: z.number().nullable(),
+});
 
 const ORKA_DIR = ".orka";
 const DB_FILE = "orka.db";
@@ -27,6 +56,12 @@ export function getDb(): Database {
   }
   return _db;
 }
+
+const MIGRATIONS = [
+  { version: 1, sql: `ALTER TABLE sessions ADD COLUMN log_file TEXT NOT NULL DEFAULT ''` },
+  { version: 2, sql: `ALTER TABLE sessions ADD COLUMN project_path TEXT NOT NULL DEFAULT ''` },
+  { version: 3, sql: `ALTER TABLE tasks ADD COLUMN model TEXT` },
+];
 
 function migrate(db: Database): void {
   db.exec(`
@@ -56,16 +91,21 @@ function migrate(db: Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
   `);
 
-  // Migrations for existing DBs
-  const migrations = [
-    `ALTER TABLE sessions ADD COLUMN log_file TEXT NOT NULL DEFAULT ''`,
-    `ALTER TABLE sessions ADD COLUMN project_path TEXT NOT NULL DEFAULT ''`,
-    `ALTER TABLE tasks ADD COLUMN model TEXT`,
-  ];
-  for (const sql of migrations) {
-    try { db.exec(sql); } catch { /* column already exists */ }
+  const check = db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?");
+  const insert = db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)");
+
+  for (const { version, sql } of MIGRATIONS) {
+    if (!check.get(version)) {
+      try { db.exec(sql); } catch { /* column may already exist from pre-versioned migration */ }
+      insert.run(version, new Date().toISOString());
+    }
   }
 }
 
@@ -193,33 +233,35 @@ export function deleteSessions(ids: string[]): void {
 
 // --- Row mappers ---
 
-function rowToTask(row: any): Task {
+function rowToTask(row: unknown): Task {
+  const data = TaskRowSchema.parse(row);
   return {
-    id: row.id,
-    title: row.title,
-    prompt: row.prompt,
-    backend: row.backend,
-    mode: row.mode,
-    model: row.model ?? null,
-    createdAt: row.created_at,
+    id: data.id,
+    title: data.title,
+    prompt: data.prompt,
+    backend: data.backend,
+    mode: data.mode,
+    model: data.model,
+    createdAt: data.created_at,
   };
 }
 
-function rowToSession(row: any): Session {
+function rowToSession(row: unknown): Session {
+  const data = SessionRowSchema.parse(row);
   return {
-    id: row.id,
-    taskId: row.task_id,
-    workspaceId: row.workspace_id,
-    status: row.status,
-    backend: row.backend,
-    mode: row.mode,
-    tmuxSessionName: row.tmux_session_name,
-    projectPath: row.project_path ?? "",
-    workingDir: row.working_dir,
-    logFile: row.log_file ?? "",
-    createdAt: row.created_at,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
-    exitCode: row.exit_code,
+    id: data.id,
+    taskId: data.task_id,
+    workspaceId: data.workspace_id,
+    status: data.status,
+    backend: data.backend,
+    mode: data.mode,
+    tmuxSessionName: data.tmux_session_name,
+    projectPath: data.project_path,
+    workingDir: data.working_dir,
+    logFile: data.log_file,
+    createdAt: data.created_at,
+    startedAt: data.started_at,
+    finishedAt: data.finished_at,
+    exitCode: data.exit_code,
   };
 }
