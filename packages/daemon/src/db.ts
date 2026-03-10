@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
-import { z } from "zod";
+import { z } from "zod/v4";
 import type { Session, Task, SessionStatus } from "@orka/core";
 import { BackendKindSchema, SessionModeSchema, SessionStatusSchema } from "@orka/core";
 
