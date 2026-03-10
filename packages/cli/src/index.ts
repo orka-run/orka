@@ -18,6 +18,7 @@ import {
   tmuxHas,
   deleteSessions,
   getOrkaHome,
+  cleanupOrphanedWorktrees,
 } from "@orka/daemon";
 
 const command = process.argv[2];
@@ -474,6 +475,12 @@ async function cmdPrune(): Promise<void> {
 
   deleteSessions(sessions.map((s) => s.id));
   console.log(`pruned ${sessions.length} session(s)`);
+
+  // Clean up orphaned worktree dirs
+  const orphans = await cleanupOrphanedWorktrees();
+  if (orphans > 0) {
+    console.log(`cleaned ${orphans} orphaned worktree(s)`);
+  }
 }
 
 function parseAge(age: string): number {

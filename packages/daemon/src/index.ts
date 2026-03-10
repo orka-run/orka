@@ -1,4 +1,4 @@
-export { spawnSession, stopSession, reapSessions } from "./orchestrator";
+export { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
 export { tmuxList, tmuxAttach, tmuxCapture, tmuxHas } from "./tmux";
 export { getDb, getOrkaHome } from "./db";
 export {

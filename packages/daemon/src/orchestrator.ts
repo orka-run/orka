@@ -1,5 +1,5 @@
 import { resolve, join } from "node:path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import {
   generateId,
   type Session,
@@ -145,4 +145,35 @@ async function tryCleanupWorktree(session: Session): Promise<void> {
   } catch {
     // Cleanup failure should not break reap/stop
   }
+}
+
+/** Clean up orphaned worktree dirs that don't belong to any active session. */
+export async function cleanupOrphanedWorktrees(): Promise<number> {
+  const wtDir = getWorktreeDir();
+  if (!existsSync(wtDir)) return 0;
+
+  const allSessions = listSessions();
+  const activeWorkdirs = new Set(
+    allSessions
+      .filter((s) => s.status === "running" || s.status === "preparing")
+      .map((s) => s.workingDir),
+  );
+
+  const entries = readdirSync(wtDir, { withFileTypes: true });
+  let cleaned = 0;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const wtPath = join(wtDir, entry.name);
+    if (activeWorkdirs.has(wtPath)) continue;
+
+    try {
+      rmSync(wtPath, { recursive: true, force: true });
+      cleaned++;
+    } catch {
+      // skip dirs that can't be removed
+    }
+  }
+
+  return cleaned;
 }
