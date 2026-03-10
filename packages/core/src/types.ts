@@ -34,6 +34,7 @@ export interface Task {
   prompt: string;
   backend: BackendKind;
   mode: SessionMode;
+  model: string | null;
   createdAt: string; // ISO 8601
 }
 
@@ -53,6 +54,7 @@ export interface Session {
   backend: BackendKind;
   mode: SessionMode;
   tmuxSessionName: string;
+  projectPath: string;
   workingDir: string;
   logFile: string;
   createdAt: string;

@@ -58,11 +58,14 @@ function migrate(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `);
 
-  // Migration: add log_file if missing (for existing DBs)
-  try {
-    db.exec(`ALTER TABLE sessions ADD COLUMN log_file TEXT NOT NULL DEFAULT ''`);
-  } catch {
-    // column already exists
+  // Migrations for existing DBs
+  const migrations = [
+    `ALTER TABLE sessions ADD COLUMN log_file TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE sessions ADD COLUMN project_path TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE tasks ADD COLUMN model TEXT`,
+  ];
+  for (const sql of migrations) {
+    try { db.exec(sql); } catch { /* column already exists */ }
   }
 }
 
@@ -71,8 +74,8 @@ function migrate(db: Database): void {
 export function insertTask(task: Task): void {
   getDb()
     .prepare(
-      `INSERT INTO tasks (id, title, prompt, backend, mode, created_at)
-       VALUES ($id, $title, $prompt, $backend, $mode, $createdAt)`,
+      `INSERT INTO tasks (id, title, prompt, backend, mode, model, created_at)
+       VALUES ($id, $title, $prompt, $backend, $mode, $model, $createdAt)`,
     )
     .run({
       $id: task.id,
@@ -80,6 +83,7 @@ export function insertTask(task: Task): void {
       $prompt: task.prompt,
       $backend: task.backend,
       $mode: task.mode,
+      $model: task.model,
       $createdAt: task.createdAt,
     });
 }
@@ -94,8 +98,8 @@ export function getTask(id: string): Task | null {
 export function insertSession(session: Session): void {
   getDb()
     .prepare(
-      `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, working_dir, log_file, created_at, started_at, finished_at, exit_code)
-       VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode)`,
+      `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code)
+       VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode)`,
     )
     .run({
       $id: session.id,
@@ -105,6 +109,7 @@ export function insertSession(session: Session): void {
       $backend: session.backend,
       $mode: session.mode,
       $tmuxSessionName: session.tmuxSessionName,
+      $projectPath: session.projectPath,
       $workingDir: session.workingDir,
       $logFile: session.logFile,
       $createdAt: session.createdAt,
@@ -195,6 +200,7 @@ function rowToTask(row: any): Task {
     prompt: row.prompt,
     backend: row.backend,
     mode: row.mode,
+    model: row.model ?? null,
     createdAt: row.created_at,
   };
 }
@@ -208,6 +214,7 @@ function rowToSession(row: any): Session {
     backend: row.backend,
     mode: row.mode,
     tmuxSessionName: row.tmux_session_name,
+    projectPath: row.project_path ?? "",
     workingDir: row.working_dir,
     logFile: row.log_file ?? "",
     createdAt: row.created_at,

@@ -8,7 +8,7 @@ import {
 } from "@orka/core";
 import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
-import { worktreeCreate, worktreeRemove } from "./worktree";
+import { worktreeCreate, worktreeRemove, getWorktreeDir } from "./worktree";
 import { buildBackendCommand } from "./backends";
 
 /** Parse the exit code written by the backend into the log file.
@@ -41,6 +41,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     prompt: req.prompt,
     backend: req.backend,
     mode: req.mode,
+    model: req.model ?? null,
     createdAt: now,
   };
   insertTask(task);
@@ -67,6 +68,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     backend: req.backend,
     mode: req.mode,
     tmuxSessionName: tmuxName,
+    projectPath,
     workingDir,
     logFile,
     createdAt: now,
@@ -108,7 +110,7 @@ export async function reapSessions(): Promise<number> {
         finishedAt: new Date().toISOString(),
         ...(exitCode !== undefined ? { exitCode } : {}),
       });
-      await tryCleanupWorktree(s.workingDir);
+      await tryCleanupWorktree(s);
       reaped++;
     }
   }
@@ -129,17 +131,17 @@ export async function stopSession(sessionId: string): Promise<void> {
     finishedAt: new Date().toISOString(),
   });
 
-  await tryCleanupWorktree(session.workingDir);
+  await tryCleanupWorktree(session);
 }
 
-const WORKTREE_MARKER = ".orka/worktrees/";
-
 /** Remove worktree if the session was using one. */
-async function tryCleanupWorktree(workingDir: string): Promise<void> {
-  if (!workingDir.includes(WORKTREE_MARKER)) return;
-  const repoPath = workingDir.split(WORKTREE_MARKER)[0];
+async function tryCleanupWorktree(session: Session): Promise<void> {
+  const wtDir = getWorktreeDir();
+  if (!session.workingDir.startsWith(wtDir)) return;
+  const repoPath = session.projectPath;
+  if (!repoPath) return;
   try {
-    await worktreeRemove(repoPath, workingDir);
+    await worktreeRemove(repoPath, session.workingDir);
   } catch {
     // Cleanup failure should not break reap/stop
   }

@@ -1,12 +1,17 @@
 import { $ } from "bun";
 import { join } from "node:path";
-
-const WORKTREE_DIR = ".orka/worktrees";
+import { mkdirSync } from "node:fs";
+import { getOrkaHome } from "./db";
 
 export interface WorktreeInfo {
   path: string;
   branch: string;
   commit: string;
+}
+
+/** Get the global worktrees directory (~/.orka/worktrees/). */
+export function getWorktreeDir(): string {
+  return join(getOrkaHome(), "worktrees");
 }
 
 /** Create a git worktree for a session. Returns the worktree path. */
@@ -15,10 +20,11 @@ export async function worktreeCreate(
   sessionSlug: string,
   branch?: string,
 ): Promise<string> {
-  const wtPath = join(repoPath, WORKTREE_DIR, sessionSlug);
+  const wtDir = getWorktreeDir();
+  mkdirSync(wtDir, { recursive: true });
+  const wtPath = join(wtDir, sessionSlug);
 
   if (branch) {
-    // Check if branch exists
     const branchExists =
       await $`git -C ${repoPath} rev-parse --verify ${branch}`
         .quiet()
@@ -31,7 +37,6 @@ export async function worktreeCreate(
       await $`git -C ${repoPath} worktree add -b ${branch} ${wtPath}`.quiet();
     }
   } else {
-    // Detached HEAD worktree from current HEAD
     await $`git -C ${repoPath} worktree add --detach ${wtPath}`.quiet();
   }
 
@@ -46,10 +51,11 @@ export async function worktreeRemove(
   await $`git -C ${repoPath} worktree remove --force ${wtPath}`.quiet();
 }
 
-/** List all orka worktrees. */
+/** List all orka worktrees for a given repo. */
 export async function worktreeList(
   repoPath: string,
 ): Promise<WorktreeInfo[]> {
+  const wtDir = getWorktreeDir();
   const result =
     await $`git -C ${repoPath} worktree list --porcelain`.quiet().text();
 
@@ -64,7 +70,7 @@ export async function worktreeList(
     } else if (line.startsWith("branch ")) {
       current.branch = line.slice("branch ".length);
     } else if (line === "") {
-      if (current.path?.includes(WORKTREE_DIR)) {
+      if (current.path?.startsWith(wtDir)) {
         worktrees.push(current as WorktreeInfo);
       }
       current = {};
