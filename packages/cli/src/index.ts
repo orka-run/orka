@@ -28,7 +28,12 @@ import {
   getWorktreeDir,
   parseSessionResult,
   setSessionKept,
+  initTracing,
+  shutdownTracing,
 } from "@orka/daemon";
+
+// Initialize OpenTelemetry tracing
+initTracing();
 
 const command = process.argv[2];
 
@@ -81,6 +86,9 @@ switch (command) {
   default:
     printUsage();
 }
+
+// Flush pending spans before exit
+await shutdownTracing();
 
 function printUsage(): void {
   console.log("orka — agent session orchestrator");
