@@ -31,10 +31,12 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
   };
   insertTask(task);
 
-  // 2. Prepare workspace
+  // 2. Prepare workspace — auto-worktree for background sessions
   let workingDir = projectPath;
   if (req.branch) {
     workingDir = await worktreeCreate(projectPath, sessionId, req.branch);
+  } else if (req.mode === "background") {
+    workingDir = await worktreeCreate(projectPath, sessionId);
   }
 
   // 3. Log file
@@ -61,7 +63,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
   insertSession(session);
 
   // 5. Build backend command (with log tee)
-  const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId });
+  const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model });
 
   // 6. Spawn tmux session
   await tmuxSpawn(tmuxName, command, workingDir);

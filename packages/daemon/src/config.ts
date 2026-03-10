@@ -6,6 +6,7 @@ export interface OrkaConfig {
   defaults: {
     backend: string;
     mode: string;
+    model: string;
     project: string;
   };
 }
@@ -14,6 +15,7 @@ const DEFAULT_CONFIG: OrkaConfig = {
   defaults: {
     backend: "claude-code",
     mode: "interactive",
+    model: "",
     project: ".",
   },
 };
@@ -36,6 +38,7 @@ export function getConfig(): OrkaConfig {
       defaults: {
         backend: parsed.defaults?.backend ?? DEFAULT_CONFIG.defaults.backend,
         mode: parsed.defaults?.mode ?? DEFAULT_CONFIG.defaults.mode,
+        model: parsed.defaults?.model ?? DEFAULT_CONFIG.defaults.model,
         project: parsed.defaults?.project ?? DEFAULT_CONFIG.defaults.project,
       },
     };

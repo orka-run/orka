@@ -70,4 +70,5 @@ export interface SpawnRequest {
   backend: BackendKind;
   mode: SessionMode;
   branch?: string;
+  model?: string;
 }

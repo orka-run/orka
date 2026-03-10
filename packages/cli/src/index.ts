@@ -75,6 +75,7 @@ function printUsage(): void {
   console.log("  --backend, -b   Agent backend: claude-code|codex|aider|shell (default: claude-code)");
   console.log("  --prompt        Prompt/task for the agent (or use positional args)");
   console.log("  --mode, -m      Session mode: interactive|background (default: interactive)");
+  console.log("  --model         Model for claude-code backend (e.g. sonnet, opus, haiku)");
   console.log("  --branch        Git branch (creates worktree if specified)");
   console.log("  --title         Session title");
 }
@@ -88,6 +89,7 @@ async function cmdSpawn(): Promise<void> {
       backend: { type: "string", short: "b", default: cfg.backend },
       prompt: { type: "string" },
       mode: { type: "string", short: "m", default: cfg.mode },
+      model: { type: "string" },
       branch: { type: "string" },
       title: { type: "string" },
     },
@@ -107,6 +109,7 @@ async function cmdSpawn(): Promise<void> {
     projectPath: args.values.project!,
     backend: args.values.backend as BackendKind,
     mode: args.values.mode as SessionMode,
+    model: args.values.model || cfg.model || undefined,
     branch: args.values.branch,
   });
 

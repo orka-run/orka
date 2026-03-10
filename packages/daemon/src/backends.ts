@@ -10,13 +10,13 @@ export function buildBackendCommand(
   backend: BackendKind,
   prompt: string,
   mode: SessionMode,
-  opts?: { logFile?: string; sessionId?: string },
+  opts?: { logFile?: string; sessionId?: string; model?: string },
 ): BackendCommand {
   let cmd: string;
 
   switch (backend) {
     case "claude-code":
-      cmd = buildClaudeCode(prompt, mode, opts?.sessionId);
+      cmd = buildClaudeCode(prompt, mode, opts?.sessionId, opts?.model);
       break;
     case "codex":
       cmd = buildCodex(prompt);
@@ -38,18 +38,16 @@ export function buildBackendCommand(
   return { command: cmd };
 }
 
-function buildClaudeCode(prompt: string, mode: SessionMode, sessionId?: string): string {
+function buildClaudeCode(prompt: string, mode: SessionMode, sessionId?: string, model?: string): string {
   const escaped = shellEscape(prompt);
-  // Append system prompt so claude sessions are identifiable as orka-managed
-  const sysprompt = sessionId
-    ? `--append-system-prompt ${shellEscape(`[orka session: ${sessionId}]`)}`
-    : "";
+  const parts: string[] = ["claude"];
+  if (model) parts.push(`--model ${shellEscape(model)}`);
+  if (sessionId) parts.push(`--append-system-prompt ${shellEscape(`[orka session: ${sessionId}]`)}`);
   if (mode === "background") {
-    // Non-interactive: -p flag, auto permissions
-    return `claude -p --verbose --output-format stream-json --permission-mode auto ${sysprompt} ${escaped}`;
+    parts.push("-p --verbose --output-format stream-json --permission-mode auto");
   }
-  // Interactive: positional prompt starts session with initial message
-  return `claude ${sysprompt} ${escaped}`;
+  parts.push(escaped);
+  return parts.join(" ");
 }
 
 function buildCodex(prompt: string): string {
