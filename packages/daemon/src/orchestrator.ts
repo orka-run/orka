@@ -6,8 +6,8 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome } from "./db";
-import { tmuxSpawn, tmuxHas, tmuxKill } from "./tmux";
+import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
+import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
 import { worktreeCreate } from "./worktree";
 import { buildBackendCommand } from "./backends";
 
@@ -68,6 +68,27 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
   updateSessionStatus(sessionId, "running", { startedAt: new Date().toISOString() });
 
   return { ...session, status: "running", startedAt: new Date().toISOString() };
+}
+
+/** Reap sessions whose tmux has exited but DB still says "running". */
+export async function reapSessions(): Promise<number> {
+  const running = listSessions("running");
+  if (running.length === 0) return 0;
+
+  const live = await tmuxList();
+  const liveNames = new Set(live.map((s) => s.name));
+  let reaped = 0;
+
+  for (const s of running) {
+    if (!liveNames.has(s.tmuxSessionName)) {
+      updateSessionStatus(s.id, "completed", {
+        finishedAt: new Date().toISOString(),
+      });
+      reaped++;
+    }
+  }
+
+  return reaped;
 }
 
 /** Stop a session: kill tmux, update status. */

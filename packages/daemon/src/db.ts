@@ -166,6 +166,26 @@ export function findSessionByTmux(tmuxName: string): Session | null {
   return row ? rowToSession(row) : null;
 }
 
+// --- Delete ---
+
+export function deleteSessions(ids: string[]): void {
+  if (ids.length === 0) return;
+  const db = getDb();
+  const placeholders = ids.map(() => "?").join(", ");
+  // Collect task_ids before deleting sessions
+  const taskIds = db
+    .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
+    .all(...ids) as { task_id: string }[];
+  db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
+  // Delete orphaned tasks
+  for (const { task_id } of taskIds) {
+    const ref = db.prepare("SELECT 1 FROM sessions WHERE task_id = ? LIMIT 1").get(task_id);
+    if (!ref) {
+      db.prepare("DELETE FROM tasks WHERE id = ?").run(task_id);
+    }
+  }
+}
+
 // --- Row mappers ---
 
 function rowToTask(row: any): Task {

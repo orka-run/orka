@@ -7,18 +7,20 @@ import type { BackendKind, SessionMode } from "@orka/core";
 import {
   spawnSession,
   stopSession,
+  reapSessions,
   listSessions,
   getSession,
   getTask,
   tmuxAttach,
   tmuxCapture,
   tmuxHas,
-  updateSessionStatus,
-  tmuxList,
   deleteSessions,
 } from "@orka/daemon";
 
 const command = process.argv[2];
+
+// Auto-reap dead sessions on every CLI invocation
+await reapSessions();
 
 switch (command) {
   case "spawn":
@@ -62,6 +64,10 @@ function printUsage(): void {
   console.log("  stop    Stop a session");
   console.log("  diff    Show git changes in a session worktree");
   console.log("  retry   Re-run a session with the same prompt");
+  console.log("  prune   Remove old completed/cancelled/failed sessions");
+  console.log("");
+  console.log("prune options:");
+  console.log("  --age       Max age to keep (default: 24h)");
   console.log("");
   console.log("spawn options:");
   console.log("  --project, -p   Project directory (default: .)");
@@ -118,22 +124,10 @@ async function cmdSpawn(): Promise<void> {
 
 async function cmdPs(): Promise<void> {
   const sessions = listSessions();
-  const live = await tmuxList();
-  const liveNames = new Set(live.map((s) => s.name));
 
   if (sessions.length === 0) {
     console.log("no sessions");
     return;
-  }
-
-  // Sync stale sessions
-  for (const s of sessions) {
-    if (s.status === "running" && !liveNames.has(s.tmuxSessionName)) {
-      updateSessionStatus(s.id, "completed", {
-        finishedAt: new Date().toISOString(),
-      });
-      s.status = "completed";
-    }
   }
 
   const noColor = !!process.env["NO_COLOR"];
@@ -308,6 +302,54 @@ async function cmdRetry(): Promise<void> {
     console.log("");
     console.log("attaching... (detach: Ctrl-b d)");
     await tmuxAttach(newSession.tmuxSessionName);
+  }
+}
+
+async function cmdPrune(): Promise<void> {
+  const args = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      age: { type: "string", default: "24h" },
+    },
+    allowPositionals: false,
+  });
+
+  const maxAgeMs = parseAge(args.values.age!);
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  const pruneStatuses = new Set(["completed", "cancelled", "failed"]);
+
+  const sessions = listSessions().filter(
+    (s) => pruneStatuses.has(s.status) && s.createdAt < cutoff,
+  );
+
+  if (sessions.length === 0) {
+    console.log("nothing to prune");
+    return;
+  }
+
+  // Delete log files
+  for (const s of sessions) {
+    if (s.logFile && existsSync(s.logFile)) {
+      unlinkSync(s.logFile);
+    }
+  }
+
+  deleteSessions(sessions.map((s) => s.id));
+  console.log(`pruned ${sessions.length} session(s)`);
+}
+
+function parseAge(age: string): number {
+  const match = age.match(/^(\d+)\s*(h|d|m)$/);
+  if (!match) {
+    console.error("error: invalid --age format, use e.g. 24h, 7d, 30m");
+    process.exit(1);
+  }
+  const value = parseInt(match[1], 10);
+  switch (match[2]) {
+    case "m": return value * 60 * 1000;
+    case "h": return value * 60 * 60 * 1000;
+    case "d": return value * 24 * 60 * 60 * 1000;
+    default: return value * 60 * 60 * 1000;
   }
 }
 
