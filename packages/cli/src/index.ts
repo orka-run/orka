@@ -106,7 +106,8 @@ function printUsage(): void {
   console.log("spawn options:");
   console.log("  --project, -p   Project directory (default: .)");
   console.log("  --backend, -b   Agent backend: claude-code|codex|aider|shell (default: claude-code)");
-  console.log("  --prompt        Prompt/task for the agent (or use positional args)");
+  console.log("  --prompt        Prompt/task for the agent (or use positional args or pipe stdin)");
+  console.log("  --prompt-file   Read prompt from file");
   console.log("  --mode, -m      Session mode: interactive|background (default: interactive)");
   console.log("  --model         Model for claude-code backend (e.g. sonnet, opus, haiku)");
   console.log("  --branch        Git branch (creates worktree if specified)");
@@ -121,6 +122,7 @@ async function cmdSpawn(): Promise<void> {
       project: { type: "string", short: "p", default: cfg.project },
       backend: { type: "string", short: "b", default: cfg.backend },
       prompt: { type: "string" },
+      "prompt-file": { type: "string" },
       mode: { type: "string", short: "m", default: cfg.mode },
       model: { type: "string" },
       branch: { type: "string" },
@@ -129,10 +131,37 @@ async function cmdSpawn(): Promise<void> {
     allowPositionals: true,
   });
 
-  const prompt = args.values.prompt ?? args.positionals.join(" ");
+  if (args.values.prompt && args.values["prompt-file"]) {
+    console.error("error: cannot use both --prompt and --prompt-file");
+    process.exit(1);
+  }
+
+  let prompt: string;
+  if (args.values["prompt-file"]) {
+    const filePath = args.values["prompt-file"];
+    if (!existsSync(filePath)) {
+      console.error(`error: prompt file not found: ${filePath}`);
+      process.exit(1);
+    }
+    prompt = readFileSync(filePath, "utf-8").trim();
+  } else if (args.values.prompt) {
+    prompt = args.values.prompt;
+  } else if (args.positionals.length > 0) {
+    prompt = args.positionals.join(" ");
+  } else if (!process.stdin.isTTY) {
+    // Read from piped stdin
+    prompt = await new Promise<string>((resolve) => {
+      let data = "";
+      process.stdin.setEncoding("utf-8");
+      process.stdin.on("data", (chunk) => (data += chunk));
+      process.stdin.on("end", () => resolve(data.trim()));
+    });
+  } else {
+    prompt = "";
+  }
 
   if (!prompt) {
-    console.error("error: prompt is required (use --prompt or positional args)");
+    console.error("error: prompt is required (use --prompt, --prompt-file, positional args, or pipe stdin)");
     process.exit(1);
   }
 

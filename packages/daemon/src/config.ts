@@ -3,20 +3,20 @@ import { readFileSync, existsSync } from "node:fs";
 import { z } from "zod/v4";
 import { getOrkaHome } from "./db";
 
+const DefaultsSchema = z.object({
+  backend: z.string().default("claude-code"),
+  mode: z.string().default("interactive"),
+  model: z.string().default(""),
+  project: z.string().default("."),
+});
+
+const LimitsSchema = z.object({
+  maxConcurrent: z.number().default(0),
+});
+
 export const ConfigSchema = z.object({
-  defaults: z
-    .object({
-      backend: z.string().default("claude-code"),
-      mode: z.string().default("interactive"),
-      model: z.string().default(""),
-      project: z.string().default("."),
-    })
-    .default({}),
-  limits: z
-    .object({
-      maxConcurrent: z.number().default(0),
-    })
-    .default({}),
+  defaults: DefaultsSchema.default(DefaultsSchema.parse({})),
+  limits: LimitsSchema.default(LimitsSchema.parse({})),
 });
 
 export type OrkaConfig = z.infer<typeof ConfigSchema>;
