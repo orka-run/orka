@@ -8,7 +8,7 @@ import {
 } from "@orka/core";
 import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
-import { worktreeCreate } from "./worktree";
+import { worktreeCreate, worktreeRemove } from "./worktree";
 import { buildBackendCommand } from "./backends";
 
 /** Spawn a new agent session. Returns the created session. */
@@ -84,6 +84,7 @@ export async function reapSessions(): Promise<number> {
       updateSessionStatus(s.id, "completed", {
         finishedAt: new Date().toISOString(),
       });
+      await tryCleanupWorktree(s.workingDir);
       reaped++;
     }
   }
@@ -103,4 +104,19 @@ export async function stopSession(sessionId: string): Promise<void> {
   updateSessionStatus(sessionId, "cancelled", {
     finishedAt: new Date().toISOString(),
   });
+
+  await tryCleanupWorktree(session.workingDir);
+}
+
+const WORKTREE_MARKER = ".orka/worktrees/";
+
+/** Remove worktree if the session was using one. */
+async function tryCleanupWorktree(workingDir: string): Promise<void> {
+  if (!workingDir.includes(WORKTREE_MARKER)) return;
+  const repoPath = workingDir.split(WORKTREE_MARKER)[0];
+  try {
+    await worktreeRemove(repoPath, workingDir);
+  } catch {
+    // Cleanup failure should not break reap/stop
+  }
 }
