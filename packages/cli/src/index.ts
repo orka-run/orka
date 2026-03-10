@@ -26,6 +26,7 @@ import {
   worktreeHasChanges,
   deleteBranch,
   getWorktreeDir,
+  parseSessionResult,
 } from "@orka/daemon";
 
 const command = process.argv[2];
@@ -64,6 +65,9 @@ switch (command) {
   case "wait":
     await cmdWait();
     break;
+  case "result":
+    await cmdResult();
+    break;
   case "merge":
     await cmdMerge();
     break;
@@ -89,6 +93,7 @@ function printUsage(): void {
   console.log("  show    Show full details for a session");
   console.log("  workdir Print session working directory");
   console.log("  wait    Wait for session(s) to complete");
+  console.log("  result  Show final result from a background session");
   console.log("  merge   Merge session worktree branch into current branch");
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
@@ -557,6 +562,81 @@ async function cmdWait(): Promise<void> {
 
   console.log("all sessions finished");
   if (anyFailed) process.exit(1);
+}
+
+async function cmdResult(): Promise<void> {
+  const args = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      json: { type: "boolean", default: false },
+    },
+    allowPositionals: true,
+  });
+
+  const sessionId = args.positionals[0];
+  if (!sessionId) {
+    console.error("usage: orka result <session-id> [--json]");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  if (!session.logFile) {
+    console.error("no log file for this session");
+    process.exit(1);
+  }
+
+  const result = parseSessionResult(session.logFile);
+  if (!result) {
+    console.error("no result found in session log (session may not be a background claude-code session)");
+    process.exit(1);
+  }
+
+  if (args.values.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const noColor = !!process.env["NO_COLOR"];
+  const c = (code: string, text: string): string =>
+    noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
+
+  const task = getTask(session.taskId);
+  console.log(c("1", `session ${session.id}`));
+  if (task) console.log(`  title: ${task.title.slice(0, 80)}`);
+
+  console.log("");
+  if (result.isError) {
+    console.log(c("31", "STATUS: ERROR"));
+  } else {
+    console.log(c("32", "STATUS: SUCCESS"));
+  }
+
+  if (result.model) console.log(`  model:    ${result.model}`);
+  console.log(`  turns:    ${result.numTurns}`);
+  console.log(`  duration: ${formatDuration(result.durationMs)}`);
+  if (result.costUsd !== null) console.log(`  cost:     $${result.costUsd.toFixed(4)}`);
+  console.log(`  tokens:   ${result.inputTokens.toLocaleString()} in / ${result.outputTokens.toLocaleString()} out`);
+  if (result.cacheReadTokens > 0) {
+    console.log(`  cache:    ${result.cacheReadTokens.toLocaleString()} read / ${result.cacheCreateTokens.toLocaleString()} created`);
+  }
+
+  console.log("");
+  console.log(c("1", "Result:"));
+  console.log(result.result);
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const remainSecs = secs % 60;
+  return `${mins}m${remainSecs}s`;
 }
 
 async function cmdMerge(): Promise<void> {
