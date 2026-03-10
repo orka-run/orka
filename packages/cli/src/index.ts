@@ -153,11 +153,12 @@ async function cmdPs(): Promise<void> {
   console.log(
     padR("ID", 16) +
     padR("STATUS", 20) +  // extra for ANSI codes
+    padR("AGE", 10) +
     padR("BACKEND", 14) +
     padR("MODE", 14) +
     "TITLE",
   );
-  console.log("-".repeat(76));
+  console.log("-".repeat(86));
 
   for (const s of sessions) {
     const task = getTask(s.taskId);
@@ -167,6 +168,7 @@ async function cmdPs(): Promise<void> {
     console.log(
       padR(s.id, 16) +
       colored.padEnd(statusPad) +
+      padR(formatAge(s.createdAt), 10) +
       padR(s.backend, 14) +
       padR(s.mode, 14) +
       (task?.title ?? "").slice(0, 50),
@@ -354,6 +356,16 @@ function parseAge(age: string): number {
 }
 
 // --- Helpers ---
+
+function formatAge(isoDate: string): string {
+  const ms = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + "m";
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + "h";
+  return Math.floor(hours / 24) + "d";
+}
 
 function findSession(query: string) {
   const exact = getSession(query);
