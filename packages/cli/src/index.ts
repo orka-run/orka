@@ -131,6 +131,7 @@ function printUsage(): void {
   console.log("");
   console.log("prune options:");
   console.log("  --age       Max age to keep (default: 24h)");
+  console.log("  --project   Only prune sessions for this project");
   console.log("");
   console.log("spawn options:");
   console.log("  --project, -p   Project directory (default: .)");
@@ -572,11 +573,14 @@ async function cmdWorkdir(): Promise<void> {
 }
 
 async function cmdWait(): Promise<void> {
-  const ids = process.argv.slice(3);
-  const allFlag = ids.includes("--all");
+  const rawArgs = process.argv.slice(3);
+  const allFlag = rawArgs.includes("--all");
+  const projectIdx = rawArgs.indexOf("--project");
+  const projectFilter = projectIdx !== -1 ? rawArgs[projectIdx + 1] : undefined;
+  const ids = rawArgs.filter((a, i) => a !== "--all" && a !== "--project" && i !== projectIdx + 1);
 
-  if (ids.length === 0) {
-    console.error("usage: orka wait <session-id...> | --all");
+  if (ids.length === 0 && !allFlag) {
+    console.error("usage: orka wait <session-id...> | --all [--project <name>]");
     process.exit(1);
   }
 
@@ -584,7 +588,13 @@ async function cmdWait(): Promise<void> {
   let targets: string[];
 
   if (allFlag) {
-    const running = listSessions().filter((s) => !terminalStatuses.has(s.status));
+    let running = listSessions().filter((s) => !terminalStatuses.has(s.status));
+    if (projectFilter) {
+      const resolved = resolveProject(projectFilter);
+      running = running.filter((s) =>
+        s.projectPath === resolved || s.projectPath === projectFilter || projectName(s.projectPath) === projectFilter,
+      );
+    }
     targets = running.map((s) => s.id);
     if (targets.length === 0) {
       console.log("no running sessions to wait for");
@@ -819,6 +829,7 @@ async function cmdPrune(): Promise<void> {
     args: process.argv.slice(3),
     options: {
       age: { type: "string", default: "24h" },
+      project: { type: "string" },
     },
     allowPositionals: false,
   });
@@ -827,9 +838,16 @@ async function cmdPrune(): Promise<void> {
   const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
   const pruneStatuses = new Set(["completed", "cancelled", "failed"]);
 
-  const sessions = listSessions().filter(
+  let sessions = listSessions().filter(
     (s) => pruneStatuses.has(s.status) && s.createdAt < cutoff,
   );
+
+  if (args.values.project) {
+    const resolved = resolveProject(args.values.project);
+    sessions = sessions.filter((s) =>
+      s.projectPath === resolved || s.projectPath === args.values.project || projectName(s.projectPath) === args.values.project,
+    );
+  }
 
   if (sessions.length === 0) {
     console.log("nothing to prune");
