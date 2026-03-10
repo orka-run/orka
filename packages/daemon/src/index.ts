@@ -1,10 +1,10 @@
-export { spawnSession, stopSession } from "./orchestrator.js";
-export { tmuxList, tmuxAttach, tmuxCapture, tmuxHas } from "./tmux.js";
-export { getDb, getOrkaHome } from "./db.js";
+export { spawnSession, stopSession } from "./orchestrator";
+export { tmuxList, tmuxAttach, tmuxCapture, tmuxHas } from "./tmux";
+export { getDb, getOrkaHome } from "./db";
 export {
   getSession,
   listSessions,
   getTask,
   updateSessionStatus,
   findSessionByTmux,
-} from "./db.js";
+} from "./db";

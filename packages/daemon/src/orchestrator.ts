@@ -6,10 +6,10 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome } from "./db.js";
-import { tmuxSpawn, tmuxHas, tmuxKill } from "./tmux.js";
-import { worktreeCreate } from "./worktree.js";
-import { buildBackendCommand } from "./backends.js";
+import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome } from "./db";
+import { tmuxSpawn, tmuxHas, tmuxKill } from "./tmux";
+import { worktreeCreate } from "./worktree";
+import { buildBackendCommand } from "./backends";
 
 /** Spawn a new agent session. Returns the created session. */
 export async function spawnSession(req: SpawnRequest): Promise<Session> {

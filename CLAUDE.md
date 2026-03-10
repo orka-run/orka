@@ -20,6 +20,13 @@ packages/
 orka        — shell wrapper for global CLI access
 ```
 
+## Import Policy
+
+- **Between packages**: use workspace aliases — `import { ... } from "@orka/core"`, `import { ... } from "@orka/daemon"`
+- **Within a package**: use relative imports **without file extensions** — `import { ... } from "./db"`, NOT `"./db.js"` or `"./db.ts"`
+- Bun resolves `.ts` files from extensionless imports automatically
+- Never use `@/` prefix — it doesn't work in Bun monorepo context
+
 ## Tech Stack
 
 - **Runtime**: Bun
