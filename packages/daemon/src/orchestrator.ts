@@ -1,5 +1,5 @@
 import { resolve, join } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import {
   generateId,
   type Session,
@@ -10,6 +10,20 @@ import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
 import { worktreeCreate, worktreeRemove } from "./worktree";
 import { buildBackendCommand } from "./backends";
+
+/** Parse the exit code written by the backend into the log file.
+ *  Looks for a line matching `[orka] exit_code=N` in the last 20 lines.
+ */
+function parseExitCode(logFile: string): number | undefined {
+  if (!existsSync(logFile)) return undefined;
+  const lines = readFileSync(logFile, "utf8").split("\n");
+  const tail = lines.slice(-20);
+  for (const line of tail) {
+    const match = line.match(/\[orka\] exit_code=(\d+)/);
+    if (match) return parseInt(match[1], 10);
+  }
+  return undefined;
+}
 
 /** Spawn a new agent session. Returns the created session. */
 export async function spawnSession(req: SpawnRequest): Promise<Session> {
@@ -89,8 +103,10 @@ export async function reapSessions(): Promise<number> {
 
   for (const s of running) {
     if (!liveNames.has(s.tmuxSessionName)) {
+      const exitCode = parseExitCode(s.logFile);
       updateSessionStatus(s.id, "completed", {
         finishedAt: new Date().toISOString(),
+        ...(exitCode !== undefined ? { exitCode } : {}),
       });
       await tryCleanupWorktree(s.workingDir);
       reaped++;
