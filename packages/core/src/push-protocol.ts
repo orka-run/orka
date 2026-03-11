@@ -9,6 +9,7 @@ export const PushChannelSchema = z.enum([
   "orchestration.sessionUpdated",
   "orchestration.sessionDeleted",
   "orchestration.event",
+  "session.logLine",
 ]);
 
 export type PushChannel = z.infer<typeof PushChannelSchema>;
@@ -32,6 +33,12 @@ export interface SessionUpdatedData {
 
 export interface SessionDeletedData {
   sessionId: string;
+}
+
+export interface SessionLogLineData {
+  sessionId: string;
+  content: string;
+  offset: number;
 }
 
 export const SubscribeRequestSchema = z.object({

@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Shield, ShieldOff } from "lucide-react";
 import type { SessionResult } from "@orka/core";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
+import { LogPanel } from "./LogPanel";
 import { formatDateTime, formatDuration } from "../lib/sessionUi";
 import { useSessionStore, type SessionSummary } from "../stores/sessionStore";
 import type { WsTransport } from "../lib/wsTransport";
@@ -45,7 +46,7 @@ function formatTokenCount(count: number): string {
 }
 
 export function SessionView({ sessionId, transport }: SessionViewProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "chat" | "diff">("chat");
+  const [activeTab, setActiveTab] = useState<"overview" | "chat" | "logs" | "diff">("logs");
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
 
   if (!session) {
@@ -89,6 +90,17 @@ export function SessionView({ sessionId, transport }: SessionViewProps) {
             </button>
             <button
               type="button"
+              onClick={() => setActiveTab("logs")}
+              className={`rounded-md px-3 py-1.5 text-sm ${
+                activeTab === "logs"
+                  ? "bg-zinc-800 text-zinc-100"
+                  : "text-zinc-500 transition hover:text-zinc-200"
+              }`}
+            >
+              Logs
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab("diff")}
               className={`rounded-md px-3 py-1.5 text-sm ${
                 activeTab === "diff"
@@ -101,8 +113,10 @@ export function SessionView({ sessionId, transport }: SessionViewProps) {
           </div>
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto p-6">
-        {activeTab === "overview" ? (
+      <div className={`flex-1 p-6 ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
+        {activeTab === "logs" ? (
+          <LogPanel sessionId={sessionId} transport={transport} />
+        ) : activeTab === "overview" ? (
           <OverviewTab session={session} transport={transport} />
         ) : activeTab === "chat" ? (
           <ChatView sessionId={sessionId} />

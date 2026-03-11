@@ -13,6 +13,7 @@ import daemonPackageJson from "../package.json";
 import { PushHub } from "./push-hub";
 import { GracefulShutdown } from "./graceful-shutdown";
 import { handleRpcRequest } from "./rpc-handler";
+import { LogTailer } from "./log-tailer";
 import { getOrkaHome } from "./db";
 import { withSpan } from "./tracing";
 
@@ -139,7 +140,12 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
       },
     });
 
+    // Start log tailer for real-time log streaming
+    const logTailer = new LogTailer(svc, pushHub);
+    logTailer.start();
+
     // Register cleanup tasks for graceful shutdown
+    gracefulShutdown.onShutdown(async () => logTailer.stop());
     gracefulShutdown.onShutdown(async () => {
       pushHub.broadcast("server.shutdown", {});
     });
