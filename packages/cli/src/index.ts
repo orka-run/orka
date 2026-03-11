@@ -36,9 +36,24 @@ import {
   optional,
   restPositionals,
   multioption,
+  oneOf,
+  type Type,
 } from "cmd-ts";
 
 void bool;
+
+// Custom enum type that shows valid values in help text
+function enumType<T extends string>(values: readonly T[], typeName: string): Type<string, T> {
+  return {
+    ...oneOf(values),
+    displayName: values.join("|"),
+    description: `one of: ${values.join(", ")}`,
+  };
+}
+
+const statusValues = ["running", "completed", "failed", "cancelled", "queued", "preparing"] as const;
+const backendValues = ["claude-code", "codex", "shell"] as const;
+const modeValues = ["interactive", "background"] as const;
 
 // Initialize OpenTelemetry tracing
 initTracing();
@@ -190,18 +205,24 @@ async function readPromptFromStdin(): Promise<string> {
 const spawnCmd = command({
   name: "spawn",
   description: "Spawn an agent session",
+  examples: [
+    { description: "Background task with inline prompt", command: "orka spawn -m background fix the login bug" },
+    { description: "Interactive session with specific backend", command: "orka spawn -b codex 'refactor auth module'" },
+    { description: "Read prompt from file, auto-merge on success", command: "orka spawn --prompt-file task.md --auto-merge" },
+    { description: "Pipe prompt from stdin", command: "echo 'add tests' | orka spawn -m background" },
+  ],
   args: {
-    project: option({ type: optional(str), long: "project", short: "p" }),
-    backend: option({ type: optional(str), long: "backend", short: "b" }),
-    prompt: option({ type: optional(str), long: "prompt" }),
-    promptFile: option({ type: optional(str), long: "prompt-file" }),
-    mode: option({ type: optional(str), long: "mode", short: "m" }),
-    model: option({ type: optional(str), long: "model" }),
-    branch: option({ type: optional(str), long: "branch" }),
-    title: option({ type: optional(str), long: "title" }),
-    reasoningEffort: option({ type: optional(str), long: "reasoning-effort" }),
-    autoMerge: flag({ long: "auto-merge" }),
-    tag: multioption({ type: str, long: "tag" }),
+    project: option({ type: optional(str), long: "project", short: "p", description: "Project directory or alias (default: current dir)" }),
+    backend: option({ type: optional(enumType(backendValues, "backend")), long: "backend", short: "b", description: "Agent backend (default: claude-code)" }),
+    prompt: option({ type: optional(str), long: "prompt", description: "Task prompt (or use positional args / stdin)" }),
+    promptFile: option({ type: optional(str), long: "prompt-file", description: "Read prompt from a file" }),
+    mode: option({ type: optional(enumType(modeValues, "mode")), long: "mode", short: "m", description: "Session mode (default: interactive)" }),
+    model: option({ type: optional(str), long: "model", description: "Model for the backend (e.g. sonnet, opus, haiku)" }),
+    branch: option({ type: optional(str), long: "branch", description: "Git branch name (creates worktree)" }),
+    title: option({ type: optional(str), long: "title", description: "Session title for display in orka ps" }),
+    reasoningEffort: option({ type: optional(str), long: "reasoning-effort", description: "Reasoning effort level (low, medium, high)" }),
+    autoMerge: flag({ long: "auto-merge", description: "Auto-merge worktree on successful completion" }),
+    tag: multioption({ type: str, long: "tag", description: "Tag the session (repeatable)" }),
     words: restPositionals({ type: str, displayName: "prompt" }),
   },
   handler: async (args) => runCliCommand("spawn", async () => {
@@ -270,12 +291,17 @@ const spawnCmd = command({
 const psCmd = command({
   name: "ps",
   description: "List active sessions",
+  examples: [
+    { description: "Show only running sessions", command: "orka ps --status running" },
+    { description: "Verbose output with cost and tokens", command: "orka ps -v" },
+    { description: "Filter by project and backend", command: "orka ps --project myapp --backend codex" },
+  ],
   args: {
-    status: option({ type: optional(str), long: "status" }),
-    backend: option({ type: optional(str), long: "backend" }),
-    project: option({ type: optional(str), long: "project" }),
-    tag: option({ type: optional(str), long: "tag" }),
-    verbose: flag({ long: "verbose", short: "v" }),
+    status: option({ type: optional(enumType(statusValues, "status")), long: "status", description: "Filter by session status" }),
+    backend: option({ type: optional(enumType(backendValues, "backend")), long: "backend", description: "Filter by agent backend" }),
+    project: option({ type: optional(str), long: "project", description: "Filter by project name or path" }),
+    tag: option({ type: optional(str), long: "tag", description: "Filter by tag" }),
+    verbose: flag({ long: "verbose", short: "v", description: "Show cost, duration, tokens, and project" }),
   },
   handler: async (args) => runCliCommand("ps", async () => {
     let sessions = await svc.listSessions({
@@ -371,9 +397,9 @@ const psCmd = command({
 
 const attachCmd = command({
   name: "attach",
-  description: "Attach to a session",
+  description: "Attach to a running tmux session (detach: Ctrl-b d)",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("attach", async () => {
@@ -407,10 +433,13 @@ const attachCmd = command({
 
 const logsCmd = command({
   name: "logs",
-  description: "View session logs",
+  description: "View session output (formatted from stream-json)",
+  examples: [
+    { description: "Stream live output", command: "orka logs -f <session-id>" },
+  ],
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
-    follow: flag({ long: "follow", short: "f" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    follow: flag({ long: "follow", short: "f", description: "Stream live output (polls until session ends)" }),
   },
   handler: async ({ sessionId, follow }) => runCliCommand("logs", async () => {
     if (!sessionId) {
@@ -486,9 +515,9 @@ const logsCmd = command({
 
 const stopCmd = command({
   name: "stop",
-  description: "Stop a session",
+  description: "Stop a running session (kills the tmux session)",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("stop", async () => {
@@ -512,9 +541,9 @@ const stopCmd = command({
 
 const diffCmd = command({
   name: "diff",
-  description: "Show git changes in a session worktree",
+  description: "Show git status and diff in a session's worktree",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("diff", async () => {
@@ -542,9 +571,9 @@ const diffCmd = command({
 
 const retryCmd = command({
   name: "retry",
-  description: "Re-run a session with the same prompt",
+  description: "Re-run a session with the same prompt, model, and tags",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("retry", async () => {
@@ -594,9 +623,9 @@ const retryCmd = command({
 
 const showCmd = command({
   name: "show",
-  description: "Show full details for a session",
+  description: "Show full details for a session (status, config, prompt, tags)",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("show", async () => {
@@ -641,9 +670,9 @@ const showCmd = command({
 
 const workdirCmd = command({
   name: "workdir",
-  description: "Print session working directory",
+  description: "Print session working directory (use with: cd $(orka workdir <id>))",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("workdir", async () => {
@@ -662,11 +691,16 @@ const workdirCmd = command({
 
 const waitCmd = command({
   name: "wait",
-  description: "Wait for session(s) to complete",
+  description: "Block until session(s) complete, then show summary",
+  examples: [
+    { description: "Wait for specific sessions", command: "orka wait sess-abc sess-def" },
+    { description: "Wait for all running sessions", command: "orka wait --all" },
+    { description: "Wait for all sessions in a project", command: "orka wait --all --project myapp" },
+  ],
   args: {
-    all: flag({ long: "all" }),
-    verbose: flag({ long: "verbose", short: "v" }),
-    project: option({ type: optional(str), long: "project" }),
+    all: flag({ long: "all", description: "Wait for all running sessions" }),
+    verbose: flag({ long: "verbose", short: "v", description: "Show result preview for each session" }),
+    project: option({ type: optional(str), long: "project", description: "Only wait for sessions in this project" }),
     ids: restPositionals({ type: str, displayName: "session-id" }),
   },
   handler: async ({ all, verbose, project, ids }) => runCliCommand("wait", async () => {
@@ -765,10 +799,14 @@ const waitCmd = command({
 
 const resultCmd = command({
   name: "result",
-  description: "Show final result from a background session",
+  description: "Extract final result, cost, and tokens from a background session",
+  examples: [
+    { description: "Show formatted result", command: "orka result <session-id>" },
+    { description: "Get machine-readable JSON", command: "orka result --json <session-id>" },
+  ],
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
-    json: flag({ long: "json" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    json: flag({ long: "json", description: "Output as JSON (for scripting)" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId, json }) => runCliCommand("result", async () => {
@@ -825,9 +863,9 @@ const resultCmd = command({
 
 const sendCmd = command({
   name: "send",
-  description: "Send text input to a running session",
+  description: "Send text input to a running interactive session via tmux",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     text: restPositionals({ type: str, displayName: "text" }),
   },
   handler: async ({ sessionId, text }) => runCliCommand("send", async () => {
@@ -851,9 +889,9 @@ const sendCmd = command({
 
 const keepCmd = command({
   name: "keep",
-  description: "Protect a session's worktree from auto-cleanup",
+  description: "Protect a session's worktree from auto-cleanup (survives prune/reap)",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("keep", async () => {
@@ -873,9 +911,9 @@ const keepCmd = command({
 
 const unkeepCmd = command({
   name: "unkeep",
-  description: "Remove worktree protection",
+  description: "Remove worktree protection (allows auto-cleanup)",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId }) => runCliCommand("unkeep", async () => {
@@ -895,10 +933,10 @@ const unkeepCmd = command({
 
 const mergeCmd = command({
   name: "merge",
-  description: "Merge session worktree branch into current branch",
+  description: "Merge session worktree branch into current branch (auto-cleans worktree)",
   args: {
-    sessionId: positional({ type: optional(str), displayName: "session-id" }),
-    noCleanup: flag({ long: "no-cleanup" }),
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    noCleanup: flag({ long: "no-cleanup", description: "Keep worktree and branch after merge" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async ({ sessionId, noCleanup }) => runCliCommand("merge", async () => {
@@ -925,10 +963,14 @@ const mergeCmd = command({
 
 const pruneCmd = command({
   name: "prune",
-  description: "Remove old completed/cancelled/failed sessions",
+  description: "Remove old completed/cancelled/failed sessions and orphaned worktrees",
+  examples: [
+    { description: "Prune sessions older than 7 days", command: "orka prune --age 7d" },
+    { description: "Prune only for a specific project", command: "orka prune --project myapp" },
+  ],
   args: {
-    age: option({ type: optional(str), long: "age" }),
-    project: option({ type: optional(str), long: "project" }),
+    age: option({ type: optional(str), long: "age", description: "Max age to keep (e.g. 24h, 7d, 30m; default: 24h)" }),
+    project: option({ type: optional(str), long: "project", description: "Only prune sessions for this project" }),
   },
   handler: async ({ age, project }) => runCliCommand("prune", async () => {
     const maxAgeMs = parseAge(age ?? "24h");
@@ -949,13 +991,17 @@ const pruneCmd = command({
 
 const serveCmd = command({
   name: "serve",
-  description: "Start daemon WS server",
+  description: "Start daemon WebSocket server for remote access",
+  examples: [
+    { description: "Start on default port", command: "orka serve" },
+    { description: "Register with relay", command: "orka serve --relay ws://relay:7390 --node-id mynode" },
+  ],
   args: {
-    port: option({ type: optional(str), long: "port" }),
-    host: option({ type: optional(str), long: "host" }),
-    relay: option({ type: optional(str), long: "relay" }),
-    nodeId: option({ type: optional(str), long: "node-id" }),
-    relayToken: option({ type: optional(str), long: "relay-token" }),
+    port: option({ type: optional(str), long: "port", description: "Port to listen on (default: 7394)" }),
+    host: option({ type: optional(str), long: "host", description: "Hostname to bind (default: 127.0.0.1)" }),
+    relay: option({ type: optional(str), long: "relay", description: "Relay URL to register with (e.g. ws://relay:7390)" }),
+    nodeId: option({ type: optional(str), long: "node-id", description: "Node ID for relay registration" }),
+    relayToken: option({ type: optional(str), long: "relay-token", description: "Auth token for relay connection" }),
   },
   handler: async (args) => runCliCommand("serve", async () => {
     const port = parseInt(args.port ?? "7394", 10);
@@ -1087,10 +1133,10 @@ const projectCmd = subcommands({
 
 const relayServeCmd = command({
   name: "serve",
-  description: "Start relay server",
+  description: "Start relay WebSocket router for multi-machine setups",
   args: {
-    port: option({ type: optional(str), long: "port" }),
-    token: option({ type: optional(str), long: "token" }),
+    port: option({ type: optional(str), long: "port", description: "Port to listen on (default: 7390)" }),
+    token: option({ type: optional(str), long: "token", description: "Auth token for connections" }),
   },
   handler: async ({ port, token }) => runCliCommand("relay", async () => {
     const parsedPort = parseInt(port ?? "7390", 10);
@@ -1117,10 +1163,10 @@ const relayServeCmd = command({
 
 const relaySignupCmd = command({
   name: "signup",
-  description: "Sign up for a relay account",
+  description: "Sign up for a relay account (saves API key automatically)",
   args: {
-    email: option({ type: optional(str), long: "email" }),
-    name: option({ type: optional(str), long: "name" }),
+    email: option({ type: optional(str), long: "email", description: "Account email address" }),
+    name: option({ type: optional(str), long: "name", description: "Account display name" }),
   },
   handler: async ({ email, name }) => runCliCommand("relay", async () => {
     if (!email || !name) {
@@ -1146,10 +1192,10 @@ const relaySignupCmd = command({
 
 const relayKeysCreateCmd = command({
   name: "create",
-  description: "Create an API key",
+  description: "Create an API key for relay access",
   args: {
-    label: option({ type: optional(str), long: "label" }),
-    permissions: option({ type: optional(str), long: "permissions" }),
+    label: option({ type: optional(str), long: "label", description: "Human-readable label for the key" }),
+    permissions: option({ type: optional(str), long: "permissions", description: "Permission level (client or node)" }),
   },
   handler: async ({ label, permissions }) => runCliCommand("relay", async () => {
     const body: any = {};
@@ -1235,11 +1281,11 @@ const relayAccountCmd = command({
 
 const relayUsageCmd = command({
   name: "usage",
-  description: "Show usage statistics",
+  description: "Show relay usage statistics (requests, bytes)",
   args: {
-    from: option({ type: optional(str), long: "from" }),
-    to: option({ type: optional(str), long: "to" }),
-    granularity: option({ type: optional(str), long: "granularity" }),
+    from: option({ type: optional(str), long: "from", description: "Start date (ISO 8601)" }),
+    to: option({ type: optional(str), long: "to", description: "End date (ISO 8601)" }),
+    granularity: option({ type: optional(str), long: "granularity", description: "Bucket size: hour, day, month (default: hour)" }),
   },
   handler: async ({ from, to, granularity }) => runCliCommand("relay", async () => {
     const params = new URLSearchParams();
@@ -1396,7 +1442,7 @@ const keygenCmd = subcommands({
 
 const app = subcommands({
   name: "orka",
-  description: "agent session orchestrator",
+  description: "Agent session orchestrator — spawn, monitor, and manage AI coding agents",
   cmds: {
     spawn: spawnCmd,
     ps: psCmd,
@@ -1487,82 +1533,48 @@ try {
 function printUsage(): void {
   console.log("orka — agent session orchestrator");
   console.log("");
-  console.log("usage: orka <command>");
+  console.log("usage: orka <command> [options]");
   console.log("");
-  console.log("commands:");
-  console.log("  spawn   Spawn an agent session");
-  console.log("  ps      List active sessions");
-  console.log("  attach  Attach to a session");
-  console.log("  logs    View session logs");
-  console.log("  stop    Stop a session");
-  console.log("  diff    Show git changes in a session worktree");
-  console.log("  show    Show full details for a session");
-  console.log("  workdir Print session working directory");
-  console.log("  wait    Wait for session(s) to complete");
-  console.log("  result  Show final result from a background session");
-  console.log("  send    Send text input to a running session");
-  console.log("  keep    Protect a session's worktree from auto-cleanup");
-  console.log("  unkeep  Remove worktree protection");
-  console.log("  merge   Merge session worktree branch into current branch");
-  console.log("  project Register/list/remove project aliases");
-  console.log("  retry   Re-run a session with the same prompt");
-  console.log("  prune   Remove old completed/cancelled/failed sessions");
-  console.log("  serve   Start daemon WS server");
-  console.log("  relay   Start relay WS router / manage relay account");
-  console.log("  keygen  Manage E2E encryption keys");
+  console.log("session lifecycle:");
+  console.log("  spawn    Spawn an agent session           orka spawn -m background fix the bug");
+  console.log("  ps       List sessions                    orka ps --status running -v");
+  console.log("  attach   Attach to running tmux session   orka attach <id>");
+  console.log("  logs     View session output              orka logs -f <id>");
+  console.log("  stop     Stop a running session           orka stop <id>");
+  console.log("  wait     Block until sessions complete    orka wait --all");
+  console.log("  result   Show result, cost, tokens        orka result --json <id>");
+  console.log("  retry    Re-run with same prompt          orka retry <id>");
+  console.log("  send     Send input to session            orka send <id> hello");
   console.log("");
-  console.log("ps options:");
-  console.log("  --status       Filter by status (e.g. running, completed, failed, cancelled)");
-  console.log("  --backend      Filter by backend (e.g. claude-code, codex, aider, shell)");
-  console.log("  --project      Filter by project (name or full path)");
-  console.log("  --tag          Filter by tag");
-  console.log("  --verbose, -v  Show cost, duration, tokens, and project column");
+  console.log("worktree management:");
+  console.log("  diff     Show git changes in worktree     orka diff <id>");
+  console.log("  show     Full session detail view         orka show <id>");
+  console.log("  workdir  Print working directory           cd $(orka workdir <id>)");
+  console.log("  merge    Merge worktree into current      orka merge <id>");
+  console.log("  keep     Protect worktree from cleanup    orka keep <id>");
+  console.log("  unkeep   Remove worktree protection       orka unkeep <id>");
+  console.log("  prune    Remove old sessions              orka prune --age 7d");
   console.log("");
-  console.log("logs options:");
-  console.log("  --follow, -f  Stream live output (polls tmux or tail -f log)");
+  console.log("infrastructure:");
+  console.log("  project  Register/list/remove aliases     orka project add myapp /path/to/repo");
+  console.log("  serve    Start daemon WS server           orka serve --port 7394");
+  console.log("  relay    Relay router / account mgmt      orka relay --port 7390");
+  console.log("  keygen   Manage E2E encryption keys       orka keygen client");
   console.log("");
-  console.log("prune options:");
-  console.log("  --age       Max age to keep (default: 24h)");
-  console.log("  --project   Only prune sessions for this project");
-  console.log("");
-  console.log("spawn options:");
-  console.log("  --project, -p   Project directory (default: .)");
-  console.log("  --backend, -b   Agent backend: claude-code|codex|shell (default: claude-code)");
-  console.log("  --prompt        Prompt/task for the agent (or use positional args or pipe stdin)");
-  console.log("  --prompt-file   Read prompt from file");
-  console.log("  --mode, -m      Session mode: interactive|background (default: interactive)");
-  console.log("  --model         Model for claude-code backend (e.g. sonnet, opus, haiku)");
-  console.log("  --branch        Git branch (creates worktree if specified)");
-  console.log("  --title         Session title");
-  console.log("  --auto-merge    Auto-merge worktree on successful completion");
-  console.log("  --tag           Add tag(s) to session (repeatable: --tag foo --tag bar)");
-  console.log("");
-  console.log("serve options:");
-  console.log("  --port          Port to listen on (default: 7394)");
-  console.log("  --host          Hostname to bind (default: 127.0.0.1)");
-  console.log("  --relay         Connect to relay (e.g. ws://relay:7390)");
-  console.log("  --node-id       Node ID for relay registration");
-  console.log("  --encrypt       Enable E2E encryption (generates node keypair)");
-  console.log("");
-  console.log("relay options:");
-  console.log("  (no subcommand) Start relay server");
-  console.log("  signup          Sign up for a relay account");
-  console.log("  keys            Manage API keys (list, create, revoke)");
-  console.log("  account         Show account info");
-  console.log("  usage           Show usage statistics");
-  console.log("  --port          Port to listen on (default: 7390)");
+  console.log("enum values:");
+  console.log(`  --status   ${statusValues.join(", ")}`);
+  console.log(`  --backend  ${backendValues.join(", ")}`);
+  console.log(`  --mode     ${modeValues.join(", ")}`);
   console.log("");
   console.log("global options:");
-  console.log("  --remote <url>  Connect to remote daemon (e.g. ws://host:7394)");
-  console.log("  --token <tok>   Auth token for relay/daemon connection");
-  console.log("  --encrypt       Enable E2E encryption for remote connections");
-  console.log("  --server-key    Server public key for E2E (or ORKA_SERVER_KEY)");
-  console.log("  ORKA_REMOTE     Env var alternative to --remote");
-  console.log("  ORKA_TOKEN      Env var alternative to --token");
-  console.log("  ORKA_API_KEY    API key for relay (auto-loaded from ~/.orka/relay-key)");
-  console.log("  ORKA_RELAY_URL  Relay HTTP URL for signup/keys/account/usage commands");
-  console.log("  ORKA_ENCRYPT    Env var alternative to --encrypt");
-  console.log("  ORKA_SERVER_KEY Env var alternative to --server-key");
+  console.log("  --remote <url>    Connect to remote daemon (ws://host:7394)");
+  console.log("  --token <tok>     Auth token for relay/daemon");
+  console.log("  --encrypt         Enable E2E encryption");
+  console.log("  --server-key <k>  Server public key for E2E");
+  console.log("");
+  console.log("env vars: ORKA_REMOTE, ORKA_TOKEN, ORKA_API_KEY, ORKA_ENCRYPT, ORKA_SERVER_KEY");
+  console.log("");
+  console.log("run orka <command> --help for detailed options");
 }
 
 function formatDuration(ms: number): string {
