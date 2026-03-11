@@ -253,25 +253,45 @@ class LocalClient implements OrkaService {
       sessions = sessions.filter((s) => s.projectPath === opts.projectPath);
     }
 
-    if (sessions.length === 0) {
-      return { pruned: 0, orphansCleaned: 0 };
+    if (!opts.confirm) {
+      return {
+        pruned: sessions.length,
+        orphansCleaned: 0,
+        dryRun: true,
+      };
     }
 
-    // Delete log files and script files, but keep session records in DB
-    const scriptsDir = join(getOrkaHome(), "scripts");
-    for (const s of sessions) {
-      if (s.logFile && existsSync(s.logFile)) {
-        unlinkSync(s.logFile);
+    let logsDeleted = 0;
+    if (opts.purgeLogs) {
+      const scriptsDir = join(getOrkaHome(), "scripts");
+      for (const s of sessions) {
+        if (s.logFile && existsSync(s.logFile)) {
+          unlinkSync(s.logFile);
+          logsDeleted += 1;
+        }
+        const scriptFile = join(scriptsDir, `${s.id}.sh`);
+        if (existsSync(scriptFile)) {
+          unlinkSync(scriptFile);
+          logsDeleted += 1;
+        }
       }
-      const scriptFile = join(scriptsDir, `${s.id}.sh`);
-      if (existsSync(scriptFile)) {
-        unlinkSync(scriptFile);
-      }
+    }
+
+    let dbRecordsDeleted = 0;
+    if (opts.purgeDb) {
+      dbDeleteSessions(sessions.map((s) => s.id));
+      dbRecordsDeleted = sessions.length;
     }
 
     const orphansCleaned = await cleanupOrphanedWorktrees();
 
-    return { pruned: sessions.length, orphansCleaned };
+    return {
+      pruned: sessions.length,
+      orphansCleaned,
+      dryRun: false,
+      ...(opts.purgeLogs ? { logsDeleted } : {}),
+      ...(opts.purgeDb ? { dbRecordsDeleted } : {}),
+    };
   }
 
   async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {

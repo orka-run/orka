@@ -104,7 +104,13 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
       svc.deleteSessions(params.ids);
       return null;
     case "pruneSessions":
-      return svc.pruneSessions(params);
+      return svc.pruneSessions({
+        maxAgeMs: params.maxAgeMs,
+        projectPath: params.projectPath,
+        confirm: params.confirm,
+        purgeLogs: params.purgeLogs,
+        purgeDb: params.purgeDb,
+      });
     case "getPendingApprovals":
       return svc.getPendingApprovals(params.sessionId);
     case "resolveApproval":

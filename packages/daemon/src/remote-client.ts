@@ -247,7 +247,13 @@ class RemoteClient implements OrkaService {
   }
 
   async pruneSessions(opts: PruneOptions): Promise<PruneResult> {
-    return this.call("pruneSessions", opts);
+    return this.call("pruneSessions", {
+      maxAgeMs: opts.maxAgeMs,
+      projectPath: opts.projectPath,
+      confirm: opts.confirm,
+      purgeLogs: opts.purgeLogs,
+      purgeDb: opts.purgeDb,
+    });
   }
 
   async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {

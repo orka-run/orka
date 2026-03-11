@@ -46,11 +46,17 @@ export interface SessionFilters {
 export interface PruneOptions {
   maxAgeMs: number;
   projectPath?: string;
+  confirm?: boolean;
+  purgeLogs?: boolean;
+  purgeDb?: boolean;
 }
 
 export interface PruneResult {
   pruned: number;
   orphansCleaned: number;
+  dryRun: boolean;
+  logsDeleted?: number;
+  dbRecordsDeleted?: number;
 }
 
 export interface DiffResult {

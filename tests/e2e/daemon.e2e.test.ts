@@ -18,7 +18,7 @@ const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-daemon-"));
 process.env.ORKA_HOME = testHome;
 
 import { createLocalClient } from "@orka/daemon";
-import type { OrkaService, Session } from "@orka/core";
+import type { OrkaService } from "@orka/core";
 
 // Check tmux availability
 let tmuxAvailable = false;
@@ -292,24 +292,62 @@ describeE2E("Daemon Session Lifecycle", () => {
 
   // ---- Prune ----
 
-  test("pruneSessions removes old completed sessions", async () => {
-    // Spawn and stop a session to make it prunable
+  test("pruneSessions is dry-run by default and only purges when confirmed", async () => {
+    const pruneRepo = mkdtempSync(join(tmpdir(), "orka-e2e-prune-repo-"));
+    await $`git init ${pruneRepo}`.quiet();
+    await $`git -C ${pruneRepo} config user.email "test@orka.dev"`.quiet();
+    await $`git -C ${pruneRepo} config user.name "Orka Test"`.quiet();
+    await $`git -C ${pruneRepo} commit --allow-empty -m "init"`.quiet();
+
+    // Spawn and stop a session to make it prunable.
     const session = await client.spawn({
-      prompt: "echo 'prune-me'",
+      prompt: "sleep 300",
       backend: "shell",
-      mode: "interactive", // no worktree
-      projectPath: testRepo,
+      mode: "interactive",
+      projectPath: pruneRepo,
     });
     spawnedTmuxNames.push(session.tmuxSessionName);
+    const scriptFile = join(testHome, "scripts", `${session.id}.sh`);
 
-    await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 5_000 });
+    expect(existsSync(session.logFile)).toBe(true);
+    expect(existsSync(scriptFile)).toBe(true);
 
-    // Manually stop to set status (reap requires grace period)
-    try { await client.stop(session.id); } catch { /* already dead */ }
+    await client.stop(session.id);
 
-    // Prune with maxAge=0 (everything is old enough)
-    const result = await client.pruneSessions({ maxAgeMs: 0 });
-    expect(result.pruned).toBeGreaterThanOrEqual(0);
+    const dryRun = await client.pruneSessions({
+      maxAgeMs: 0,
+      projectPath: pruneRepo,
+      purgeLogs: true,
+      purgeDb: true,
+    });
+    expect(dryRun).toEqual({
+      pruned: 1,
+      orphansCleaned: 0,
+      dryRun: true,
+    });
+
+    expect(await client.getSession(session.id)).not.toBeNull();
+    expect(existsSync(session.logFile)).toBe(true);
+    expect(existsSync(scriptFile)).toBe(true);
+
+    const result = await client.pruneSessions({
+      maxAgeMs: 0,
+      projectPath: pruneRepo,
+      confirm: true,
+      purgeLogs: true,
+      purgeDb: true,
+    });
+    expect(result.pruned).toBe(1);
+    expect(result.orphansCleaned).toBeGreaterThanOrEqual(0);
+    expect(result.dryRun).toBe(false);
+    expect(result.logsDeleted).toBe(2);
+    expect(result.dbRecordsDeleted).toBe(1);
+
+    expect(await client.getSession(session.id)).toBeNull();
+    expect(existsSync(session.logFile)).toBe(false);
+    expect(existsSync(scriptFile)).toBe(false);
+
+    rmSync(pruneRepo, { recursive: true, force: true });
   });
 
   // ---- deleteSessions ----
