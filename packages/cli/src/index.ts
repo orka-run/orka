@@ -151,6 +151,7 @@ function printUsage(): void {
   console.log("  --model         Model for claude-code backend (e.g. sonnet, opus, haiku)");
   console.log("  --branch        Git branch (creates worktree if specified)");
   console.log("  --title         Session title");
+  console.log("  --auto-merge    Auto-merge worktree on successful completion");
 }
 
 async function cmdSpawn(): Promise<void> {
@@ -166,6 +167,7 @@ async function cmdSpawn(): Promise<void> {
       model: { type: "string" },
       branch: { type: "string" },
       title: { type: "string" },
+      "auto-merge": { type: "boolean", default: false },
     },
     allowPositionals: true,
   });
@@ -214,6 +216,7 @@ async function cmdSpawn(): Promise<void> {
       mode: args.values.mode as SessionMode,
       model: args.values.model || cfg.model || undefined,
       branch: args.values.branch,
+      autoMerge: args.values["auto-merge"] || false,
     });
   } catch (e: any) {
     console.error(`error: ${e.message}`);
@@ -556,6 +559,7 @@ async function cmdShow(): Promise<void> {
   console.log(`  finished:  ${session.finishedAt ?? "(not finished)"}`);
   console.log(`  exit code: ${session.exitCode ?? "(none)"}`);
   if (session.kept) console.log(`  kept:      yes (worktree protected)`);
+  if (session.autoMerge) console.log(`  auto-merge: yes`);
 
   if (task) {
     console.log("");

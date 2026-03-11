@@ -8,7 +8,7 @@ import {
 } from "@orka/core";
 import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
-import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges } from "./worktree";
+import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
 import { buildBackendCommand } from "./backends";
 import { getConfig } from "./config";
 import { withSpan } from "./tracing";
@@ -107,6 +107,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       finishedAt: null,
       exitCode: null,
       kept: false,
+      autoMerge: req.autoMerge ?? false,
     };
     insertSession(session);
 
@@ -157,6 +158,11 @@ export async function reapSessions(): Promise<number> {
           "orka.exit_code": exitCode ?? -1,
         });
 
+        // Auto-merge on success
+        if (s.autoMerge && (exitCode === undefined || exitCode === 0)) {
+          await tryAutoMerge(s, span);
+        }
+
         await tryCleanupWorktree(s);
         reaped++;
       }
@@ -191,6 +197,34 @@ export async function stopSession(sessionId: string): Promise<void> {
 /** Remove worktree if the session was using one.
  *  Preserves worktrees that have uncommitted changes or commits ahead of parent.
  */
+/** Auto-merge worktree branch into parent repo on successful completion. */
+async function tryAutoMerge(session: Session, parentSpan: any): Promise<void> {
+  const wtDir = getWorktreeDir();
+  if (!session.workingDir.startsWith(wtDir)) return;
+  if (!session.projectPath) return;
+
+  try {
+    const { branch, commits } = await worktreeMerge(session.projectPath, session.workingDir);
+    parentSpan.addEvent("session.auto_merged", {
+      "orka.session.id": session.id,
+      "orka.branch": branch,
+      "orka.commits": commits,
+    });
+    // Clean up worktree and branch after successful merge
+    try {
+      await worktreeRemove(session.projectPath, session.workingDir);
+      await deleteBranch(session.projectPath, branch);
+    } catch {
+      // Cleanup failure is non-fatal after merge
+    }
+  } catch {
+    // Merge failure — worktree preserved for manual resolution
+    parentSpan.addEvent("session.auto_merge_failed", {
+      "orka.session.id": session.id,
+    });
+  }
+}
+
 async function tryCleanupWorktree(session: Session): Promise<void> {
   const wtDir = getWorktreeDir();
   if (!session.workingDir.startsWith(wtDir)) return;

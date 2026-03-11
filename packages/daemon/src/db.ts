@@ -31,6 +31,7 @@ const SessionRowSchema = z.object({
   finished_at: z.string().nullable(),
   exit_code: z.number().nullable(),
   kept: z.number().default(0),
+  auto_merge: z.number().default(0),
 });
 
 const ORKA_DIR = ".orka";
@@ -63,6 +64,7 @@ const MIGRATIONS = [
   { version: 2, sql: `ALTER TABLE sessions ADD COLUMN project_path TEXT NOT NULL DEFAULT ''` },
   { version: 3, sql: `ALTER TABLE tasks ADD COLUMN model TEXT` },
   { version: 4, sql: `ALTER TABLE sessions ADD COLUMN kept INTEGER NOT NULL DEFAULT 0` },
+  { version: 5, sql: `ALTER TABLE sessions ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0` },
 ];
 
 function migrate(db: Database): void {
@@ -140,8 +142,8 @@ export function getTask(id: string): Task | null {
 export function insertSession(session: Session): void {
   getDb()
     .prepare(
-      `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept)
-       VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept)`,
+      `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge)
+       VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge)`,
     )
     .run({
       $id: session.id,
@@ -159,6 +161,7 @@ export function insertSession(session: Session): void {
       $finishedAt: session.finishedAt,
       $exitCode: session.exitCode,
       $kept: session.kept ? 1 : 0,
+      $autoMerge: session.autoMerge ? 1 : 0,
     });
 }
 
@@ -273,5 +276,6 @@ function rowToSession(row: unknown): Session {
     finishedAt: data.finished_at,
     exitCode: data.exit_code,
     kept: data.kept === 1,
+    autoMerge: data.auto_merge === 1,
   };
 }

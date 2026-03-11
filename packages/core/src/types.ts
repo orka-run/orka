@@ -67,6 +67,7 @@ export interface Session {
   finishedAt: string | null;
   exitCode: number | null;
   kept: boolean;
+  autoMerge: boolean;
 }
 
 // --- Spawn Request ---
@@ -79,4 +80,5 @@ export interface SpawnRequest {
   mode: SessionMode;
   branch?: string;
   model?: string;
+  autoMerge?: boolean;
 }
