@@ -18,6 +18,10 @@ export interface SessionSummary {
   finishedAt: string | null;
   exitCode: number | null;
   projectPath: string;
+  workingDir: string;
+  kept: boolean;
+  autoMerge: boolean;
+  prompt: string | null;
 }
 
 export interface SessionState {
@@ -37,6 +41,7 @@ export interface SessionState {
 interface TaskDetails {
   title: string | null;
   model: string | null;
+  prompt: string | null;
 }
 
 async function getTaskDetails(transport: WsTransport, taskId: string): Promise<TaskDetails> {
@@ -45,11 +50,13 @@ async function getTaskDetails(transport: WsTransport, taskId: string): Promise<T
     return {
       title: task?.title ?? null,
       model: task?.model ?? null,
+      prompt: task?.prompt ?? null,
     };
   } catch {
     return {
       title: null,
       model: null,
+      prompt: null,
     };
   }
 }
@@ -75,6 +82,10 @@ async function toSessionSummary(
     finishedAt: session.finishedAt,
     exitCode: session.exitCode,
     projectPath: session.projectPath,
+    workingDir: session.workingDir,
+    kept: session.kept,
+    autoMerge: session.autoMerge,
+    prompt: taskDetails.prompt,
   };
 }
 

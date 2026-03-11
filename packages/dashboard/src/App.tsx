@@ -55,7 +55,7 @@ export function App() {
         />
         <main className="flex-1 overflow-hidden">
           {selectedId ? (
-            <SessionView sessionId={selectedId} />
+            <SessionView sessionId={selectedId} transport={transport} />
           ) : (
             <div className="flex h-full items-center justify-center text-zinc-500">
               Select a session or spawn a new one
