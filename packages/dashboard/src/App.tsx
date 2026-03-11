@@ -5,6 +5,7 @@ import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { StatusBar } from "./components/StatusBar";
+import { TransportContext } from "./lib/transportContext";
 import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useSessionStore } from "./stores/sessionStore";
@@ -45,31 +46,33 @@ export function App() {
   }, [transport, fetchSessions, handleSessionDeleted, handleSessionUpdated, setConnectionStatus]);
 
   return (
-    <div className="flex h-screen flex-col">
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          sessions={sessions}
-          selectedId={selectedId}
-          onSelect={selectSession}
-          onNewSession={() => setIsNewSessionOpen(true)}
+    <TransportContext.Provider value={transport}>
+      <div className="flex h-screen flex-col">
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar
+            sessions={sessions}
+            selectedId={selectedId}
+            onSelect={selectSession}
+            onNewSession={() => setIsNewSessionOpen(true)}
+          />
+          <main className="flex-1 overflow-hidden">
+            {selectedId ? (
+              <SessionView sessionId={selectedId} transport={transport} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-zinc-500">
+                Select a session or spawn a new one
+              </div>
+            )}
+          </main>
+        </div>
+        <NewSessionDialog
+          open={isNewSessionOpen}
+          transport={transport}
+          defaultProjectPath={defaultProjectPath}
+          onClose={() => setIsNewSessionOpen(false)}
         />
-        <main className="flex-1 overflow-hidden">
-          {selectedId ? (
-            <SessionView sessionId={selectedId} transport={transport} />
-          ) : (
-            <div className="flex h-full items-center justify-center text-zinc-500">
-              Select a session or spawn a new one
-            </div>
-          )}
-        </main>
+        <StatusBar sessionCount={sessions.length} />
       </div>
-      <NewSessionDialog
-        open={isNewSessionOpen}
-        transport={transport}
-        defaultProjectPath={defaultProjectPath}
-        onClose={() => setIsNewSessionOpen(false)}
-      />
-      <StatusBar sessionCount={sessions.length} />
-    </div>
+    </TransportContext.Provider>
   );
 }

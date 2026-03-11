@@ -1,29 +1,31 @@
 // Attribution: Diff panel concept inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, FileDiff, LoaderCircle } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ChevronRight, FileDiff, LoaderCircle, RefreshCw } from "lucide-react";
 import type { DiffResult } from "@orka/core";
 import { parseDiff, type DiffFile, type DiffLine } from "../lib/parseDiff";
+import { useTransport } from "../lib/transportContext";
+import { useSessionStore } from "../stores/sessionStore";
 
 interface DiffPanelProps {
   sessionId: string;
 }
 
-async function fetchSessionDiff(sessionId: string): Promise<DiffResult> {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/diff`);
-  if (!response.ok) {
-    throw new Error(`Failed to load diff for session ${sessionId}`);
-  }
-
-  return response.json() as Promise<DiffResult>;
-}
+const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
+const AUTO_REFRESH_MS = 5_000;
 
 export function DiffPanel({ sessionId }: DiffPanelProps) {
+  const transport = useTransport();
+  const queryClient = useQueryClient();
+  const session = useSessionStore((state) => state.sessions.find((s) => s.id === sessionId));
+  const isActive = session ? ACTIVE_STATUSES.has(session.status) : false;
+
   const diffQuery = useQuery({
     queryKey: ["session-diff", sessionId],
-    queryFn: () => fetchSessionDiff(sessionId),
-    refetchInterval: 3000,
+    queryFn: () => transport.request<DiffResult>("getDiff", { sessionId }),
+    refetchInterval: isActive ? AUTO_REFRESH_MS : false,
   });
+
   const files = parseDiff(diffQuery.data?.diff ?? "");
   const [collapsedFiles, setCollapsedFiles] = useState<Record<string, boolean>>({});
 
@@ -40,6 +42,10 @@ export function DiffPanel({ sessionId }: DiffPanelProps) {
     });
   }, [diffQuery.data?.diff]);
 
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["session-diff", sessionId] });
+  };
+
   if (diffQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/50">
@@ -53,11 +59,14 @@ export function DiffPanel({ sessionId }: DiffPanelProps) {
 
   if (diffQuery.isError) {
     return (
-      <div className="rounded-xl border border-red-950 bg-red-950/20 p-4 text-sm text-red-200">
-        <p className="font-medium">Unable to load worktree diff.</p>
-        <p className="mt-1 text-red-200/80">
-          {diffQuery.error instanceof Error ? diffQuery.error.message : "Unknown error"}
-        </p>
+      <div className="space-y-3">
+        <RefreshBar isActive={isActive} isFetching={diffQuery.isFetching} onRefresh={handleRefresh} />
+        <div className="rounded-xl border border-red-950 bg-red-950/20 p-4 text-sm text-red-200">
+          <p className="font-medium">Unable to load worktree diff.</p>
+          <p className="mt-1 text-red-200/80">
+            {diffQuery.error instanceof Error ? diffQuery.error.message : "Unknown error"}
+          </p>
+        </div>
       </div>
     );
   }
@@ -67,6 +76,7 @@ export function DiffPanel({ sessionId }: DiffPanelProps) {
   if (!diffQuery.data?.diff.trim()) {
     return (
       <div className="space-y-4">
+        <RefreshBar isActive={isActive} isFetching={diffQuery.isFetching} onRefresh={handleRefresh} />
         {status ? <StatusBlock status={status} /> : null}
         <div className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 px-6 py-10 text-center">
           <FileDiff className="h-8 w-8 text-zinc-600" />
@@ -81,6 +91,7 @@ export function DiffPanel({ sessionId }: DiffPanelProps) {
 
   return (
     <div className="space-y-4">
+      <RefreshBar isActive={isActive} isFetching={diffQuery.isFetching} onRefresh={handleRefresh} />
       {status ? <StatusBlock status={status} /> : null}
       <div className="space-y-3">
         {files.map((file) => {
@@ -154,6 +165,33 @@ export function DiffPanel({ sessionId }: DiffPanelProps) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function RefreshBar({
+  isActive,
+  isFetching,
+  onRefresh,
+}: {
+  isActive: boolean;
+  isFetching: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <p className="text-xs text-zinc-500">
+        {isActive ? "Auto-refreshing while session is active" : "Session finished"}
+      </p>
+      <button
+        type="button"
+        onClick={onRefresh}
+        disabled={isFetching}
+        className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200 disabled:opacity-50"
+      >
+        <RefreshCw className={`h-3 w-3 ${isFetching ? "animate-spin" : ""}`} />
+        Refresh
+      </button>
     </div>
   );
 }
