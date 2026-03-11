@@ -80,7 +80,6 @@ function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoning
     parts[0] = "codex exec";
     parts.push("--full-auto");
     parts.push("--json");
-    parts.push("--ephemeral");
     parts.push("--skip-git-repo-check");
   }
 
