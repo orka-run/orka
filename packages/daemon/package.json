@@ -5,6 +5,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@orka/core": "workspace:*"
+    "@orka/core": "workspace:*",
+    "node-pty": "^1.1.0"
   }
 }

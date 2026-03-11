@@ -86,4 +86,11 @@ export interface OrkaService {
   // --- Approvals ---
   getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]>;
   resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
+
+  // --- Terminal PTY ---
+  terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }>;
+  terminalWrite(termId: string, data: string): Promise<void>;
+  terminalResize(termId: string, cols: number, rows: number): Promise<void>;
+  terminalClose(termId: string): Promise<void>;
+  terminalList(sessionId: string): Promise<Array<{ id: string; cols: number; rows: number }>>;
 }

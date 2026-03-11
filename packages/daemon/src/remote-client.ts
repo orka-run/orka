@@ -252,6 +252,26 @@ class RemoteClient implements OrkaService {
   async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
     return this.call("resolveApproval", { requestId, decision });
   }
+
+  async terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }> {
+    return this.call("terminalOpen", { sessionId, opts });
+  }
+
+  async terminalWrite(termId: string, data: string): Promise<void> {
+    return this.call("terminalWrite", { termId, data });
+  }
+
+  async terminalResize(termId: string, cols: number, rows: number): Promise<void> {
+    return this.call("terminalResize", { termId, cols, rows });
+  }
+
+  async terminalClose(termId: string): Promise<void> {
+    return this.call("terminalClose", { termId });
+  }
+
+  async terminalList(sessionId: string): Promise<Array<{ id: string; cols: number; rows: number }>> {
+    return this.call("terminalList", { sessionId });
+  }
 }
 
 export function createRemoteClient(urlOrOpts: string | RemoteClientOptions): RemoteClient {

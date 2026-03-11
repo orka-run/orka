@@ -26,6 +26,7 @@ import {
   getOrkaHome,
 } from "./db";
 import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees, getRunner } from "./orchestrator";
+import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
 import {
   worktreeMerge,
@@ -37,6 +38,14 @@ import { ApprovalManager } from "./approval-manager";
 
 class LocalClient implements OrkaService {
   readonly approvals = new ApprovalManager();
+  private terminalManager: TerminalManager | null = null;
+
+  private getTerminalManager(): TerminalManager {
+    if (!this.terminalManager) {
+      this.terminalManager = new TerminalManager();
+    }
+    return this.terminalManager;
+  }
 
   async spawn(req: SpawnRequest): Promise<Session> {
     return spawnSession(req);
@@ -210,6 +219,37 @@ class LocalClient implements OrkaService {
     if (!resolved) {
       throw new Error(`Approval request not found or already resolved: ${requestId}`);
     }
+  }
+
+  async terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }> {
+    const session = getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const term = this.getTerminalManager().open(sessionId, {
+      cols: opts?.cols,
+      rows: opts?.rows,
+      cwd: session.workingDir,
+    });
+    return { termId: term.id };
+  }
+
+  async terminalWrite(termId: string, data: string): Promise<void> {
+    this.getTerminalManager().write(termId, data);
+  }
+
+  async terminalResize(termId: string, cols: number, rows: number): Promise<void> {
+    this.getTerminalManager().resize(termId, cols, rows);
+  }
+
+  async terminalClose(termId: string): Promise<void> {
+    this.getTerminalManager().close(termId);
+  }
+
+  async terminalList(sessionId: string): Promise<Array<{ id: string; cols: number; rows: number }>> {
+    return this.getTerminalManager().listForSession(sessionId).map((t) => ({
+      id: t.id,
+      cols: t.cols,
+      rows: t.rows,
+    }));
   }
 }
 

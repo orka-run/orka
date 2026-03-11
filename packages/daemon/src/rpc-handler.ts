@@ -108,6 +108,19 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
     case "resolveApproval":
       await svc.resolveApproval(params.requestId, params.decision);
       return null;
+    case "terminalOpen":
+      return svc.terminalOpen(params.sessionId, params.opts);
+    case "terminalWrite":
+      await svc.terminalWrite(params.termId, params.data);
+      return null;
+    case "terminalResize":
+      await svc.terminalResize(params.termId, params.cols, params.rows);
+      return null;
+    case "terminalClose":
+      await svc.terminalClose(params.termId);
+      return null;
+    case "terminalList":
+      return svc.terminalList(params.sessionId);
     default: {
       const err = new Error(`Method not found: ${method}`);
       (err as any).rpcCode = RPC_METHOD_NOT_FOUND;
