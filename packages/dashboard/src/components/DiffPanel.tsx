@@ -9,12 +9,13 @@ import { useSessionStore } from "../stores/sessionStore";
 
 interface DiffPanelProps {
   sessionId: string;
+  onSelectionLoadSettled?: (status: "ok" | "error", error?: unknown) => void;
 }
 
 const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
 const AUTO_REFRESH_MS = 5_000;
 
-export function DiffPanel({ sessionId }: DiffPanelProps) {
+export function DiffPanel({ sessionId, onSelectionLoadSettled }: DiffPanelProps) {
   const transport = useTransport();
   const queryClient = useQueryClient();
   const session = useSessionStore((state) => state.sessions.find((s) => s.id === sessionId));
@@ -25,6 +26,14 @@ export function DiffPanel({ sessionId }: DiffPanelProps) {
     queryFn: () => transport.request<DiffResult>("getDiff", { sessionId }),
     refetchInterval: isActive ? AUTO_REFRESH_MS : false,
   });
+
+  useEffect(() => {
+    if (diffQuery.isSuccess) {
+      onSelectionLoadSettled?.("ok");
+    } else if (diffQuery.isError) {
+      onSelectionLoadSettled?.("error", diffQuery.error);
+    }
+  }, [diffQuery.error, diffQuery.isError, diffQuery.isSuccess, onSelectionLoadSettled]);
 
   const files = parseDiff(diffQuery.data?.diff ?? "");
   const [collapsedFiles, setCollapsedFiles] = useState<Record<string, boolean>>({});

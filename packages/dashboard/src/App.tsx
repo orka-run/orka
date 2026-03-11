@@ -1,14 +1,28 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import type { OrchestrationEvent, SessionDeletedData, SessionUpdatedData } from "@orka/core";
-import { useEffect, useRef, useState } from "react";
+import { SpanStatusCode, type Span } from "@opentelemetry/api";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { StatusBar } from "./components/StatusBar";
+import { getTracer, initDashboardTracing } from "./lib/tracing";
 import { TransportContext } from "./lib/transportContext";
 import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useSessionStore } from "./stores/sessionStore";
+
+initDashboardTracing();
+
+type PendingSelectionSpan = {
+  sessionId: string;
+  span: Span;
+  startedAt: number;
+};
+
+function now(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
 
 function getDaemonUrl(): string {
   // Explicit override via env (dev mode)
@@ -22,6 +36,7 @@ const DEFAULT_DAEMON_URL = getDaemonUrl();
 
 export function App() {
   const transportRef = useRef<WsTransport | null>(null);
+  const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
   const transport = transportRef.current ?? (transportRef.current = new WsTransport(DEFAULT_DAEMON_URL));
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const sessions = useSessionStore((state) => state.sessions);
@@ -33,6 +48,50 @@ export function App() {
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
   const defaultProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
+
+  const handleSelectSession = (id: string) => {
+    const pendingSelection = selectionSpanRef.current;
+    if (pendingSelection) {
+      pendingSelection.span.setAttribute("orka.status", "superseded");
+      pendingSelection.span.setAttribute("orka.duration_ms", Math.max(0, now() - pendingSelection.startedAt));
+      pendingSelection.span.end();
+    }
+
+    selectionSpanRef.current = {
+      sessionId: id,
+      span: getTracer().startSpan("orka.dashboard.session.select", {
+        attributes: {
+          "orka.session.id": id,
+        },
+      }),
+      startedAt: now(),
+    };
+
+    selectSession(id);
+  };
+
+  const handleSelectionLoadSettled = useEffectEvent((sessionId: string, status: "ok" | "error", error?: unknown) => {
+    const pendingSelection = selectionSpanRef.current;
+    if (!pendingSelection || pendingSelection.sessionId !== sessionId) {
+      return;
+    }
+
+    pendingSelection.span.setAttribute("orka.status", status);
+    pendingSelection.span.setAttribute("orka.duration_ms", Math.max(0, now() - pendingSelection.startedAt));
+
+    if (error instanceof Error) {
+      pendingSelection.span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error.message,
+      });
+      pendingSelection.span.recordException(error);
+    } else {
+      pendingSelection.span.setStatus({ code: SpanStatusCode.OK });
+    }
+
+    pendingSelection.span.end();
+    selectionSpanRef.current = null;
+  });
 
   useEffect(() => {
     const unsubscribeState = transport.onStateChange(setConnectionStatus);
@@ -68,6 +127,14 @@ export function App() {
     void fetchSessions(transport);
 
     return () => {
+      const pendingSelection = selectionSpanRef.current;
+      if (pendingSelection) {
+        pendingSelection.span.setAttribute("orka.status", "cancelled");
+        pendingSelection.span.setAttribute("orka.duration_ms", Math.max(0, now() - pendingSelection.startedAt));
+        pendingSelection.span.end();
+        selectionSpanRef.current = null;
+      }
+
       unsubscribeDeleted();
       unsubscribeEvent();
       unsubscribeUpdated();
@@ -83,12 +150,16 @@ export function App() {
           <Sidebar
             sessions={sessions}
             selectedId={selectedId}
-            onSelect={selectSession}
+            onSelect={handleSelectSession}
             onNewSession={() => setIsNewSessionOpen(true)}
           />
           <main className="flex-1 overflow-hidden">
             {selectedId ? (
-              <SessionView sessionId={selectedId} transport={transport} />
+              <SessionView
+                sessionId={selectedId}
+                transport={transport}
+                onSelectionLoadSettled={handleSelectionLoadSettled}
+              />
             ) : (
               <div className="flex h-full items-center justify-center text-zinc-500">
                 Select a session or spawn a new one

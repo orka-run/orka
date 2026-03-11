@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useEffect, useId, useState } from "react";
 import { X } from "lucide-react";
 import type { BackendKind, SessionMode } from "@orka/core";
+import { withDashboardSpan } from "../lib/tracing";
 import type { WsTransport } from "../lib/wsTransport";
 import { useSessionStore } from "../stores/sessionStore";
 
@@ -80,13 +81,25 @@ export function NewSessionDialog({
     setLocalError(null);
 
     try {
-      await spawnSession(transport, {
-        prompt: trimmedPrompt,
-        projectPath: trimmedProjectPath,
-        backend,
-        mode,
-        ...(trimmedModel ? { model: trimmedModel } : {}),
-      });
+      await withDashboardSpan(
+        "orka.dashboard.session.spawn",
+        {
+          "orka.backend": backend,
+          "orka.mode": mode,
+          "orka.project_path": trimmedProjectPath,
+        },
+        async (span) => {
+          span.addEvent("session.spawn_clicked");
+
+          await spawnSession(transport, {
+            prompt: trimmedPrompt,
+            projectPath: trimmedProjectPath,
+            backend,
+            mode,
+            ...(trimmedModel ? { model: trimmedModel } : {}),
+          });
+        },
+      );
 
       setPrompt("");
       setModel("");

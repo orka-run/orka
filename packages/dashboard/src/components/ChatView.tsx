@@ -39,9 +39,10 @@ type ChatEntry =
 
 interface ChatViewProps {
   sessionId: string;
+  onSelectionLoadSettled?: (status: "ok" | "error", error?: unknown) => void;
 }
 
-export function ChatView({ sessionId }: ChatViewProps) {
+export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const entries = buildMockEntries(session);
@@ -49,6 +50,10 @@ export function ChatView({ sessionId }: ChatViewProps) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [entries.length, session?.status]);
+
+  useEffect(() => {
+    onSelectionLoadSettled?.("ok");
+  }, [onSelectionLoadSettled, sessionId]);
 
   if (!session) {
     return (

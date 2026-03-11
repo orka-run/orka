@@ -8,9 +8,10 @@ import { useSessionStore } from "../stores/sessionStore";
 interface LogPanelProps {
   sessionId: string;
   transport: WsTransport;
+  onInitialLoadSettled?: (status: "ok" | "error", error?: unknown) => void;
 }
 
-export function LogPanel({ sessionId, transport }: LogPanelProps) {
+export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPanelProps) {
   const session = useSessionStore((state) => state.sessions.find((s) => s.id === sessionId) ?? null);
   const [logContent, setLogContent] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -36,9 +37,11 @@ export function LogPanel({ sessionId, transport }: LogPanelProps) {
         const text = content ?? "";
         setLogContent(text);
         offsetRef.current = new TextEncoder().encode(text).byteLength;
+        onInitialLoadSettled?.("ok");
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Failed to fetch logs");
+        onInitialLoadSettled?.("error", e);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -49,7 +52,7 @@ export function LogPanel({ sessionId, transport }: LogPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, transport]);
+  }, [onInitialLoadSettled, sessionId, transport]);
 
   // Subscribe to real-time log updates
   useEffect(() => {

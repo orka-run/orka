@@ -1,4 +1,11 @@
 // Attribution: WsTransport design inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
+import type { RpcRequest, RpcResponse } from "@orka/core";
+import type { Span } from "@opentelemetry/api";
+import {
+  finishDashboardSpan,
+  injectSpanContext,
+  startDashboardSpan,
+} from "./tracing";
 
 type PushEnvelope = {
   type: "push";
@@ -7,14 +14,7 @@ type PushEnvelope = {
   data: unknown;
 };
 
-type RpcResponseEnvelope = {
-  jsonrpc: "2.0";
-  id: number | string;
-  result?: unknown;
-  error?: {
-    message?: string;
-  };
-};
+type RpcResponseEnvelope = RpcResponse;
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -23,10 +23,16 @@ type PendingRequest = {
   sent: boolean;
   payload: string;
   method: string;
+  span: Span;
+  startedAt: number;
 };
 
 export type PushHandler = (data: unknown, sequence: number) => void;
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
+
+function now(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
 
 export class WsTransport {
   private ws: WebSocket | null = null;
@@ -40,6 +46,8 @@ export class WsTransport {
   private reconnectDelay = 500;
   private stateListeners = new Set<(state: ConnectionState) => void>();
   private shouldReconnect = false;
+  private connectionSpan: Span | null = null;
+  private connectionStartedAt = 0;
 
   constructor(
     private url: string,
@@ -65,6 +73,7 @@ export class WsTransport {
       this.setState("connecting");
     }
 
+    this.beginConnectionSpan();
     const ws = new WebSocket(this.url);
     this.ws = ws;
 
@@ -73,6 +82,7 @@ export class WsTransport {
         return;
       }
 
+      this.connectionSpan?.addEvent("ws.connected");
       this.reconnectDelay = 500;
       this.setState("connected");
       this.syncSubscriptions();
@@ -87,10 +97,12 @@ export class WsTransport {
       if (this.ws === ws) {
         this.ws = null;
       }
+      this.connectionSpan?.addEvent("ws.closed");
       this.handleClose();
     };
 
     ws.onerror = () => {
+      this.connectionSpan?.addEvent("ws.error");
       // Browsers usually emit onclose after onerror for connection failures.
     };
   }
@@ -107,33 +119,46 @@ export class WsTransport {
     this.ws = null;
 
     if (ws) {
+      this.connectionSpan?.addEvent("ws.disconnect_requested");
       ws.close();
     }
 
     this.outbox = [];
     this.rejectAllPending(new Error("Connection closed"));
+    this.endConnectionSpan("disconnected");
     this.reconnectDelay = 500;
     this.setState("disconnected");
   }
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     const id = ++this.requestId;
-    const payload = JSON.stringify({
+    const { span, startedAt } = startDashboardSpan("orka.dashboard.rpc", {
+      "orka.method": method,
+    });
+    const traceCarrier: { traceparent?: string } = {};
+    injectSpanContext(span, traceCarrier);
+
+    const request: RpcRequest = {
       jsonrpc: "2.0",
       id,
       method,
       ...(params !== undefined ? { params } : {}),
-    });
+      ...(traceCarrier.traceparent ? { traceparent: traceCarrier.traceparent } : {}),
+    };
+    const payload = JSON.stringify(request);
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (!this.pending.has(id)) {
+        const pending = this.pending.get(id);
+        if (!pending) {
           return;
         }
 
         this.pending.delete(id);
         this.outbox = this.outbox.filter((message) => message !== payload);
-        reject(new Error(`Request timeout: ${method}`));
+        const error = new Error(`Request timeout: ${method}`);
+        finishDashboardSpan(pending.span, pending.startedAt, "timeout", error);
+        reject(error);
       }, this.options?.timeout ?? 60_000);
 
       this.pending.set(id, {
@@ -143,6 +168,8 @@ export class WsTransport {
         sent: false,
         payload,
         method,
+        span,
+        startedAt,
       });
 
       if (this.isOpen()) {
@@ -218,6 +245,11 @@ export class WsTransport {
     }
 
     if (this.isPushEnvelope(parsed)) {
+      this.connectionSpan?.addEvent("push.received", {
+        "orka.channel": parsed.channel,
+        "orka.sequence": parsed.sequence,
+      });
+
       const current = this.latestPush.get(parsed.channel);
       if (!current || parsed.sequence >= current.sequence) {
         this.latestPush.set(parsed.channel, {
@@ -255,10 +287,13 @@ export class WsTransport {
     this.pending.delete(id);
 
     if (parsed.error) {
-      pending.reject(new Error(parsed.error.message ?? `Request failed: ${pending.method}`));
+      const error = new Error(parsed.error.message ?? `Request failed: ${pending.method}`);
+      finishDashboardSpan(pending.span, pending.startedAt, "error", error);
+      pending.reject(error);
       return;
     }
 
+    finishDashboardSpan(pending.span, pending.startedAt, "ok");
     pending.resolve(parsed.result);
   }
 
@@ -270,10 +305,13 @@ export class WsTransport {
 
       clearTimeout(pending.timer);
       this.pending.delete(id);
-      pending.reject(new Error("Connection closed"));
+      const error = new Error("Connection closed");
+      finishDashboardSpan(pending.span, pending.startedAt, "disconnected", error);
+      pending.reject(error);
     }
 
     if (!this.shouldReconnect) {
+      this.endConnectionSpan("closed");
       this.setState("disconnected");
       return;
     }
@@ -283,6 +321,10 @@ export class WsTransport {
     }
 
     const delay = Math.min(this.reconnectDelay, this.options?.maxReconnectDelay ?? 8_000);
+    this.connectionSpan?.addEvent("ws.reconnecting", {
+      "orka.reconnect.delay_ms": delay,
+    });
+    this.endConnectionSpan("reconnecting");
     this.setState("reconnecting");
     this.reconnectDelay = Math.min(delay * 2, this.options?.maxReconnectDelay ?? 8_000);
 
@@ -341,6 +383,7 @@ export class WsTransport {
   private rejectAllPending(error: Error): void {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
+      finishDashboardSpan(pending.span, pending.startedAt, "error", error);
       pending.reject(error);
       this.pending.delete(id);
     }
@@ -361,6 +404,28 @@ export class WsTransport {
     }
   }
 
+  private beginConnectionSpan(): void {
+    this.endConnectionSpan("replaced");
+    const { span, startedAt } = startDashboardSpan("orka.dashboard.ws", {
+      "orka.transport.url": this.url,
+    });
+    this.connectionSpan = span;
+    this.connectionStartedAt = startedAt;
+    this.connectionSpan.addEvent("ws.connecting");
+  }
+
+  private endConnectionSpan(status: string): void {
+    if (!this.connectionSpan) {
+      return;
+    }
+
+    this.connectionSpan.setAttribute("orka.status", status);
+    this.connectionSpan.setAttribute("orka.duration_ms", Math.max(0, now() - this.connectionStartedAt));
+    this.connectionSpan.end();
+    this.connectionSpan = null;
+    this.connectionStartedAt = 0;
+  }
+
   private extractRequestId(payload: string): number | null {
     let parsed: unknown;
     try {
@@ -369,7 +434,7 @@ export class WsTransport {
       return null;
     }
 
-    if (!this.isRpcResponseEnvelope(parsed)) {
+    if (!this.isRpcRequestEnvelope(parsed)) {
       return null;
     }
 
@@ -401,6 +466,19 @@ export class WsTransport {
       candidate.type === "push" &&
       typeof candidate.channel === "string" &&
       typeof candidate.sequence === "number"
+    );
+  }
+
+  private isRpcRequestEnvelope(value: unknown): value is RpcRequest {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+
+    const candidate = value as Partial<RpcRequest>;
+    return (
+      candidate.jsonrpc === "2.0" &&
+      (typeof candidate.id === "number" || typeof candidate.id === "string") &&
+      typeof candidate.method === "string"
     );
   }
 

@@ -1,11 +1,12 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import { useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Shield, ShieldOff } from "lucide-react";
+import { ChevronDown, ChevronRight, LoaderCircle, Shield, ShieldOff, Square } from "lucide-react";
 import type { SessionResult } from "@orka/core";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
 import { LogPanel } from "./LogPanel";
+import { withDashboardSpan } from "../lib/tracing";
 import { formatDateTime, formatDuration } from "../lib/sessionUi";
 import { useSessionStore, type SessionSummary } from "../stores/sessionStore";
 import type { WsTransport } from "../lib/wsTransport";
@@ -13,6 +14,7 @@ import type { WsTransport } from "../lib/wsTransport";
 interface SessionViewProps {
   sessionId: string;
   transport: WsTransport;
+  onSelectionLoadSettled: (sessionId: string, status: "ok" | "error", error?: unknown) => void;
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -23,6 +25,8 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
   failed: { bg: "bg-red-950/60", text: "text-red-300", dot: "bg-red-400" },
   cancelled: { bg: "bg-zinc-800/60", text: "text-zinc-400", dot: "bg-zinc-500" },
 };
+
+const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
 
 function StatusBadge({ status }: { status: string }) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS.cancelled!;
@@ -45,9 +49,27 @@ function formatTokenCount(count: number): string {
   return String(count);
 }
 
-export function SessionView({ sessionId, transport }: SessionViewProps) {
+export function SessionView({ sessionId, transport, onSelectionLoadSettled }: SessionViewProps) {
   const [activeTab, setActiveTab] = useState<"overview" | "chat" | "logs" | "diff">("logs");
+  const [isStopping, setIsStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const notifiedSessionRef = useRef<string | null>(null);
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
+  const stopSession = useSessionStore((state) => state.stopSession);
+
+  useEffect(() => {
+    notifiedSessionRef.current = null;
+    setStopError(null);
+  }, [sessionId]);
+
+  const reportSelectionLoad = useEffectEvent((status: "ok" | "error", error?: unknown) => {
+    if (notifiedSessionRef.current === sessionId) {
+      return;
+    }
+
+    notifiedSessionRef.current = sessionId;
+    onSelectionLoadSettled(sessionId, status, error);
+  });
 
   if (!session) {
     return (
@@ -55,6 +77,35 @@ export function SessionView({ sessionId, transport }: SessionViewProps) {
         Session metadata is unavailable.
       </div>
     );
+  }
+
+  const isStoppable = ACTIVE_STATUSES.has(session.status);
+
+  async function handleStopSession() {
+    if (!isStoppable || isStopping) {
+      return;
+    }
+
+    setIsStopping(true);
+    setStopError(null);
+
+    try {
+      await withDashboardSpan(
+        "orka.dashboard.session.stop",
+        {
+          "orka.session.id": session.id,
+        },
+        async (span) => {
+          span.addEvent("session.stop_clicked");
+          await stopSession(transport, session.id);
+          span.addEvent("session.stop_confirmed");
+        },
+      );
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : "Failed to stop session.");
+    } finally {
+      setIsStopping(false);
+    }
   }
 
   return (
@@ -65,70 +116,102 @@ export function SessionView({ sessionId, transport }: SessionViewProps) {
             <p className="text-lg font-semibold text-zinc-100">{session.title}</p>
             <p className="mt-1 text-sm font-mono text-zinc-500">{sessionId}</p>
           </div>
-          <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab("overview")}
-              className={`rounded-md px-3 py-1.5 text-sm ${
-                activeTab === "overview"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 transition hover:text-zinc-200"
-              }`}
-            >
-              Overview
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("chat")}
-              className={`rounded-md px-3 py-1.5 text-sm ${
-                activeTab === "chat"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 transition hover:text-zinc-200"
-              }`}
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("logs")}
-              className={`rounded-md px-3 py-1.5 text-sm ${
-                activeTab === "logs"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 transition hover:text-zinc-200"
-              }`}
-            >
-              Logs
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("diff")}
-              className={`rounded-md px-3 py-1.5 text-sm ${
-                activeTab === "diff"
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-500 transition hover:text-zinc-200"
-              }`}
-            >
-              Diff
-            </button>
+          <div className="flex items-center gap-3">
+            {isStoppable ? (
+              <button
+                type="button"
+                onClick={() => void handleStopSession()}
+                disabled={isStopping}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-200 transition hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                {isStopping ? "Stopping..." : "Stop Session"}
+              </button>
+            ) : null}
+            <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("overview")}
+                className={`rounded-md px-3 py-1.5 text-sm ${
+                  activeTab === "overview"
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 transition hover:text-zinc-200"
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("chat")}
+                className={`rounded-md px-3 py-1.5 text-sm ${
+                  activeTab === "chat"
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 transition hover:text-zinc-200"
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("logs")}
+                className={`rounded-md px-3 py-1.5 text-sm ${
+                  activeTab === "logs"
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 transition hover:text-zinc-200"
+                }`}
+              >
+                Logs
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("diff")}
+                className={`rounded-md px-3 py-1.5 text-sm ${
+                  activeTab === "diff"
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 transition hover:text-zinc-200"
+                }`}
+              >
+                Diff
+              </button>
+            </div>
           </div>
         </div>
+        {stopError ? (
+          <p className="mt-3 text-sm text-red-300">{stopError}</p>
+        ) : null}
       </header>
       <div className={`flex-1 p-6 ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
         {activeTab === "logs" ? (
-          <LogPanel sessionId={sessionId} transport={transport} />
+          <LogPanel
+            sessionId={sessionId}
+            transport={transport}
+            onInitialLoadSettled={reportSelectionLoad}
+          />
         ) : activeTab === "overview" ? (
-          <OverviewTab session={session} transport={transport} />
+          <OverviewTab
+            session={session}
+            transport={transport}
+            onSelectionLoadSettled={reportSelectionLoad}
+          />
         ) : activeTab === "chat" ? (
-          <ChatView sessionId={sessionId} />
+          <ChatView sessionId={sessionId} onSelectionLoadSettled={reportSelectionLoad} />
         ) : (
-          <DiffPanel sessionId={sessionId} />
+          <DiffPanel sessionId={sessionId} onSelectionLoadSettled={reportSelectionLoad} />
         )}
       </div>
     </div>
   );
 }
 
-function OverviewTab({ session, transport }: { session: SessionSummary; transport: WsTransport }) {
+function OverviewTab({
+  session,
+  transport,
+  onSelectionLoadSettled,
+}: {
+  session: SessionSummary;
+  transport: WsTransport;
+  onSelectionLoadSettled: (status: "ok" | "error", error?: unknown) => void;
+}) {
   const [promptExpanded, setPromptExpanded] = useState(false);
   const isFinished = session.status === "completed" || session.status === "failed" || session.status === "cancelled";
 
@@ -140,9 +223,21 @@ function OverviewTab({ session, transport }: { session: SessionSummary; transpor
   });
   const result = resultQuery.data ?? null;
 
+  useEffect(() => {
+    if (!isFinished) {
+      onSelectionLoadSettled("ok");
+      return;
+    }
+
+    if (resultQuery.isSuccess) {
+      onSelectionLoadSettled("ok");
+    } else if (resultQuery.isError) {
+      onSelectionLoadSettled("error", resultQuery.error);
+    }
+  }, [isFinished, onSelectionLoadSettled, resultQuery.error, resultQuery.isError, resultQuery.isSuccess]);
+
   return (
     <div className="space-y-4">
-      {/* Status & Runtime */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,1fr)]">
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Overview</p>
@@ -186,7 +281,6 @@ function OverviewTab({ session, transport }: { session: SessionSummary; transpor
           </dl>
         </section>
 
-        {/* Paths & IDs */}
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Paths</p>
           <dl className="mt-4 space-y-4">
@@ -200,7 +294,6 @@ function OverviewTab({ session, transport }: { session: SessionSummary; transpor
         </section>
       </div>
 
-      {/* Cost & Tokens */}
       {result && (
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Usage</p>
@@ -216,7 +309,6 @@ function OverviewTab({ session, transport }: { session: SessionSummary; transpor
         </section>
       )}
 
-      {/* Prompt */}
       {session.prompt && (
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
           <button

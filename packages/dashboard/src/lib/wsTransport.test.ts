@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { propagation, trace } from "@opentelemetry/api";
+import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { WsTransport } from "./wsTransport";
 
 class MockWebSocket {
@@ -64,6 +67,8 @@ const originalClearTimeout = globalThis.clearTimeout;
 
 let timerId = 0;
 let scheduledTimers: ScheduledTimer[] = [];
+let provider: WebTracerProvider;
+let exporter: InMemorySpanExporter;
 
 beforeEach(() => {
   MockWebSocket.instances = [];
@@ -93,12 +98,21 @@ beforeEach(() => {
       timer.cleared = true;
     }
   }) as typeof clearTimeout;
+
+  exporter = new InMemorySpanExporter();
+  provider = new WebTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  provider.register();
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.WebSocket = originalWebSocket;
   globalThis.setTimeout = originalSetTimeout;
   globalThis.clearTimeout = originalClearTimeout;
+  await provider.shutdown();
+  trace.disable();
+  propagation.disable();
 });
 
 describe("WsTransport", () => {
@@ -111,14 +125,15 @@ describe("WsTransport", () => {
 
     const resultPromise = transport.request<string>("listSessions", { filter: "all" });
 
-    expect(socket.sent).toEqual([
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "listSessions",
-        params: { filter: "all" },
-      }),
-    ]);
+    expect(socket.sent).toHaveLength(1);
+    const request = JSON.parse(socket.sent[0]);
+    expect(request).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "listSessions",
+      params: { filter: "all" },
+    });
+    expect(request.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
 
     socket.receive({
       jsonrpc: "2.0",
@@ -127,6 +142,15 @@ describe("WsTransport", () => {
     });
 
     await expect(resultPromise).resolves.toBe("ok");
+    const rpcSpan = exporter.getFinishedSpans().find(
+      (span) => span.name === "orka.dashboard.rpc" && span.attributes["orka.method"] === "listSessions",
+    );
+    expect(rpcSpan).toBeDefined();
+    expect(rpcSpan?.attributes["orka.status"]).toBe("ok");
+
+    const [, traceId, spanId] = request.traceparent.split("-");
+    expect(traceId).toBe(rpcSpan?.spanContext().traceId);
+    expect(spanId).toBe(rpcSpan?.spanContext().spanId);
   });
 
   test("request() rejects on timeout", async () => {
@@ -141,13 +165,20 @@ describe("WsTransport", () => {
     runTimer(5);
 
     await expect(resultPromise).rejects.toThrow("Request timeout: listSessions");
-    expect(socket.sent).toEqual([
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "listSessions",
-      }),
-    ]);
+    expect(socket.sent).toHaveLength(1);
+
+    const request = JSON.parse(socket.sent[0]);
+    expect(request).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "listSessions",
+    });
+    expect(request.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+
+    const rpcSpan = exporter.getFinishedSpans().find(
+      (span) => span.name === "orka.dashboard.rpc" && span.attributes["orka.method"] === "listSessions",
+    );
+    expect(rpcSpan?.attributes["orka.status"]).toBe("timeout");
   });
 
   test("subscribe() registers handler and receives push messages", () => {
@@ -246,13 +277,12 @@ describe("WsTransport", () => {
     const secondSocket = latestSocket();
     secondSocket.open();
 
-    expect(secondSocket.sent).toEqual([
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "listSessions",
-      }),
-    ]);
+    expect(secondSocket.sent).toHaveLength(1);
+    expect(JSON.parse(secondSocket.sent[0])).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "listSessions",
+    });
 
     secondSocket.receive({
       jsonrpc: "2.0",
@@ -308,7 +338,7 @@ function latestSocket(): MockWebSocket {
 }
 
 function pendingDelays(): number[] {
-  return scheduledTimers.filter((timer) => !timer.cleared).map((timer) => timer.delay);
+  return scheduledTimers.filter((timer) => !timer.cleared && timer.delay > 0).map((timer) => timer.delay);
 }
 
 function runTimer(delay: number): void {

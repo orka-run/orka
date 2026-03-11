@@ -15,6 +15,9 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     proxy: {
+      "/v1/traces": {
+        target: "http://localhost:7394",
+      },
       "/ws": {
         target: "ws://localhost:7394",
         ws: true,
