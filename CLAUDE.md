@@ -16,29 +16,36 @@ See also: [AGENTS.md](./AGENTS.md) for issue tracking and agent workflow convent
 
 ```
 packages/
-  core/     — @orka/core: domain types, zod schemas (Session, Task, BackendKind, etc.)
-  daemon/   — @orka/daemon: orchestrator, tmux, git worktree, SQLite, backends, config, tracing
-  cli/      — @orka/cli: CLI entry point (16 commands)
+  core/     — @orka/core: domain types, zod schemas, OrkaService interface, RPC types
+  daemon/   — @orka/daemon: orchestrator, tmux, worktree, SQLite, backends, config, tracing,
+              LocalClient, RemoteClient, WS server
+  relay/    — @orka/relay: transparent WS router for multi-machine setups
+  cli/      — @orka/cli: CLI entry point (20 commands)
 orka        — shell wrapper for global CLI access
 ```
 
 ## CLI Commands
 
 ```
-spawn   — Spawn an agent session (--backend, --mode, --model, --branch, --title, --prompt-file)
-ps      — List sessions (--status, --backend, --verbose/-v for cost/duration/tokens)
-attach  — Attach to running tmux session
+spawn   — Spawn an agent session (--backend, --mode, --model, --branch, --title, --prompt-file, --tag, --auto-merge)
+ps      — List sessions (--status, --backend, --tag, --project, --verbose/-v)
+attach  — Attach to running tmux session (shows SSH hint in remote mode)
 logs    — View session output (--follow/-f for live streaming)
 stop    — Stop a running session
 diff    — Show git changes in session worktree
-show    — Full session detail view (status, project, model, prompt, kept status, etc.)
+show    — Full session detail view (status, project, model, prompt, tags, kept, auto-merge)
 workdir — Print session working directory (for shell: cd $(orka workdir <id>))
-wait    — Block until session(s) complete (supports --all)
+wait    — Block until session(s) complete (supports --all, --project)
 result  — Extract final result, cost, tokens from background session log (--json)
+send    — Send text input to a running interactive session
 keep    — Protect a session's worktree from auto-cleanup
+unkeep  — Remove worktree protection
 merge   — Merge session worktree branch into current branch (auto-cleans worktree+branch)
-retry   — Re-run a session with same prompt/model/title
-prune   — Remove old completed sessions (--age, also cleans orphaned worktrees)
+retry   — Re-run a session with same prompt/model/title/tags
+project — Register/list/remove project aliases
+prune   — Remove old completed sessions (--age, --project)
+serve   — Start daemon WS server (--port, --relay, --node-id)
+relay   — Start relay WS router for multi-machine (--port, --token)
 ```
 
 ### Prompt Input
@@ -48,6 +55,21 @@ prune   — Remove old completed sessions (--age, also cleans orphaned worktrees
 - `--prompt-file path` — read prompt from file
 - Positional args — `orka spawn do the thing`
 - Piped stdin — `echo "task" | orka spawn --backend shell`
+
+### Multi-Machine Mode
+
+```bash
+# Start relay (central router)
+orka relay --port 7390 --token mysecret
+
+# Start daemon nodes (register with relay)
+orka serve --port 7394 --relay ws://relay:7390 --node-id node1 --relay-token mysecret
+
+# CLI connects via relay
+orka --remote ws://relay:7390/ws --token mysecret ps
+# Or via env vars
+ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=mysecret orka ps
+```
 
 ## Import Policy
 
@@ -70,6 +92,22 @@ prune   — Remove old completed sessions (--age, also cleans orphaned worktrees
 - **Tracing**: OpenTelemetry (see Observability section)
 - **Issue tracking**: beads (`bd` CLI)
 
+## Architecture: OrkaService Interface
+
+The **OrkaService** interface (`@orka/core/service.ts`) is the contract between CLI and daemon. All methods are fully async (return Promise) for network transparency.
+
+**Implementations:**
+- **LocalClient** (`@orka/daemon/local-client.ts`) — direct in-process calls, used by default
+- **RemoteClient** (`@orka/daemon/remote-client.ts`) — WS JSON-RPC client, used with `--remote`
+
+**Protocol:** JSON-RPC 2.0 over WebSocket. Request envelope includes optional `node` field for relay routing.
+
+**Relay** (`@orka/relay`) — transparent WS router. Reads only `id` and `node` from envelope, forwards payload as-is. Supports:
+- Least-loaded node scheduling (tracks active requests per node)
+- Auth tokens via `?token=` query param
+- Auto-reconnect for daemon nodes (5s backoff)
+- `/health` endpoint with node status
+
 ## Observability
 
 OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/sdk-trace-base`.
@@ -90,6 +128,7 @@ OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/s
 
 ## Key Architecture Decisions
 
+- **OrkaService interface**: All daemon operations are behind an abstract async interface. CLI never imports daemon internals directly (except tmuxAttach, config, projects which are CLI-local).
 - **Named worktree branches**: Background sessions auto-create `orka/<session-id>` branches (not detached HEAD), so agent commits are never lost. Use `orka merge <id>` to integrate.
 - **Smart worktree cleanup**: Worktrees are preserved during reap/stop if they have uncommitted changes, commits ahead of parent, or are marked with `orka keep`. Only clean worktrees are auto-removed.
 - **Worktrees outside main repo**: Background sessions get worktrees at `~/.orka/worktrees/` so `git rev-parse --show-toplevel` returns the worktree path, not the parent repo.
@@ -98,6 +137,7 @@ OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/s
 - **Auto-reap on every CLI invocation**: `reapSessions()` runs before every command, marking dead tmux sessions as completed and cleaning up worktrees.
 - **Concurrent limits**: Configurable via `[limits] max_concurrent = "5"` in config.toml (0 = unlimited).
 - **zod/v4 default gotcha**: When using `.default({})` on nested zod objects, inner field defaults are NOT applied. Always use `Schema.default(Schema.parse({}))` pattern (see config.ts).
+- **Relay transparency**: Relay routes by `node` field in JSON-RPC envelope, never parses `params`/`result`. Protocol changes don't require relay updates.
 
 ## Development Commands
 
@@ -107,6 +147,11 @@ bun run packages/cli/src/index.ts <command>
 
 # Or via wrapper (if symlinked to ~/.local/bin/orka)
 orka <command>
+
+# Start daemon server + relay for multi-machine testing
+orka relay --port 7390 &
+orka serve --port 7394 --relay ws://127.0.0.1:7390 --node-id local &
+orka --remote ws://127.0.0.1:7390/ws ps
 
 # Check issues
 bd ready
