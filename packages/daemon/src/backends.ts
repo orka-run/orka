@@ -81,14 +81,13 @@ function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoning
   const parts: string[] = ["codex"];
 
   if (mode === "background") {
-    // Non-interactive: codex exec with full automation
+    // Non-interactive: codex exec with full automation and no sandbox
+    // --dangerously-bypass-approvals-and-sandbox replaces --full-auto (they conflict)
+    // TODO(orka-bt3): re-enable sandbox with lifecycle hooks for dep install
     parts[0] = "codex exec";
-    parts.push("--full-auto");
+    parts.push("--dangerously-bypass-approvals-and-sandbox");
     parts.push("--json");
     parts.push("--skip-git-repo-check");
-    // Disable sandbox — agents need network (bun install), tmpdir, and .git access.
-    // TODO: re-enable with proper hooks system (orka-bt3) so deps are installed before agent starts
-    parts.push("--dangerously-bypass-approvals-and-sandbox");
   }
 
   if (model) parts.push(`--model ${shellEscape(model)}`);
