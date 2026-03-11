@@ -36,6 +36,63 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## Observability Policy
+
+**All significant operations MUST be covered by OpenTelemetry spans.** This is a first-class requirement, not an afterthought.
+
+### What must be traced
+
+- **Every CLI command** — wrap handler in `withSpan("orka.cli.<command>", ...)`
+- **Every orchestrator operation** — spawn, reap, stop, cleanup (already done)
+- **Every worktree operation** — create, remove, merge, diff, hasChanges, hasCommitsAhead
+- **Every relay routing hop** — client→relay, relay→node, node→relay, relay→client
+- **Every auth/rate-limit decision** — authenticate(), check(), checkMessage()
+- **Every DB write** — insert/update operations (reads only if slow-query debugging needed)
+- **Every remote RPC call** — WS JSON-RPC request/response in RemoteClient
+
+### Span naming convention
+
+```
+orka.cli.spawn          — CLI command spans
+orka.spawn              — orchestrator/daemon spans
+orka.worktree.create    — worktree operation spans
+orka.relay.forward      — relay routing spans
+orka.relay.auth         — relay auth spans
+orka.db.insertSession   — database operation spans
+orka.rpc.request        — remote client spans
+```
+
+### Attributes
+
+Every span should include relevant context:
+- `orka.session.id` — on any session-related operation
+- `orka.account.id` — on any account-scoped relay operation
+- `orka.command` — on CLI commands
+- `orka.method` — on RPC calls
+- Error spans must include exception details via `span.recordException(err)`
+
+### How to add a span
+
+```typescript
+import { withSpan } from "./tracing";
+
+const result = await withSpan("orka.something", {
+  "orka.session.id": sessionId,
+  "orka.key": value,
+}, async (span) => {
+  // ... do work ...
+  span.addEvent("something.happened", { detail: "value" });
+  return result;
+});
+```
+
+### Trace output
+
+- **Daemon**: `~/.orka/traces.jsonl` (always on)
+- **Relay**: `~/.orka-relay/traces.jsonl` (always on)
+- **Console**: `ORKA_TRACE=console` env var
+- **OTLP**: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`
+
 <!-- BEGIN BEADS INTEGRATION -->
 ## Issue Tracking with bd (beads)
 
