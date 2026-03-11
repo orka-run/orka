@@ -88,6 +88,7 @@ const MIGRATIONS = [
   { version: 7, sql: `CREATE TABLE IF NOT EXISTS usage_log (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, backend TEXT NOT NULL, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, cache_read_tokens INTEGER DEFAULT 0, cost_usd REAL, model TEXT, recorded_at TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES sessions(id))` },
   { version: 8, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_session_id ON usage_log(session_id)` },
   { version: 9, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_backend_recorded_at ON usage_log(backend, recorded_at)` },
+  { version: 10, sql: `ALTER TABLE sessions ADD COLUMN last_diff TEXT` },
 ];
 
 function migrate(db: Database): void {
@@ -244,6 +245,22 @@ export function setSessionKept(id: string, kept: boolean): void {
       .prepare("UPDATE sessions SET kept = ? WHERE id = ?")
       .run(kept ? 1 : 0, id);
   });
+}
+
+export function saveSessionDiff(sessionId: string, diff: string, status: string): void {
+  withSpanSync("orka.db.saveSessionDiff", { "orka.session.id": sessionId }, () => {
+    getDb()
+      .prepare("UPDATE sessions SET last_diff = ? WHERE id = ?")
+      .run(JSON.stringify({ status, diff }), sessionId);
+  });
+}
+
+export function getSessionDiff(sessionId: string): { status: string; diff: string } | null {
+  const row = getDb()
+    .prepare("SELECT last_diff FROM sessions WHERE id = ?")
+    .get(sessionId) as { last_diff: string | null } | undefined;
+  if (!row?.last_diff) return null;
+  return JSON.parse(row.last_diff);
 }
 
 export function getSession(id: string): Session | null {

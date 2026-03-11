@@ -1,12 +1,13 @@
 import { resolve, join } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { $ } from "bun";
 import {
   generateId,
   type Session,
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
+import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions, saveSessionDiff } from "./db";
 import { defaultRunner } from "./tmux";
 import type { SessionRunner } from "./runner";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
@@ -182,6 +183,13 @@ export async function reapSessions(): Promise<number> {
         }
 
         const exitCode = parseExitCode(s.logFile);
+        try {
+          const statusText = (await $`git -C ${s.workingDir} status`.text()).trim();
+          const diffText = (await $`git -C ${s.workingDir} diff`.text()).trim();
+          saveSessionDiff(s.id, diffText, statusText);
+        } catch {
+          // Worktree may already be gone and diff persistence is best-effort.
+        }
         updateSessionStatus(s.id, "completed", {
           finishedAt: new Date().toISOString(),
           ...(exitCode !== undefined ? { exitCode } : {}),
@@ -220,6 +228,14 @@ export async function stopSession(sessionId: string): Promise<void> {
 
     if (await _runner.has(session.tmuxSessionName)) {
       await _runner.kill(session.tmuxSessionName);
+    }
+
+    try {
+      const statusText = (await $`git -C ${session.workingDir} status`.text()).trim();
+      const diffText = (await $`git -C ${session.workingDir} diff`.text()).trim();
+      saveSessionDiff(sessionId, diffText, statusText);
+    } catch {
+      // Worktree may already be gone and diff persistence is best-effort.
     }
 
     updateSessionStatus(sessionId, "cancelled", {

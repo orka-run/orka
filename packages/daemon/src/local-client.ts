@@ -27,6 +27,7 @@ import {
   getUsageBySession,
   getUsageSummary as dbGetUsageSummary,
   getOrkaHome,
+  getSessionDiff,
   insertUsageRecord,
 } from "./db";
 import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees, getRunner } from "./orchestrator";
@@ -208,6 +209,8 @@ class LocalClient implements OrkaService {
       const diff = (await $`git -C ${session.workingDir} diff`.text()).trim();
       return { status, diff };
     } catch {
+      const saved = getSessionDiff(sessionId);
+      if (saved) return saved;
       throw new Error(`Cannot read git status in ${session.workingDir} (worktree may have been cleaned up)`);
     }
   }
