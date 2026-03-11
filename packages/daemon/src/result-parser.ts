@@ -3,14 +3,33 @@ import type { SessionResult } from "@orka/core";
 
 export type { SessionResult } from "@orka/core";
 
-/** Parse stream-json log to extract the final result event. */
+/** Parse a session log to extract the final result. Auto-detects format (claude-code vs codex). */
 export function parseSessionResult(logFile: string): SessionResult | null {
   if (!existsSync(logFile)) return null;
 
   const content = readFileSync(logFile, "utf-8");
   const lines = content.split("\n");
 
-  // Find the last "type":"result" line (scan from end)
+  // Detect format by scanning for known event types
+  // claude-code emits {"type":"result",...}
+  // codex emits {"type":"turn.completed",...}
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.type === "result") return parseClaudeCodeResult(lines);
+      if (parsed.type === "turn.completed" || parsed.type === "thread.started") return parseCodexResult(lines);
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+/** Parse claude-code stream-json log. */
+function parseClaudeCodeResult(lines: string[]): SessionResult | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
     if (!line) continue;
@@ -44,4 +63,60 @@ export function parseSessionResult(logFile: string): SessionResult | null {
   }
 
   return null;
+}
+
+/** Parse codex exec --json JSONL log. Aggregates usage across turns. */
+function parseCodexResult(lines: string[]): SessionResult | null {
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCachedInput = 0;
+  let numTurns = 0;
+  let lastAgentMessage = "";
+  let hasError = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+
+    if (parsed.type === "turn.completed") {
+      numTurns++;
+      const usage = parsed.usage ?? {};
+      totalInput += usage.input_tokens ?? 0;
+      totalOutput += usage.output_tokens ?? 0;
+      totalCachedInput += usage.cached_input_tokens ?? 0;
+    }
+
+    if (parsed.type === "item.completed" && parsed.item?.type === "agent_message") {
+      lastAgentMessage = parsed.item.text ?? "";
+    }
+
+    // Track command failures
+    if (parsed.type === "item.completed" && parsed.item?.type === "command_execution") {
+      if (parsed.item.exit_code !== 0 && parsed.item.exit_code != null) {
+        hasError = true;
+      }
+    }
+  }
+
+  if (numTurns === 0 && !lastAgentMessage) return null;
+
+  return {
+    result: lastAgentMessage,
+    isError: hasError,
+    durationMs: 0, // codex doesn't report duration in JSONL
+    costUsd: null,  // codex doesn't report cost in JSONL
+    inputTokens: totalInput,
+    outputTokens: totalOutput,
+    cacheReadTokens: totalCachedInput,
+    cacheCreateTokens: 0,
+    model: null,
+    numTurns,
+  };
 }
