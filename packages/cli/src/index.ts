@@ -20,6 +20,9 @@ import {
   addProject,
   removeProject,
   listProjects,
+  formatLog,
+  formatEvent,
+  parseLine,
 } from "@orka/daemon";
 import {
   command,
@@ -139,6 +142,35 @@ async function runCliCommand(name: string, fn: () => Promise<void>): Promise<voi
     }
     await fn();
   });
+}
+
+function createLogChunkFormatter() {
+  let pending = "";
+
+  return {
+    push(chunk: string): void {
+      const combined = `${pending}${chunk}`;
+      const lines = combined.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const event = parseLine(line);
+        if (!event) continue;
+        process.stdout.write(`${formatEvent(event)}\n`);
+      }
+    },
+    flush(): void {
+      if (!pending) return;
+      const event = parseLine(pending);
+      pending = "";
+      if (event) {
+        process.stdout.write(`${formatEvent(event)}\n`);
+      }
+    },
+    reset(): void {
+      pending = "";
+    },
+  };
 }
 
 function fail(message: string): never {
@@ -393,7 +425,7 @@ const logsCmd = command({
     if (!follow) {
       try {
         const output = await svc.captureOutput(session.id);
-        console.log(output);
+        console.log(formatLog(output));
         return;
       } catch {
         fail("no logs available (session ended, no log file found)");
@@ -402,11 +434,16 @@ const logsCmd = command({
 
     if (await svc.isAlive(session.id)) {
       let offset = 0;
+      const formatter = createLogChunkFormatter();
       while (true) {
         try {
           const output = await svc.captureOutput(session.id);
+          if (output.length < offset) {
+            offset = 0;
+            formatter.reset();
+          }
           if (output.length > offset) {
-            process.stdout.write(output.slice(offset));
+            formatter.push(output.slice(offset));
             offset = output.length;
           }
         } catch {
@@ -415,14 +452,30 @@ const logsCmd = command({
         if (!(await svc.isAlive(session.id))) break;
         await Bun.sleep(500);
       }
+      formatter.flush();
       return;
     }
 
     if (session.logFile && existsSync(session.logFile)) {
       const proc = Bun.spawn(["tail", "-f", session.logFile], {
-        stdout: "inherit",
+        stdout: "pipe",
         stderr: "inherit",
       });
+      const formatter = createLogChunkFormatter();
+      const decoder = new TextDecoder();
+      if (proc.stdout) {
+        const reader = proc.stdout.getReader();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) {
+            formatter.push(decoder.decode(value, { stream: true }));
+          }
+        }
+        const tail = decoder.decode();
+        if (tail) formatter.push(tail);
+      }
+      formatter.flush();
       await proc.exited;
       return;
     }

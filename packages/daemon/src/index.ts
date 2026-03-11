@@ -22,3 +22,4 @@ export {
 } from "./projects";
 export type { ProjectEntry } from "./projects";
 export { getOrkaHome } from "./db";
+export { formatLog, formatEvent, parseLine } from "./log-formatter";
