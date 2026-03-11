@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "node:util";
-import { existsSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService } from "@orka/core";
 import { ensureKeyPair, loadKeyPair, loadPublicKey } from "@orka/core";
 import { startRelay } from "@orka/relay";
@@ -32,9 +32,19 @@ if (remoteIdx !== -1) {
   process.argv.splice(remoteIdx, 2);
 }
 const tokenIdx = process.argv.indexOf("--token");
-const remoteToken = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : process.env.ORKA_TOKEN;
+let remoteToken = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : process.env.ORKA_TOKEN;
 if (tokenIdx !== -1) {
   process.argv.splice(tokenIdx, 2);
+}
+// Auto-load API key: ORKA_API_KEY > ~/.orka/relay-key > --token/ORKA_TOKEN
+if (!remoteToken) {
+  remoteToken = process.env.ORKA_API_KEY ?? undefined;
+  if (!remoteToken) {
+    const savedKeyFile = join(getOrkaHome(), "relay-key");
+    if (existsSync(savedKeyFile)) {
+      remoteToken = readFileSync(savedKeyFile, "utf-8").trim() || undefined;
+    }
+  }
 }
 if (remoteUrl && remoteToken) {
   const sep = remoteUrl.includes("?") ? "&" : "?";
@@ -176,7 +186,7 @@ function printUsage(): void {
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
   console.log("  serve   Start daemon WS server");
-  console.log("  relay   Start relay WS router (for multi-machine)");
+  console.log("  relay   Start relay WS router / manage relay account");
   console.log("  keygen  Manage E2E encryption keys");
   console.log("");
   console.log("ps options:");
@@ -213,6 +223,11 @@ function printUsage(): void {
   console.log("  --encrypt       Enable E2E encryption (generates node keypair)");
   console.log("");
   console.log("relay options:");
+  console.log("  (no subcommand) Start relay server");
+  console.log("  signup          Sign up for a relay account");
+  console.log("  keys            Manage API keys (list, create, revoke)");
+  console.log("  account         Show account info");
+  console.log("  usage           Show usage statistics");
   console.log("  --port          Port to listen on (default: 7390)");
   console.log("");
   console.log("global options:");
@@ -222,6 +237,8 @@ function printUsage(): void {
   console.log("  --server-key    Server public key for E2E (or ORKA_SERVER_KEY)");
   console.log("  ORKA_REMOTE     Env var alternative to --remote");
   console.log("  ORKA_TOKEN      Env var alternative to --token");
+  console.log("  ORKA_API_KEY    API key for relay (auto-loaded from ~/.orka/relay-key)");
+  console.log("  ORKA_RELAY_URL  Relay HTTP URL for signup/keys/account/usage commands");
   console.log("  ORKA_ENCRYPT    Env var alternative to --encrypt");
   console.log("  ORKA_SERVER_KEY Env var alternative to --server-key");
 }
@@ -1010,6 +1027,15 @@ async function cmdServe(): Promise<void> {
 }
 
 async function cmdRelay(): Promise<void> {
+  const sub = process.argv[3];
+
+  // Relay subcommands that call the relay HTTP API
+  if (sub === "signup") return cmdRelaySignup();
+  if (sub === "keys") return cmdRelayKeys();
+  if (sub === "account") return cmdRelayAccount();
+  if (sub === "usage") return cmdRelayUsage();
+
+  // Default: start relay server
   const args = parseArgs({
     args: process.argv.slice(3),
     options: {
@@ -1040,6 +1066,201 @@ async function cmdRelay(): Promise<void> {
 
   // Keep running until killed
   await new Promise(() => {});
+}
+
+// --- Relay API helpers ---
+
+function getRelayHttpUrl(): string {
+  // Use --remote / ORKA_REMOTE, converting ws:// to http://
+  let base = remoteUrl ?? process.env.ORKA_RELAY_URL;
+  if (!base) {
+    console.error("error: relay URL required (use --remote <url> or ORKA_RELAY_URL)");
+    process.exit(1);
+  }
+  // Strip ?token= query params for HTTP API calls (we use Authorization header)
+  base = base.split("?")[0];
+  return base.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
+}
+
+function getApiKey(): string | null {
+  // 1. ORKA_API_KEY env var
+  if (process.env.ORKA_API_KEY) return process.env.ORKA_API_KEY;
+  // 2. Saved key file
+  const keyFile = join(getOrkaHome(), "relay-key");
+  if (existsSync(keyFile)) return readFileSync(keyFile, "utf-8").trim();
+  // 3. Legacy token
+  return remoteToken ?? null;
+}
+
+function saveApiKey(key: string): void {
+  const keyFile = join(getOrkaHome(), "relay-key");
+  mkdirSync(getOrkaHome(), { recursive: true });
+  writeFileSync(keyFile, key + "\n", { mode: 0o600 });
+}
+
+async function relayFetch(path: string, opts?: { method?: string; body?: any; auth?: boolean }): Promise<any> {
+  const base = getRelayHttpUrl();
+  const url = `${base}${path}`;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+
+  if (opts?.auth !== false) {
+    const key = getApiKey();
+    if (key) headers["authorization"] = `Bearer ${key}`;
+  }
+
+  const fetchOpts: RequestInit = { method: opts?.method ?? "GET", headers };
+  if (opts?.body) fetchOpts.body = JSON.stringify(opts.body);
+
+  const resp = await fetch(url, fetchOpts);
+  const data = await resp.json() as any;
+
+  if (!resp.ok) {
+    const msg = data?.error?.message ?? data?.error ?? `HTTP ${resp.status}`;
+    console.error(`error: ${msg}`);
+    process.exit(1);
+  }
+
+  return data;
+}
+
+async function cmdRelaySignup(): Promise<void> {
+  const args = parseArgs({
+    args: process.argv.slice(4),
+    options: {
+      email: { type: "string" },
+      name: { type: "string" },
+    },
+    allowPositionals: false,
+  });
+
+  if (!args.values.email || !args.values.name) {
+    console.error("usage: orka relay signup --email <email> --name <name>");
+    process.exit(1);
+  }
+
+  const data = await relayFetch("/v1/signup", {
+    method: "POST",
+    body: { email: args.values.email, name: args.values.name },
+    auth: false,
+  });
+
+  // Auto-save the API key
+  saveApiKey(data.apiKey);
+
+  console.log("signup successful!");
+  console.log(`  account: ${data.accountId}`);
+  console.log(`  api key: ${data.apiKey}`);
+  console.log("");
+  console.log(`key saved to ${join(getOrkaHome(), "relay-key")}`);
+  console.log("it will be used automatically for future relay commands");
+}
+
+async function cmdRelayKeys(): Promise<void> {
+  const sub = process.argv[4];
+
+  if (sub === "create") {
+    const args = parseArgs({
+      args: process.argv.slice(5),
+      options: {
+        label: { type: "string" },
+        permissions: { type: "string" },
+      },
+      allowPositionals: false,
+    });
+
+    const body: any = {};
+    if (args.values.label) body.label = args.values.label;
+    if (args.values.permissions) body.permissions = args.values.permissions;
+
+    const data = await relayFetch("/v1/keys", { method: "POST", body });
+    console.log("key created:");
+    console.log(`  id:     ${data.keyId}`);
+    console.log(`  key:    ${data.apiKey}`);
+    console.log(`  prefix: ${data.prefix}`);
+    return;
+  }
+
+  if (sub === "revoke") {
+    const keyId = process.argv[5];
+    if (!keyId) {
+      console.error("usage: orka relay keys revoke <key-id>");
+      process.exit(1);
+    }
+    await relayFetch(`/v1/keys/${keyId}`, { method: "DELETE" });
+    console.log(`revoked key ${keyId}`);
+    return;
+  }
+
+  if (sub === "list" || !sub) {
+    const data = await relayFetch("/v1/keys");
+    if (data.keys.length === 0) {
+      console.log("no API keys");
+      return;
+    }
+    console.log(padR("ID", 20) + padR("PREFIX", 20) + padR("PERMS", 10) + padR("STATUS", 10) + padR("LABEL", 20) + "LAST USED");
+    for (const k of data.keys) {
+      console.log(
+        padR(k.id, 20) +
+        padR(k.prefix, 20) +
+        padR(k.permissions, 10) +
+        padR(k.status, 10) +
+        padR(k.label, 20) +
+        (k.lastUsedAt ?? "never"),
+      );
+    }
+    return;
+  }
+
+  console.error("usage: orka relay keys [list|create|revoke]");
+  console.error("  list                          List API keys");
+  console.error("  create [--label L] [--permissions client|node]  Create a key");
+  console.error("  revoke <key-id>               Revoke a key");
+  process.exit(1);
+}
+
+async function cmdRelayAccount(): Promise<void> {
+  const data = await relayFetch("/v1/account");
+  console.log(`account ${data.id}`);
+  console.log(`  email:   ${data.email}`);
+  console.log(`  name:    ${data.name}`);
+  console.log(`  status:  ${data.status}`);
+  console.log(`  tier:    ${data.tier}`);
+  console.log(`  created: ${data.createdAt}`);
+}
+
+async function cmdRelayUsage(): Promise<void> {
+  const args = parseArgs({
+    args: process.argv.slice(4),
+    options: {
+      from: { type: "string" },
+      to: { type: "string" },
+      granularity: { type: "string", default: "hour" },
+    },
+    allowPositionals: false,
+  });
+
+  const params = new URLSearchParams();
+  if (args.values.from) params.set("from", args.values.from);
+  if (args.values.to) params.set("to", args.values.to);
+  if (args.values.granularity) params.set("granularity", args.values.granularity);
+
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  const data = await relayFetch(`/v1/usage${qs}`);
+
+  if (data.buckets.length === 0) {
+    console.log("no usage data for this period");
+    return;
+  }
+
+  console.log(padR("PERIOD", 24) + padR("REQUESTS", 12) + padR("BYTES IN", 12) + "BYTES OUT");
+  for (const b of data.buckets) {
+    console.log(
+      padR(b.period, 24) +
+      padR(String(b.requests), 12) +
+      padR(String(b.bytesIn), 12) +
+      String(b.bytesOut),
+    );
+  }
 }
 
 async function cmdKeygen(): Promise<void> {
