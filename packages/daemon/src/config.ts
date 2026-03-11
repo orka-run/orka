@@ -16,7 +16,7 @@ const LimitsSchema = z.object({
 });
 
 const ProvidersSchema = z.object({
-  useRuntime: z.boolean().default(false),
+  useRuntime: z.boolean().default(true),
 });
 
 export const ConfigSchema = z.object({
