@@ -86,13 +86,11 @@ function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoning
     parts.push("--full-auto");
     parts.push("--json");
     parts.push("--skip-git-repo-check");
-    // workspace-write sandbox + extra writable dirs for worktree git metadata and bun tmpdir
+    // workspace-write sandbox + grant access to .git for worktree metadata (index.lock etc.)
     parts.push("--sandbox workspace-write");
     if (projectPath) {
-      // Worktree .git metadata (index.lock etc.) lives in <projectPath>/.git/worktrees/
       parts.push(`--add-dir ${shellEscape(projectPath + "/.git")}`);
     }
-    parts.push("--add-dir /tmp");
   }
 
   if (model) parts.push(`--model ${shellEscape(model)}`);
