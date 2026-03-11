@@ -57,22 +57,6 @@ const backendValues = ["claude-code", "codex", "shell"] as const;
 const modeValues = ["interactive", "background"] as const;
 const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
 
-type CliPruneOptions = {
-  maxAgeMs: number;
-  projectPath?: string;
-  confirm?: boolean;
-  purgeLogs?: boolean;
-  purgeDb?: boolean;
-};
-
-type CliPruneResult = {
-  pruned: number;
-  orphansCleaned: number;
-  dryRun?: boolean;
-  logsDeleted?: number;
-  dbRecordsDeleted?: number;
-};
-
 // Initialize OpenTelemetry tracing
 initTracing();
 
@@ -1064,8 +1048,7 @@ const pruneCmd = command({
     const projectPath = project ? resolveProject(project) : undefined;
     const purgeLogs = purgeAll || purgeLogsFlag;
     const purgeDb = purgeAll || purgeDbFlag;
-    const pruneOptions: CliPruneOptions = { maxAgeMs, projectPath, confirm, purgeLogs, purgeDb };
-    const result = await svc.pruneSessions(pruneOptions) as CliPruneResult;
+    const result = await svc.pruneSessions({ maxAgeMs, projectPath, confirm, purgeLogs, purgeDb });
     const {
       pruned,
       orphansCleaned,
