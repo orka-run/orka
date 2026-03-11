@@ -27,7 +27,7 @@ orka        — shell wrapper for global CLI access
 ## CLI Commands
 
 ```
-spawn   — Spawn an agent session (--backend, --mode, --model, --branch, --title, --prompt-file, --tag, --auto-merge)
+spawn   — Spawn an agent session (--backend, --mode, --model, --branch, --title, --prompt-file, --tag, --auto-merge; auto-checks CLI installed)
 ps      — List sessions (--status, --backend, --tag, --project, --verbose/-v)
 attach  — Attach to running tmux session (shows SSH hint in remote mode)
 logs    — View session output (--follow/-f for live streaming)
