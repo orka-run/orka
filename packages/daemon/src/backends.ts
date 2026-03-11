@@ -86,6 +86,8 @@ function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoning
     parts.push("--full-auto");
     parts.push("--json");
     parts.push("--skip-git-repo-check");
+    // TODO(orka-ad2): re-enable sandbox once git worktree writes are supported
+    parts.push("--sandbox danger-full-access");
   }
 
   if (model) parts.push(`--model ${shellEscape(model)}`);
