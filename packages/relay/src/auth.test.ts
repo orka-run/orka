@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, beforeEach, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -73,5 +73,39 @@ describe("authenticate", () => {
 
     expect(result.success).toBe(false);
     expect(result.code).toBeGreaterThanOrEqual(400);
+  });
+
+  test("with revoked key returns failure", () => {
+    const { account, apiKey } = auth.signup("auth-revoked@example.com", "Revoked User");
+    // Find the key and revoke it
+    const keys = db.listApiKeys(account.id);
+    expect(keys.length).toBeGreaterThan(0);
+    db.revokeApiKey(keys[0].id, account.id);
+    config.resetRelayConfig(); // clear auth cache side-effects
+
+    const result = auth.authenticate(apiKey);
+    expect(result.success).toBe(false);
+  });
+
+  test("with empty key returns failure with missing message", () => {
+    const result = auth.authenticate("");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Missing API key");
+  });
+});
+
+describe("legacy token fallback", () => {
+  test("authenticates with legacy_token from config", () => {
+    const configPath = join(tmpDir, "config.toml");
+    writeFileSync(configPath, '[auth]\nlegacy_token = "my-legacy-token"\n');
+    config.resetRelayConfig();
+
+    const result = auth.authenticate("my-legacy-token");
+    expect(result.success).toBe(true);
+    expect(result.ctx).toBeDefined();
+    expect(result.ctx!.accountId).toBe("__legacy__");
+
+    unlinkSync(configPath);
+    config.resetRelayConfig();
   });
 });

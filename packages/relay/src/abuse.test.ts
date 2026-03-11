@@ -59,6 +59,27 @@ describe("AbuseDetector", () => {
     expect(action).toBe("suspend");
   });
 
+  test("checkConnection detects churn when exceeding limit", async () => {
+    const { AbuseDetector } = await import("./abuse");
+    detector = new AbuseDetector();
+
+    // connectionRatePerMinute = 5 → more than 5 connections in 1 minute triggers action
+    let lastAction = "none";
+    for (let i = 0; i < 10; i++) {
+      lastAction = detector.checkConnection("acct-conn-churn", 5);
+    }
+    expect(lastAction).not.toBe("none");
+  });
+
+  test("checkNodeRegistration returns 'none' under limit", async () => {
+    const { AbuseDetector } = await import("./abuse");
+    detector = new AbuseDetector();
+
+    // currentCount < maxNodes → "none"
+    const action = detector.checkNodeRegistration("acct-nodes-ok", 10, 3);
+    expect(action).toBe("none");
+  });
+
   test("escalation: repeated signals escalate from warn to throttle to suspend", async () => {
     const { AbuseDetector } = await import("./abuse");
     detector = new AbuseDetector();

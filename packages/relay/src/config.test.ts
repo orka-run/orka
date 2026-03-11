@@ -1,5 +1,8 @@
-import { describe, test, expect, beforeEach } from "bun:test";
-import { RelayConfigSchema, resetRelayConfig } from "./config";
+import { describe, test, expect, beforeEach, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { RelayConfigSchema, resetRelayConfig, getRelayConfig } from "./config";
 
 describe("RelayConfigSchema", () => {
   beforeEach(() => {
@@ -40,7 +43,25 @@ describe("RelayConfigSchema", () => {
   });
 
   test("resetRelayConfig() clears cached config", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "orka-test-config-reset-"));
+    const origData = process.env.ORKA_RELAY_DATA;
+    process.env.ORKA_RELAY_DATA = tmpDir;
+
     resetRelayConfig();
+    const config1 = getRelayConfig();
+    resetRelayConfig();
+    const config2 = getRelayConfig();
+
+    // After reset, getRelayConfig should return a new object (different reference)
+    expect(config1).not.toBe(config2);
+
+    // Restore
+    if (origData !== undefined) {
+      process.env.ORKA_RELAY_DATA = origData;
+    } else {
+      delete process.env.ORKA_RELAY_DATA;
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
     resetRelayConfig();
   });
 });
