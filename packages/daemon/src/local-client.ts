@@ -75,7 +75,7 @@ class LocalClient implements OrkaService {
   async getResult(sessionId: string): Promise<SessionResult | null> {
     const session = getSession(sessionId);
     if (!session?.logFile) return null;
-    return parseSessionResult(session.logFile);
+    return parseSessionResult(session.logFile, session);
   }
 
   async captureOutput(sessionId: string): Promise<string> {

@@ -4,13 +4,16 @@ import { withSpanSync } from "./tracing";
 
 export type { SessionResult } from "@orka/core";
 
-/** Parse a session log to extract the final result. Auto-detects format (claude-code vs codex). */
-export function parseSessionResult(logFile: string): SessionResult | null {
+/** Parse a session log to extract the final result. Auto-detects format (claude-code vs codex).
+ *  When session timestamps are provided, they serve as fallback for backends that don't report duration. */
+export function parseSessionResult(logFile: string, session?: { startedAt: string | null; finishedAt: string | null }): SessionResult | null {
   return withSpanSync("orka.result.parse", {}, () => {
     if (!existsSync(logFile)) return null;
 
     const content = readFileSync(logFile, "utf-8");
     const lines = content.split("\n");
+
+    let result: SessionResult | null = null;
 
     // Detect format by scanning for known event types
     // claude-code emits {"type":"result",...}
@@ -20,14 +23,19 @@ export function parseSessionResult(logFile: string): SessionResult | null {
       if (!trimmed) continue;
       try {
         const parsed = JSON.parse(trimmed);
-        if (parsed.type === "result") return parseClaudeCodeResult(lines);
-        if (parsed.type === "turn.completed" || parsed.type === "thread.started") return parseCodexResult(lines);
+        if (parsed.type === "result") { result = parseClaudeCodeResult(lines); break; }
+        if (parsed.type === "turn.completed" || parsed.type === "thread.started") { result = parseCodexResult(lines); break; }
       } catch {
         continue;
       }
     }
 
-    return null;
+    // Fallback: calculate duration from session timestamps when backend reports 0
+    if (result && result.durationMs === 0 && session?.startedAt && session?.finishedAt) {
+      result.durationMs = new Date(session.finishedAt).getTime() - new Date(session.startedAt).getTime();
+    }
+
+    return result;
   });
 }
 
