@@ -41,10 +41,9 @@ import {
   deleteBranch,
   getWorktreeDir,
 } from "./worktree";
-import { ApprovalManager } from "./approval-manager";
+import { approvalManager, isProviderRuntimeEnabled, providerService } from "./provider-runtime";
 
 class LocalClient implements OrkaService {
-  readonly approvals = new ApprovalManager();
   private terminalManager: TerminalManager | null = null;
 
   private getTerminalManager(): TerminalManager {
@@ -193,12 +192,19 @@ class LocalClient implements OrkaService {
   async isAlive(sessionId: string): Promise<boolean> {
     const session = getSession(sessionId);
     if (!session) return false;
+    if (providerService.getHandle(sessionId)) {
+      return true;
+    }
     return getRunner().has(session.tmuxSessionName);
   }
 
   async sendInput(sessionId: string, text: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (providerService.getHandle(sessionId)) {
+      await providerService.sendTurn(sessionId, { input: text });
+      return;
+    }
     const runner = getRunner();
     if (!(await runner.has(session.tmuxSessionName))) {
       throw new Error(`Session ${sessionId} is not running`);
@@ -305,15 +311,23 @@ class LocalClient implements OrkaService {
 
   async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {
     if (sessionId) {
-      return this.approvals.getPendingForSession(sessionId);
+      return approvalManager.getPendingForSession(sessionId);
     }
-    return this.approvals.getPending();
+    return approvalManager.getPending();
   }
 
   async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
-    const resolved = this.approvals.resolve(requestId, decision);
+    const resolved = approvalManager.resolve(requestId, decision);
     if (!resolved) {
       throw new Error(`Approval request not found or already resolved: ${requestId}`);
+    }
+
+    if (isProviderRuntimeEnabled() && providerService.getHandle(resolved.threadId)) {
+      await providerService.respondToRequest(
+        resolved.threadId,
+        requestId,
+        decision === "approve" || decision === "approve_session" ? "approve" : "deny",
+      );
     }
   }
 

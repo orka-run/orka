@@ -83,6 +83,12 @@ export class ProviderService {
     return withSpanSync("orka.provider.get_handle", { "orka.session.id": threadId }, () => this.sessions.get(threadId));
   }
 
+  clearHandle(threadId: string): void {
+    withSpanSync("orka.provider.clear_handle", { "orka.session.id": threadId }, () => {
+      this.sessions.delete(threadId);
+    });
+  }
+
   listActiveSessions(): ProviderSessionHandle[] {
     return withSpanSync("orka.provider.list_active_sessions", {}, () => Array.from(this.sessions.values()));
   }

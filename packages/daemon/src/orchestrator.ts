@@ -7,12 +7,14 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions, saveSessionDiff } from "./db";
+import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions, saveSessionDiff, insertUsageRecord } from "./db";
 import { defaultRunner } from "./tmux";
 import type { SessionRunner } from "./runner";
+import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
 import { buildBackendCommand, assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";
+import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerService } from "./provider-runtime";
 import { pushHub } from "./push";
 import { withSpan } from "./tracing";
 
@@ -133,6 +135,47 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       span.setAttribute("orka.tags", req.tags.join(","));
     }
 
+    if (isProviderRuntimeEnabled()) {
+      const startedAt = new Date().toISOString();
+      const handle = await providerService.startSession(req.backend, {
+        threadId: sessionId,
+        cwd: workingDir,
+        model: req.model,
+        reasoningEffort: req.reasoningEffort,
+        prompt: req.prompt,
+      });
+
+      updateSessionStatus(sessionId, "running", { startedAt });
+
+      void consumeProviderEvents(sessionId, handle, orchestrationEngine, {
+        updateSessionStatus,
+        saveSessionDiff,
+        insertUsageRecord,
+        approvalManager,
+        logFile,
+        pushHub,
+        workingDir,
+        projectPath,
+        autoMerge: session.autoMerge,
+        model: req.model ?? null,
+        cleanupWorktree: async () => {
+          const currentSession = getSession(sessionId);
+          if (currentSession) {
+            await tryCleanupWorktree(currentSession);
+          }
+        },
+      })
+        .catch((error) => {
+          console.error(`provider event consumer failed for session ${sessionId}`, error);
+        })
+        .finally(() => {
+          providerService.clearHandle(sessionId);
+        });
+
+      span.addEvent("session.started");
+      return { ...session, status: "running", startedAt };
+    }
+
     // 5. Build backend command (with log tee)
     const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model, reasoningEffort: req.reasoningEffort, projectPath });
 
@@ -175,6 +218,11 @@ export async function reapSessions(): Promise<number> {
     let reaped = 0;
 
     for (const s of running) {
+      if (providerService.getHandle(s.id)) {
+        span.addEvent("session.reap_skipped_provider_runtime", { "orka.session.id": s.id });
+        continue;
+      }
+
       if (!liveNames.has(s.tmuxSessionName)) {
         // Grace period: don't reap sessions started less than 30s ago.
         // tmuxList() can return incomplete results if the tmux server is busy
@@ -239,6 +287,18 @@ export async function stopSession(sessionId: string): Promise<void> {
   return withSpan("orka.stop", { "orka.session.id": sessionId }, async (span) => {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    const providerHandle = providerService.getHandle(sessionId);
+    if (providerHandle) {
+      await providerService.stopSession(sessionId);
+      span.addEvent("session.stop_requested");
+      return;
+    }
+
+    if (isProviderRuntimeEnabled() && session.status !== "running" && session.status !== "preparing") {
+      span.addEvent("session.stop_skipped_terminal");
+      return;
+    }
 
     if (await _runner.has(session.tmuxSessionName)) {
       await _runner.kill(session.tmuxSessionName);

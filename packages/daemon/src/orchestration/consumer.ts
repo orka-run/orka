@@ -31,6 +31,7 @@ export interface ProviderEventConsumerCallbacks {
   projectPath?: string;
   autoMerge?: boolean;
   model?: string | null;
+  cleanupWorktree?: () => Promise<void>;
 }
 
 export async function consumeProviderEvents(
@@ -156,6 +157,11 @@ async function finalizeSession(
 
   if (status === "completed" && callbacks.autoMerge) {
     await tryAutoMerge(sessionId, callbacks);
+    return;
+  }
+
+  if (status === "cancelled") {
+    await callbacks.cleanupWorktree?.();
   }
 }
 

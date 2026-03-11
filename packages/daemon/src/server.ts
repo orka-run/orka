@@ -11,6 +11,7 @@ import {
 } from "@orka/core";
 import daemonPackageJson from "../package.json";
 import { GracefulShutdown } from "./graceful-shutdown";
+import { orchestrationEngine } from "./provider-runtime";
 import { pushHub } from "./push";
 import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
@@ -43,6 +44,8 @@ export const gracefulShutdown = new GracefulShutdown();
  */
 export async function startServer(svc: OrkaService, opts: ServerOptions) {
   return withSpan("orka.server.start", {}, async () => {
+    void orchestrationEngine;
+
     // Load or generate node keypair for E2E encryption
     let nodeKeyPair: KeyPair | undefined;
     if (opts.encrypt) {

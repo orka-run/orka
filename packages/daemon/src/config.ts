@@ -15,9 +15,14 @@ const LimitsSchema = z.object({
   maxConcurrent: z.number().default(0),
 });
 
+const ProvidersSchema = z.object({
+  useRuntime: z.boolean().default(false),
+});
+
 export const ConfigSchema = z.object({
   defaults: DefaultsSchema.default(DefaultsSchema.parse({})),
   limits: LimitsSchema.default(LimitsSchema.parse({})),
+  providers: ProvidersSchema.default(ProvidersSchema.parse({})),
 });
 
 export type OrkaConfig = z.infer<typeof ConfigSchema>;
@@ -43,6 +48,10 @@ export function getConfig(): OrkaConfig {
           toml.limits?.max_concurrent !== undefined
             ? { maxConcurrent: parseInt(toml.limits.max_concurrent, 10) || 0 }
             : undefined,
+        providers:
+          toml.providers?.use_runtime !== undefined
+            ? { useRuntime: toml.providers.use_runtime === "true" || toml.providers.use_runtime === "1" }
+            : undefined,
       });
     } catch {
       _config = ConfigSchema.parse({});
@@ -52,13 +61,13 @@ export function getConfig(): OrkaConfig {
   });
 }
 
-/** Minimal TOML parser — handles [section] and key = "value" */
+/** Minimal TOML parser — handles [section] and key = "value"/bare */
 function parseSimpleToml(raw: string): Record<string, Record<string, string>> {
   const result: Record<string, Record<string, string>> = {};
   let section = "";
 
   for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
+    const trimmed = stripInlineComment(line).trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
 
     const sectionMatch = trimmed.match(/^\[(.+)]$/);
@@ -68,11 +77,29 @@ function parseSimpleToml(raw: string): Record<string, Record<string, string>> {
       continue;
     }
 
-    const kvMatch = trimmed.match(/^(\w+)\s*=\s*"(.+)"$/);
+    const kvMatch = trimmed.match(/^(\w+)\s*=\s*(?:"([^"]*)"|(\S+))$/);
     if (kvMatch && section) {
-      result[section]![kvMatch[1]] = kvMatch[2];
+      result[section]![kvMatch[1]] = kvMatch[2] ?? kvMatch[3] ?? "";
     }
   }
 
   return result;
+}
+
+function stripInlineComment(line: string): string {
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === "\"") {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === "#" && !inQuotes) {
+      return line.slice(0, index);
+    }
+  }
+
+  return line;
 }
