@@ -1,52 +1,31 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "node:util";
-import { join } from "node:path";
-import { readFileSync, existsSync, unlinkSync } from "node:fs";
-import { $ } from "bun";
-import type { BackendKind, SessionMode } from "@orka/core";
+import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import type { BackendKind, SessionMode, OrkaService } from "@orka/core";
 import {
-  spawnSession,
-  stopSession,
-  reapSessions,
-  listSessions,
-  getSession,
-  getTask,
-  getConfig,
+  createLocalClient,
   tmuxAttach,
-  tmuxCapture,
-  tmuxHas,
-  deleteSessions,
-  getOrkaHome,
-  cleanupOrphanedWorktrees,
-  worktreeMerge,
-  worktreeRemove,
-  worktreeBranch,
-  worktreeHasCommitsAhead,
-  worktreeHasChanges,
-  deleteBranch,
-  getWorktreeDir,
-  parseSessionResult,
-  setSessionKept,
-  getSessionTags,
-  listSessionsByTag,
-  tmuxSendText,
+  getConfig,
   initTracing,
   shutdownTracing,
+  resolveProject,
+  projectNameForPath,
   addProject,
   removeProject,
   listProjects,
-  resolveProject,
-  projectNameForPath,
 } from "@orka/daemon";
 
 // Initialize OpenTelemetry tracing
 initTracing();
 
+const svc: OrkaService = createLocalClient();
+
 const command = process.argv[2];
 
 // Auto-reap dead sessions on every CLI invocation
-await reapSessions();
+await svc.reap();
 
 switch (command) {
   case "spawn":
@@ -135,6 +114,7 @@ function printUsage(): void {
   console.log("  --status       Filter by status (e.g. running, completed, failed, cancelled)");
   console.log("  --backend      Filter by backend (e.g. claude-code, codex, aider, shell)");
   console.log("  --project      Filter by project (name or full path)");
+  console.log("  --tag          Filter by tag");
   console.log("  --verbose, -v  Show cost, duration, tokens, and project column");
   console.log("");
   console.log("logs options:");
@@ -155,9 +135,6 @@ function printUsage(): void {
   console.log("  --title         Session title");
   console.log("  --auto-merge    Auto-merge worktree on successful completion");
   console.log("  --tag           Add tag(s) to session (repeatable: --tag foo --tag bar)");
-  console.log("");
-  console.log("ps filter options:");
-  console.log("  --tag           Filter sessions by tag");
 }
 
 async function cmdSpawn(): Promise<void> {
@@ -215,7 +192,7 @@ async function cmdSpawn(): Promise<void> {
 
   let session;
   try {
-    session = await spawnSession({
+    session = await svc.spawn({
       prompt,
       title: args.values.title,
       projectPath: resolveProject(args.values.project!),
@@ -261,12 +238,10 @@ async function cmdPs(): Promise<void> {
     allowPositionals: false,
   });
 
-  let sessions = args.values.tag
-    ? listSessionsByTag(args.values.tag)
-    : listSessions();
-  if (args.values.status) {
-    sessions = sessions.filter((s) => s.status === args.values.status);
-  }
+  let sessions = svc.listSessions({
+    status: args.values.status as any,
+    tag: args.values.tag,
+  });
   if (args.values.backend) {
     sessions = sessions.filter((s) => s.backend === args.values.backend);
   }
@@ -323,7 +298,7 @@ async function cmdPs(): Promise<void> {
   console.log("-".repeat(lineWidth));
 
   for (const s of sessions) {
-    const task = getTask(s.taskId);
+    const task = svc.getTask(s.taskId);
     const statusText = s.kept ? `${s.status} [kept]` : s.status;
     const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
     const statusPad = 20 - statusText.length + colored.length;
@@ -341,7 +316,7 @@ async function cmdPs(): Promise<void> {
     line += padR(s.backend, 14);
 
     if (verbose) {
-      const result = s.logFile ? parseSessionResult(s.logFile) : null;
+      const result = svc.getResult(s.id);
       const cost = result?.costUsd != null ? `$${result.costUsd.toFixed(2)}` : "-";
       const duration = result ? formatDuration(result.durationMs) : "-";
       const tokens = result ? `${shortNum(result.outputTokens)} out` : "-";
@@ -366,7 +341,7 @@ async function cmdAttach(): Promise<void> {
     process.exit(1);
   }
 
-  if (!(await tmuxHas(session.tmuxSessionName))) {
+  if (!(await svc.isAlive(session.id))) {
     console.error(`tmux session not running: ${session.tmuxSessionName}`);
     process.exit(1);
   }
@@ -398,41 +373,34 @@ async function cmdLogs(): Promise<void> {
   }
 
   if (!follow) {
-    // One-shot: try live tmux capture first
-    if (await tmuxHas(session.tmuxSessionName)) {
-      const output = await tmuxCapture(session.tmuxSessionName);
+    try {
+      const output = await svc.captureOutput(session.id);
       console.log(output);
       return;
+    } catch {
+      console.error("no logs available (session ended, no log file found)");
+      process.exit(1);
     }
-
-    // Fall back to log file
-    if (session.logFile && existsSync(session.logFile)) {
-      const content = readFileSync(session.logFile, "utf-8");
-      console.log(content);
-      return;
-    }
-
-    console.error("no logs available (session ended, no log file found)");
-    process.exit(1);
   }
 
   // --follow mode
-  if (await tmuxHas(session.tmuxSessionName)) {
-    // Poll tmux pane every 500ms, printing new output as it arrives
+  if (await svc.isAlive(session.id)) {
     let offset = 0;
     while (true) {
-      const output = await tmuxCapture(session.tmuxSessionName);
-      if (output.length > offset) {
-        process.stdout.write(output.slice(offset));
-        offset = output.length;
-      }
-      if (!(await tmuxHas(session.tmuxSessionName))) break;
+      try {
+        const output = await svc.captureOutput(session.id);
+        if (output.length > offset) {
+          process.stdout.write(output.slice(offset));
+          offset = output.length;
+        }
+      } catch { break; }
+      if (!(await svc.isAlive(session.id))) break;
       await Bun.sleep(500);
     }
     return;
   }
 
-  // tmux dead — stream log file with tail -f
+  // tmux dead — stream log file with tail -f (local-only, will be WS streaming in remote mode)
   if (session.logFile && existsSync(session.logFile)) {
     const proc = Bun.spawn(["tail", "-f", session.logFile], {
       stdout: "inherit",
@@ -464,7 +432,7 @@ async function cmdStop(): Promise<void> {
     process.exit(1);
   }
 
-  await stopSession(session.id);
+  await svc.stop(session.id);
   console.log(`stopped session ${session.id}`);
 }
 
@@ -482,16 +450,14 @@ async function cmdDiff(): Promise<void> {
   }
 
   try {
-    const status = await $`git -C ${session.workingDir} status`.text();
+    const { status, diff } = await svc.getDiff(session.id);
     console.log(status);
-
-    const diff = await $`git -C ${session.workingDir} diff`.text();
     if (diff) {
+      console.log("");
       console.log(diff);
     }
-  } catch {
-    console.error(`error: cannot read git status in ${session.workingDir}`);
-    console.error("  (worktree may have been cleaned up)");
+  } catch (e: any) {
+    console.error(`error: ${e.message}`);
     process.exit(1);
   }
 }
@@ -514,14 +480,14 @@ async function cmdRetry(): Promise<void> {
     process.exit(1);
   }
 
-  const task = getTask(session.taskId);
+  const task = svc.getTask(session.taskId);
   if (!task) {
     console.error(`task not found for session: ${session.id}`);
     process.exit(1);
   }
 
-  const oldTags = getSessionTags(session.id);
-  const newSession = await spawnSession({
+  const oldTags = svc.getTags(session.id);
+  const newSession = await svc.spawn({
     prompt: task.prompt,
     title: task.title,
     projectPath: session.projectPath || session.workingDir,
@@ -558,7 +524,7 @@ async function cmdShow(): Promise<void> {
     process.exit(1);
   }
 
-  const task = getTask(session.taskId);
+  const task = svc.getTask(session.taskId);
 
   console.log(`session ${session.id}`);
   console.log("");
@@ -577,7 +543,7 @@ async function cmdShow(): Promise<void> {
   if (session.kept) console.log(`  kept:      yes (worktree protected)`);
   if (session.autoMerge) console.log(`  auto-merge: yes`);
 
-  const tags = getSessionTags(session.id);
+  const tags = svc.getTags(session.id);
   if (tags.length > 0) console.log(`  tags:      ${tags.join(", ")}`);
 
   if (task) {
@@ -600,7 +566,6 @@ async function cmdWorkdir(): Promise<void> {
     process.exit(1);
   }
 
-  // Print only the path — usable in shell: cd $(orka workdir <id>)
   console.log(session.workingDir);
 }
 
@@ -620,7 +585,7 @@ async function cmdWait(): Promise<void> {
   let targets: string[];
 
   if (allFlag) {
-    let running = listSessions().filter((s) => !terminalStatuses.has(s.status));
+    let running = svc.listSessions().filter((s) => !terminalStatuses.has(s.status));
     if (projectFilter) {
       const resolved = resolveProject(projectFilter);
       running = running.filter((s) =>
@@ -648,13 +613,13 @@ async function cmdWait(): Promise<void> {
   let anyFailed = false;
 
   while (pending.size > 0) {
-    await reapSessions();
+    await svc.reap();
     for (const id of [...pending]) {
-      const s = getSession(id);
+      const s = svc.getSession(id);
       if (!s || terminalStatuses.has(s.status)) {
         pending.delete(id);
         const status = s?.status ?? "unknown";
-        const task = s ? getTask(s.taskId) : null;
+        const task = s ? svc.getTask(s.taskId) : null;
         const label = task?.title?.slice(0, 50) ?? id;
         console.log(`  ${id}  ${status}  ${label}`);
         if (status === "failed") anyFailed = true;
@@ -686,13 +651,13 @@ async function cmdSend(): Promise<void> {
     process.exit(1);
   }
 
-  if (!(await tmuxHas(session.tmuxSessionName))) {
-    console.error(`session ${session.id} is not running`);
+  try {
+    await svc.sendInput(session.id, text);
+    console.log(`sent to ${session.id}`);
+  } catch (e: any) {
+    console.error(`error: ${e.message}`);
     process.exit(1);
   }
-
-  await tmuxSendText(session.tmuxSessionName, text);
-  console.log(`sent to ${session.id}`);
 }
 
 async function cmdKeep(): Promise<void> {
@@ -708,7 +673,7 @@ async function cmdKeep(): Promise<void> {
     process.exit(1);
   }
 
-  setSessionKept(session.id, true);
+  svc.setKept(session.id, true);
   console.log(`session ${session.id} marked as kept (worktree protected from cleanup)`);
 }
 
@@ -725,7 +690,7 @@ async function cmdUnkeep(): Promise<void> {
     process.exit(1);
   }
 
-  setSessionKept(session.id, false);
+  svc.setKept(session.id, false);
   console.log(`session ${session.id} unprotected (worktree may be cleaned up)`);
 }
 
@@ -750,12 +715,7 @@ async function cmdResult(): Promise<void> {
     process.exit(1);
   }
 
-  if (!session.logFile) {
-    console.error("no log file for this session");
-    process.exit(1);
-  }
-
-  const result = parseSessionResult(session.logFile);
+  const result = svc.getResult(session.id);
   if (!result) {
     console.error("no result found in session log (session may not be a background claude-code session)");
     process.exit(1);
@@ -770,7 +730,7 @@ async function cmdResult(): Promise<void> {
   const c = (code: string, text: string): string =>
     noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
 
-  const task = getTask(session.taskId);
+  const task = svc.getTask(session.taskId);
   console.log(c("1", `session ${session.id}`));
   if (task) console.log(`  title: ${task.title.slice(0, 80)}`);
 
@@ -825,24 +785,11 @@ async function cmdMerge(): Promise<void> {
     process.exit(1);
   }
 
-  const wtDir = getWorktreeDir();
-  if (!session.workingDir.startsWith(wtDir)) {
-    console.error(`session ${session.id} is not using a worktree`);
-    process.exit(1);
-  }
-
   try {
-    const { branch, commits } = await worktreeMerge(session.projectPath, session.workingDir);
+    const { branch, commits, cleaned } = await svc.merge(session.id, args.values.cleanup !== false);
     console.log(`merged ${commits} commit(s) from ${branch}`);
-
-    if (args.values.cleanup !== false) {
-      try {
-        await worktreeRemove(session.projectPath, session.workingDir);
-        await deleteBranch(session.projectPath, branch);
-        console.log(`cleaned up worktree and branch ${branch}`);
-      } catch {
-        console.log(`note: could not clean up worktree/branch (manual cleanup may be needed)`);
-      }
+    if (cleaned) {
+      console.log(`cleaned up worktree and branch ${branch}`);
     }
   } catch (e: any) {
     console.error(`error: ${e.message}`);
@@ -912,44 +859,17 @@ async function cmdPrune(): Promise<void> {
   });
 
   const maxAgeMs = parseAge(args.values.age!);
-  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-  const pruneStatuses = new Set(["completed", "cancelled", "failed"]);
+  const projectPath = args.values.project ? resolveProject(args.values.project) : undefined;
 
-  let sessions = listSessions().filter(
-    (s) => pruneStatuses.has(s.status) && s.createdAt < cutoff,
-  );
+  const { pruned, orphansCleaned } = await svc.pruneSessions({ maxAgeMs, projectPath });
 
-  if (args.values.project) {
-    const resolved = resolveProject(args.values.project);
-    sessions = sessions.filter((s) =>
-      s.projectPath === resolved || s.projectPath === args.values.project || projectName(s.projectPath) === args.values.project,
-    );
-  }
-
-  if (sessions.length === 0) {
+  if (pruned === 0) {
     console.log("nothing to prune");
-    return;
+  } else {
+    console.log(`pruned ${pruned} session(s)`);
   }
-
-  // Delete log files and script files
-  const scriptsDir = join(getOrkaHome(), "scripts");
-  for (const s of sessions) {
-    if (s.logFile && existsSync(s.logFile)) {
-      unlinkSync(s.logFile);
-    }
-    const scriptFile = join(scriptsDir, `${s.id}.sh`);
-    if (existsSync(scriptFile)) {
-      unlinkSync(scriptFile);
-    }
-  }
-
-  deleteSessions(sessions.map((s) => s.id));
-  console.log(`pruned ${sessions.length} session(s)`);
-
-  // Clean up orphaned worktree dirs
-  const orphans = await cleanupOrphanedWorktrees();
-  if (orphans > 0) {
-    console.log(`cleaned ${orphans} orphaned worktree(s)`);
+  if (orphansCleaned > 0) {
+    console.log(`cleaned ${orphansCleaned} orphaned worktree(s)`);
   }
 }
 
@@ -971,10 +891,10 @@ function parseAge(age: string): number {
 // --- Helpers ---
 
 function findSession(query: string) {
-  const exact = getSession(query);
+  const exact = svc.getSession(query);
   if (exact) return exact;
 
-  const all = listSessions();
+  const all = svc.listSessions();
   const matches = all.filter((s) => s.id.includes(query));
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) {

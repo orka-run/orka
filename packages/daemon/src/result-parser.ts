@@ -1,17 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
+import type { SessionResult } from "@orka/core";
 
-export interface SessionResult {
-  result: string;
-  isError: boolean;
-  durationMs: number;
-  costUsd: number | null;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreateTokens: number;
-  model: string | null;
-  numTurns: number;
-}
+export type { SessionResult } from "@orka/core";
 
 /** Parse stream-json log to extract the final result event. */
 export function parseSessionResult(logFile: string): SessionResult | null {
