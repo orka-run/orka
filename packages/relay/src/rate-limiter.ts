@@ -1,4 +1,5 @@
 import type { RateLimitConfig } from "./db";
+import { withSpanSync } from "./tracing";
 
 // --- Sliding Window Counter ---
 
@@ -32,32 +33,42 @@ export class RateLimiter {
 
   /** Check and record a request. Returns whether it's allowed. */
   check(accountId: string, limits: RateLimitConfig): RateLimitResult {
-    const counters = this.getOrCreate(accountId);
-    const now = Date.now();
+    return withSpanSync("orka.relay.ratelimit.check", {
+      "orka.account.id": accountId,
+    }, () => {
+      const counters = this.getOrCreate(accountId);
+      const now = Date.now();
 
-    // Check per-minute limit
-    const perMinResult = this.checkWindow(counters.perMinute, now, 60_000, limits.requestsPerMinute);
-    if (!perMinResult.allowed) return perMinResult;
+      // Check per-minute limit
+      const perMinResult = this.checkWindow(counters.perMinute, now, 60_000, limits.requestsPerMinute);
+      if (!perMinResult.allowed) return perMinResult;
 
-    // Check per-hour limit
-    const perHourResult = this.checkWindow(counters.perHour, now, 3_600_000, limits.requestsPerHour);
-    if (!perHourResult.allowed) return perHourResult;
+      // Check per-hour limit
+      const perHourResult = this.checkWindow(counters.perHour, now, 3_600_000, limits.requestsPerHour);
+      if (!perHourResult.allowed) return perHourResult;
 
-    // Record the request
-    this.recordWindow(counters.perMinute, now, 60_000);
-    this.recordWindow(counters.perHour, now, 3_600_000);
+      // Record the request
+      this.recordWindow(counters.perMinute, now, 60_000);
+      this.recordWindow(counters.perHour, now, 3_600_000);
 
-    return { allowed: true };
+      return { allowed: true };
+    });
   }
 
   /** Check concurrent connection limit */
   checkConnection(limits: RateLimitConfig, currentCount: number): boolean {
-    return currentCount < limits.concurrentConnections;
+    return withSpanSync("orka.relay.ratelimit.checkConnection", {
+      "orka.concurrent_connections": currentCount,
+      "orka.concurrent_limit": limits.concurrentConnections,
+    }, () => currentCount < limits.concurrentConnections);
   }
 
   /** Check message size limit */
   checkMessageSize(limits: RateLimitConfig, bytes: number): boolean {
-    return bytes <= limits.maxMessageBytes;
+    return withSpanSync("orka.relay.ratelimit.checkMessageSize", {
+      "orka.bytes": bytes,
+      "orka.max_bytes": limits.maxMessageBytes,
+    }, () => bytes <= limits.maxMessageBytes);
   }
 
   /** Remove counters for accounts not seen in 10 minutes */

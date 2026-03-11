@@ -40,24 +40,29 @@ export function generateApiKey(
   accountId: string,
   opts?: { label?: string; permissions?: "client" | "node" | "admin" },
 ): GeneratedKey {
-  const secret = randomBase62(32);
-  const key = `ork_live_${secret}`;
-  const keyHash = hashKey(key);
-  const keyPrefix = key.slice(0, 16); // "ork_live_" + first 7 chars of secret
+  return withSpanSync("orka.relay.auth.generateApiKey", {
+    "orka.account.id": accountId,
+    "orka.permissions": opts?.permissions ?? "client",
+  }, () => {
+    const secret = randomBase62(32);
+    const key = `ork_live_${secret}`;
+    const keyHash = hashKey(key);
+    const keyPrefix = key.slice(0, 16); // "ork_live_" + first 7 chars of secret
 
-  const record: ApiKeyRecord = {
-    id: generateId("key"),
-    accountId,
-    keyHash,
-    keyPrefix,
-    label: opts?.label ?? "default",
-    permissions: opts?.permissions ?? "client",
-    status: "active",
-    lastUsedAt: null,
-    createdAt: new Date().toISOString(),
-  };
+    const record: ApiKeyRecord = {
+      id: generateId("key"),
+      accountId,
+      keyHash,
+      keyPrefix,
+      label: opts?.label ?? "default",
+      permissions: opts?.permissions ?? "client",
+      status: "active",
+      lastUsedAt: null,
+      createdAt: new Date().toISOString(),
+    };
 
-  return { key, record };
+    return { key, record };
+  });
 }
 
 /** Hash an API key for storage/lookup. */
@@ -152,7 +157,9 @@ function flushLastUsed(): void {
 }
 
 export function flushAuthUpdates(): void {
-  flushLastUsed();
+  withSpanSync("orka.relay.auth.flush", {}, () => {
+    flushLastUsed();
+  });
 }
 
 // --- Authentication ---
@@ -178,13 +185,13 @@ const DEFAULT_RATE_LIMITS: RateLimitConfig = {
  * Returns AuthContext on success, error on failure.
  */
 export function authenticate(key: string): AuthResult {
-  if (!key) {
-    return { success: false, error: "Missing API key", code: 401 };
-  }
-
-  return withSpanSync("orka.relay.auth", {
+  return withSpanSync("orka.relay.auth.authenticate", {
     "orka.auth.key_prefix": key.slice(0, 16),
   }, (span) => {
+    if (!key) {
+      return { success: false, error: "Missing API key", code: 401 };
+    }
+
     const keyHash = hashKey(key);
 
     // Check cache first
@@ -267,15 +274,19 @@ export function authenticate(key: string): AuthResult {
  * Checks Authorization header first, then ?token= query param.
  */
 export function extractApiKey(req: Request): string | null {
-  // Authorization: Bearer <key>
-  const authHeader = req.headers.get("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
+  return withSpanSync("orka.relay.auth.extractApiKey", {
+    "orka.method": req.method,
+  }, () => {
+    // Authorization: Bearer <key>
+    const authHeader = req.headers.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      return authHeader.slice(7);
+    }
 
-  // ?token=<key> query param
-  const url = new URL(req.url);
-  return url.searchParams.get("token");
+    // ?token=<key> query param
+    const url = new URL(req.url);
+    return url.searchParams.get("token");
+  });
 }
 
 /**
