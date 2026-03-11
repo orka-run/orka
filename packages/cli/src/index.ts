@@ -91,8 +91,10 @@ if (remoteUrl) {
 
 const command = process.argv[2];
 
-// Auto-reap dead sessions on every CLI invocation
-await svc.reap();
+// Auto-reap dead sessions on every CLI invocation (skip for wait — it reaps in its own loop)
+if (command !== "wait") {
+  await svc.reap();
+}
 
 switch (command) {
   case "spawn":
@@ -692,7 +694,7 @@ async function cmdWait(): Promise<void> {
   const allFlag = rawArgs.includes("--all");
   const projectIdx = rawArgs.indexOf("--project");
   const projectFilter = projectIdx !== -1 ? rawArgs[projectIdx + 1] : undefined;
-  const ids = rawArgs.filter((a, i) => a !== "--all" && a !== "--project" && i !== projectIdx + 1);
+  const ids = rawArgs.filter((a, i) => a !== "--all" && a !== "--project" && (projectIdx === -1 || i !== projectIdx + 1));
 
   if (ids.length === 0 && !allFlag) {
     console.error("usage: orka wait <session-id...> | --all [--project <name>]");
