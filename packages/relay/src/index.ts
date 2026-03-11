@@ -26,6 +26,7 @@ import { UsageMeter } from "./metering";
 import { AbuseDetector } from "./abuse";
 import { getRelayConfig } from "./config";
 import { closeDb } from "./db";
+import { SingleInstanceCluster } from "./cluster";
 import { metrics, initRelayTracing, shutdownRelayTracing, withSpan } from "./tracing";
 
 // --- Allowed Methods (service enforcement) ---
@@ -62,6 +63,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
   const globalLimiter = new GlobalRateLimiter(config.rateLimits.globalRequestsPerSecond);
   const meter = new UsageMeter();
   const abuseDetector = new AbuseDetector();
+  const cluster = new SingleInstanceCluster({ url: `ws://${opts.hostname ?? config.server.hostname}:${opts.port}` });
   let draining = false;
 
   // Apply legacy token from opts to config
@@ -98,6 +100,9 @@ export function startRelay(opts: RelayOptions): RelayHandle {
             });
           }
         }
+        // Update cluster stats on health check
+        const gs = state.getGlobalStats();
+        cluster.updateStats(gs.accounts, gs.totalClients + gs.totalNodes);
         return jsonResponse({ status: draining ? "draining" : "ok", version: "0.2.0" });
       }
 
