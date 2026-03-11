@@ -64,6 +64,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
   const meter = new UsageMeter();
   const abuseDetector = new AbuseDetector();
   const cluster = new SingleInstanceCluster({ url: `ws://${opts.hostname ?? config.server.hostname}:${opts.port}` });
+  const startTime = Date.now();
   let draining = false;
 
   // Apply legacy token from opts to config
@@ -82,28 +83,32 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 
       // --- Health endpoint (public, always available even during drain) ---
       if (url.pathname === "/health") {
+        const gs = state.getGlobalStats();
+        cluster.updateStats(gs.accounts, gs.totalClients + gs.totalNodes);
+        const status = draining ? "draining" : "ok";
+        const uptime = Math.floor((Date.now() - startTime) / 1000);
+
         const key = extractApiKey(req);
         if (key) {
-          // Authenticated health: show account info
+          // Authenticated health: include account-specific info
           const auth = authenticate(key);
           if (auth.success && auth.ctx) {
             const stats = state.getAccountStats(auth.ctx.accountId);
             const nodes = state.getAccountNodes(auth.ctx.accountId);
             return jsonResponse({
-              status: "ok",
+              status,
               version: "0.2.0",
+              uptime,
               account: {
                 id: auth.ctx.accountId,
+                tier: auth.ctx.tier,
                 nodes,
                 ...stats,
               },
             });
           }
         }
-        // Update cluster stats on health check
-        const gs = state.getGlobalStats();
-        cluster.updateStats(gs.accounts, gs.totalClients + gs.totalNodes);
-        return jsonResponse({ status: draining ? "draining" : "ok", version: "0.2.0" });
+        return jsonResponse({ status, version: "0.2.0", uptime });
       }
 
       // Reject all other requests when draining

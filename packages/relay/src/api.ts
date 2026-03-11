@@ -187,6 +187,39 @@ export async function handleApiRequest(
       });
     }
 
+    if (path === "/v1/admin/health" && method === "GET") {
+      const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
+      const accounts = listAccounts();
+      const accountDetails = accounts.map((a) => {
+        const acctStats = state?.getAccountStats(a.id) ?? { nodes: 0, clients: 0, pending: 0 };
+        const limits = getRateLimits(a.id);
+        return {
+          id: a.id,
+          email: a.email,
+          name: a.name,
+          status: a.status,
+          tier: a.tier,
+          ...acctStats,
+          rateLimits: limits,
+        };
+      });
+
+      return json({
+        status: "ok",
+        version: "0.2.0",
+        global: {
+          accountCount: getAccountCount(),
+          ...stats,
+        },
+        accounts: accountDetails,
+        config: {
+          signupEnabled: config.auth.signupEnabled,
+          rateLimits: config.rateLimits,
+          abuse: config.abuse,
+        },
+      });
+    }
+
     return error("Not found", 404);
   }
 
