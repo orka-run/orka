@@ -192,9 +192,10 @@ describe("ClaudeCodeAdapter", () => {
       "[orka session: thread-1]",
       "--effort",
       "medium",
-      "Inspect the project",
     ]);
     expect(spawnCalls[0]?.options.cwd).toBe("/tmp/project");
+    expect(spawnCalls[0]?.options.env?.CLAUDECODE).toBeUndefined();
+    expect(stdin.writes).toEqual(["Inspect the project"]);
     expect(stdin.ended).toBe(true);
 
     expect(events.map((event) => event.type)).toEqual([

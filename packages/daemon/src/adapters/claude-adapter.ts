@@ -98,11 +98,16 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const events = new AsyncEventQueue<ProviderRuntimeEvent>();
         const turnId = generateId("turn");
         const command = buildClaudeCommand(input);
+        // Remove CLAUDECODE env to prevent nested session detection
+        const spawnEnv = { ...globalThis.process.env };
+        delete spawnEnv.CLAUDECODE;
+
         const process = this.spawnProcess(command, {
           cwd: input.cwd,
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
+          env: spawnEnv,
         });
         const meta: ClaudeHandleMeta = {
           process,
@@ -142,11 +147,17 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const outputTask = consumeClaudeOutput(input.threadId, stdout, meta, input.model);
         void finalizeClaudeProcess(input.threadId, process, outputTask, meta);
 
-        // Prompt is passed as CLI argument; close stdin immediately
         try {
+          if (input.prompt) {
+            await Promise.resolve(stdin.write(input.prompt));
+          }
           await Promise.resolve(stdin.end());
-        } catch {
-          // stdin close failure is non-fatal when prompt is passed as argument
+        } catch (error) {
+          emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error");
+          closeEvents(meta);
+          process.kill();
+          await process.exited;
+          throw error;
         }
 
         return handle;
@@ -483,11 +494,6 @@ function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
   const effort = mapClaudeReasoningEffort(input.reasoningEffort);
   if (effort) {
     command.push("--effort", effort);
-  }
-
-  // Pass prompt as CLI argument instead of stdin to avoid pipe race conditions
-  if (input.prompt) {
-    command.push(input.prompt);
   }
 
   return command;
