@@ -1,4 +1,5 @@
 import type {
+  OrchestrationEvent,
   OrkaService,
   Session,
   Task,
@@ -212,6 +213,10 @@ class RemoteClient implements OrkaService {
 
   async getResult(sessionId: string): Promise<SessionResult | null> {
     return this.call("getResult", { sessionId });
+  }
+
+  async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
+    return this.call("getSessionTimeline", { sessionId });
   }
 
   async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {

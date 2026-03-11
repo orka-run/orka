@@ -2,6 +2,7 @@ export * from "./types";
 export * from "./approval";
 export * from "./provider-adapter";
 export * from "./provider-events";
+export * from "./orchestration";
 export * from "./service";
 export * from "./rpc";
 export * from "./crypto";

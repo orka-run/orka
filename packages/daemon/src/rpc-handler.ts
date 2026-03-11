@@ -101,6 +101,8 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
       return svc.getTags(params.sessionId);
     case "getResult":
       return svc.getResult(params.sessionId);
+    case "getSessionTimeline":
+      return svc.getSessionTimeline(params.sessionId);
     case "getUsage":
       return svc.getUsage(params);
     case "captureOutput":

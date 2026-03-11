@@ -52,6 +52,39 @@ describe("OrchestrationEngine", () => {
     ]);
   });
 
+  test("persists mapped events with provider metadata when configured", () => {
+    const persisted: unknown[] = [];
+    const engine = new OrchestrationEngine({
+      persistEvent: (event) => {
+        persisted.push(event);
+      },
+    });
+
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "session.started",
+        "thread-1",
+        {},
+        {
+          eventId: "evt-1",
+          provider: "codex",
+          createdAt: "2026-03-11T00:00:00.000Z",
+        },
+      ),
+    );
+
+    expect(persisted).toEqual([
+      {
+        eventId: "evt-1",
+        provider: "codex",
+        type: "session.started",
+        sessionId: "session-1",
+        timestamp: "2026-03-11T00:00:00.000Z",
+      },
+    ]);
+  });
+
   test("filters events by session id", () => {
     const engine = new OrchestrationEngine();
 
@@ -71,6 +104,32 @@ describe("OrchestrationEngine", () => {
         timestamp: "2026-03-11T00:00:00.000Z",
       },
     ]);
+  });
+
+  test("loads persisted session timelines into the in-memory log", () => {
+    const timeline = [
+      {
+        type: "session.started",
+        sessionId: "session-1",
+        timestamp: "2026-03-11T00:00:00.000Z",
+      },
+      {
+        type: "content.delta",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        streamKind: "assistant_text",
+        delta: "Hello",
+        timestamp: "2026-03-11T00:00:01.000Z",
+      },
+    ] as const;
+
+    const engine = new OrchestrationEngine({
+      getSessionTimeline: (sessionId) => (sessionId === "session-1" ? [...timeline] : []),
+    });
+
+    expect(engine.getSessionTimeline("session-1")).toEqual(timeline);
+    expect(engine.loadSessionEvents("session-1")).toEqual(timeline);
+    expect(engine.getSessionEvents("session-1")).toEqual(timeline);
   });
 
   test("projects session status across started, running, and completed states", () => {

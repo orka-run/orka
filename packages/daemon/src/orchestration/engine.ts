@@ -1,7 +1,7 @@
 import type { ProviderRuntimeEvent, RuntimeSessionState, SessionStatus } from "@orka/core";
 import type { PushHub } from "../push-hub";
 import { withSpanSync } from "../tracing";
-import type { OrchestrationEvent } from "./events";
+import type { OrchestrationEvent, PersistedOrchestrationEvent } from "./events";
 import { mapProviderEvent } from "./ingestion";
 
 const UNKNOWN_TURN_PREFIX = "unknown-turn:";
@@ -18,11 +18,24 @@ export interface SessionProjection {
   pendingRequests: Array<{ requestId: string; requestType: string }>;
 }
 
+export interface OrchestrationEngineOptions {
+  pushHub?: PushHub;
+  persistEvent?: (event: PersistedOrchestrationEvent) => void;
+  getSessionTimeline?: (sessionId: string) => OrchestrationEvent[];
+}
+
 export class OrchestrationEngine {
   private log: OrchestrationEvent[] = [];
   private listeners: Array<(event: OrchestrationEvent) => void> = [];
+  private readonly options: OrchestrationEngineOptions;
 
-  constructor(private pushHub?: PushHub) {}
+  constructor(pushHub?: PushHub);
+  constructor(options?: OrchestrationEngineOptions);
+  constructor(pushHubOrOptions?: PushHub | OrchestrationEngineOptions) {
+    this.options = pushHubOrOptions instanceof Object && "broadcast" in pushHubOrOptions
+      ? { pushHub: pushHubOrOptions as PushHub }
+      : (pushHubOrOptions ?? {});
+  }
 
   ingest(sessionId: string, event: ProviderRuntimeEvent): void {
     withSpanSync(
@@ -35,14 +48,19 @@ export class OrchestrationEngine {
           return;
         }
 
+        this.options.persistEvent?.({
+          ...orchestrationEvent,
+          provider: event.provider,
+          eventId: event.eventId,
+        });
         this.log.push(orchestrationEvent);
 
         for (const listener of this.listeners) {
           listener(orchestrationEvent);
         }
 
-        this.pushHub?.broadcast("orchestration.event", orchestrationEvent);
-        this.pushHub?.broadcast("orchestration.sessionUpdated", {
+        this.options.pushHub?.broadcast("orchestration.event", orchestrationEvent);
+        this.options.pushHub?.broadcast("orchestration.sessionUpdated", {
           sessionId,
           status: this.getSessionState(sessionId).status,
         });
@@ -66,6 +84,23 @@ export class OrchestrationEngine {
     return withSpanSync("orka.orchestration.get_session_events", { "orka.session.id": sessionId }, () =>
       this.log.filter((event) => event.sessionId === sessionId),
     );
+  }
+
+  getSessionTimeline(sessionId: string): OrchestrationEvent[] {
+    return withSpanSync("orka.orchestration.get_session_timeline", { "orka.session.id": sessionId }, () =>
+      this.options.getSessionTimeline?.(sessionId) ?? this.getSessionEvents(sessionId),
+    );
+  }
+
+  loadSessionEvents(sessionId: string): OrchestrationEvent[] {
+    return withSpanSync("orka.orchestration.load_session_events", { "orka.session.id": sessionId }, () => {
+      const timeline = this.getSessionTimeline(sessionId);
+      this.log = [
+        ...this.log.filter((event) => event.sessionId !== sessionId),
+        ...timeline,
+      ];
+      return timeline;
+    });
   }
 
   getSessionState(sessionId: string): SessionProjection {

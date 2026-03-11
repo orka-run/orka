@@ -2,6 +2,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import type {
+  OrchestrationEvent,
   OrkaService,
   SessionFilters,
   PruneOptions,
@@ -28,6 +29,7 @@ import {
   getUsageSummary as dbGetUsageSummary,
   getOrkaHome,
   getSessionDiff,
+  getOrchestrationEvents,
   insertUsageRecord,
 } from "./db";
 import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees, getRunner } from "./orchestrator";
@@ -108,6 +110,10 @@ class LocalClient implements OrkaService {
       });
     }
     return result;
+  }
+
+  async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
+    return getOrchestrationEvents(sessionId);
   }
 
   async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {

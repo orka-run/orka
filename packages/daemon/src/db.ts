@@ -2,7 +2,15 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { z } from "zod/v4";
-import type { Session, Task, SessionStatus, UsageRecord, UsageSummary } from "@orka/core";
+import type {
+  OrchestrationEvent,
+  PersistedOrchestrationEvent,
+  Session,
+  SessionStatus,
+  Task,
+  UsageRecord,
+  UsageSummary,
+} from "@orka/core";
 import { BackendKindSchema, SessionModeSchema, SessionStatusSchema } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
@@ -44,6 +52,10 @@ const UsageLogRowSchema = z.object({
   cost_usd: z.number().nullable().default(null),
   model: z.string().nullable().default(null),
   recorded_at: z.string(),
+});
+
+const OrchestrationEventRowSchema = z.object({
+  payload: z.string(),
 });
 
 const ORKA_DIR = ".orka";
@@ -89,6 +101,9 @@ const MIGRATIONS = [
   { version: 8, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_session_id ON usage_log(session_id)` },
   { version: 9, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_backend_recorded_at ON usage_log(backend, recorded_at)` },
   { version: 10, sql: `ALTER TABLE sessions ADD COLUMN last_diff TEXT` },
+  { version: 11, sql: `CREATE TABLE IF NOT EXISTS orchestration_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, turn_id TEXT, item_id TEXT, request_id TEXT, provider TEXT NOT NULL, timestamp TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES sessions(id))` },
+  { version: 12, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_session ON orchestration_events(session_id)` },
+  { version: 13, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_type ON orchestration_events(type)` },
 ];
 
 function migrate(db: Database): void {
@@ -429,6 +444,67 @@ export function getUsageSummary(opts: { since?: string; backend?: string } = {})
   });
 }
 
+// --- Orchestration events ---
+
+export function insertOrchestrationEvent(event: PersistedOrchestrationEvent): void {
+  withSpanSync("orka.db.insertOrchestrationEvent", {
+    "orka.session.id": event.sessionId,
+    "orka.provider": event.provider,
+  }, () => {
+    const payload = stripPersistedEventFields(event);
+    getDb()
+      .prepare(
+        `INSERT INTO orchestration_events (
+           event_id,
+           session_id,
+           type,
+           payload,
+           turn_id,
+           item_id,
+           request_id,
+           provider,
+           timestamp
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        event.eventId,
+        event.sessionId,
+        event.type,
+        JSON.stringify(payload),
+        getTurnId(payload),
+        getItemId(payload),
+        getRequestId(payload),
+        event.provider,
+        event.timestamp,
+      );
+  });
+}
+
+export function getOrchestrationEvents(sessionId: string): OrchestrationEvent[] {
+  return withSpanSync("orka.db.getOrchestrationEvents", { "orka.session.id": sessionId }, () => {
+    const rows = getDb()
+      .prepare(
+        `SELECT payload
+         FROM orchestration_events
+         WHERE session_id = ?
+         ORDER BY timestamp ASC, event_id ASC`,
+      )
+      .all(sessionId) as unknown[];
+    return rows.map(rowToOrchestrationEvent);
+  });
+}
+
+export function deleteOrchestrationEvents(sessionIds: string[]): void {
+  if (sessionIds.length === 0) return;
+  withSpanSync("orka.db.deleteOrchestrationEvents", { "orka.session.count": sessionIds.length }, () => {
+    const placeholders = sessionIds.map(() => "?").join(", ");
+    getDb()
+      .prepare(`DELETE FROM orchestration_events WHERE session_id IN (${placeholders})`)
+      .run(...sessionIds);
+  });
+}
+
 // --- Delete ---
 
 export function deleteSessions(ids: string[]): void {
@@ -440,6 +516,7 @@ export function deleteSessions(ids: string[]): void {
     const taskIds = db
       .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
       .all(...ids) as { task_id: string }[];
+    deleteOrchestrationEvents(ids);
     db.prepare(`DELETE FROM usage_log WHERE session_id IN (${placeholders})`).run(...ids);
     db.prepare(`DELETE FROM session_tags WHERE session_id IN (${placeholders})`).run(...ids);
     db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
@@ -538,4 +615,26 @@ function rowToUsageRecord(row: unknown): UsageRecord {
     model: data.model,
     recordedAt: data.recorded_at,
   };
+}
+
+function rowToOrchestrationEvent(row: unknown): OrchestrationEvent {
+  const data = OrchestrationEventRowSchema.parse(row);
+  return JSON.parse(data.payload) as OrchestrationEvent;
+}
+
+function stripPersistedEventFields(event: PersistedOrchestrationEvent): OrchestrationEvent {
+  const { provider: _provider, eventId: _eventId, ...payload } = event;
+  return payload;
+}
+
+function getTurnId(event: OrchestrationEvent): string | null {
+  return "turnId" in event ? (event.turnId ?? null) : null;
+}
+
+function getItemId(event: OrchestrationEvent): string | null {
+  return "itemId" in event ? (event.itemId ?? null) : null;
+}
+
+function getRequestId(event: OrchestrationEvent): string | null {
+  return "requestId" in event ? (event.requestId ?? null) : null;
 }

@@ -2,7 +2,17 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { closeDb, getUsageBySession, getUsageSummary, insertSession, insertTask, insertUsageRecord } from "./db";
+import {
+  closeDb,
+  deleteSessions,
+  getOrchestrationEvents,
+  getUsageBySession,
+  getUsageSummary,
+  insertOrchestrationEvent,
+  insertSession,
+  insertTask,
+  insertUsageRecord,
+} from "./db";
 
 const prevOrkaHome = process.env.ORKA_HOME;
 let testHome = "";
@@ -22,6 +32,37 @@ afterEach(() => {
     process.env.ORKA_HOME = prevOrkaHome;
   }
 });
+
+function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
+  insertTask({
+    id: taskId,
+    title: `Task ${sessionId}`,
+    prompt: "Fix issue",
+    backend: "claude-code",
+    mode: "background",
+    model: "claude-sonnet",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  insertSession({
+    id: sessionId,
+    taskId,
+    workspaceId: `ws-${sessionId}`,
+    status: "completed",
+    backend: "claude-code",
+    mode: "background",
+    tmuxSessionName: `tmux-${sessionId}`,
+    projectPath: "/tmp/project",
+    workingDir: "/tmp/project",
+    logFile: `/tmp/project/${sessionId}.log`,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    startedAt: "2026-01-01T00:01:00.000Z",
+    finishedAt: "2026-01-01T00:02:00.000Z",
+    exitCode: 0,
+    kept: false,
+    autoMerge: false,
+  });
+}
 
 describe("usage_log helpers", () => {
   test("stores per-session usage and summarizes with filters", () => {
@@ -181,5 +222,59 @@ describe("usage_log helpers", () => {
         },
       },
     });
+  });
+});
+
+describe("orchestration event helpers", () => {
+  test("stores orchestration events and returns them in timestamp order", () => {
+    seedSession("sess-1");
+
+    insertOrchestrationEvent({
+      eventId: "evt-2",
+      provider: "claude-code",
+      type: "turn.completed",
+      sessionId: "sess-1",
+      turnId: "turn-1",
+      state: "completed",
+      timestamp: "2026-01-01T00:01:00.000Z",
+    });
+    insertOrchestrationEvent({
+      eventId: "evt-1",
+      provider: "claude-code",
+      type: "session.started",
+      sessionId: "sess-1",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(getOrchestrationEvents("sess-1")).toEqual([
+      {
+        type: "session.started",
+        sessionId: "sess-1",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        type: "turn.completed",
+        sessionId: "sess-1",
+        turnId: "turn-1",
+        state: "completed",
+        timestamp: "2026-01-01T00:01:00.000Z",
+      },
+    ]);
+  });
+
+  test("deletes persisted orchestration events when sessions are deleted", () => {
+    seedSession("sess-1");
+
+    insertOrchestrationEvent({
+      eventId: "evt-1",
+      provider: "claude-code",
+      type: "session.started",
+      sessionId: "sess-1",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+
+    deleteSessions(["sess-1"]);
+
+    expect(getOrchestrationEvents("sess-1")).toEqual([]);
   });
 });

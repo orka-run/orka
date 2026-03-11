@@ -1,5 +1,6 @@
 import type { Session, SessionStatus, SpawnRequest, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
+import type { OrchestrationEvent } from "./orchestration";
 
 // --- Session Result (moved from daemon/result-parser) ---
 
@@ -96,6 +97,7 @@ export interface OrkaService {
 
   // --- Session output ---
   getResult(sessionId: string): Promise<SessionResult | null>;
+  getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]>;
   getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary>;
   captureOutput(sessionId: string): Promise<string>;
   getLogContent(sessionId: string): Promise<string | null>;
