@@ -37,7 +37,7 @@ export function buildBackendCommand(
   backend: BackendKind,
   prompt: string,
   mode: SessionMode,
-  opts?: { logFile?: string; sessionId?: string; model?: string; reasoningEffort?: ReasoningEffort },
+  opts?: { logFile?: string; sessionId?: string; model?: string; reasoningEffort?: ReasoningEffort; projectPath?: string },
 ): BackendCommand {
   return withSpanSync("orka.backend.build_command", { "orka.backend": backend }, () => {
     let cmd: string;
@@ -47,7 +47,7 @@ export function buildBackendCommand(
         cmd = buildClaudeCode(prompt, mode, opts?.sessionId, opts?.model);
         break;
       case "codex":
-        cmd = buildCodex(prompt, mode, opts?.model, opts?.reasoningEffort);
+        cmd = buildCodex(prompt, mode, opts?.model, opts?.reasoningEffort, opts?.projectPath);
         break;
       case "shell":
         cmd = prompt;
@@ -76,7 +76,7 @@ function buildClaudeCode(prompt: string, mode: SessionMode, sessionId?: string, 
   return parts.join(" ");
 }
 
-function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoningEffort?: ReasoningEffort): string {
+function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoningEffort?: ReasoningEffort, projectPath?: string): string {
   const escaped = shellEscape(prompt);
   const parts: string[] = ["codex"];
 
@@ -86,8 +86,13 @@ function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoning
     parts.push("--full-auto");
     parts.push("--json");
     parts.push("--skip-git-repo-check");
-    // TODO(orka-ad2): re-enable sandbox once git worktree writes are supported
-    parts.push("--sandbox danger-full-access");
+    // workspace-write sandbox + extra writable dirs for worktree git metadata and bun tmpdir
+    parts.push("--sandbox workspace-write");
+    if (projectPath) {
+      // Worktree .git metadata (index.lock etc.) lives in <projectPath>/.git/worktrees/
+      parts.push(`--add-dir ${shellEscape(projectPath + "/.git")}`);
+    }
+    parts.push("--add-dir /tmp");
   }
 
   if (model) parts.push(`--model ${shellEscape(model)}`);

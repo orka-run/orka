@@ -131,7 +131,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     }
 
     // 5. Build backend command (with log tee)
-    const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model, reasoningEffort: req.reasoningEffort });
+    const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model, reasoningEffort: req.reasoningEffort, projectPath });
 
     // 6. Write command to script file (avoids bash -c escaping hell)
     //    Unset CLAUDECODE so nested claude-code sessions don't detect parent and refuse to start.
