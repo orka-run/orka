@@ -13,22 +13,12 @@ export function parseSessionResult(logFile: string, session?: { startedAt: strin
     const content = readFileSync(logFile, "utf-8");
     const lines = content.split("\n");
 
-    let result: SessionResult | null = null;
-
-    // Detect format by scanning for known event types
-    // claude-code emits {"type":"result",...}
-    // codex emits {"type":"turn.completed",...}
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed.type === "result") { result = parseClaudeCodeResult(lines); break; }
-        if (parsed.type === "turn.completed" || parsed.type === "thread.started") { result = parseCodexResult(lines); break; }
-      } catch {
-        continue;
-      }
-    }
+    const format = detectLogFormat(lines);
+    const result = format === "claude"
+      ? parseClaudeCodeResult(lines)
+      : format === "codex"
+        ? parseCodexResult(lines)
+        : null;
 
     // Fallback: calculate duration from session timestamps when backend reports 0
     if (result && result.durationMs === 0 && session?.startedAt && session?.finishedAt) {
@@ -37,6 +27,38 @@ export function parseSessionResult(logFile: string, session?: { startedAt: strin
 
     return result;
   });
+}
+
+function detectLogFormat(lines: string[]): "claude" | "codex" | null {
+  let sawCodexMarker = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (trimmed.startsWith("[orka] exit_code=")) {
+      sawCodexMarker = true;
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.type === "result") return "claude";
+      if (
+        parsed.type === "thread.started" ||
+        parsed.type === "turn.started" ||
+        parsed.type === "turn.completed" ||
+        parsed.type === "item.started" ||
+        parsed.type === "item.completed"
+      ) {
+        sawCodexMarker = true;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return sawCodexMarker ? "codex" : null;
 }
 
 /** Parse claude-code stream-json log. */
@@ -83,11 +105,18 @@ function parseCodexResult(lines: string[]): SessionResult | null {
   let totalCachedInput = 0;
   let numTurns = 0;
   let lastAgentMessage = "";
-  let hasError = false;
+  let sessionExitCode: number | null = null;
+  let hasRuntimeError = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+
+    const exitCode = parseOrkaExitCode(trimmed);
+    if (exitCode !== null) {
+      sessionExitCode = exitCode;
+      continue;
+    }
 
     let parsed: any;
     try {
@@ -108,21 +137,18 @@ function parseCodexResult(lines: string[]): SessionResult | null {
       lastAgentMessage = parsed.item.text ?? "";
     }
 
-    // Track command failures
-    if (parsed.type === "item.completed" && parsed.item?.type === "command_execution") {
-      if (parsed.item.exit_code !== 0 && parsed.item.exit_code != null) {
-        hasError = true;
-      }
+    if (parsed.type === "error") {
+      hasRuntimeError = true;
     }
   }
 
-  if (numTurns === 0 && !lastAgentMessage) return null;
+  if (numTurns === 0 && !lastAgentMessage && sessionExitCode === null) return null;
 
   return {
     result: lastAgentMessage,
-    isError: hasError,
+    isError: sessionExitCode !== null ? sessionExitCode !== 0 : hasRuntimeError,
     durationMs: 0, // codex doesn't report duration in JSONL
-    costUsd: null,  // codex doesn't report cost in JSONL
+    costUsd: null, // codex doesn't report cost in JSONL
     inputTokens: totalInput,
     outputTokens: totalOutput,
     cacheReadTokens: totalCachedInput,
@@ -130,4 +156,12 @@ function parseCodexResult(lines: string[]): SessionResult | null {
     model: null,
     numTurns,
   };
+}
+
+function parseOrkaExitCode(line: string): number | null {
+  const match = /^\[orka\]\s+exit_code=(\d+)$/.exec(line);
+  if (!match) {
+    return null;
+  }
+  return Number.parseInt(match[1], 10);
 }
