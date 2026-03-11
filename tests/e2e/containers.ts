@@ -6,10 +6,24 @@
  * connection URLs + cleanup functions.
  */
 
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
 import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const PROJECT_ROOT = resolve(import.meta.dir, "../..");
+
+/** Build a Docker image (always rebuilds to pick up source changes, fast with layer cache). */
+function ensureImage(tag: string, dockerfile: string): void {
+  const build = spawnSync("docker", ["build", "-f", dockerfile, "-t", tag, "."], {
+    cwd: PROJECT_ROOT,
+    stdio: "pipe",
+  });
+  const code = build.status ?? build.exitCode ?? 0;
+  if (code !== 0) {
+    const stderr = build.stderr ? Buffer.from(build.stderr).toString() : "";
+    throw new Error(`Failed to build ${tag}: ${stderr}`);
+  }
+}
 
 export interface RelayContainer {
   container: StartedTestContainer;
@@ -35,20 +49,16 @@ export interface DaemonContainer {
 export async function startRelayContainer(opts?: {
   env?: Record<string, string>;
 }): Promise<RelayContainer> {
-  const container = await GenericContainer
-    .fromDockerfile(PROJECT_ROOT, "Dockerfile.relay")
-    .build("orka-relay-test", { deleteOnExit: true });
+  // Build image via docker CLI (fast with layer cache, avoids testcontainers rebuild overhead)
+  ensureImage("orka-relay-test", "Dockerfile.relay");
 
-  let started = await container
+  let started = await new GenericContainer("orka-relay-test")
     .withExposedPorts(7390)
     .withEnvironment({
       ORKA_RELAY_DATA: "/data",
       ...opts?.env,
     })
-    .withWaitStrategy(
-      // @ts-ignore — testcontainers Wait strategies
-      undefined, // use default: wait for port
-    )
+    .withWaitStrategy(Wait.forLogMessage("orka relay listening"))
     .start();
 
   const port = started.getMappedPort(7390);
@@ -71,13 +81,11 @@ export async function startDaemonContainer(opts: {
   nodeId?: string;
   env?: Record<string, string>;
 }): Promise<DaemonContainer> {
-  const container = await GenericContainer
-    .fromDockerfile(PROJECT_ROOT, "Dockerfile.daemon")
-    .build("orka-daemon-test", { deleteOnExit: true });
+  ensureImage("orka-daemon-test", "Dockerfile.daemon");
 
   const nodeId = opts.nodeId ?? "test-node";
 
-  let started = await container
+  let started = await new GenericContainer("orka-daemon-test")
     .withExposedPorts(7394)
     .withEnvironment({
       ORKA_HOME: "/data",
