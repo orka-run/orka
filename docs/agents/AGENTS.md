@@ -2,6 +2,11 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Backend Selection by Task Type
+
+- **Frontend / frontend-design tasks** (dashboard, UI components, styling): use **claude-code** with model **claude-opus-4-6**
+- **Backend / tooling tasks** (daemon, CLI, config, infra): any backend (codex or claude-code)
+
 ## Quick Reference
 
 ```bash
