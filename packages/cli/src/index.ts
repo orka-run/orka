@@ -56,9 +56,6 @@ const backendValues = ["claude-code", "codex", "shell"] as const;
 const modeValues = ["interactive", "background"] as const;
 const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
 
-// Initialize OpenTelemetry tracing
-initTracing();
-
 // Check for --remote and --token flags before command
 const remoteIdx = process.argv.indexOf("--remote");
 let remoteUrl = remoteIdx !== -1 ? process.argv[remoteIdx + 1] : process.env.ORKA_REMOTE;
@@ -103,6 +100,30 @@ const DEFAULT_DAEMON_PORT = 7394;
 const DEFAULT_DAEMON_HOST = "127.0.0.1";
 const DEFAULT_DAEMON_URL = `ws://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}`;
 const DEFAULT_DAEMON_HEALTH = `http://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}/health`;
+const DEFAULT_DAEMON_TRACES = `http://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}/v1/traces`;
+
+function deriveTraceCollectorEndpoint(url: string): string | undefined {
+  try {
+    const endpoint = new URL(url);
+    endpoint.protocol = endpoint.protocol === "wss:" ? "https:" : "http:";
+    endpoint.pathname = "/v1/traces";
+    endpoint.search = "";
+    endpoint.hash = "";
+    return endpoint.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+const topLevelCommand = process.argv.slice(2).find((arg) => !arg.startsWith("-"));
+initTracing(
+  topLevelCommand === "serve"
+    ? {}
+    : {
+        otlpHttpEndpoint: remoteUrl ? deriveTraceCollectorEndpoint(remoteUrl) : DEFAULT_DAEMON_TRACES,
+        otlpFallbackToFile: true,
+      },
+);
 
 async function isDaemonRunning(): Promise<boolean> {
   try {

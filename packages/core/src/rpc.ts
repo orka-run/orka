@@ -2,16 +2,17 @@
 
 export interface RpcRequest {
   jsonrpc: "2.0";
-  id: string;
+  id: string | number;
   method: string;
   params?: any;
+  traceparent?: string;
   /** Routing hint for relay — ignored by direct server. */
   node?: string;
 }
 
 export interface RpcResponse {
   jsonrpc: "2.0";
-  id: string;
+  id: string | number | null;
   result?: any;
   error?: RpcError;
 }

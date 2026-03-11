@@ -16,7 +16,7 @@ import { pushHub } from "./push";
 import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
 import { getOrkaHome } from "./db";
-import { withSpan } from "./tracing";
+import { persistOtlpJsonTraces, withSpan } from "./tracing";
 
 export interface ServerOptions {
   port: number;
@@ -67,6 +67,26 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
           return new Response(JSON.stringify(body), {
             headers: { "content-type": "application/json" },
           });
+        }
+
+        if (url.pathname === "/v1/traces") {
+          if (req.method !== "POST") {
+            return new Response("Method not allowed", { status: 405 });
+          }
+
+          try {
+            const body = await req.json();
+            persistOtlpJsonTraces(body);
+            return new Response(JSON.stringify({ ok: true }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          } catch {
+            return new Response(JSON.stringify({ error: "Invalid OTLP JSON payload" }), {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            });
+          }
         }
 
         // Session completion callback — called by session script on exit

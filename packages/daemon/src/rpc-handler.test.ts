@@ -1,3 +1,6 @@
+import { context, propagation, trace } from "@opentelemetry/api";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { OrkaService, Session } from "@orka/core";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { pushHub } from "./push";
@@ -130,5 +133,62 @@ describe("handleRpcRequest", () => {
         data: { sessionId: "sess-2" },
       },
     ]);
+  });
+
+  test("creates a child span from the caller traceparent", async () => {
+    trace.disable();
+    propagation.disable();
+
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    trace.setGlobalTracerProvider(provider);
+    propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+
+    try {
+      const svc = {
+        async reap() {
+          return 1;
+        },
+      } as OrkaService;
+
+      const tracer = trace.getTracer("rpc-handler-test");
+      let traceparent = "";
+
+      await tracer.startActiveSpan("caller", async (callerSpan) => {
+        const carrier: { traceparent?: string } = {};
+        propagation.inject(trace.setSpan(context.active(), callerSpan), carrier);
+        traceparent = carrier.traceparent ?? "";
+
+        const response = await handleRpcRequest(
+          svc,
+          JSON.stringify({ jsonrpc: "2.0", id: 4, method: "reap", traceparent }),
+        );
+
+        expect(JSON.parse(response)).toEqual({
+          jsonrpc: "2.0",
+          id: 4,
+          result: 1,
+        });
+
+        callerSpan.end();
+      });
+
+      await provider.forceFlush();
+
+      const callerSpan = exporter.getFinishedSpans().find((span) => span.name === "caller");
+      const rpcSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.rpc.handle");
+
+      expect(traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
+      expect(callerSpan).toBeDefined();
+      expect(rpcSpan).toBeDefined();
+      expect(rpcSpan?.spanContext().traceId).toBe(callerSpan?.spanContext().traceId);
+      expect(rpcSpan?.parentSpanContext?.spanId).toBe(callerSpan?.spanContext().spanId);
+    } finally {
+      await provider.shutdown();
+      trace.disable();
+      propagation.disable();
+    }
   });
 });

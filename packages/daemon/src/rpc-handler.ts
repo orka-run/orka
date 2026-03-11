@@ -1,8 +1,9 @@
+import { ROOT_CONTEXT, propagation, SpanStatusCode } from "@opentelemetry/api";
 import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
 import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR } from "@orka/core";
 import { decryptRequest, encryptResponse } from "@orka/core";
 import { pushHub } from "./push";
-import { withSpan } from "./tracing";
+import { getTracer } from "./tracing";
 
 /**
  * Dispatch a JSON-RPC request to the OrkaService implementation.
@@ -14,55 +15,73 @@ export async function handleRpcRequest(
   raw: string,
   encKey?: Buffer | null,
 ): Promise<string> {
-  return withSpan("orka.rpc.handle", { "orka.method": "unknown" }, async (span) => {
-    let req: any;
-    try {
-      req = JSON.parse(raw);
-      span.setAttribute("orka.method", req?.method ?? "unknown");
-    } catch {
-      return JSON.stringify({
-        jsonrpc: "2.0",
-        id: null,
-        error: { code: RPC_PARSE_ERROR, message: "Parse error" },
-      });
-    }
+  let req: RpcRequest & { _enc?: unknown };
+  try {
+    req = JSON.parse(raw);
+  } catch {
+    return JSON.stringify({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: RPC_PARSE_ERROR, message: "Parse error" },
+    });
+  }
 
-    const id = req.id;
-    const isEncrypted = !!req._enc;
+  const parentContext =
+    typeof req.traceparent === "string" && req.traceparent.trim() !== ""
+      ? propagation.extract(ROOT_CONTEXT, { traceparent: req.traceparent })
+      : ROOT_CONTEXT;
 
-    // Decrypt request if encrypted
-    if (isEncrypted && encKey) {
+  const tracer = getTracer();
+  return tracer.startActiveSpan(
+    "orka.rpc.handle",
+    {
+      attributes: {
+        "orka.method": req.method ?? "unknown",
+      },
+    },
+    parentContext,
+    async (span) => {
+      const id = req.id;
+      const isEncrypted = !!req._enc;
+
+      if (isEncrypted && encKey) {
+        try {
+          req = decryptRequest(encKey, req);
+          span.setAttribute("orka.method", req?.method ?? "unknown");
+        } catch {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: "E2E decryption failed" });
+          return JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            error: { code: RPC_PARSE_ERROR, message: "E2E decryption failed" },
+          });
+        }
+      }
+
       try {
-        req = decryptRequest(encKey, req);
-        span.setAttribute("orka.method", req?.method ?? "unknown");
-      } catch {
+        const result = await dispatch(svc, req.method, req.params ?? {});
+        let response: any = { jsonrpc: "2.0", id, result };
+
+        if (isEncrypted && encKey) {
+          response = encryptResponse(encKey, response);
+        }
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return JSON.stringify(response);
+      } catch (error: any) {
+        const code = error.rpcCode ?? RPC_INTERNAL_ERROR;
+        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        span.recordException(error);
         return JSON.stringify({
           jsonrpc: "2.0",
           id,
-          error: { code: RPC_PARSE_ERROR, message: "E2E decryption failed" },
-        });
+          error: { code, message: error.message },
+        } as RpcResponse);
+      } finally {
+        span.end();
       }
-    }
-
-    try {
-      const result = await dispatch(svc, req.method, req.params ?? {});
-      let response: any = { jsonrpc: "2.0", id, result };
-
-      // Encrypt response if request was encrypted
-      if (isEncrypted && encKey) {
-        response = encryptResponse(encKey, response);
-      }
-
-      return JSON.stringify(response);
-    } catch (e: any) {
-      const code = e.rpcCode ?? RPC_INTERNAL_ERROR;
-      return JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        error: { code, message: e.message },
-      } as RpcResponse);
-    }
-  });
+    },
+  );
 }
 
 async function dispatch(svc: OrkaService, method: string, params: any): Promise<any> {

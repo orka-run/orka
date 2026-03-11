@@ -17,6 +17,7 @@ import type {
   ApprovalRequest,
   ApprovalDecision,
 } from "@orka/core";
+import { context, propagation, trace } from "@opentelemetry/api";
 import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy } from "@orka/core";
 import { withSpan } from "./tracing";
 
@@ -141,7 +142,7 @@ class RemoteClient implements OrkaService {
   private async call(method: string, params?: any): Promise<any> {
     return withSpan("orka.rpc.request", {
       "orka.method": method,
-    }, async () => {
+    }, async (span) => {
       await this.connect();
       const id = String(this.nextId++);
 
@@ -154,6 +155,11 @@ class RemoteClient implements OrkaService {
           method,
           ...(params !== undefined ? { params } : {}),
         };
+        const traceCarrier: { traceparent?: string } = {};
+        propagation.inject(trace.setSpan(context.active(), span), traceCarrier);
+        if (traceCarrier.traceparent) {
+          req.traceparent = traceCarrier.traceparent;
+        }
 
         // Encrypt params if E2E is enabled
         if (this.encKey && req.params) {

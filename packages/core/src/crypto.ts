@@ -4,7 +4,7 @@
  * Design:
  *   - X25519 ECDH key exchange for shared secret derivation
  *   - AES-256-GCM for symmetric encryption of JSON-RPC params/result
- *   - Envelope fields (jsonrpc, id, method, node) remain plaintext for relay routing
+ *   - Envelope fields (jsonrpc, id, method, node, traceparent) remain plaintext for relay routing
  *   - Only `params` (request) and `result`/`error.data` (response) are encrypted
  *   - Perfect forward secrecy via ephemeral session keys
  *   - User-owned keys — relay operator has zero access to payload content
@@ -140,7 +140,7 @@ export function decrypt(key: Buffer, payload: EncryptedPayload): string {
 
 /**
  * Encrypt a JSON-RPC request's params field in-place.
- * The envelope (jsonrpc, id, method, node) stays plaintext for relay routing.
+ * The envelope (jsonrpc, id, method, node, traceparent) stays plaintext for relay routing.
  */
 export function encryptRequest(key: Buffer, request: any): any {
   if (!request.params) return request;
