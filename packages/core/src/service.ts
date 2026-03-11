@@ -1,4 +1,5 @@
 import type { Session, SessionStatus, SpawnRequest, Task } from "./types";
+import type { ApprovalRequest, ApprovalDecision } from "./approval";
 
 // --- Session Result (moved from daemon/result-parser) ---
 
@@ -81,4 +82,8 @@ export interface OrkaService {
   // --- Bulk operations ---
   deleteSessions(ids: string[]): Promise<void>;
   pruneSessions(opts: PruneOptions): Promise<PruneResult>;
+
+  // --- Approvals ---
+  getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]>;
+  resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
 }
