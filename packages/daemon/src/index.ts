@@ -24,6 +24,7 @@ export type { ProjectEntry } from "./projects";
 export { getOrkaHome } from "./db";
 export { formatLog, formatEvent, parseLine } from "./log-formatter";
 export { createDrainableWorker, type DrainableWorker } from "./drainable-worker";
+export * from "./adapters";
 export { ProviderAdapterRegistry } from "./provider-registry";
 export { ProviderService } from "./provider-service";
 export { ShellAdapter } from "./adapters";
