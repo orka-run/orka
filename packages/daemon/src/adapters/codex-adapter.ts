@@ -11,12 +11,14 @@ import type {
   RuntimeSessionState,
   RuntimeTurnState,
 } from "@orka/core";
+import type { Span } from "@opentelemetry/api";
 import { createEvent } from "@orka/core";
 import { withSpan } from "../tracing";
 
 type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/interrupt" | "thread/unsubscribe";
 type CodexClientNotificationMethod = "initialized";
 type CodexProcess = ReturnType<typeof Bun.spawn>;
+type CodexSpawn = typeof Bun.spawn;
 type JsonRpcId = string | number;
 
 interface CodexUsage {
@@ -131,42 +133,49 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
 export class CodexAdapter implements ProviderAdapter {
   readonly kind = "codex" as const;
 
+  constructor(private readonly spawnProcess: CodexSpawn = Bun.spawn.bind(Bun)) {}
+
   async startSession(input: ProviderSessionStartInput): Promise<ProviderSessionHandle> {
     return withSpan(
       "orka.provider.codex.start_session",
       { "orka.session.id": input.threadId, "orka.backend": this.kind },
-      async () => {
+      async (span) => {
         const command = ["codex"];
         if (input.model) {
           command.push("--model", input.model);
         }
         command.push("--dangerously-bypass-approvals-and-sandbox", "app-server");
 
-        const process = Bun.spawn(command, {
+        const process = this.spawnProcess(command, {
           cwd: input.cwd,
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
         });
+        span.addEvent("process.spawned", { "orka.command": command.join(" ") });
 
         const events = new AsyncEventQueue<ProviderRuntimeEvent>();
 
         if (!isReadableStream(process.stdout)) {
-          events.push(
+          emitCodexEvent(
+            events,
             createEvent(
               "runtime.error",
               input.threadId,
               { message: "Codex app-server stdout is not available", class: "transport_error" },
               { provider: this.kind },
             ),
+            span,
           );
-          events.push(
+          emitCodexEvent(
+            events,
             createEvent(
               "session.exited",
               input.threadId,
               { reason: "Codex app-server failed to start stdout transport", exitKind: "error" },
               { provider: this.kind },
             ),
+            span,
           );
           events.close();
           throw new Error("Codex app-server stdout is not available");
@@ -184,8 +193,7 @@ export class CodexAdapter implements ProviderAdapter {
           void drainStream(process.stderr);
         }
 
-        const outputTask = consumeCodexOutput(input.threadId, process.stdout, meta, events);
-        void finalizeCodexProcess(input.threadId, process, meta, outputTask, events);
+        void consumeCodexOutput(input.threadId, process.stdout, meta, events, process);
 
         try {
           await meta.sendRequest<{ userAgent: string }>("initialize", {
@@ -609,80 +617,90 @@ async function consumeCodexOutput(
   stdout: ReadableStream<Uint8Array>,
   meta: CodexHandleMeta,
   events: AsyncEventQueue<ProviderRuntimeEvent>,
+  process: CodexProcess,
 ): Promise<void> {
-  try {
-    for await (const line of readLines(stdout)) {
-      let raw: unknown;
-
+  await withSpan(
+    "orka.provider.codex.parse_output",
+    { "orka.session.id": threadId, "orka.backend": "codex" },
+    async (span) => {
       try {
-        raw = JSON.parse(line);
+        for await (const line of readLines(stdout)) {
+          let raw: unknown;
+
+          try {
+            raw = JSON.parse(line);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown JSON parse failure";
+            emitCodexEvent(
+              events,
+              createEvent(
+                "runtime.warning",
+                threadId,
+                { message: `Ignoring malformed Codex event: ${message}` },
+                { provider: "codex" },
+              ),
+              span,
+            );
+            continue;
+          }
+
+          if (isJsonRpcResponse(raw)) {
+            resolvePendingRequest(meta, raw);
+            continue;
+          }
+
+          const mapped = mapCodexEvent(threadId, raw, { meta });
+          if (mapped) {
+            emitCodexEvent(events, mapped, span);
+          }
+        }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown JSON parse failure";
-        events.push(
+        const message = error instanceof Error ? error.message : "Unknown stream failure";
+        emitCodexEvent(
+          events,
           createEvent(
-            "runtime.warning",
+            "runtime.error",
             threadId,
-            { message: `Ignoring malformed Codex event: ${message}` },
+            { message: `Codex app-server stream failed: ${message}`, class: "transport_error" },
             { provider: "codex" },
           ),
+          span,
         );
-        continue;
       }
 
-      if (isJsonRpcResponse(raw)) {
-        resolvePendingRequest(meta, raw);
-        continue;
+      const exitCode = await process.exited;
+      span.addEvent("process.exited", { "orka.exit_code": exitCode });
+
+      for (const [requestId, pending] of meta.pendingRequests) {
+        pending.reject(new Error(`Codex app-server exited before replying to ${pending.method} (${requestId})`));
+      }
+      meta.pendingRequests.clear();
+      meta.pendingServerRequests.clear();
+
+      if (!meta.sawSessionExit) {
+        emitCodexEvent(
+          events,
+          createEvent(
+            "session.exited",
+            threadId,
+            {
+              reason: `Codex app-server exited with code ${exitCode}`,
+              exitKind: exitCode === 0 ? "graceful" : "error",
+            },
+            { provider: "codex" },
+          ),
+          span,
+        );
       }
 
-      const mapped = mapCodexEvent(threadId, raw, { meta });
-      if (mapped) {
-        events.push(mapped);
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown stream failure";
-    events.push(
-      createEvent(
-        "runtime.error",
-        threadId,
-        { message: `Codex app-server stream failed: ${message}`, class: "transport_error" },
-        { provider: "codex" },
-      ),
-    );
-  }
+      events.close();
+    },
+  );
 }
 
-async function finalizeCodexProcess(
-  threadId: string,
-  process: CodexProcess,
-  meta: CodexHandleMeta,
-  outputTask: Promise<void>,
-  events: AsyncEventQueue<ProviderRuntimeEvent>,
-): Promise<void> {
-  const exitCode = await process.exited;
-  await outputTask;
-
-  for (const [requestId, pending] of meta.pendingRequests) {
-    pending.reject(new Error(`Codex app-server exited before replying to ${pending.method} (${requestId})`));
-  }
-  meta.pendingRequests.clear();
-  meta.pendingServerRequests.clear();
-
-  if (!meta.sawSessionExit) {
-    events.push(
-      createEvent(
-        "session.exited",
-        threadId,
-        {
-          reason: `Codex app-server exited with code ${exitCode}`,
-          exitKind: exitCode === 0 ? "graceful" : "error",
-        },
-        { provider: "codex" },
-      ),
-    );
-  }
-
-  events.close();
+function emitCodexEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: ProviderRuntimeEvent, span?: Span): void {
+  queue.push(event);
+  span?.addEvent("event.emitted", { "orka.event.type": event.type });
 }
 
 function resolvePendingRequest(meta: CodexHandleMeta, response: JsonRpcResponse): void {

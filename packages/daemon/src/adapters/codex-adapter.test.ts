@@ -1,9 +1,35 @@
-import { describe, expect, test } from "bun:test";
-import { mapCodexEvent } from "./codex-adapter";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CodexAdapter, mapCodexEvent } from "./codex-adapter";
+import { initTracing } from "../tracing";
+
+const originalOrkaHome = process.env.ORKA_HOME;
+
+let testHome = "";
+
+beforeEach(() => {
+  testHome = mkdtempSync(join(tmpdir(), "orka-codex-adapter-"));
+  process.env.ORKA_HOME = testHome;
+  initTracing();
+});
+
+afterEach(() => {
+  rmSync(testHome, { recursive: true, force: true });
+  if (originalOrkaHome === undefined) {
+    delete process.env.ORKA_HOME;
+  } else {
+    process.env.ORKA_HOME = originalOrkaHome;
+  }
+});
 
 function createMeta() {
   return {
-    pendingServerRequests: new Map<string, { requestType: "command_execution_approval" | "tool_user_input" | "unknown"; decision?: "approve" | "deny" }>(),
+    pendingServerRequests: new Map<
+      string,
+      { requestType: "command_execution_approval" | "tool_user_input" | "unknown"; decision?: "approve" | "deny" }
+    >(),
     turnUsage: new Map<string, { inputTokens: number; outputTokens: number }>(),
     sawSessionExit: false,
   };
@@ -203,3 +229,135 @@ describe("mapCodexEvent", () => {
     });
   });
 });
+
+describe("CodexAdapter", () => {
+  test("startSession records the codex start_session span", async () => {
+    const spawnCalls: Array<{ command: string[]; options: Record<string, unknown> }> = [];
+    const stdout = createControlledTextStream();
+    const stdin = new MockWritableSink((value) => {
+      const message = JSON.parse(value) as { id?: string; method?: string };
+
+      if (message.method === "initialize") {
+        stdout.pushJson({ id: message.id, result: { userAgent: "orka-test" } });
+        return;
+      }
+
+      if (message.method === "thread/start") {
+        stdout.pushJson({ id: message.id, result: { thread: { id: "provider-thread-1" } } });
+        stdout.close();
+      }
+    });
+
+    const adapter = new CodexAdapter(((command, options) => {
+      spawnCalls.push({ command: [...command], options: options as Record<string, unknown> });
+      return {
+        stdout: stdout.stream,
+        stderr: createTextStream([]),
+        stdin,
+        exited: Promise.resolve(0),
+        kill() {},
+      } as ReturnType<typeof Bun.spawn>;
+    }) as typeof Bun.spawn);
+
+    const handle = await adapter.startSession({
+      threadId: "thread-1",
+      cwd: "/tmp/project",
+      model: "gpt-5",
+    });
+
+    expect(handle.provider).toBe("codex");
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0]?.command).toEqual([
+      "codex",
+      "--model",
+      "gpt-5",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "app-server",
+    ]);
+    expect(spawnCalls[0]?.options.cwd).toBe("/tmp/project");
+
+    const startSpan = readTraceEntries().find((entry) => entry.name === "orka.provider.codex.start_session");
+
+    expect(startSpan).toBeDefined();
+    expect(startSpan?.attributes).toMatchObject({
+      "orka.session.id": "thread-1",
+      "orka.backend": "codex",
+    });
+    expect(startSpan?.events.some((event) => {
+      return (
+        event.name === "process.spawned" &&
+        event.attributes?.["orka.command"] ===
+          "codex --model gpt-5 --dangerously-bypass-approvals-and-sandbox app-server"
+      );
+    })).toBe(true);
+  });
+});
+
+function createControlledTextStream(): {
+  stream: ReadableStream<Uint8Array>;
+  pushJson(value: unknown): void;
+  close(): void;
+} {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  return {
+    stream: new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController;
+      },
+    }),
+    pushJson(value: unknown) {
+      controller?.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+    },
+    close() {
+      controller?.close();
+    },
+  };
+}
+
+function createTextStream(lines: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const line of lines) {
+        controller.enqueue(encoder.encode(`${line}\n`));
+      }
+      controller.close();
+    },
+  });
+}
+
+class MockWritableSink {
+  constructor(private readonly onWrite: (value: string) => void) {}
+
+  write(value: string): void {
+    this.onWrite(value);
+  }
+
+  end(): void {}
+}
+
+function readTraceEntries(): Array<{
+  name: string;
+  attributes: Record<string, unknown>;
+  events: Array<{ name: string; attributes?: Record<string, unknown> }>;
+}> {
+  const traceFile = join(testHome, "traces.jsonl");
+  if (!existsSync(traceFile)) {
+    return [];
+  }
+
+  return readFileSync(traceFile, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) =>
+      JSON.parse(line) as {
+        name: string;
+        attributes: Record<string, unknown>;
+        events: Array<{ name: string; attributes?: Record<string, unknown> }>;
+      },
+    );
+}

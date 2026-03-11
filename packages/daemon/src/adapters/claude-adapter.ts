@@ -7,6 +7,7 @@ import type {
   ProviderSessionHandle,
   ProviderSessionStartInput,
 } from "@orka/core";
+import type { Span } from "@opentelemetry/api";
 import { createEvent, generateId } from "@orka/core";
 import { withSpan } from "../tracing";
 
@@ -94,7 +95,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     return withSpan(
       "orka.provider.claude_code.start_session",
       { "orka.session.id": input.threadId, "orka.backend": this.kind },
-      async () => {
+      async (span) => {
         const events = new AsyncEventQueue<ProviderRuntimeEvent>();
         const turnId = generateId("turn");
         const command = buildClaudeCommand(input);
@@ -109,6 +110,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           stderr: "pipe",
           env: spawnEnv,
         });
+        span.addEvent("process.spawned", { "orka.command": command.join(" ") });
         const meta: ClaudeHandleMeta = {
           process,
           events,
@@ -127,15 +129,17 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const stdout = process.stdout;
         const stdin = process.stdin;
         if (!isReadableStream(stdout) || !isWritableSink(stdin)) {
-          events.push(
+          emitClaudeEvent(
+            events,
             createEvent(
               "runtime.error",
               input.threadId,
               { message: "Claude Code stdio is not available", class: "transport_error" },
               { provider: this.kind },
             ),
+            span,
           );
-          emitSessionExited(input.threadId, meta, "Claude Code failed to initialize stdio", "error");
+          emitSessionExited(input.threadId, meta, "Claude Code failed to initialize stdio", "error", span);
           closeEvents(meta);
           throw new Error("Claude Code stdio is not available");
         }
@@ -144,8 +148,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           void drainStream(process.stderr);
         }
 
-        const outputTask = consumeClaudeOutput(input.threadId, stdout, meta, input.model);
-        void finalizeClaudeProcess(input.threadId, process, outputTask, meta);
+        void consumeClaudeOutput(input.threadId, stdout, meta, process, input.model);
 
         try {
           if (input.prompt) {
@@ -153,7 +156,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           }
           await Promise.resolve(stdin.end());
         } catch (error) {
-          emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error");
+          emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error", span);
           closeEvents(meta);
           process.kill();
           await process.exited;
@@ -317,86 +320,93 @@ async function consumeClaudeOutput(
   threadId: string,
   stdout: ReadableStream<Uint8Array>,
   meta: ClaudeHandleMeta,
+  process: ClaudeProcess,
   model?: string,
 ): Promise<boolean> {
-  let sawSessionExit = false;
-  let emittedTurnStarted = false;
-
-  try {
-    for await (const line of readLines(stdout)) {
-      let raw: unknown;
+  return withSpan(
+    "orka.provider.claude_code.parse_output",
+    { "orka.session.id": threadId, "orka.backend": "claude-code" },
+    async (span) => {
+      let sawSessionExit = false;
+      let emittedTurnStarted = false;
 
       try {
-        raw = JSON.parse(line);
+        for await (const line of readLines(stdout)) {
+          let raw: unknown;
+
+          try {
+            raw = JSON.parse(line);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown JSON parse failure";
+            emitClaudeEvent(
+              meta.events,
+              createEvent(
+                "runtime.warning",
+                threadId,
+                { message: `Ignoring malformed Claude Code event: ${message}` },
+                { provider: "claude-code" },
+              ),
+              span,
+            );
+            continue;
+          }
+
+          const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
+          if (primary) {
+            emitClaudeEvent(meta.events, primary, span);
+            if (!emittedTurnStarted && primary.type === "session.started") {
+              emitClaudeEvent(
+                meta.events,
+                createEvent(
+                  "turn.started",
+                  threadId,
+                  { ...(model ? { model } : {}) },
+                  { provider: "claude-code", turnId: meta.turnId },
+                ),
+                span,
+              );
+              emittedTurnStarted = true;
+            }
+          }
+
+          const exit = mapClaudeEvent(threadId, raw, { mode: "exit", turnId: meta.turnId });
+          if (exit) {
+            emitClaudeEvent(meta.events, exit, span);
+            meta.exitEmitted = true;
+            sawSessionExit = true;
+          }
+        }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown JSON parse failure";
-        meta.events.push(
+        const message = error instanceof Error ? error.message : "Unknown stream failure";
+        emitClaudeEvent(
+          meta.events,
           createEvent(
-            "runtime.warning",
+            "runtime.error",
             threadId,
-            { message: `Ignoring malformed Claude Code event: ${message}` },
+            { message: `Claude Code stream failed: ${message}`, class: "transport_error" },
             { provider: "claude-code" },
           ),
+          span,
         );
-        continue;
       }
 
-      const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
-      if (primary) {
-        meta.events.push(primary);
-        if (!emittedTurnStarted && primary.type === "session.started") {
-          meta.events.push(
-            createEvent(
-              "turn.started",
-              threadId,
-              { ...(model ? { model } : {}) },
-              { provider: "claude-code", turnId: meta.turnId },
-            ),
-          );
-          emittedTurnStarted = true;
-        }
+      const exitCode = await process.exited;
+      span.addEvent("process.exited", { "orka.exit_code": exitCode });
+
+      if (!sawSessionExit && !meta.exitEmitted) {
+        emitSessionExited(
+          threadId,
+          meta,
+          `Claude Code exited with code ${exitCode}`,
+          exitCode === 0 ? "graceful" : "error",
+          span,
+        );
       }
 
-      const exit = mapClaudeEvent(threadId, raw, { mode: "exit", turnId: meta.turnId });
-      if (exit) {
-        meta.events.push(exit);
-        meta.exitEmitted = true;
-        sawSessionExit = true;
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown stream failure";
-    meta.events.push(
-      createEvent(
-        "runtime.error",
-        threadId,
-        { message: `Claude Code stream failed: ${message}`, class: "transport_error" },
-        { provider: "claude-code" },
-      ),
-    );
-  }
-
-  return sawSessionExit;
-}
-
-async function finalizeClaudeProcess(
-  threadId: string,
-  process: ClaudeProcess,
-  outputTask: Promise<boolean>,
-  meta: ClaudeHandleMeta,
-): Promise<void> {
-  const [sawSessionExit, exitCode] = await Promise.all([outputTask, process.exited]);
-
-  if (!sawSessionExit && !meta.exitEmitted) {
-    emitSessionExited(
-      threadId,
-      meta,
-      `Claude Code exited with code ${exitCode}`,
-      exitCode === 0 ? "graceful" : "error",
-    );
-  }
-
-  closeEvents(meta);
+      closeEvents(meta);
+      return sawSessionExit;
+    },
+  );
 }
 
 async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -466,20 +476,28 @@ function emitSessionExited(
   meta: ClaudeHandleMeta,
   reason: string,
   exitKind: "graceful" | "error",
+  span?: Span,
 ): void {
   if (meta.exitEmitted) {
     return;
   }
 
   meta.exitEmitted = true;
-  meta.events.push(
+  emitClaudeEvent(
+    meta.events,
     createEvent(
       "session.exited",
       threadId,
       { reason, exitKind },
       { provider: "claude-code" },
     ),
+    span,
   );
+}
+
+function emitClaudeEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: ProviderRuntimeEvent, span?: Span): void {
+  queue.push(event);
+  span?.addEvent("event.emitted", { "orka.event.type": event.type });
 }
 
 function buildClaudeCommand(input: ProviderSessionStartInput): string[] {

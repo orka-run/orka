@@ -8,6 +8,7 @@ import type {
   ProviderSessionHandle,
   ProviderSessionStartInput,
 } from "@orka/core";
+import type { Span } from "@opentelemetry/api";
 import { createEvent } from "@orka/core";
 import { buildBackendCommand } from "../backends";
 import { getOrkaHome } from "../db";
@@ -96,7 +97,7 @@ export class ShellAdapter implements ProviderAdapter {
         ...(input.cwd ? { "orka.cwd": input.cwd } : {}),
         ...(input.prompt ? { "orka.command": input.prompt } : {}),
       },
-      async () => {
+      async (span) => {
         const threadId = input.threadId;
         const sessionName = buildSessionName(threadId);
         const cwd = input.cwd ?? process.cwd();
@@ -108,6 +109,7 @@ export class ShellAdapter implements ProviderAdapter {
         await writeFile(scriptPath, buildScript(command), "utf8");
 
         await this.runner.spawn(sessionName, scriptPath, cwd);
+        span.addEvent("process.spawned", { "orka.command": command });
 
         const runtime: ShellSessionRuntime = {
           sessionName,
@@ -118,13 +120,15 @@ export class ShellAdapter implements ProviderAdapter {
           lastCapture: "",
         };
 
-        runtime.queue.push(
+        emitShellEvent(
+          runtime.queue,
           createEvent(
             "session.started",
             threadId,
             { message: `shell session started in tmux (${sessionName})` },
             { provider: this.kind },
           ),
+          span,
         );
 
         void this.pollSession(threadId, runtime);
@@ -167,7 +171,7 @@ export class ShellAdapter implements ProviderAdapter {
   }
 
   async stopSession(handle: ProviderSessionHandle): Promise<void> {
-    await withSpan("orka.provider.shell.stop_session", { "orka.session.id": handle.threadId }, async () => {
+    await withSpan("orka.provider.shell.stop_session", { "orka.session.id": handle.threadId }, async (span) => {
       const runtime = getRuntime(handle);
       runtime.closed = true;
 
@@ -175,7 +179,8 @@ export class ShellAdapter implements ProviderAdapter {
         await this.runner.kill(runtime.sessionName);
       }
 
-      this.emitSessionExited(handle.threadId, runtime, "stopped");
+      span.addEvent("process.exited", { "orka.exit_code": -1 });
+      this.emitSessionExited(handle.threadId, runtime, "stopped", "graceful", span);
     });
   }
 
@@ -188,44 +193,55 @@ export class ShellAdapter implements ProviderAdapter {
   }
 
   private async pollSession(threadId: string, runtime: ShellSessionRuntime): Promise<void> {
-    while (!runtime.closed) {
-      try {
-        const running = await this.runner.has(runtime.sessionName);
-        if (!running) {
-          this.emitSessionExited(threadId, runtime);
-          return;
+    await withSpan(
+      "orka.provider.shell.parse_output",
+      { "orka.session.id": threadId, "orka.backend": this.kind },
+      async (span) => {
+        while (!runtime.closed) {
+          try {
+            const running = await this.runner.has(runtime.sessionName);
+            if (!running) {
+              span.addEvent("process.exited", { "orka.exit_code": -1 });
+              this.emitSessionExited(threadId, runtime, "process exited", "graceful", span);
+              return;
+            }
+
+            const capture = await this.runner.capture(runtime.sessionName, CAPTURE_LINES);
+            const delta = diffCapture(runtime.lastCapture, capture);
+            runtime.lastCapture = capture;
+
+            if (delta.length > 0) {
+              emitShellEvent(
+                runtime.queue,
+                createEvent(
+                  "content.delta",
+                  threadId,
+                  { streamKind: "command_output", delta },
+                  { provider: this.kind },
+                ),
+                span,
+              );
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            emitShellEvent(
+              runtime.queue,
+              createEvent(
+                "runtime.error",
+                threadId,
+                { message, class: "provider_error" },
+                { provider: this.kind },
+              ),
+              span,
+            );
+            this.emitSessionExited(threadId, runtime, "polling failed", "error", span);
+            return;
+          }
+
+          await sleep(POLL_INTERVAL_MS);
         }
-
-        const capture = await this.runner.capture(runtime.sessionName, CAPTURE_LINES);
-        const delta = diffCapture(runtime.lastCapture, capture);
-        runtime.lastCapture = capture;
-
-        if (delta.length > 0) {
-          runtime.queue.push(
-            createEvent(
-              "content.delta",
-              threadId,
-              { streamKind: "command_output", delta },
-              { provider: this.kind },
-            ),
-          );
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        runtime.queue.push(
-          createEvent(
-            "runtime.error",
-            threadId,
-            { message, class: "provider_error" },
-            { provider: this.kind },
-          ),
-        );
-        this.emitSessionExited(threadId, runtime, "polling failed", "error");
-        return;
-      }
-
-      await sleep(POLL_INTERVAL_MS);
-    }
+      },
+    );
   }
 
   private emitSessionExited(
@@ -233,18 +249,21 @@ export class ShellAdapter implements ProviderAdapter {
     runtime: ShellSessionRuntime,
     reason = "process exited",
     exitKind: "graceful" | "error" = "graceful",
+    span?: Span,
   ): void {
     if (runtime.exitEmitted) return;
 
     runtime.exitEmitted = true;
     runtime.closed = true;
-    runtime.queue.push(
+    emitShellEvent(
+      runtime.queue,
       createEvent(
         "session.exited",
         threadId,
         { reason, exitKind },
         { provider: this.kind },
       ),
+      span,
     );
     runtime.queue.close();
   }
@@ -269,6 +288,11 @@ function buildSessionName(threadId: string): string {
 
 function sanitizeName(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function emitShellEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: ProviderRuntimeEvent, span?: Span): void {
+  queue.push(event);
+  span?.addEvent("event.emitted", { "orka.event.type": event.type });
 }
 
 function buildScript(command: string): string {
