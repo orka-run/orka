@@ -49,53 +49,55 @@ class RemoteClient implements OrkaService {
   }
 
   private async connect(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) return;
-    if (this.connectPromise) return this.connectPromise;
+    return withSpan("orka.rpc.connect", {}, async () => {
+      if (this.ws?.readyState === WebSocket.OPEN) return;
+      if (this.connectPromise) return this.connectPromise;
 
-    // Derive encryption key if E2E is configured
-    if (this.keyPair && this.serverPublicKey && !this.encKey) {
-      this.encKey = await deriveSessionKey(
-        this.keyPair.privateKey,
-        this.serverPublicKey,
-        // Use a fixed salt derived from both public keys for deterministic key derivation
-        Buffer.from(this.keyPair.publicKey + this.serverPublicKey).toString("base64").slice(0, 44),
-      );
-    }
+      // Derive encryption key if E2E is configured
+      if (this.keyPair && this.serverPublicKey && !this.encKey) {
+        this.encKey = await deriveSessionKey(
+          this.keyPair.privateKey,
+          this.serverPublicKey,
+          // Use a fixed salt derived from both public keys for deterministic key derivation
+          Buffer.from(this.keyPair.publicKey + this.serverPublicKey).toString("base64").slice(0, 44),
+        );
+      }
 
-    // Append client public key to URL for server-side key derivation
-    let connectUrl = this.url;
-    if (this.keyPair) {
-      const sep = connectUrl.includes("?") ? "&" : "?";
-      connectUrl += `${sep}pubkey=${encodeURIComponent(this.keyPair.publicKey)}`;
-    }
+      // Append client public key to URL for server-side key derivation
+      let connectUrl = this.url;
+      if (this.keyPair) {
+        const sep = connectUrl.includes("?") ? "&" : "?";
+        connectUrl += `${sep}pubkey=${encodeURIComponent(this.keyPair.publicKey)}`;
+      }
 
-    this.connectPromise = new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(connectUrl);
-      ws.onopen = () => {
-        this.ws = ws;
-        this.connectPromise = null;
-        this.backoff.reset();
-        resolve();
-      };
-      ws.onerror = () => {
-        this.connectPromise = null;
-        reject(new Error(`WebSocket connection failed: ${this.url}`));
-      };
-      ws.onclose = () => {
-        this.ws = null;
-        this.connectPromise = null;
-        // Reject all pending requests
-        for (const [id, p] of this.pending) {
-          p.reject(new Error("Connection closed"));
-          this.pending.delete(id);
-        }
-      };
-      ws.onmessage = (event) => {
-        this.handleMessage(typeof event.data === "string" ? event.data : "");
-      };
+      this.connectPromise = new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(connectUrl);
+        ws.onopen = () => {
+          this.ws = ws;
+          this.connectPromise = null;
+          this.backoff.reset();
+          resolve();
+        };
+        ws.onerror = () => {
+          this.connectPromise = null;
+          reject(new Error(`WebSocket connection failed: ${this.url}`));
+        };
+        ws.onclose = () => {
+          this.ws = null;
+          this.connectPromise = null;
+          // Reject all pending requests
+          for (const [id, p] of this.pending) {
+            p.reject(new Error("Connection closed"));
+            this.pending.delete(id);
+          }
+        };
+        ws.onmessage = (event) => {
+          this.handleMessage(typeof event.data === "string" ? event.data : "");
+        };
+      });
+
+      return this.connectPromise;
     });
-
-    return this.connectPromise;
   }
 
   private handleMessage(raw: string): void {

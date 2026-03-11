@@ -137,8 +137,10 @@ export function insertTask(task: Task): void {
 }
 
 export function getTask(id: string): Task | null {
-  const row = getDb().prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
-  return row ? rowToTask(row) : null;
+  return withSpanSync("orka.db.getTask", { "orka.task.id": id }, () => {
+    const row = getDb().prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
+    return row ? rowToTask(row) : null;
+  });
 }
 
 // --- Session CRUD ---
@@ -200,28 +202,34 @@ export function updateSessionStatus(
 }
 
 export function setSessionKept(id: string, kept: boolean): void {
-  getDb()
-    .prepare("UPDATE sessions SET kept = ? WHERE id = ?")
-    .run(kept ? 1 : 0, id);
+  withSpanSync("orka.db.setSessionKept", {}, () => {
+    getDb()
+      .prepare("UPDATE sessions SET kept = ? WHERE id = ?")
+      .run(kept ? 1 : 0, id);
+  });
 }
 
 export function getSession(id: string): Session | null {
-  const row = getDb()
-    .prepare("SELECT * FROM sessions WHERE id = ?")
-    .get(id) as any;
-  return row ? rowToSession(row) : null;
+  return withSpanSync("orka.db.getSession", { "orka.session.id": id }, () => {
+    const row = getDb()
+      .prepare("SELECT * FROM sessions WHERE id = ?")
+      .get(id) as any;
+    return row ? rowToSession(row) : null;
+  });
 }
 
 export function listSessions(status?: SessionStatus): Session[] {
-  const db = getDb();
-  const rows = status
-    ? (db
-        .prepare("SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC")
-        .all(status) as any[])
-    : (db
-        .prepare("SELECT * FROM sessions ORDER BY created_at DESC")
-        .all() as any[]);
-  return rows.map(rowToSession);
+  return withSpanSync("orka.db.listSessions", {}, () => {
+    const db = getDb();
+    const rows = status
+      ? (db
+          .prepare("SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC")
+          .all(status) as any[])
+      : (db
+          .prepare("SELECT * FROM sessions ORDER BY created_at DESC")
+          .all() as any[]);
+    return rows.map(rowToSession);
+  });
 }
 
 export function findSessionByTmux(tmuxName: string): Session | null {
@@ -257,31 +265,37 @@ export function deleteSessions(ids: string[]): void {
 // --- Tags ---
 
 export function insertSessionTags(sessionId: string, tags: string[]): void {
-  if (tags.length === 0) return;
-  const db = getDb();
-  const stmt = db.prepare("INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)");
-  for (const tag of tags) {
-    stmt.run(sessionId, tag);
-  }
+  withSpanSync("orka.db.insertSessionTags", {}, () => {
+    if (tags.length === 0) return;
+    const db = getDb();
+    const stmt = db.prepare("INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)");
+    for (const tag of tags) {
+      stmt.run(sessionId, tag);
+    }
+  });
 }
 
 export function getSessionTags(sessionId: string): string[] {
-  const rows = getDb()
-    .prepare("SELECT tag FROM session_tags WHERE session_id = ? ORDER BY tag")
-    .all(sessionId) as { tag: string }[];
-  return rows.map((r) => r.tag);
+  return withSpanSync("orka.db.getSessionTags", {}, () => {
+    const rows = getDb()
+      .prepare("SELECT tag FROM session_tags WHERE session_id = ? ORDER BY tag")
+      .all(sessionId) as { tag: string }[];
+    return rows.map((r) => r.tag);
+  });
 }
 
 export function listSessionsByTag(tag: string): Session[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT s.* FROM sessions s
-       INNER JOIN session_tags t ON s.id = t.session_id
-       WHERE t.tag = ?
-       ORDER BY s.created_at DESC`,
-    )
-    .all(tag) as any[];
-  return rows.map(rowToSession);
+  return withSpanSync("orka.db.listSessionsByTag", {}, () => {
+    const rows = getDb()
+      .prepare(
+        `SELECT s.* FROM sessions s
+         INNER JOIN session_tags t ON s.id = t.session_id
+         WHERE t.tag = ?
+         ORDER BY s.created_at DESC`,
+      )
+      .all(tag) as any[];
+    return rows.map(rowToSession);
+  });
 }
 
 // --- Row mappers ---

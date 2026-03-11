@@ -30,12 +30,14 @@ export class TmuxRunner implements SessionRunner {
 
   /** Check if a tmux session exists. */
   async has(sessionName: string): Promise<boolean> {
-    try {
-      await $`tmux has-session -t ${sessionName}`.quiet();
-      return true;
-    } catch {
-      return false;
-    }
+    return withSpan("orka.tmux.has", { "orka.tmux.name": sessionName }, async () => {
+      try {
+        await $`tmux has-session -t ${sessionName}`.quiet();
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 
   /** List orka-prefixed tmux sessions. */
@@ -77,9 +79,11 @@ export class TmuxRunner implements SessionRunner {
     sessionName: string,
     lines = 1000,
   ): Promise<string> {
-    const result =
-      await $`tmux capture-pane -t ${sessionName} -p -S -${lines}`.quiet().text();
-    return result;
+    return withSpan("orka.tmux.capture", { "orka.tmux.name": sessionName }, async () => {
+      const result =
+        await $`tmux capture-pane -t ${sessionName} -p -S -${lines}`.quiet().text();
+      return result;
+    });
   }
 
   /** Send literal text to a tmux session (no Enter appended). */
@@ -87,7 +91,9 @@ export class TmuxRunner implements SessionRunner {
     sessionName: string,
     keys: string,
   ): Promise<void> {
-    await $`tmux send-keys -t ${sessionName} -l ${keys}`.quiet();
+    await withSpan("orka.tmux.sendKeys", { "orka.tmux.name": sessionName }, async () => {
+      await $`tmux send-keys -t ${sessionName} -l ${keys}`.quiet();
+    });
   }
 
   /** Send literal text followed by Enter to a tmux session. */
@@ -95,18 +101,22 @@ export class TmuxRunner implements SessionRunner {
     sessionName: string,
     text: string,
   ): Promise<void> {
-    await $`tmux send-keys -t ${sessionName} -l ${text}`.quiet();
-    await $`tmux send-keys -t ${sessionName} Enter`.quiet();
+    await withSpan("orka.tmux.sendText", { "orka.tmux.name": sessionName }, async () => {
+      await $`tmux send-keys -t ${sessionName} -l ${text}`.quiet();
+      await $`tmux send-keys -t ${sessionName} Enter`.quiet();
+    });
   }
 
   /** Attach to a tmux session (replaces current process). */
   async attach(sessionName: string): Promise<void> {
-    const proc = Bun.spawn(["tmux", "attach-session", "-t", sessionName], {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
+    await withSpan("orka.tmux.attach", { "orka.tmux.name": sessionName }, async () => {
+      const proc = Bun.spawn(["tmux", "attach-session", "-t", sessionName], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await proc.exited;
     });
-    await proc.exited;
   }
 }
 

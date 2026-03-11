@@ -1,31 +1,34 @@
 import { readFileSync, existsSync } from "node:fs";
 import type { SessionResult } from "@orka/core";
+import { withSpanSync } from "./tracing";
 
 export type { SessionResult } from "@orka/core";
 
 /** Parse a session log to extract the final result. Auto-detects format (claude-code vs codex). */
 export function parseSessionResult(logFile: string): SessionResult | null {
-  if (!existsSync(logFile)) return null;
+  return withSpanSync("orka.result.parse", {}, () => {
+    if (!existsSync(logFile)) return null;
 
-  const content = readFileSync(logFile, "utf-8");
-  const lines = content.split("\n");
+    const content = readFileSync(logFile, "utf-8");
+    const lines = content.split("\n");
 
-  // Detect format by scanning for known event types
-  // claude-code emits {"type":"result",...}
-  // codex emits {"type":"turn.completed",...}
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed.type === "result") return parseClaudeCodeResult(lines);
-      if (parsed.type === "turn.completed" || parsed.type === "thread.started") return parseCodexResult(lines);
-    } catch {
-      continue;
+    // Detect format by scanning for known event types
+    // claude-code emits {"type":"result",...}
+    // codex emits {"type":"turn.completed",...}
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.type === "result") return parseClaudeCodeResult(lines);
+        if (parsed.type === "turn.completed" || parsed.type === "thread.started") return parseCodexResult(lines);
+      } catch {
+        continue;
+      }
     }
-  }
 
-  return null;
+    return null;
+  });
 }
 
 /** Parse claude-code stream-json log. */

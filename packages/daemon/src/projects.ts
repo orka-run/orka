@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { resolve } from "node:path";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { getOrkaHome } from "./db";
+import { withSpanSync } from "./tracing";
 
 export interface ProjectEntry {
   name: string;
@@ -30,26 +31,30 @@ function saveProjects(projects: ProjectEntry[]): void {
 
 /** Register a project alias. */
 export function addProject(name: string, path: string): ProjectEntry {
-  const absPath = resolve(path);
-  const projects = loadProjects();
-  const existing = projects.find((p) => p.name === name);
-  if (existing) {
-    existing.path = absPath;
-  } else {
-    projects.push({ name, path: absPath });
-  }
-  saveProjects(projects);
-  return { name, path: absPath };
+  return withSpanSync("orka.project.add", {}, () => {
+    const absPath = resolve(path);
+    const projects = loadProjects();
+    const existing = projects.find((p) => p.name === name);
+    if (existing) {
+      existing.path = absPath;
+    } else {
+      projects.push({ name, path: absPath });
+    }
+    saveProjects(projects);
+    return { name, path: absPath };
+  });
 }
 
 /** Remove a project by name. Returns true if found. */
 export function removeProject(name: string): boolean {
-  const projects = loadProjects();
-  const idx = projects.findIndex((p) => p.name === name);
-  if (idx === -1) return false;
-  projects.splice(idx, 1);
-  saveProjects(projects);
-  return true;
+  return withSpanSync("orka.project.remove", {}, () => {
+    const projects = loadProjects();
+    const idx = projects.findIndex((p) => p.name === name);
+    if (idx === -1) return false;
+    projects.splice(idx, 1);
+    saveProjects(projects);
+    return true;
+  });
 }
 
 /** List all registered projects. */
@@ -61,13 +66,15 @@ export function listProjects(): ProjectEntry[] {
  *  Checks: registered alias → absolute path → relative path from cwd.
  */
 export function resolveProject(ref: string): string {
-  // Check registered aliases first
-  const projects = loadProjects();
-  const byName = projects.find((p) => p.name === ref);
-  if (byName) return byName.path;
+  return withSpanSync("orka.project.resolve", {}, () => {
+    // Check registered aliases first
+    const projects = loadProjects();
+    const byName = projects.find((p) => p.name === ref);
+    if (byName) return byName.path;
 
-  // Otherwise treat as path
-  return resolve(ref);
+    // Otherwise treat as path
+    return resolve(ref);
+  });
 }
 
 /** Find a registered project name for a given path. Returns null if not registered. */
