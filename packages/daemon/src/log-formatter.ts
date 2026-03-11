@@ -72,9 +72,9 @@ export function formatEvent(event: LogEvent): string {
     }
     case "tool_result":
       if (event.exitCode && event.exitCode !== 0) {
-        return red(`✗ ${event.tool || "command"}`);
+        return `${red(`✗ ${event.tool || "command"}`)}\n`;
       }
-      return dim(previewText(event.output, 200));
+      return `${formatToolResultOutput(event.output)}\n`;
     case "error":
       return red(`ERROR: ${event.text}`);
     case "system":
@@ -106,7 +106,7 @@ function parseCodexCompleted(parsed: JsonRecord): LogEvent | null {
     return {
       kind: "tool_result",
       tool: item.command ?? "",
-      output: item.aggregated_output ?? "",
+      output: unescapeString(item.aggregated_output ?? ""),
       exitCode: typeof item.exit_code === "number" ? item.exit_code : undefined,
     };
   }
@@ -114,11 +114,8 @@ function parseCodexCompleted(parsed: JsonRecord): LogEvent | null {
   return null;
 }
 
-function parseCodexStarted(parsed: JsonRecord): LogEvent | null {
-  const item = parsed.item;
-  if (!item || typeof item !== "object") return null;
-  if (item.type !== "command_execution") return null;
-  return { kind: "tool_call", tool: item.command ?? "", input: "" };
+function parseCodexStarted(_parsed: JsonRecord): LogEvent | null {
+  return null;
 }
 
 function parseCodexTurnCompletion(parsed: JsonRecord): LogEvent {
@@ -212,10 +209,27 @@ function previewText(text: string, maxLength: number): string {
   );
 }
 
+function formatToolResultOutput(output: string): string {
+  const lines = output.replace(/\r/g, "").split("\n");
+  while (lines.length > 1 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  const preview = lines.slice(0, 3).map((line) => dim(truncateText(line, 120)));
+  const remaining = lines.length - preview.length;
+  if (remaining > 0) {
+    preview.push(dim(`... (${remaining} more lines)`));
+  }
+  return preview.join("\n");
+}
+
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   if (maxLength <= 3) return text.slice(0, maxLength);
   return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function unescapeString(s: string): string {
+  return s.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
 }
 
 function style(text: string, ...codes: number[]): string {
