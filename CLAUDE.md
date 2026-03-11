@@ -148,12 +148,46 @@ OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/s
 - **Worktrees outside main repo**: Background sessions get worktrees at `~/.orka/worktrees/` so `git rev-parse --show-toplevel` returns the worktree path, not the parent repo.
 - **Script files for tmux**: Commands are written to `~/.orka/scripts/<id>.sh` and tmux runs `bash <path>` — avoids nested `bash -c` shell escaping issues.
 - **Session stores projectPath**: The original repo root is stored in the session record, separate from workingDir (which may be a worktree). Used for retry, merge, and worktree cleanup.
-- **Auto-reap on every CLI invocation**: `reapSessions()` runs before every command, marking dead tmux sessions as completed and cleaning up worktrees.
+- **Auto-reap on every CLI invocation**: `reapSessions()` runs before every command (except `wait`), marking dead tmux sessions as completed. Worktree cleanup is NOT done during reap — agents may commit to the main repo while working in a worktree, leaving the worktree "clean" but still needed.
+- **CLAUDECODE env unset**: Spawned agent scripts `unset CLAUDECODE` before running claude CLI, because Claude Code detects nested sessions and refuses to start.
 - **Concurrent limits**: Configurable via `[limits] max_concurrent = "5"` in config.toml (0 = unlimited).
 - **zod/v4 default gotcha**: When using `.default({})` on nested zod objects, inner field defaults are NOT applied. Always use `Schema.default(Schema.parse({}))` pattern (see config.ts).
 - **Timer unref**: Any `setInterval`/`setTimeout` at module scope in library code MUST call `.unref()` so the process can exit when imported in ad-hoc scripts/tests.
 - **Bun SQLite multi-statement**: `db.exec()` with multiple statements separated by `;` can fail with foreign key constraints. Split into individual `db.exec()` calls per statement.
 - **Relay transparency**: Relay routes by `node` field in JSON-RPC envelope, never parses `params`/`result`. Protocol changes don't require relay updates.
+
+## Testing
+
+```bash
+# Run all tests (unit + E2E)
+bun test packages/ tests/
+
+# Unit tests only
+bun test packages/
+
+# E2E tests only (requires Docker)
+bun test tests/e2e/
+
+# Rebuild Docker images after source changes
+docker build -f Dockerfile.relay -t orka-relay-test .
+docker build -f Dockerfile.daemon -t orka-daemon-test .
+```
+
+**Unit tests** (`packages/*/src/*.test.ts`): Pure logic tests for relay modules — rate-limiter, state, cluster, abuse, config, auth, metering, reconnect. Uses `bun:test`, no external deps.
+
+**E2E tests** (`tests/e2e/`): Testcontainers-based tests that spin up relay in Docker. Auto-skip when Docker is unavailable. Uses `testcontainers` npm package.
+
+**Key testing patterns:**
+- E2E tests share a single signup account per describe block to avoid signup rate limit (5/hour/IP)
+- Relay container uses log-based wait strategy (`Wait.forLogMessage`) — WS port doesn't respond to TCP probes
+- Docker images are built via `docker` CLI (not testcontainers' `fromDockerfile`) for layer cache reuse
+- Mock DB-dependent modules with `mock.module()` in unit tests (see metering.test.ts)
+
+**Docker files:**
+- `Dockerfile.relay` — relay server on `oven/bun:1`, port 7390
+- `Dockerfile.daemon` — daemon with tmux+git, port 7394
+- `docker-compose.test.yml` — relay + daemon + toxiproxy for local dev
+- `.dockerignore` — excludes node_modules, .git, .orka, *.db
 
 ## Development Commands
 
