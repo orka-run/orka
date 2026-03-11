@@ -9,6 +9,7 @@ import type {
   DiffResult,
   MergeResult,
   SessionResult,
+  UsageSummary,
   RpcRequest,
   RpcResponse,
   KeyPair,
@@ -211,6 +212,10 @@ class RemoteClient implements OrkaService {
 
   async getResult(sessionId: string): Promise<SessionResult | null> {
     return this.call("getResult", { sessionId });
+  }
+
+  async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {
+    return this.call("getUsage", opts ?? {});
   }
 
   async captureOutput(sessionId: string): Promise<string> {

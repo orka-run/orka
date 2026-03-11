@@ -9,6 +9,7 @@ import type {
   DiffResult,
   MergeResult,
   SessionResult,
+  UsageSummary,
   SpawnRequest,
   Session,
   Task,
@@ -23,7 +24,10 @@ import {
   getSessionTags,
   listSessionsByTag,
   deleteSessions as dbDeleteSessions,
+  getUsageBySession,
+  getUsageSummary as dbGetUsageSummary,
   getOrkaHome,
+  insertUsageRecord,
 } from "./db";
 import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees, getRunner } from "./orchestrator";
 import { TerminalManager } from "./terminal-manager";
@@ -89,7 +93,71 @@ class LocalClient implements OrkaService {
   async getResult(sessionId: string): Promise<SessionResult | null> {
     const session = getSession(sessionId);
     if (!session?.logFile) return null;
-    return parseSessionResult(session.logFile, session);
+    const result = parseSessionResult(session.logFile, session);
+    if (result) {
+      insertUsageRecord({
+        sessionId: session.id,
+        backend: session.backend,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        costUsd: result.costUsd,
+        model: result.model,
+        recordedAt: session.finishedAt ?? new Date().toISOString(),
+      });
+    }
+    return result;
+  }
+
+  async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {
+    if (!opts?.sessionId) {
+      return dbGetUsageSummary(opts);
+    }
+
+    const records = getUsageBySession(opts.sessionId).filter((record) => {
+      if (opts.backend && record.backend !== opts.backend) {
+        return false;
+      }
+      if (opts.since && record.recordedAt < opts.since) {
+        return false;
+      }
+      return true;
+    });
+
+    const sessions = new Set(records.map((record) => record.sessionId));
+    const byBackend: UsageSummary["byBackend"] = {};
+    let totalCostUsd = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCacheReadTokens = 0;
+
+    for (const record of records) {
+      totalCostUsd += record.costUsd ?? 0;
+      totalInputTokens += record.inputTokens;
+      totalOutputTokens += record.outputTokens;
+      totalCacheReadTokens += record.cacheReadTokens;
+
+      const bucket = byBackend[record.backend] ?? {
+        cost: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        sessions: 0,
+      };
+      bucket.cost += record.costUsd ?? 0;
+      bucket.inputTokens += record.inputTokens;
+      bucket.outputTokens += record.outputTokens;
+      bucket.sessions = 1;
+      byBackend[record.backend] = bucket;
+    }
+
+    return {
+      totalCostUsd,
+      totalInputTokens,
+      totalOutputTokens,
+      totalCacheReadTokens,
+      sessionCount: sessions.size,
+      byBackend,
+    };
   }
 
   async captureOutput(sessionId: string): Promise<string> {

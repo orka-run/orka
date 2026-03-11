@@ -16,6 +16,26 @@ export interface SessionResult {
   numTurns: number;
 }
 
+export interface UsageRecord {
+  sessionId: string;
+  backend: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number | null;
+  model: string | null;
+  recordedAt: string;
+}
+
+export interface UsageSummary {
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  sessionCount: number;
+  byBackend: Record<string, { cost: number; inputTokens: number; outputTokens: number; sessions: number }>;
+}
+
 // --- Service Types ---
 
 export interface SessionFilters {
@@ -70,6 +90,7 @@ export interface OrkaService {
 
   // --- Session output ---
   getResult(sessionId: string): Promise<SessionResult | null>;
+  getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary>;
   captureOutput(sessionId: string): Promise<string>;
   getLogContent(sessionId: string): Promise<string | null>;
   isAlive(sessionId: string): Promise<boolean>;

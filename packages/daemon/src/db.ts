@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { z } from "zod/v4";
-import type { Session, Task, SessionStatus } from "@orka/core";
+import type { Session, Task, SessionStatus, UsageRecord, UsageSummary } from "@orka/core";
 import { BackendKindSchema, SessionModeSchema, SessionStatusSchema } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
@@ -35,6 +35,17 @@ const SessionRowSchema = z.object({
   auto_merge: z.number().default(0),
 });
 
+const UsageLogRowSchema = z.object({
+  session_id: z.string(),
+  backend: BackendKindSchema,
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cost_usd: z.number().nullable().default(null),
+  model: z.string().nullable().default(null),
+  recorded_at: z.string(),
+});
+
 const ORKA_DIR = ".orka";
 const DB_FILE = "orka.db";
 
@@ -60,6 +71,13 @@ export function getDb(): Database {
   return _db;
 }
 
+export function closeDb(): void {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
+}
+
 const MIGRATIONS = [
   { version: 1, sql: `ALTER TABLE sessions ADD COLUMN log_file TEXT NOT NULL DEFAULT ''` },
   { version: 2, sql: `ALTER TABLE sessions ADD COLUMN project_path TEXT NOT NULL DEFAULT ''` },
@@ -67,6 +85,9 @@ const MIGRATIONS = [
   { version: 4, sql: `ALTER TABLE sessions ADD COLUMN kept INTEGER NOT NULL DEFAULT 0` },
   { version: 5, sql: `ALTER TABLE sessions ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0` },
   { version: 6, sql: `CREATE TABLE IF NOT EXISTS session_tags (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, tag TEXT NOT NULL, PRIMARY KEY (session_id, tag))` },
+  { version: 7, sql: `CREATE TABLE IF NOT EXISTS usage_log (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, backend TEXT NOT NULL, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, cache_read_tokens INTEGER DEFAULT 0, cost_usd REAL, model TEXT, recorded_at TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES sessions(id))` },
+  { version: 8, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_session_id ON usage_log(session_id)` },
+  { version: 9, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_backend_recorded_at ON usage_log(backend, recorded_at)` },
 ];
 
 function migrate(db: Database): void {
@@ -97,6 +118,22 @@ function migrate(db: Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+    CREATE TABLE IF NOT EXISTS usage_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      backend TEXT NOT NULL,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cache_read_tokens INTEGER DEFAULT 0,
+      cost_usd REAL,
+      model TEXT,
+      recorded_at TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usage_log_session_id ON usage_log(session_id);
+    CREATE INDEX IF NOT EXISTS idx_usage_log_backend_recorded_at ON usage_log(backend, recorded_at);
 
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
@@ -239,6 +276,142 @@ export function findSessionByTmux(tmuxName: string): Session | null {
   return row ? rowToSession(row) : null;
 }
 
+// --- Usage ---
+
+export function insertUsageRecord(record: UsageRecord): void {
+  withSpanSync("orka.db.insertUsageRecord", {
+    "orka.session.id": record.sessionId,
+    "orka.backend": record.backend,
+  }, () => {
+    getDb()
+      .prepare(
+        `INSERT INTO usage_log (
+           session_id,
+           backend,
+           input_tokens,
+           output_tokens,
+           cache_read_tokens,
+           cost_usd,
+           model,
+           recorded_at
+         )
+         SELECT
+           $sessionId,
+           $backend,
+           $inputTokens,
+           $outputTokens,
+           $cacheReadTokens,
+           $costUsd,
+           $model,
+           $recordedAt
+         WHERE NOT EXISTS (
+           SELECT 1 FROM usage_log WHERE session_id = $sessionId
+         )`,
+      )
+      .run({
+        $sessionId: record.sessionId,
+        $backend: record.backend,
+        $inputTokens: record.inputTokens,
+        $outputTokens: record.outputTokens,
+        $cacheReadTokens: record.cacheReadTokens,
+        $costUsd: record.costUsd,
+        $model: record.model,
+        $recordedAt: record.recordedAt,
+      });
+  });
+}
+
+export function getUsageBySession(sessionId: string): UsageRecord[] {
+  return withSpanSync("orka.db.getUsageBySession", { "orka.session.id": sessionId }, () => {
+    const rows = getDb()
+      .prepare(
+        `SELECT session_id, backend, input_tokens, output_tokens, cache_read_tokens, cost_usd, model, recorded_at
+         FROM usage_log
+         WHERE session_id = ?
+         ORDER BY recorded_at DESC`,
+      )
+      .all(sessionId) as any[];
+    return rows.map(rowToUsageRecord);
+  });
+}
+
+export function getUsageSummary(opts: { since?: string; backend?: string } = {}): UsageSummary {
+  return withSpanSync("orka.db.getUsageSummary", {}, () => {
+    const clauses: string[] = [];
+    const params: any[] = [];
+
+    if (opts.since) {
+      clauses.push("recorded_at >= ?");
+      params.push(opts.since);
+    }
+    if (opts.backend) {
+      clauses.push("backend = ?");
+      params.push(opts.backend);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const db = getDb();
+    const totals = db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS total_cost_usd,
+           COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+           COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+           COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
+           COUNT(DISTINCT session_id) AS session_count
+         FROM usage_log
+         ${where}`,
+      )
+      .get(...params) as {
+        total_cost_usd: number;
+        total_input_tokens: number;
+        total_output_tokens: number;
+        total_cache_read_tokens: number;
+        session_count: number;
+      } | null;
+
+    const byBackendRows = db
+      .prepare(
+        `SELECT
+           backend,
+           COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS cost,
+           COALESCE(SUM(input_tokens), 0) AS input_tokens,
+           COALESCE(SUM(output_tokens), 0) AS output_tokens,
+           COUNT(DISTINCT session_id) AS sessions
+         FROM usage_log
+         ${where}
+         GROUP BY backend
+         ORDER BY cost DESC, backend ASC`,
+      )
+      .all(...params) as Array<{
+        backend: string;
+        cost: number;
+        input_tokens: number;
+        output_tokens: number;
+        sessions: number;
+      }>;
+
+    return {
+      totalCostUsd: totals?.total_cost_usd ?? 0,
+      totalInputTokens: totals?.total_input_tokens ?? 0,
+      totalOutputTokens: totals?.total_output_tokens ?? 0,
+      totalCacheReadTokens: totals?.total_cache_read_tokens ?? 0,
+      sessionCount: totals?.session_count ?? 0,
+      byBackend: Object.fromEntries(
+        byBackendRows.map((row) => [
+          row.backend,
+          {
+            cost: row.cost,
+            inputTokens: row.input_tokens,
+            outputTokens: row.output_tokens,
+            sessions: row.sessions,
+          },
+        ]),
+      ),
+    };
+  });
+}
+
 // --- Delete ---
 
 export function deleteSessions(ids: string[]): void {
@@ -250,6 +423,7 @@ export function deleteSessions(ids: string[]): void {
     const taskIds = db
       .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
       .all(...ids) as { task_id: string }[];
+    db.prepare(`DELETE FROM usage_log WHERE session_id IN (${placeholders})`).run(...ids);
     db.prepare(`DELETE FROM session_tags WHERE session_id IN (${placeholders})`).run(...ids);
     db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
     // Delete orphaned tasks
@@ -332,5 +506,19 @@ function rowToSession(row: unknown): Session {
     exitCode: data.exit_code,
     kept: data.kept === 1,
     autoMerge: data.auto_merge === 1,
+  };
+}
+
+function rowToUsageRecord(row: unknown): UsageRecord {
+  const data = UsageLogRowSchema.parse(row);
+  return {
+    sessionId: data.session_id,
+    backend: data.backend,
+    inputTokens: data.input_tokens,
+    outputTokens: data.output_tokens,
+    cacheReadTokens: data.cache_read_tokens,
+    costUsd: data.cost_usd,
+    model: data.model,
+    recordedAt: data.recorded_at,
   };
 }

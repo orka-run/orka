@@ -134,6 +134,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "workdir",
   "wait",
   "result",
+  "usage",
   "send",
   "keep",
   "unkeep",
@@ -861,6 +862,63 @@ const resultCmd = command({
   }),
 });
 
+const usageCmd = command({
+  name: "usage",
+  description: "Show usage totals by session and backend",
+  examples: [
+    { description: "Show all recorded usage", command: "orka usage" },
+    { description: "Show usage for a session", command: "orka usage --session <id>" },
+    { description: "Show usage from the last 24 hours", command: "orka usage --since 24h" },
+    { description: "Show usage for a backend", command: "orka usage --backend codex" },
+  ],
+  args: {
+    session: option({ type: optional(str), long: "session", description: "Session ID or prefix" }),
+    since: option({ type: optional(str), long: "since", description: "Relative duration (24h, 7d, 30m) or ISO 8601 timestamp" }),
+    backend: option({ type: optional(enumType(backendValues, "backend")), long: "backend", description: "Filter by backend" }),
+  },
+  handler: async ({ session: sessionQuery, since, backend }) => runCliCommand("usage", async () => {
+    const session = sessionQuery ? await findSession(sessionQuery) : null;
+    if (sessionQuery && !session) {
+      fail(`session not found: ${sessionQuery}`);
+    }
+
+    const sinceIso = since ? parseSinceFilter(since) : undefined;
+    const summary = await svc.getUsage({
+      sessionId: session?.id,
+      since: sinceIso,
+      backend: backend as BackendKind | undefined,
+    });
+
+    const scope: string[] = [];
+    if (session) scope.push(`session ${session.id}`);
+    if (since) scope.push(sinceLabel(since));
+    if (backend) scope.push(`backend ${backend}`);
+    const title = scope.length > 0 ? `Usage Summary (${scope.join(", ")})` : "Usage Summary";
+
+    console.log(title);
+    console.log(`  Sessions: ${summary.sessionCount}`);
+    console.log(`  Total cost: $${summary.totalCostUsd.toFixed(2)}`);
+    console.log(
+      `  Total tokens: ${formatTokens(summary.totalInputTokens)} in / ${formatTokens(summary.totalOutputTokens)} out (${formatTokens(summary.totalCacheReadTokens)} cached)`,
+    );
+
+    const backendEntries = Object.entries(summary.byBackend);
+    if (backendEntries.length === 0) {
+      return;
+    }
+
+    console.log("");
+    console.log("  By backend:");
+    const backendWidth = Math.max(...backendEntries.map(([name]) => name.length));
+    for (const [name, stats] of backendEntries) {
+      const sessionLabel = `${stats.sessions} ${stats.sessions === 1 ? "session" : "sessions"}`;
+      console.log(
+        `    ${padR(name, backendWidth)}  ${padR(sessionLabel, 10)}  $${stats.cost.toFixed(2)}  ${formatTokens(stats.inputTokens)} in / ${formatTokens(stats.outputTokens)} out`,
+      );
+    }
+  }),
+});
+
 const sendCmd = command({
   name: "send",
   description: "Send text input to a running interactive session via tmux",
@@ -1455,6 +1513,7 @@ const app = subcommands({
     workdir: workdirCmd,
     wait: waitCmd,
     result: resultCmd,
+    usage: usageCmd,
     send: sendCmd,
     keep: keepCmd,
     unkeep: unkeepCmd,
@@ -1543,6 +1602,7 @@ function printUsage(): void {
   console.log("  stop     Stop a running session           orka stop <id>");
   console.log("  wait     Block until sessions complete    orka wait --all");
   console.log("  result   Show result, cost, tokens        orka result --json <id>");
+  console.log("  usage    Show aggregate usage totals      orka usage --since 24h");
   console.log("  retry    Re-run with same prompt          orka retry <id>");
   console.log("  send     Send input to session            orka send <id> hello");
   console.log("");
@@ -1659,6 +1719,23 @@ function parseAge(age: string): number {
     case "d": return value * 24 * 60 * 60 * 1000;
     default: return value * 60 * 60 * 1000;
   }
+}
+
+function parseSinceFilter(value: string): string {
+  if (/^\d+\s*(h|d|m)$/.test(value)) {
+    return new Date(Date.now() - parseAge(value)).toISOString();
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    console.error("error: invalid --since format, use e.g. 24h, 7d, 30m, or ISO 8601");
+    process.exit(1);
+  }
+  return parsed.toISOString();
+}
+
+function sinceLabel(value: string): string {
+  return /^\d+\s*(h|d|m)$/.test(value) ? `last ${value}` : `since ${value}`;
 }
 
 // --- Helpers ---
