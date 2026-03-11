@@ -77,6 +77,7 @@ export function getDb(): Database {
   if (!_db) {
     _db = new Database(getDbPath());
     _db.exec("PRAGMA journal_mode = WAL");
+    _db.exec("PRAGMA busy_timeout = 5000");
     _db.exec("PRAGMA foreign_keys = ON");
     migrate(_db);
   }
