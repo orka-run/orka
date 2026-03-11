@@ -194,7 +194,7 @@ export interface CreateProviderRuntimeEventOptions {
   requestId?: string;
 }
 
-const DEFAULT_PROVIDER: BackendKind = BackendKindSchema.options[0];
+const DEFAULT_PROVIDER: BackendKind = BackendKindSchema.options[0] ?? "claude-code";
 
 export function createEvent<TType extends ProviderRuntimeEventType>(
   type: TType,

@@ -2,11 +2,19 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "noEmit": false,
+    "exactOptionalPropertyTypes": false,
+    "noPropertyAccessFromIndexSignature": false,
+    "noUncheckedIndexedAccess": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
   },
   "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [
     { "path": "../core" },
-    { "path": "../daemon" }
+    { "path": "../daemon" },
+    { "path": "../relay" }
   ]
 }

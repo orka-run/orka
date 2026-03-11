@@ -7,7 +7,8 @@ import {
   type SpawnRequest,
 } from "@orka/core";
 import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
-import { type SessionRunner, defaultRunner } from "./tmux";
+import { defaultRunner } from "./tmux";
+import type { SessionRunner } from "./runner";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
 import { buildBackendCommand, assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";

@@ -16,6 +16,14 @@ interface CodexHandleMeta {
   writeRpc: (method: CodexRpcMethod, params?: unknown) => Promise<void>;
 }
 
+function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return value instanceof ReadableStream;
+}
+
+function isWritableSink<T>(value: T): value is Exclude<T, number> {
+  return typeof value !== "number";
+}
+
 interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: string;
@@ -101,7 +109,7 @@ export class CodexAdapter implements ProviderAdapter {
         };
 
         const stdout = process.stdout;
-        if (!stdout) {
+        if (!isReadableStream(stdout)) {
           events.push(
             createEvent(
               "runtime.error",
@@ -122,7 +130,7 @@ export class CodexAdapter implements ProviderAdapter {
           throw new Error("Codex app-server stdout is not available");
         }
 
-        if (process.stderr) {
+        if (isReadableStream(process.stderr)) {
           void drainStream(process.stderr);
         }
 
@@ -206,7 +214,8 @@ export class CodexAdapter implements ProviderAdapter {
           "orka.rpc.request",
           { "orka.session.id": threadId, "orka.method": method, "orka.backend": this.kind },
           async () => {
-            if (!process.stdin) {
+            const stdin = process.stdin;
+            if (!stdin || typeof stdin === "number") {
               throw new Error("Codex app-server stdin is not available");
             }
 
@@ -220,7 +229,7 @@ export class CodexAdapter implements ProviderAdapter {
               request.params = params;
             }
 
-            await Promise.resolve(process.stdin.write(`${JSON.stringify(request)}\n`));
+            await Promise.resolve(stdin.write(`${JSON.stringify(request)}\n`));
           },
         );
       },
@@ -313,7 +322,7 @@ export function mapCodexEvent(threadId: string, raw: unknown): ProviderRuntimeEv
 
 async function consumeCodexOutput(
   threadId: string,
-  stdout: NonNullable<CodexProcess["stdout"]>,
+  stdout: ReadableStream<Uint8Array>,
   events: AsyncEventQueue<ProviderRuntimeEvent>,
 ): Promise<boolean> {
   let sawSessionExit = false;
@@ -388,7 +397,7 @@ async function finalizeCodexProcess(
   events.close();
 }
 
-async function* readLines(stream: NonNullable<CodexProcess["stdout"]>): AsyncGenerator<string> {
+async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

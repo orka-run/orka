@@ -141,9 +141,15 @@ function parseDiffGitLine(line: string): DiffFile | null {
     return null;
   }
 
+  const oldPath = match[1];
+  const newPath = match[2];
+  if (!oldPath || !newPath) {
+    return null;
+  }
+
   return {
-    oldPath: match[1],
-    newPath: match[2],
+    oldPath,
+    newPath,
     hunks: [],
   };
 }
@@ -154,9 +160,15 @@ function parseBinaryFileLine(line: string): Pick<DiffFile, "oldPath" | "newPath"
     return null;
   }
 
+  const oldPath = match[1];
+  const newPath = match[2];
+  if (!oldPath || !newPath) {
+    return null;
+  }
+
   return {
-    oldPath: normalizeHeaderPath(match[1]),
-    newPath: normalizeHeaderPath(match[2]),
+    oldPath: normalizeHeaderPath(oldPath),
+    newPath: normalizeHeaderPath(newPath),
   };
 }
 

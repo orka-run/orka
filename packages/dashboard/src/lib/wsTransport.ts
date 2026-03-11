@@ -137,7 +137,7 @@ export class WsTransport {
       }, this.options?.timeout ?? 60_000);
 
       this.pending.set(id, {
-        resolve,
+        resolve: (value) => resolve(value as T),
         reject,
         timer,
         sent: false,

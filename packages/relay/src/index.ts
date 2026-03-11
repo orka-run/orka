@@ -49,7 +49,7 @@ export interface RelayOptions {
 }
 
 export interface RelayHandle {
-  server: Server;
+  server: Server<SocketData>;
   /** Graceful shutdown: stop accepting, drain in-flight, flush, close DB. */
   shutdown: (opts?: { drainTimeoutMs?: number }) => Promise<void>;
 }
@@ -105,8 +105,8 @@ export function startRelay(opts: RelayOptions): RelayHandle {
                 account: {
                   id: auth.ctx.accountId,
                   tier: auth.ctx.tier,
-                  nodes,
                   ...stats,
+                  nodes,
                 },
               });
             }

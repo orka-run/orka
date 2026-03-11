@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 
 export const PushChannelSchema = z.enum([
   "server.welcome",
+  "server.shutdown",
   "orchestration.sessionUpdated",
   "orchestration.sessionDeleted",
   "orchestration.event",

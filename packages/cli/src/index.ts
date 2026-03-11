@@ -36,6 +36,7 @@ import {
   optional,
   restPositionals,
   multioption,
+  array,
   oneOf,
   type Type,
 } from "cmd-ts";
@@ -223,7 +224,7 @@ const spawnCmd = command({
     title: option({ type: optional(str), long: "title", description: "Session title for display in orka ps" }),
     reasoningEffort: option({ type: optional(str), long: "reasoning-effort", description: "Reasoning effort level (low, medium, high)" }),
     autoMerge: flag({ long: "auto-merge", description: "Auto-merge worktree on successful completion" }),
-    tag: multioption({ type: str, long: "tag", description: "Tag the session (repeatable)" }),
+    tag: multioption({ type: array(str), long: "tag", description: "Tag the session (repeatable)" }),
     words: restPositionals({ type: str, displayName: "prompt" }),
   },
   handler: async (args) => runCliCommand("spawn", async () => {

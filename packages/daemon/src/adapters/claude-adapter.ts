@@ -19,6 +19,14 @@ interface ClaudeHandleMeta {
   closed: boolean;
 }
 
+function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return value instanceof ReadableStream;
+}
+
+function isWritableSink<T>(value: T): value is Exclude<T, number> {
+  return typeof value !== "number";
+}
+
 interface ClaudeUsage {
   inputTokens: number;
   outputTokens: number;
@@ -101,10 +109,12 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           threadId: input.threadId,
           provider: this.kind,
           events,
-          meta,
+          meta: meta as unknown as Record<string, unknown>,
         };
 
-        if (!process.stdout || !process.stdin) {
+        const stdout = process.stdout;
+        const stdin = process.stdin;
+        if (!isReadableStream(stdout) || !isWritableSink(stdin)) {
           events.push(
             createEvent(
               "runtime.error",
@@ -118,18 +128,18 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           throw new Error("Claude Code stdio is not available");
         }
 
-        if (process.stderr) {
+        if (isReadableStream(process.stderr)) {
           void drainStream(process.stderr);
         }
 
-        const outputTask = consumeClaudeOutput(input.threadId, process.stdout, meta);
+        const outputTask = consumeClaudeOutput(input.threadId, stdout, meta);
         void finalizeClaudeProcess(input.threadId, process, outputTask, meta);
 
         try {
           if (input.prompt) {
-            await Promise.resolve(process.stdin.write(input.prompt));
+            await Promise.resolve(stdin.write(input.prompt));
           }
-          await Promise.resolve(process.stdin.end());
+          await Promise.resolve(stdin.end());
         } catch (error) {
           emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error");
           closeEvents(meta);
@@ -287,7 +297,7 @@ export function mapClaudeEvent(
 
 async function consumeClaudeOutput(
   threadId: string,
-  stdout: NonNullable<ClaudeProcess["stdout"]>,
+  stdout: ReadableStream<Uint8Array>,
   meta: ClaudeHandleMeta,
 ): Promise<boolean> {
   let sawSessionExit = false;
@@ -358,7 +368,7 @@ async function finalizeClaudeProcess(
   closeEvents(meta);
 }
 
-async function* readLines(stream: NonNullable<ClaudeProcess["stdout"]>): AsyncGenerator<string> {
+async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -496,7 +506,7 @@ function normalizeClaudeUsageValue(value: unknown): ClaudeUsage | undefined {
 
 function extractClaudeAssistantText(content: unknown[]): string | null {
   const text = content
-    .filter((item) => isRecord(item) && item.type === "text" && typeof item.text === "string")
+    .filter((item): item is Record<string, string> => isRecord(item) && item.type === "text" && typeof item.text === "string")
     .map((item) => item.text)
     .join("\n")
     .trim();

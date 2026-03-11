@@ -128,7 +128,7 @@ export function closeDb(): void {
 
 // --- Migrations ---
 
-const MIGRATIONS = [
+const MIGRATIONS: Array<{ version: number; sql: string }> = [
   // Future migrations go here
 ];
 

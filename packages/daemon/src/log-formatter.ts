@@ -129,19 +129,19 @@ function parseCodexTurnCompletion(parsed: JsonRecord): LogEvent {
 }
 
 function parseClaudeAssistant(parsed: JsonRecord): LogEvent | null {
-  const content = Array.isArray(parsed.message?.content) ? parsed.message.content : [];
+  const content: unknown[] = Array.isArray(parsed.message?.content) ? parsed.message.content : [];
   const first = content.find((item) => item && typeof item === "object");
   if (!first) return null;
 
-  if (first.type === "text") {
+  if (isRecord(first) && first.type === "text") {
     const text = content
-      .filter((item) => item?.type === "text" && typeof item.text === "string")
+      .filter((item): item is JsonRecord => isRecord(item) && item.type === "text" && typeof item.text === "string")
       .map((item) => item.text)
       .join("\n");
     return { kind: "message", text };
   }
 
-  if (first.type === "tool_use") {
+  if (isRecord(first) && first.type === "tool_use") {
     return {
       kind: "tool_call",
       tool: first.name ?? "",

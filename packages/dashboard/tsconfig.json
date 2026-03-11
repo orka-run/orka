@@ -7,7 +7,14 @@
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
-    "noEmit": true
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [
+    { "path": "../core" }
+  ]
 }
