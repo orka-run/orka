@@ -45,6 +45,7 @@ describe("OrchestrationEngine", () => {
         type: "content.delta",
         sessionId: "session-1",
         turnId: "turn-1",
+        streamKind: "assistant_text",
         delta: "Hello",
         timestamp: "2026-03-11T00:01:00.000Z",
       },
@@ -77,7 +78,7 @@ describe("OrchestrationEngine", () => {
 
     expect(engine.getSessionState("session-1")).toEqual({
       sessionId: "session-1",
-      status: "created",
+      status: "queued",
       currentTurnId: null,
       totalCost: 0,
       totalTokens: { input: 0, output: 0 },
@@ -88,7 +89,7 @@ describe("OrchestrationEngine", () => {
       "session-1",
       createEvent("session.started", "thread-1", {}, { createdAt: "2026-03-11T00:00:00.000Z" }),
     );
-    expect(engine.getSessionState("session-1").status).toBe("started");
+    expect(engine.getSessionState("session-1").status).toBe("running");
 
     engine.ingest(
       "session-1",
@@ -101,12 +102,72 @@ describe("OrchestrationEngine", () => {
 
     engine.ingest(
       "session-1",
-      createEvent("session.exited", "thread-1", {}, { createdAt: "2026-03-11T00:00:02.000Z" }),
+      createEvent("session.exited", "thread-1", { exitKind: "graceful" }, { createdAt: "2026-03-11T00:00:02.000Z" }),
     );
     expect(engine.getSessionState("session-1")).toMatchObject({
       status: "completed",
       currentTurnId: null,
     });
+  });
+
+  test("maps provider error exits to failed and graceful exits to completed", () => {
+    const failedEngine = new OrchestrationEngine();
+    failedEngine.ingest(
+      "session-failed",
+      createEvent(
+        "session.exited",
+        "thread-1",
+        { exitKind: "error", reason: "provider crashed" },
+        { createdAt: "2026-03-11T00:02:00.000Z" },
+      ),
+    );
+
+    expect(failedEngine.getSessionEvents("session-failed")).toEqual([
+      {
+        type: "session.failed",
+        sessionId: "session-failed",
+        error: "provider crashed",
+        timestamp: "2026-03-11T00:02:00.000Z",
+      },
+    ]);
+    expect(failedEngine.getSessionState("session-failed").status).toBe("failed");
+
+    const completedEngine = new OrchestrationEngine();
+    completedEngine.ingest(
+      "session-completed",
+      createEvent(
+        "session.exited",
+        "thread-1",
+        { exitKind: "graceful", reason: "done" },
+        { createdAt: "2026-03-11T00:02:01.000Z" },
+      ),
+    );
+
+    expect(completedEngine.getSessionState("session-completed").status).toBe("completed");
+  });
+
+  test("maps user-initiated stops to cancelled", () => {
+    const engine = new OrchestrationEngine();
+
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "session.exited",
+        "thread-1",
+        { exitKind: "graceful", reason: "stopped" },
+        { createdAt: "2026-03-11T00:02:00.000Z" },
+      ),
+    );
+
+    expect(engine.getSessionEvents("session-1")).toEqual([
+      {
+        type: "session.cancelled",
+        sessionId: "session-1",
+        reason: "stopped",
+        timestamp: "2026-03-11T00:02:00.000Z",
+      },
+    ]);
+    expect(engine.getSessionState("session-1").status).toBe("cancelled");
   });
 
   test("accumulates turn cost and tokens in the session projection", () => {
@@ -147,5 +208,125 @@ describe("OrchestrationEngine", () => {
       totalTokens: { input: 140, output: 70 },
       pendingRequests: [],
     });
+  });
+
+  test("stores item lifecycle events and keeps the session running", () => {
+    const engine = new OrchestrationEngine();
+
+    engine.ingest(
+      "session-1",
+      createEvent("session.started", "thread-1", {}, { createdAt: "2026-03-11T00:03:00.000Z" }),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "item.started",
+        "thread-1",
+        {
+          itemType: "command_execution",
+          status: "in_progress",
+          title: "ls -la",
+          detail: "ls -la",
+        },
+        {
+          turnId: "turn-1",
+          itemId: "item-1",
+          createdAt: "2026-03-11T00:03:01.000Z",
+        },
+      ),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "item.updated",
+        "thread-1",
+        {
+          itemType: "command_execution",
+          status: "in_progress",
+          detail: "still running",
+        },
+        {
+          turnId: "turn-1",
+          itemId: "item-1",
+          createdAt: "2026-03-11T00:03:02.000Z",
+        },
+      ),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "item.completed",
+        "thread-1",
+        {
+          itemType: "command_execution",
+          status: "completed",
+          detail: "finished",
+        },
+        {
+          turnId: "turn-1",
+          itemId: "item-1",
+          createdAt: "2026-03-11T00:03:03.000Z",
+        },
+      ),
+    );
+
+    expect(engine.getSessionEvents("session-1")).toMatchObject([
+      {
+        type: "session.started",
+        sessionId: "session-1",
+      },
+      {
+        type: "item.started",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        itemType: "command_execution",
+      },
+      {
+        type: "item.updated",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        itemType: "command_execution",
+      },
+      {
+        type: "item.completed",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        itemType: "command_execution",
+        status: "completed",
+      },
+    ]);
+    expect(engine.getSessionState("session-1")).toMatchObject({
+      status: "running",
+      currentTurnId: "turn-1",
+    });
+  });
+
+  test("uses a synthetic turn id when the provider omits turnId", () => {
+    const engine = new OrchestrationEngine();
+
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "content.delta",
+        "thread-1",
+        { streamKind: "assistant_text", delta: "Hello" },
+        { eventId: "evt-missing-turn", createdAt: "2026-03-11T00:04:00.000Z" },
+      ),
+    );
+
+    expect(engine.getSessionEvents("session-1")).toEqual([
+      {
+        type: "content.delta",
+        sessionId: "session-1",
+        turnId: "unknown-turn:evt-missing-turn",
+        streamKind: "assistant_text",
+        delta: "Hello",
+        timestamp: "2026-03-11T00:04:00.000Z",
+      },
+    ]);
+    expect(engine.getSessionState("session-1").currentTurnId).toBeNull();
   });
 });
