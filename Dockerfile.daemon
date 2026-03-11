@@ -1,0 +1,33 @@
+FROM oven/bun:1 AS base
+
+# Install system deps needed by daemon (tmux for sessions, git for worktrees)
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends tmux git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package manifests first for layer caching
+COPY package.json bun.lock ./
+COPY packages/core/package.json packages/core/
+COPY packages/daemon/package.json packages/daemon/
+COPY packages/cli/package.json packages/cli/
+COPY packages/relay/package.json packages/relay/
+
+RUN bun install --frozen-lockfile
+
+# Copy all source (daemon uses core + daemon + cli + relay packages)
+COPY packages/core/src packages/core/src
+COPY packages/daemon/src packages/daemon/src
+COPY packages/cli/src packages/cli/src
+COPY packages/relay/src packages/relay/src
+
+# Create data directory for SQLite, logs, worktrees, scripts
+RUN mkdir -p /data/logs /data/worktrees /data/scripts
+
+ENV ORKA_HOME=/data
+
+EXPOSE 7394
+
+ENTRYPOINT ["bun", "run", "packages/cli/src/index.ts", "serve"]
+CMD ["--port", "7394", "--host", "0.0.0.0"]

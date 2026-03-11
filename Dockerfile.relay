@@ -1,0 +1,29 @@
+FROM oven/bun:1 AS base
+
+WORKDIR /app
+
+# Copy package manifests first for layer caching
+COPY package.json bun.lock ./
+COPY packages/core/package.json packages/core/
+COPY packages/relay/package.json packages/relay/
+# CLI and daemon not needed for relay — stub their package.json
+# so bun resolves the workspace without copying all source
+COPY packages/daemon/package.json packages/daemon/
+COPY packages/cli/package.json packages/cli/
+
+RUN bun install --frozen-lockfile
+
+# Copy source
+COPY packages/core/src packages/core/src
+COPY packages/relay/src packages/relay/src
+
+# Create data directory for SQLite
+RUN mkdir -p /data
+
+ENV ORKA_RELAY_DATA=/data
+
+EXPOSE 7390
+
+ENTRYPOINT ["bun", "run", "packages/relay/src/index.ts"]
+# Default port passed as first arg (relay reads process.argv[2])
+CMD ["7390"]
