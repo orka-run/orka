@@ -6,7 +6,7 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
+import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
 import { buildBackendCommand } from "./backends";
@@ -110,6 +110,12 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       autoMerge: req.autoMerge ?? false,
     };
     insertSession(session);
+
+    // 4b. Store tags
+    if (req.tags && req.tags.length > 0) {
+      insertSessionTags(sessionId, req.tags);
+      span.setAttribute("orka.tags", req.tags.join(","));
+    }
 
     // 5. Build backend command (with log tee)
     const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model });

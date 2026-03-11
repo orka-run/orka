@@ -81,4 +81,5 @@ export interface SpawnRequest {
   branch?: string;
   model?: string;
   autoMerge?: boolean;
+  tags?: string[];
 }

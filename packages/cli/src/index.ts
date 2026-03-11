@@ -28,6 +28,8 @@ import {
   getWorktreeDir,
   parseSessionResult,
   setSessionKept,
+  getSessionTags,
+  listSessionsByTag,
   tmuxSendText,
   initTracing,
   shutdownTracing,
@@ -152,6 +154,10 @@ function printUsage(): void {
   console.log("  --branch        Git branch (creates worktree if specified)");
   console.log("  --title         Session title");
   console.log("  --auto-merge    Auto-merge worktree on successful completion");
+  console.log("  --tag           Add tag(s) to session (repeatable: --tag foo --tag bar)");
+  console.log("");
+  console.log("ps filter options:");
+  console.log("  --tag           Filter sessions by tag");
 }
 
 async function cmdSpawn(): Promise<void> {
@@ -168,6 +174,7 @@ async function cmdSpawn(): Promise<void> {
       branch: { type: "string" },
       title: { type: "string" },
       "auto-merge": { type: "boolean", default: false },
+      tag: { type: "string", multiple: true },
     },
     allowPositionals: true,
   });
@@ -217,6 +224,7 @@ async function cmdSpawn(): Promise<void> {
       model: args.values.model || cfg.model || undefined,
       branch: args.values.branch,
       autoMerge: args.values["auto-merge"] || false,
+      tags: args.values.tag as string[] | undefined,
     });
   } catch (e: any) {
     console.error(`error: ${e.message}`);
@@ -229,6 +237,9 @@ async function cmdSpawn(): Promise<void> {
   console.log(`  workdir:  ${session.workingDir}`);
   console.log(`  tmux:     ${session.tmuxSessionName}`);
   console.log(`  log:      ${session.logFile}`);
+  if (args.values.tag && (args.values.tag as string[]).length > 0) {
+    console.log(`  tags:     ${(args.values.tag as string[]).join(", ")}`);
+  }
 
   if (session.mode === "interactive") {
     console.log("");
@@ -244,12 +255,15 @@ async function cmdPs(): Promise<void> {
       status: { type: "string" },
       backend: { type: "string" },
       project: { type: "string" },
+      tag: { type: "string" },
       verbose: { type: "boolean", short: "v", default: false },
     },
     allowPositionals: false,
   });
 
-  let sessions = listSessions();
+  let sessions = args.values.tag
+    ? listSessionsByTag(args.values.tag)
+    : listSessions();
   if (args.values.status) {
     sessions = sessions.filter((s) => s.status === args.values.status);
   }
@@ -506,6 +520,7 @@ async function cmdRetry(): Promise<void> {
     process.exit(1);
   }
 
+  const oldTags = getSessionTags(session.id);
   const newSession = await spawnSession({
     prompt: task.prompt,
     title: task.title,
@@ -513,6 +528,7 @@ async function cmdRetry(): Promise<void> {
     backend: session.backend,
     mode: session.mode,
     model: task.model || undefined,
+    tags: oldTags.length > 0 ? oldTags : undefined,
   });
 
   console.log(`retried session ${session.id} → ${newSession.id}`);
@@ -560,6 +576,9 @@ async function cmdShow(): Promise<void> {
   console.log(`  exit code: ${session.exitCode ?? "(none)"}`);
   if (session.kept) console.log(`  kept:      yes (worktree protected)`);
   if (session.autoMerge) console.log(`  auto-merge: yes`);
+
+  const tags = getSessionTags(session.id);
+  if (tags.length > 0) console.log(`  tags:      ${tags.join(", ")}`);
 
   if (task) {
     console.log("");

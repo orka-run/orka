@@ -65,6 +65,7 @@ const MIGRATIONS = [
   { version: 3, sql: `ALTER TABLE tasks ADD COLUMN model TEXT` },
   { version: 4, sql: `ALTER TABLE sessions ADD COLUMN kept INTEGER NOT NULL DEFAULT 0` },
   { version: 5, sql: `ALTER TABLE sessions ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0` },
+  { version: 6, sql: `CREATE TABLE IF NOT EXISTS session_tags (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, tag TEXT NOT NULL, PRIMARY KEY (session_id, tag))` },
 ];
 
 function migrate(db: Database): void {
@@ -233,6 +234,7 @@ export function deleteSessions(ids: string[]): void {
   const taskIds = db
     .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
     .all(...ids) as { task_id: string }[];
+  db.prepare(`DELETE FROM session_tags WHERE session_id IN (${placeholders})`).run(...ids);
   db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
   // Delete orphaned tasks
   for (const { task_id } of taskIds) {
@@ -241,6 +243,36 @@ export function deleteSessions(ids: string[]): void {
       db.prepare("DELETE FROM tasks WHERE id = ?").run(task_id);
     }
   }
+}
+
+// --- Tags ---
+
+export function insertSessionTags(sessionId: string, tags: string[]): void {
+  if (tags.length === 0) return;
+  const db = getDb();
+  const stmt = db.prepare("INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)");
+  for (const tag of tags) {
+    stmt.run(sessionId, tag);
+  }
+}
+
+export function getSessionTags(sessionId: string): string[] {
+  const rows = getDb()
+    .prepare("SELECT tag FROM session_tags WHERE session_id = ? ORDER BY tag")
+    .all(sessionId) as { tag: string }[];
+  return rows.map((r) => r.tag);
+}
+
+export function listSessionsByTag(tag: string): Session[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT s.* FROM sessions s
+       INNER JOIN session_tags t ON s.id = t.session_id
+       WHERE t.tag = ?
+       ORDER BY s.created_at DESC`,
+    )
+    .all(tag) as any[];
+  return rows.map(rowToSession);
 }
 
 // --- Row mappers ---
