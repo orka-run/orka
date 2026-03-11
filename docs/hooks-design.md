@@ -21,17 +21,18 @@ Add a host-side hooks system to orka so projects can prepare worktrees, react to
 - Failure policy is configurable per hook: `abort`, `warn`, or `ignore`.
 - All hook stdout/stderr is appended to the session log with explicit start/end markers.
 - Project-local hooks are gated by a trust policy because they execute with full host access.
+- Hook integration should target the daemon-owned runtime path first and remain compatible with the legacy tmux fallback.
 
 ## Hook Stages
 
-These stages map to the lifecycle that exists today in `spawnSession()`, `reapSessions()`, `merge()`, `stopSession()`, and worktree cleanup.
+These stages map to the lifecycle that exists today in `spawnSession()`, `consumeProviderEvents()`, `reapSessions()`, `merge()`, `stopSession()`, and worktree cleanup.
 
 | Stage | When it runs | Blocking | Typical use |
 | --- | --- | --- | --- |
 | `session_preflight` | After session IDs/log file are allocated, before worktree creation or backend spawn | Yes | Validate local prerequisites, export secrets from a local store, reject unsupported machines |
 | `post_worktree_create` | Immediately after git worktree creation or branch checkout succeeds, before agent launch | Yes | Install deps, create venv, warm caches, generate local config |
-| `pre_agent_start` | After setup hooks, right before tmux/backend spawn | Yes | Final sanity checks, write marker files, emit notifications |
-| `post_agent_start` | After tmux/backend spawn succeeds and session becomes `running` | No by default | Notify external tools, start local observers |
+| `pre_agent_start` | After setup hooks, right before provider runtime or legacy tmux backend start | Yes | Final sanity checks, write marker files, emit notifications |
+| `post_agent_start` | After provider runtime or legacy tmux backend start succeeds and session becomes `running` | No by default | Notify external tools, start local observers |
 | `post_agent_exit` | After agent exit is detected and exit code/session status are known | No by default | Collect artifacts, summarize logs, notify users |
 | `pre_merge` | Before auto-merge or manual `orka merge` begins | Yes | Run repo-local checks that must pass before merge |
 | `post_merge` | After merge succeeds, before cleanup | No by default | Notify CI, update local bookkeeping |
@@ -215,7 +216,7 @@ Hooks inherit the daemon environment and receive additional `ORKA_*` variables.
 | `ORKA_BACKEND` | `codex` | Backend kind |
 | `ORKA_MODE` | `background` | Session mode |
 | `ORKA_MODEL` | `gpt-5-codex` | Empty if unset |
-| `ORKA_TMUX_SESSION` | `orka-sess-ab12cd34` | Empty before tmux exists |
+| `ORKA_TMUX_SESSION` | `orka-sess-ab12cd34` | Empty on the default provider-runtime path; set only on the legacy tmux fallback |
 | `ORKA_LOG_FILE` | `~/.orka/logs/sess-ab12cd34.log` | Session log path |
 | `ORKA_AUTO_MERGE` | `1` | `1` or `0` |
 | `ORKA_SESSION_STATUS` | `running`, `completed`, `failed`, `cancelled` | Especially useful in `post_agent_exit` |
@@ -281,7 +282,7 @@ Each hook writes clear markers into the session log:
 [orka][hook][post_worktree_create][deps] exit_code=0 duration_ms=18234
 ```
 
-This keeps `orka logs`, result parsing, and future diagnostics compatible with existing log handling.
+This keeps `orka logs`, provider-runtime log streaming, legacy result parsing, and future diagnostics compatible with the current daemon-owned log handling.
 
 ## TOML Examples
 
@@ -371,7 +372,7 @@ Reference docs:
 
 ### 1. Config and schema
 
-- Replace the minimal parser in [packages/daemon/src/config.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/daemon/src/config.ts) with a TOML parser that can handle arrays-of-tables and nested sections.
+- Replace the minimal parser in `packages/daemon/src/config.ts` with a TOML parser that can handle arrays-of-tables and nested sections.
 - Extend config loading to resolve and merge:
   - `~/.orka/config.toml`
   - trusted project `.orka.toml`
@@ -390,22 +391,22 @@ Reference docs:
 
 ### 3. Lifecycle integration
 
-- Update [packages/daemon/src/orchestrator.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/daemon/src/orchestrator.ts) to:
+- Update `packages/daemon/src/orchestrator.ts` to:
   - create the session log before the first hook
   - run spawn hooks around worktree creation and backend start
   - run exit hooks during reap/stop
   - run merge and cleanup hooks around auto-merge and cleanup paths
-- Update [packages/daemon/src/local-client.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/daemon/src/local-client.ts) so manual `merge()` also goes through the same hook orchestration path.
+- Update `packages/daemon/src/local-client.ts` so manual `merge()` also goes through the same hook orchestration path.
 
 ### 4. CLI and RPC plumbing
 
-- Extend [packages/core/src/types.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/core/src/types.ts) and [packages/core/src/service.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/core/src/service.ts) with hook override inputs where needed.
-- Add CLI flags in [packages/cli/src/index.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/cli/src/index.ts): `--hook-config`, `--hook`, `--disable-hook`, `--no-hooks`.
-- Ensure the remote path continues to work through [packages/daemon/src/remote-client.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/daemon/src/remote-client.ts) and [packages/daemon/src/rpc-handler.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/daemon/src/rpc-handler.ts).
+- Extend `packages/core/src/types.ts` and `packages/core/src/service.ts` with hook override inputs where needed.
+- Add CLI flags in `packages/cli/src/index.ts`: `--hook-config`, `--hook`, `--disable-hook`, `--no-hooks`.
+- Ensure the remote path continues to work through `packages/daemon/src/remote-client.ts` and `packages/daemon/src/rpc-handler.ts`.
 
 ### 5. Project trust plumbing
 
-- Extend [packages/daemon/src/projects.ts](/home/ilyagulya/.orka/worktrees/sess-f213570b/packages/daemon/src/projects.ts) or adjacent config state to track trusted project roots.
+- Extend `packages/daemon/src/projects.ts` or adjacent config state to track trusted project roots.
 - Add CLI affordances later if needed, for example `orka project trust <path>`.
 
 ### 6. Tests

@@ -304,7 +304,7 @@ function buildCodex(prompt, mode, opts?) {
 
 | Pattern | Codex Implementation | Orka Adoption |
 |---------|---------------------|---------------|
-| **Streaming output** | 8KB chunks, delta events, 8MB cap | Add output capping to log tee, stream events from tmux |
+| **Streaming output** | 8KB chunks, delta events, 8MB cap | Add output capping to daemon log/event streaming |
 | **Timeout safety** | 10s exec + 2s IO drain | Add per-session timeout config in `config.toml` |
 | **Result extraction** | `--output-last-message FILE` | Use for `orka result` instead of parsing log files |
 | **Sandbox integration** | `--sandbox workspace-write --cd DIR` | Pass worktree path to codex via `--cd` |
@@ -314,7 +314,7 @@ function buildCodex(prompt, mode, opts?) {
 | **SQLite state** | Session history + rollout tracking | Already using SQLite, could add audit log |
 | **Event protocol** | JSON-RPC over bounded channels | Consider for `orka serve` internal protocol |
 | **Apply-patch tool** | Pure Rust + tree-sitter | Future: custom editing tool for orka agents |
-| **Parallel tool calls** | `FuturesOrdered` concurrent exec | Orka already parallelizes via tmux sessions |
+| **Parallel tool calls** | `FuturesOrdered` concurrent exec | Orka already parallelizes across daemon-managed sessions |
 
 ### Architecture comparison
 
@@ -325,12 +325,11 @@ Codex (single-session agent):
                                               result → user
 
 Orka (multi-session orchestrator):
-  CLI → daemon → tmux session → codex exec --cd WORKTREE
-                                claude -p --permission-mode auto
-                                shell command
+  CLI → RemoteClient → daemon → provider adapter/runtime
+                               ↘ legacy tmux fallback when use_runtime=false
                       ↓
               worktree → merge → main branch
-              logs → result extraction
+              orchestration events + logs → result extraction
               traces → observability
 ```
 

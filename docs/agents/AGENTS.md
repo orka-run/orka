@@ -17,6 +17,17 @@ bd close <id>         # Complete work
 bd sync               # Sync with git
 ```
 
+## Architecture Snapshot
+
+- Orka is daemon-first now: normal CLI commands talk to the daemon over WebSocket RPC through `RemoteClient`.
+- The CLI no longer opens SQLite directly and no longer uses `LocalClient` outside `orka serve`.
+- If the local daemon is not running, the CLI auto-starts it with `setsid bun run <cli-path> serve`.
+- Daemon state lives under `~/.orka/`, including `daemon.pid`, `logs/daemon.log`, `orka.db`, session logs, and worktrees.
+- `providers.use_runtime` defaults to `true`, so the provider adapter runtime is the primary execution path.
+- tmux still exists only as a compatibility path when `providers.use_runtime = false`.
+- `orka attach` now streams live session output; it no longer attaches to tmux.
+- The dashboard connects through same-origin `/ws` in both Vite dev and nginx prod, not directly to the daemon port.
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
