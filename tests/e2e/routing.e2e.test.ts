@@ -1,0 +1,303 @@
+/**
+ * E2E tests for full-stack routing: client → relay → daemon → response.
+ *
+ * Tests the complete RPC path through the relay to a real daemon.
+ * Runs relay + daemon in-process (no Docker needed).
+ * Requires tmux for daemon session management.
+ *
+ * Run with: bun test tests/e2e/routing.e2e.test.ts
+ */
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { $ } from "bun";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
+// Isolated data dirs — must be set BEFORE importing daemon/relay
+const daemonHome = mkdtempSync(join(tmpdir(), "orka-e2e-routing-daemon-"));
+const relayHome = mkdtempSync(join(tmpdir(), "orka-e2e-routing-relay-"));
+process.env.ORKA_HOME = daemonHome;
+process.env.ORKA_RELAY_DATA = relayHome;
+
+import { createLocalClient, startServer } from "@orka/daemon";
+import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
+import type { OrkaService } from "@orka/core";
+
+let tmuxAvailable = false;
+try {
+  const proc = Bun.spawnSync(["tmux", "-V"], { stdout: "pipe", stderr: "pipe" });
+  tmuxAvailable = proc.exitCode === 0;
+} catch {
+  tmuxAvailable = false;
+}
+
+const describeE2E = tmuxAvailable ? describe : describe.skip;
+
+/** Send JSON-RPC via WebSocket and wait for response. */
+function rpc(ws: WebSocket, method: string, params: any = {}, id?: string): Promise<any> {
+  const reqId = id ?? `${method}-${Date.now()}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`RPC ${method} timeout`)), 10_000);
+    const handler = (event: MessageEvent) => {
+      try {
+        const resp = JSON.parse(String(event.data));
+        if (resp.id === reqId) {
+          clearTimeout(timer);
+          ws.removeEventListener("message", handler);
+          resolve(resp);
+        }
+      } catch {}
+    };
+    ws.addEventListener("message", handler);
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: reqId, method, params }));
+  });
+}
+
+function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (ws.readyState === WebSocket.OPEN) return resolve();
+    const timer = setTimeout(() => reject(new Error("WebSocket open timeout")), timeoutMs);
+    ws.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
+    ws.addEventListener("error", (e) => { clearTimeout(timer); reject(e); }, { once: true });
+  });
+}
+
+describeE2E("Full-Stack Routing", () => {
+  let relay: RelayHandle;
+  let daemonServer: any;
+  let svc: OrkaService;
+  let testRepo: string;
+
+  let relayPort: number;
+  let clientApiKey: string;
+  let nodeApiKey: string;
+
+  const spawnedTmuxNames: string[] = [];
+
+  beforeAll(async () => {
+    // 1. Create temp git repo
+    testRepo = mkdtempSync(join(tmpdir(), "orka-e2e-routing-repo-"));
+    await $`git init ${testRepo}`.quiet();
+    await $`git -C ${testRepo} config user.email "test@orka.dev"`.quiet();
+    await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
+    await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
+
+    // 2. Start relay
+    relay = startRelay({ port: 0, hostname: "127.0.0.1" });
+    relayPort = relay.server.port;
+
+    // 3. Sign up and get keys
+    const signupRes = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "routing-test@orka.dev", name: "Routing Test" }),
+    });
+    const signup = await signupRes.json() as any;
+    clientApiKey = signup.apiKey;
+
+    // Create a node key
+    const nodeKeyRes = await fetch(`http://127.0.0.1:${relayPort}/v1/keys`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${clientApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ label: "node", permissions: "node" }),
+    });
+    const nodeKeyData = await nodeKeyRes.json() as any;
+    nodeApiKey = nodeKeyData.apiKey;
+
+    // 4. Start daemon and register with relay
+    svc = createLocalClient();
+    daemonServer = await startServer(svc, {
+      port: 0,
+      hostname: "127.0.0.1",
+      relayUrl: `ws://127.0.0.1:${relayPort}`,
+      nodeId: "test-daemon",
+      relayToken: nodeApiKey,
+    });
+
+    // Wait for node registration to propagate
+    await Bun.sleep(500);
+  }, 30_000);
+
+  afterAll(async () => {
+    for (const name of spawnedTmuxNames) {
+      try { await $`tmux kill-session -t ${name}`.quiet(); } catch {}
+    }
+    try { daemonServer?.stop?.(true); } catch {}
+    try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
+    rmSync(daemonHome, { recursive: true, force: true });
+    rmSync(relayHome, { recursive: true, force: true });
+    rmSync(testRepo, { recursive: true, force: true });
+  });
+
+  // ---- Health ----
+
+  test("relay health returns ok", async () => {
+    const res = await fetch(`http://127.0.0.1:${relayPort}/health`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.status).toBe("ok");
+  });
+
+  test("daemon health returns ok", async () => {
+    const res = await fetch(`http://127.0.0.1:${daemonServer.port}/health`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.status).toBe("ok");
+  });
+
+  // ---- RPC Routing ----
+
+  test("listSessions routes through relay to daemon", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
+    await waitForOpen(ws);
+
+    const resp = await rpc(ws, "listSessions", { filters: {} });
+    expect(resp.error).toBeUndefined();
+    expect(resp.result).toBeInstanceOf(Array);
+
+    ws.close();
+  });
+
+  test("reap routes through relay to daemon", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
+    await waitForOpen(ws);
+
+    const resp = await rpc(ws, "reap");
+    expect(resp.error).toBeUndefined();
+    expect(typeof resp.result).toBe("number");
+
+    ws.close();
+  });
+
+  test("spawn routes through relay and creates a session", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
+    await waitForOpen(ws);
+
+    const resp = await rpc(ws, "spawn", {
+      prompt: "echo 'routed-spawn'",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+      title: "E2E routing spawn",
+    });
+
+    expect(resp.error).toBeUndefined();
+    expect(resp.result.id).toMatch(/^sess-/);
+    expect(resp.result.status).toBe("running");
+    spawnedTmuxNames.push(resp.result.tmuxSessionName);
+
+    // Verify we can read the session back through the relay
+    const getResp = await rpc(ws, "getSession", { id: resp.result.id });
+    expect(getResp.error).toBeUndefined();
+    expect(getResp.result.id).toBe(resp.result.id);
+
+    ws.close();
+  });
+
+  test("getTask routes through relay", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
+    await waitForOpen(ws);
+
+    // First list sessions to get a task ID
+    const listResp = await rpc(ws, "listSessions", { filters: {} });
+    expect(listResp.result.length).toBeGreaterThan(0);
+    const taskId = listResp.result[0].taskId;
+
+    const taskResp = await rpc(ws, "getTask", { id: taskId });
+    expect(taskResp.error).toBeUndefined();
+    expect(taskResp.result.id).toBe(taskId);
+    expect(taskResp.result.backend).toBe("shell");
+
+    ws.close();
+  });
+
+  test("stop routes through relay and cancels session", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
+    await waitForOpen(ws);
+
+    // Spawn a long-running session
+    const spawnResp = await rpc(ws, "spawn", {
+      prompt: "sleep 600",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+    });
+    spawnedTmuxNames.push(spawnResp.result.tmuxSessionName);
+    const sessionId = spawnResp.result.id;
+
+    // Stop it through the relay
+    const stopResp = await rpc(ws, "stop", { sessionId });
+    expect(stopResp.error).toBeUndefined();
+
+    // Verify it's cancelled
+    const getResp = await rpc(ws, "getSession", { id: sessionId });
+    expect(getResp.result.status).toBe("cancelled");
+
+    ws.close();
+  });
+
+  // ---- Account Isolation ----
+
+  test("second account cannot see first account's sessions", async () => {
+    // Sign up a second account
+    const signup2 = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: `iso-${Date.now()}@orka.dev`, name: "Isolated" }),
+    });
+    const { apiKey: key2 } = await signup2.json() as any;
+
+    // Connect second account as client — should get error (no nodes)
+    const ws2 = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${key2}&role=client`);
+    await waitForOpen(ws2);
+
+    const resp = await rpc(ws2, "listSessions", { filters: {} });
+    // Should get "No nodes available" error since account 2 has no registered nodes
+    expect(resp.error).toBeTruthy();
+    expect(resp.error.code).toBe(503);
+
+    ws2.close();
+  });
+
+  // ---- Error handling ----
+
+  test("unknown RPC method returns error", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
+    await waitForOpen(ws);
+
+    const resp = await rpc(ws, "nonExistentMethod", {});
+    expect(resp.error).toBeTruthy();
+
+    ws.close();
+  });
+
+  test("invalid token rejects WebSocket", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=ork_live_invalid&role=client`);
+    const closed = new Promise<number>((resolve) => {
+      ws.addEventListener("close", (e) => resolve(e.code));
+      ws.addEventListener("error", () => resolve(-1));
+    });
+    const code = await closed;
+    expect(code).not.toBe(1000);
+  });
+
+  // ---- Multiple RPC calls on same connection ----
+
+  test("multiple sequential RPCs on same WebSocket", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
+    await waitForOpen(ws);
+
+    // Send 5 sequential requests
+    for (let i = 0; i < 5; i++) {
+      const resp = await rpc(ws, "listSessions", { filters: {} }, `batch-${i}`);
+      expect(resp.error).toBeUndefined();
+      expect(resp.id).toBe(`batch-${i}`);
+    }
+
+    ws.close();
+  });
+});
