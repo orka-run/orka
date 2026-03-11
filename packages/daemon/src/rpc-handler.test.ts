@@ -28,6 +28,29 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   };
 }
 
+async function withTestTracing(
+  fn: (ctx: { exporter: InMemorySpanExporter; provider: BasicTracerProvider }) => Promise<void>,
+): Promise<void> {
+  trace.disable();
+  propagation.disable();
+
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  trace.setGlobalTracerProvider(provider);
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+
+  try {
+    await fn({ exporter, provider });
+    await provider.forceFlush();
+  } finally {
+    await provider.shutdown();
+    trace.disable();
+    propagation.disable();
+  }
+}
+
 describe("handleRpcRequest", () => {
   const originalBroadcast = pushHub.broadcast.bind(pushHub);
   let events: Array<{ channel: string; data: unknown }>;
@@ -136,17 +159,7 @@ describe("handleRpcRequest", () => {
   });
 
   test("creates a child span from the caller traceparent", async () => {
-    trace.disable();
-    propagation.disable();
-
-    const exporter = new InMemorySpanExporter();
-    const provider = new BasicTracerProvider({
-      spanProcessors: [new SimpleSpanProcessor(exporter)],
-    });
-    trace.setGlobalTracerProvider(provider);
-    propagation.setGlobalPropagator(new W3CTraceContextPropagator());
-
-    try {
+    await withTestTracing(async ({ exporter, provider }) => {
       const svc = {
         async reap() {
           return 1;
@@ -185,10 +198,70 @@ describe("handleRpcRequest", () => {
       expect(rpcSpan).toBeDefined();
       expect(rpcSpan?.spanContext().traceId).toBe(callerSpan?.spanContext().traceId);
       expect(rpcSpan?.parentSpanContext?.spanId).toBe(callerSpan?.spanContext().spanId);
-    } finally {
-      await provider.shutdown();
-      trace.disable();
-      propagation.disable();
-    }
+    });
+  });
+
+  test("creates a dispatch child span with the rpc method attribute", async () => {
+    await withTestTracing(async ({ exporter, provider }) => {
+      const svc = {
+        async reap() {
+          return 7;
+        },
+      } as OrkaService;
+
+      const response = await handleRpcRequest(
+        svc,
+        JSON.stringify({ jsonrpc: "2.0", id: 5, method: "reap", params: {} }),
+      );
+
+      expect(JSON.parse(response)).toEqual({
+        jsonrpc: "2.0",
+        id: 5,
+        result: 7,
+      });
+
+      await provider.forceFlush();
+
+      const rpcSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.rpc.handle");
+      const dispatchSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.rpc.dispatch");
+
+      expect(rpcSpan).toBeDefined();
+      expect(dispatchSpan).toBeDefined();
+      expect(dispatchSpan?.parentSpanContext?.spanId).toBe(rpcSpan?.spanContext().spanId);
+      expect(dispatchSpan?.attributes["orka.method"]).toBe("reap");
+      expect(typeof dispatchSpan?.attributes["orka.rpc.duration_ms"]).toBe("number");
+    });
+  });
+
+  test("marks slow requests with the slow attribute", async () => {
+    await withTestTracing(async ({ exporter, provider }) => {
+      const svc = {
+        async reap() {
+          await Bun.sleep(1_050);
+          return 9;
+        },
+      } as OrkaService;
+
+      const response = await handleRpcRequest(
+        svc,
+        JSON.stringify({ jsonrpc: "2.0", id: 6, method: "reap", params: {} }),
+      );
+
+      expect(JSON.parse(response)).toEqual({
+        jsonrpc: "2.0",
+        id: 6,
+        result: 9,
+      });
+
+      await provider.forceFlush();
+
+      const rpcSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.rpc.handle");
+      const dispatchSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.rpc.dispatch");
+
+      expect(rpcSpan?.attributes["orka.rpc.slow"]).toBe(true);
+      expect(dispatchSpan?.attributes["orka.rpc.slow"]).toBe(true);
+      expect(Number(rpcSpan?.attributes["orka.rpc.duration_ms"])).toBeGreaterThan(1_000);
+      expect(Number(dispatchSpan?.attributes["orka.rpc.duration_ms"])).toBeGreaterThan(1_000);
+    });
   });
 });

@@ -200,9 +200,18 @@ describe("TerminalManager", () => {
     expect(() => manager.onData(term.id, () => {})).toThrow("Terminal not found");
   });
 
-  test("constructor throws when no ptySpawn and node-pty unavailable", () => {
-    // Without providing ptySpawn, the constructor tries require("node-pty")
-    // which will fail in this test environment
+  test("constructor handles node-pty availability without an injected spawn", () => {
+    let nodePtyAvailable = false;
+    try {
+      require("node-pty");
+      nodePtyAvailable = true;
+    } catch {}
+
+    if (nodePtyAvailable) {
+      expect(() => new TerminalManager()).not.toThrow();
+      return;
+    }
+
     expect(() => new TerminalManager()).toThrow("node-pty is not available");
   });
 });

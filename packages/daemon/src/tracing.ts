@@ -1,9 +1,11 @@
 import {
+  context,
   propagation,
   trace,
   SpanStatusCode,
   type AttributeValue,
   type Attributes,
+  type Context,
   type HrTime,
   type Span,
   type Tracer,
@@ -238,9 +240,10 @@ export async function withSpan<T>(
   name: string,
   attributes: Record<string, string | number | boolean>,
   fn: (span: Span) => Promise<T>,
+  parentContext?: Context,
 ): Promise<T> {
   const tracer = getTracer();
-  return tracer.startActiveSpan(name, { attributes }, async (span) => {
+  return tracer.startActiveSpan(name, { attributes }, parentContext ?? context.active(), async (span) => {
     try {
       const result = await fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
