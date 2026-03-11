@@ -142,17 +142,11 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const outputTask = consumeClaudeOutput(input.threadId, stdout, meta, input.model);
         void finalizeClaudeProcess(input.threadId, process, outputTask, meta);
 
+        // Prompt is passed as CLI argument; close stdin immediately
         try {
-          if (input.prompt) {
-            await Promise.resolve(stdin.write(input.prompt));
-          }
           await Promise.resolve(stdin.end());
-        } catch (error) {
-          emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error");
-          closeEvents(meta);
-          process.kill();
-          await process.exited;
-          throw error;
+        } catch {
+          // stdin close failure is non-fatal when prompt is passed as argument
         }
 
         return handle;
@@ -489,6 +483,11 @@ function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
   const effort = mapClaudeReasoningEffort(input.reasoningEffort);
   if (effort) {
     command.push("--effort", effort);
+  }
+
+  // Pass prompt as CLI argument instead of stdin to avoid pipe race conditions
+  if (input.prompt) {
+    command.push(input.prompt);
   }
 
   return command;
