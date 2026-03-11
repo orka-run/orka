@@ -1,60 +1,165 @@
+// UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
+import { useId, useState } from "react";
+import { CheckCircle2, LoaderCircle, Plus, Search, XCircle } from "lucide-react";
 import type { SessionSummary } from "../stores/sessionStore";
-
-const STATUS_COLORS: Record<string, string> = {
-  running: "bg-green-500",
-  completed: "bg-zinc-500",
-  failed: "bg-red-500",
-  cancelled: "bg-yellow-500",
-  preparing: "bg-blue-500",
-  queued: "bg-zinc-600",
-};
+import { formatRelativeTime, getSessionGroup } from "../lib/sessionUi";
 
 interface SidebarProps {
   sessions: SessionSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onNewSession: () => void;
 }
 
-export function Sidebar({ sessions, selectedId, onSelect }: SidebarProps) {
-  const running = sessions.filter((s) => s.status === "running");
-  const completed = sessions.filter((s) => s.status !== "running");
+interface SessionGroup {
+  key: "running" | "completed" | "failed";
+  label: string;
+  sessions: SessionSummary[];
+}
+
+const GROUP_ORDER: Array<SessionGroup["key"]> = ["running", "completed", "failed"];
+const GROUP_LABELS: Record<SessionGroup["key"], string> = {
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+export function Sidebar({ sessions, selectedId, onSelect, onNewSession }: SidebarProps) {
+  const searchId = useId();
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const now = Date.now();
+  const runningCount = sessions.filter((session) => getSessionGroup(session.status) === "running").length;
+  const filteredSessions = sessions.filter((session) => matchesQuery(session, normalizedQuery));
+  const groups = GROUP_ORDER.map((key) => ({
+    key,
+    label: GROUP_LABELS[key],
+    sessions: filteredSessions.filter((session) => getSessionGroup(session.status) === key),
+  })).filter((group) => group.sessions.length > 0);
 
   return (
-    <aside className="flex w-72 flex-col border-r border-zinc-800 bg-zinc-900">
-      <div className="border-b border-zinc-800 px-4 py-3">
-        <h1 className="text-lg font-semibold">orka</h1>
-        <p className="text-xs text-zinc-500">
-          {running.length} running / {sessions.length} total
-        </p>
+    <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
+      <div className="border-b border-zinc-800 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold text-zinc-100">orka</h1>
+            <p className="mt-1 text-xs text-zinc-500">
+              {runningCount} active / {sessions.length} total
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onNewSession}
+            className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 transition hover:bg-white"
+          >
+            <Plus className="h-4 w-4" />
+            New Session
+          </button>
+        </div>
+        <div className="relative mt-4">
+          <label htmlFor={searchId} className="sr-only">
+            Search sessions
+          </label>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+          <input
+            id={searchId}
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search sessions"
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-9 pr-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+          />
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
-        {sessions.length === 0 ? (
-          <p className="p-4 text-sm text-zinc-500">No sessions</p>
+      <div className="flex-1 overflow-y-auto px-3 py-4">
+        {groups.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/60 px-4 py-8 text-center">
+            <p className="text-sm font-medium text-zinc-200">
+              {sessions.length === 0 ? "No sessions yet" : "No sessions match"}
+            </p>
+            <p className="mt-2 text-sm text-zinc-500">
+              {sessions.length === 0
+                ? "Create a new session to start streaming work here."
+                : "Adjust the search input to see more sessions."}
+            </p>
+          </div>
         ) : (
-          <ul className="py-1">
-            {sessions.map((s) => (
-              <li key={s.id}>
-                <button
-                  onClick={() => onSelect(s.id)}
-                  className={`w-full px-4 py-2 text-left text-sm hover:bg-zinc-800 ${
-                    selectedId === s.id ? "bg-zinc-800" : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`h-2 w-2 rounded-full ${STATUS_COLORS[s.status] ?? "bg-zinc-600"}`} />
-                    <span className="truncate font-medium">{s.title || s.id}</span>
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
-                    <span>{s.backend}</span>
-                    <span>·</span>
-                    <span>{s.status}</span>
-                  </div>
-                </button>
-              </li>
+          <div className="space-y-6">
+            {groups.map((group) => (
+              <section key={group.key}>
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                    {group.label}
+                  </h2>
+                  <span className="text-xs text-zinc-600">{group.sessions.length}</span>
+                </div>
+                <ul className="space-y-2">
+                  {group.sessions.map((session) => {
+                    const isSelected = selectedId === session.id;
+
+                    return (
+                      <li key={session.id}>
+                        <button
+                          type="button"
+                          onClick={() => onSelect(session.id)}
+                          className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                            isSelected
+                              ? "border-zinc-700 bg-zinc-900 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+                              : "border-zinc-900 bg-zinc-950 hover:border-zinc-800 hover:bg-zinc-900/70"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <StatusIcon status={session.status} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="truncate text-sm font-medium text-zinc-100">
+                                  {session.title || session.id}
+                                </p>
+                                <span className="shrink-0 text-xs text-zinc-500">
+                                  {formatRelativeTime(session.createdAt, now)}
+                                </span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-300">
+                                  {session.backend}
+                                </span>
+                                <span className="text-xs capitalize text-zinc-500">{session.status}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         )}
       </div>
     </aside>
   );
+}
+
+function matchesQuery(session: SessionSummary, query: string): boolean {
+  if (!query) {
+    return true;
+  }
+
+  const haystack = [session.id, session.title, session.backend, session.status, session.model ?? ""]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function StatusIcon({ status }: { status: SessionSummary["status"] }) {
+  if (status === "completed") {
+    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />;
+  }
+
+  if (status === "failed" || status === "cancelled") {
+    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />;
+  }
+
+  return <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-sky-400" />;
 }

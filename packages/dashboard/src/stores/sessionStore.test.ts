@@ -86,10 +86,12 @@ describe("sessionStore", () => {
     expect(store.getState().sessions).toEqual([
       {
         id: "sess-1",
+        taskId: "task-1",
         status: "queued",
         backend: "codex",
         mode: "interactive",
         title: "First session",
+        model: "gpt-5",
         createdAt: "2026-03-11T10:00:00.000Z",
         startedAt: null,
         finishedAt: null,
@@ -116,10 +118,12 @@ describe("sessionStore", () => {
       sessions: [
         {
           id: session.id,
+          taskId: session.taskId,
           status: session.status,
           backend: session.backend,
           mode: session.mode,
           title: "First session",
+          model: "gpt-5",
           createdAt: session.createdAt,
           startedAt: session.startedAt,
           finishedAt: session.finishedAt,
@@ -142,10 +146,12 @@ describe("sessionStore", () => {
       sessions: [
         {
           id: session.id,
+          taskId: session.taskId,
           status: session.status,
           backend: session.backend,
           mode: session.mode,
           title: "First session",
+          model: "gpt-5",
           createdAt: session.createdAt,
           startedAt: session.startedAt,
           finishedAt: session.finishedAt,
@@ -187,10 +193,12 @@ describe("sessionStore", () => {
     expect(store.getState().sessions).toEqual([
       {
         id: "sess-2",
+        taskId: "task-2",
         status: "queued",
         backend: "codex",
         mode: "interactive",
         title: "Ship dashboard store",
+        model: null,
         createdAt: "2026-03-11T11:00:00.000Z",
         startedAt: null,
         finishedAt: null,

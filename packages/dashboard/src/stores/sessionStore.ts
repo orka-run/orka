@@ -7,10 +7,12 @@ const FALLBACK_TITLE_LENGTH = 80;
 
 export interface SessionSummary {
   id: string;
+  taskId: string;
   status: Session["status"];
   backend: Session["backend"];
   mode: Session["mode"];
   title: string;
+  model: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -32,12 +34,23 @@ export interface SessionState {
   handleSessionDeleted: (data: SessionDeletedData) => void;
 }
 
-async function getTaskTitle(transport: WsTransport, taskId: string): Promise<string | null> {
+interface TaskDetails {
+  title: string | null;
+  model: string | null;
+}
+
+async function getTaskDetails(transport: WsTransport, taskId: string): Promise<TaskDetails> {
   try {
     const task = await transport.request<Task | null>("getTask", { id: taskId });
-    return task?.title ?? null;
+    return {
+      title: task?.title ?? null,
+      model: task?.model ?? null,
+    };
   } catch {
-    return null;
+    return {
+      title: null,
+      model: null,
+    };
   }
 }
 
@@ -46,14 +59,17 @@ async function toSessionSummary(
   session: Session,
   fallbackTitle?: string,
 ): Promise<SessionSummary> {
-  const title = fallbackTitle ?? (await getTaskTitle(transport, session.taskId)) ?? session.id;
+  const taskDetails = await getTaskDetails(transport, session.taskId);
+  const title = fallbackTitle ?? taskDetails.title ?? session.id;
 
   return {
     id: session.id,
+    taskId: session.taskId,
     status: session.status,
     backend: session.backend,
     mode: session.mode,
     title,
+    model: taskDetails.model,
     createdAt: session.createdAt,
     startedAt: session.startedAt,
     finishedAt: session.finishedAt,

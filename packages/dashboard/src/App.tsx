@@ -1,6 +1,7 @@
-// UI architecture inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
+// UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { StatusBar } from "./components/StatusBar";
@@ -13,6 +14,7 @@ const DEFAULT_DAEMON_URL = "ws://127.0.0.1:7394";
 export function App() {
   const transportRef = useRef<WsTransport | null>(null);
   const transport = transportRef.current ?? (transportRef.current = new WsTransport(DEFAULT_DAEMON_URL));
+  const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const sessions = useSessionStore((state) => state.sessions);
   const selectedId = useSessionStore((state) => state.selectedId);
   const selectSession = useSessionStore((state) => state.selectSession);
@@ -20,6 +22,8 @@ export function App() {
   const handleSessionUpdated = useSessionStore((state) => state.handleSessionUpdated);
   const handleSessionDeleted = useSessionStore((state) => state.handleSessionDeleted);
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
+  const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
+  const defaultProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
 
   useEffect(() => {
     const unsubscribeState = transport.onStateChange(setConnectionStatus);
@@ -47,6 +51,7 @@ export function App() {
           sessions={sessions}
           selectedId={selectedId}
           onSelect={selectSession}
+          onNewSession={() => setIsNewSessionOpen(true)}
         />
         <main className="flex-1 overflow-hidden">
           {selectedId ? (
@@ -58,6 +63,12 @@ export function App() {
           )}
         </main>
       </div>
+      <NewSessionDialog
+        open={isNewSessionOpen}
+        transport={transport}
+        defaultProjectPath={defaultProjectPath}
+        onClose={() => setIsNewSessionOpen(false)}
+      />
       <StatusBar sessionCount={sessions.length} />
     </div>
   );
