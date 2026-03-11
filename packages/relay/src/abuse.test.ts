@@ -1,103 +1,80 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-
-let tmpDir: string;
-let detector: any;
-
-beforeAll(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "orka-test-abuse-"));
-  process.env.ORKA_RELAY_DATA = tmpDir;
-});
-
-afterAll(() => {
-  if (detector) detector.shutdown();
-  const { closeDb } = require("./db");
-  closeDb();
-  rmSync(tmpDir, { recursive: true, force: true });
-  delete process.env.ORKA_RELAY_DATA;
-});
+import { describe, test, expect, beforeEach } from "bun:test";
+import { AbuseDetector } from "./abuse";
 
 describe("AbuseDetector", () => {
-  test("checkMessage returns 'none' under normal conditions", async () => {
-    const { AbuseDetector } = await import("./abuse");
-    detector = new AbuseDetector();
+  let detector: AbuseDetector;
 
-    // rateLimit=60 → burst threshold = (60/6)*10 = 100
-    const action = detector.checkMessage("acct-normal", 100, 60);
-    expect(action).toBe("none");
+  beforeEach(() => {
+    detector = new AbuseDetector();
   });
 
-  test("checkMessage returns escalated action on burst", async () => {
-    const { AbuseDetector } = await import("./abuse");
-    detector = new AbuseDetector();
-
-    // rateLimit=60 → burst threshold = (60/6)*10 = 100
-    // Send over 100 messages to exceed threshold
-    let lastAction = "none";
-    for (let i = 0; i < 110; i++) {
-      lastAction = detector.checkMessage("acct-burst", 100, 60);
-    }
-    expect(lastAction).not.toBe("none");
+  test("checkMessage returns none for normal traffic", () => {
+    const result = detector.checkMessage("acc-1", 100, 60);
+    expect(result).toBe("none");
   });
 
-  test("checkConnection returns 'none' under normal conditions", async () => {
-    const { AbuseDetector } = await import("./abuse");
-    detector = new AbuseDetector();
+  test("checkMessage detects burst", () => {
+    // burstThreshold = (rateLimit / 6) * 10
+    // For rateLimit=6: threshold = (6/6)*10 = 10
+    const rateLimit = 6;
 
-    const action = detector.checkConnection("acct-conn-normal", 30);
-    expect(action).toBe("none");
-  });
-
-  test("checkNodeRegistration detects over-limit", async () => {
-    const { AbuseDetector } = await import("./abuse");
-    detector = new AbuseDetector();
-
-    // currentCount >= maxNodes → "suspend" (high severity)
-    const action = detector.checkNodeRegistration("acct-nodes", 5, 5);
-    expect(action).toBe("suspend");
-  });
-
-  test("checkConnection detects churn when exceeding limit", async () => {
-    const { AbuseDetector } = await import("./abuse");
-    detector = new AbuseDetector();
-
-    // connectionRatePerMinute = 5 → more than 5 connections in 1 minute triggers action
-    let lastAction = "none";
     for (let i = 0; i < 10; i++) {
-      lastAction = detector.checkConnection("acct-conn-churn", 5);
+      detector.checkMessage("acc-1", 100, rateLimit);
     }
-    expect(lastAction).not.toBe("none");
+    // 11th should trigger burst detection
+    const result = detector.checkMessage("acc-1", 100, rateLimit);
+    expect(result).not.toBe("none");
   });
 
-  test("checkNodeRegistration returns 'none' under limit", async () => {
-    const { AbuseDetector } = await import("./abuse");
-    detector = new AbuseDetector();
-
-    // currentCount < maxNodes → "none"
-    const action = detector.checkNodeRegistration("acct-nodes-ok", 10, 3);
-    expect(action).toBe("none");
+  test("checkConnection returns none within limit", () => {
+    const result = detector.checkConnection("acc-1", 30);
+    expect(result).toBe("none");
   });
 
-  test("escalation: repeated signals escalate from warn to throttle to suspend", async () => {
-    const { AbuseDetector } = await import("./abuse");
-    detector = new AbuseDetector();
-
-    // rateLimit=6 → burst threshold = (6/6)*10 = 10
-    // Each burst beyond 10 messages raises a signal
-    const actions: string[] = [];
-    for (let i = 0; i < 50; i++) {
-      const action = detector.checkMessage("acct-escalation", 100, 6);
-      if (action !== "none") {
-        actions.push(action);
-      }
+  test("checkConnection detects connection churn", () => {
+    for (let i = 0; i < 30; i++) {
+      detector.checkConnection("acc-1", 30);
     }
+    const result = detector.checkConnection("acc-1", 30);
+    expect(result).not.toBe("none");
+  });
 
-    expect(actions.length).toBeGreaterThan(0);
-    // Signal escalation: 1st=warn, 2nd=warn, 3rd=throttle, 5th+=suspend
-    expect(actions[0]).toBe("warn");
-    const hasThrottleOrSuspend = actions.some((a) => a === "throttle" || a === "suspend");
-    expect(hasThrottleOrSuspend).toBe(true);
+  test("checkNodeRegistration returns none within limit", () => {
+    expect(detector.checkNodeRegistration("acc-1", 20, 5)).toBe("none");
+  });
+
+  test("checkNodeRegistration detects abuse at limit", () => {
+    const result = detector.checkNodeRegistration("acc-1", 20, 20);
+    expect(result).toBe("suspend");
+  });
+
+  test("escalation: warn → throttle → suspend", () => {
+    // With connection limit=5, each call after 5th triggers a signal
+    // Call 1-5: "none" (within limit)
+    for (let i = 0; i < 5; i++) {
+      expect(detector.checkConnection("acc-1", 5)).toBe("none");
+    }
+    // Call 6: signal 1 → warn
+    expect(detector.checkConnection("acc-1", 5)).toBe("warn");
+    // Call 7: signal 2 → warn
+    expect(detector.checkConnection("acc-1", 5)).toBe("warn");
+    // Call 8: signal 3 → throttle
+    expect(detector.checkConnection("acc-1", 5)).toBe("throttle");
+    // Call 9: signal 4 → throttle
+    expect(detector.checkConnection("acc-1", 5)).toBe("throttle");
+    // Call 10: signal 5 → suspend
+    expect(detector.checkConnection("acc-1", 5)).toBe("suspend");
+  });
+
+  test("accounts are tracked independently", () => {
+    const result1 = detector.checkNodeRegistration("acc-1", 10, 10);
+    expect(result1).toBe("suspend");
+
+    const result2 = detector.checkMessage("acc-2", 100, 60);
+    expect(result2).toBe("none");
+  });
+
+  test("shutdown clears timer", () => {
+    detector.shutdown();
   });
 });
