@@ -12,6 +12,7 @@ import {
   updateApiKeyLastUsed,
 } from "./db";
 import { getRelayConfig } from "./config";
+import { withSpanSync } from "./tracing";
 
 // --- API Key Generation ---
 
@@ -181,77 +182,84 @@ export function authenticate(key: string): AuthResult {
     return { success: false, error: "Missing API key", code: 401 };
   }
 
-  const keyHash = hashKey(key);
+  return withSpanSync("orka.relay.auth", {
+    "orka.auth.key_prefix": key.slice(0, 16),
+  }, (span) => {
+    const keyHash = hashKey(key);
 
-  // Check cache first
-  const cached = authCache.get(keyHash);
-  if (cached) {
-    queueLastUsedUpdate(keyHash);
-    return { success: true, ctx: cached };
-  }
-
-  // DB lookup
-  const keyRecord = getApiKeyByHash(keyHash);
-  if (!keyRecord) {
-    // Check legacy token
-    const config = getRelayConfig();
-    if (config.auth.legacyToken && key === config.auth.legacyToken) {
-      // Legacy token: create a synthetic auth context
-      const ctx: AuthContext = {
-        accountId: "__legacy__",
-        account: {
-          id: "__legacy__",
-          email: "legacy@localhost",
-          name: "Legacy Token",
-          status: "active",
-          tier: "pro",
-          createdAt: "",
-          updatedAt: "",
-        },
-        permissions: "client",
-        tier: "pro",
-        rateLimits: DEFAULT_RATE_LIMITS,
-        keyHash,
-      };
-      authCache.set(keyHash, ctx);
-      return { success: true, ctx };
+    // Check cache first
+    const cached = authCache.get(keyHash);
+    if (cached) {
+      span.setAttribute("orka.auth.cache_hit", true);
+      queueLastUsedUpdate(keyHash);
+      return { success: true, ctx: cached } as AuthResult;
     }
-    return { success: false, error: "Invalid API key", code: 401 };
-  }
+    span.setAttribute("orka.auth.cache_hit", false);
 
-  if (keyRecord.status !== "active") {
-    return { success: false, error: "API key revoked", code: 403 };
-  }
+    // DB lookup
+    const keyRecord = getApiKeyByHash(keyHash);
+    if (!keyRecord) {
+      // Check legacy token
+      const config = getRelayConfig();
+      if (config.auth.legacyToken && key === config.auth.legacyToken) {
+        // Legacy token: create a synthetic auth context
+        const ctx: AuthContext = {
+          accountId: "__legacy__",
+          account: {
+            id: "__legacy__",
+            email: "legacy@localhost",
+            name: "Legacy Token",
+            status: "active",
+            tier: "pro",
+            createdAt: "",
+            updatedAt: "",
+          },
+          permissions: "client",
+          tier: "pro",
+          rateLimits: DEFAULT_RATE_LIMITS,
+          keyHash,
+        };
+        authCache.set(keyHash, ctx);
+        return { success: true, ctx } as AuthResult;
+      }
+      return { success: false, error: "Invalid API key", code: 401 } as AuthResult;
+    }
 
-  // Load account
-  const account = getAccount(keyRecord.accountId);
-  if (!account) {
-    return { success: false, error: "Account not found", code: 403 };
-  }
+    if (keyRecord.status !== "active") {
+      return { success: false, error: "API key revoked", code: 403 } as AuthResult;
+    }
 
-  if (account.status === "suspended") {
-    return { success: false, error: "Account suspended", code: 403 };
-  }
-  if (account.status === "deleted") {
-    return { success: false, error: "Account deleted", code: 403 };
-  }
+    // Load account
+    const account = getAccount(keyRecord.accountId);
+    if (!account) {
+      return { success: false, error: "Account not found", code: 403 } as AuthResult;
+    }
 
-  // Load rate limits
-  const rateLimits = getRateLimits(keyRecord.accountId) ?? { ...DEFAULT_RATE_LIMITS, accountId: keyRecord.accountId };
+    if (account.status === "suspended") {
+      return { success: false, error: "Account suspended", code: 403 } as AuthResult;
+    }
+    if (account.status === "deleted") {
+      return { success: false, error: "Account deleted", code: 403 } as AuthResult;
+    }
 
-  const ctx: AuthContext = {
-    accountId: keyRecord.accountId,
-    account,
-    permissions: keyRecord.permissions,
-    tier: account.tier,
-    rateLimits,
-    keyHash,
-  };
+    // Load rate limits
+    const rateLimits = getRateLimits(keyRecord.accountId) ?? { ...DEFAULT_RATE_LIMITS, accountId: keyRecord.accountId };
 
-  authCache.set(keyHash, ctx);
-  queueLastUsedUpdate(keyHash);
+    const ctx: AuthContext = {
+      accountId: keyRecord.accountId,
+      account,
+      permissions: keyRecord.permissions,
+      tier: account.tier,
+      rateLimits,
+      keyHash,
+    };
 
-  return { success: true, ctx };
+    span.setAttribute("orka.account.id", ctx.accountId);
+    authCache.set(keyHash, ctx);
+    queueLastUsedUpdate(keyHash);
+
+    return { success: true, ctx } as AuthResult;
+  });
 }
 
 /**

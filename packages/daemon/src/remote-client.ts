@@ -14,6 +14,7 @@ import type {
   KeyPair,
 } from "@orka/core";
 import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy } from "@orka/core";
+import { withSpan } from "./tracing";
 
 export interface RemoteClientOptions {
   /** WebSocket URL of the daemon or relay */
@@ -132,32 +133,36 @@ class RemoteClient implements OrkaService {
   }
 
   private async call(method: string, params?: any): Promise<any> {
-    await this.connect();
-    const id = String(this.nextId++);
+    return withSpan("orka.rpc.request", {
+      "orka.method": method,
+    }, async () => {
+      await this.connect();
+      const id = String(this.nextId++);
 
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      return new Promise((resolve, reject) => {
+        this.pending.set(id, { resolve, reject });
 
-      let req: any = {
-        jsonrpc: "2.0",
-        id,
-        method,
-        ...(params !== undefined ? { params } : {}),
-      };
+        let req: any = {
+          jsonrpc: "2.0",
+          id,
+          method,
+          ...(params !== undefined ? { params } : {}),
+        };
 
-      // Encrypt params if E2E is enabled
-      if (this.encKey && req.params) {
-        req = encryptRequest(this.encKey, req);
-      }
-
-      this.ws!.send(JSON.stringify(req));
-
-      setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id);
-          reject(new Error(`Request timeout: ${method}`));
+        // Encrypt params if E2E is enabled
+        if (this.encKey && req.params) {
+          req = encryptRequest(this.encKey, req);
         }
-      }, 30_000);
+
+        this.ws!.send(JSON.stringify(req));
+
+        setTimeout(() => {
+          if (this.pending.has(id)) {
+            this.pending.delete(id);
+            reject(new Error(`Request timeout: ${method}`));
+          }
+        }, 30_000);
+      });
     });
   }
 
