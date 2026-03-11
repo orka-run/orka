@@ -17,6 +17,7 @@ import { signup, generateApiKey, authenticate, extractApiKey, type AuthContext }
 import { insertApiKey } from "./db";
 import { getRelayConfig } from "./config";
 import type { RelayState } from "./state";
+import { withSpan } from "./tracing";
 
 // --- Input Schemas ---
 
@@ -102,203 +103,208 @@ export async function handleApiRequest(
   url: URL,
   state?: RelayState,
 ): Promise<Response | null> {
-  const path = url.pathname;
-  const method = req.method;
+  return withSpan("orka.relay.api.handle", {
+    "orka.method": req.method,
+    "orka.url": new URL(req.url).pathname,
+  }, async () => {
+    const path = url.pathname;
+    const method = req.method;
 
-  // POST /v1/signup — public, rate limited by IP
-  if (path === "/v1/signup" && method === "POST") {
-    const config = getRelayConfig();
-    if (!config.auth.signupEnabled) {
-      return error("Signup is disabled", 403);
-    }
+    // POST /v1/signup — public, rate limited by IP
+    if (path === "/v1/signup" && method === "POST") {
+      const config = getRelayConfig();
+      if (!config.auth.signupEnabled) {
+        return error("Signup is disabled", 403);
+      }
 
-    const ip = getClientIp(req);
-    if (!checkSignupRateLimit(ip)) {
-      return error("Too many signup attempts. Try again later.", 429);
-    }
+      const ip = getClientIp(req);
+      if (!checkSignupRateLimit(ip)) {
+        return error("Too many signup attempts. Try again later.", 429);
+      }
 
-    let body: any;
-    try {
-      body = await req.json();
-    } catch {
-      return error("Invalid JSON body", 400);
-    }
-
-    const parsed = SignupSchema.safeParse(body);
-    if (!parsed.success) {
-      return error(`Validation error: ${parsed.error.issues[0]?.message ?? "invalid input"}`, 400);
-    }
-
-    // Check email uniqueness
-    const existing = getAccountByEmail(parsed.data.email);
-    if (existing) {
-      return error("Email already registered", 409);
-    }
-
-    const { account, apiKey } = signup(parsed.data.email, parsed.data.name);
-    return json({ accountId: account.id, apiKey }, 201);
-  }
-
-  // --- All other endpoints require authentication ---
-  const key = extractApiKey(req);
-  if (!key) return error("Missing API key", 401);
-  const auth = authenticate(key);
-  if (!auth.success || !auth.ctx) return error(auth.error ?? "Unauthorized", auth.code ?? 401);
-
-  const ctx = auth.ctx;
-
-  // --- Admin endpoints ---
-  if (path.startsWith("/v1/admin/")) {
-    const config = getRelayConfig();
-    const adminToken = config.auth.adminToken;
-
-    // Admin requires either admin permission or admin token
-    if (ctx.permissions !== "admin" && (!adminToken || key !== adminToken)) {
-      return error("Admin access required", 403);
-    }
-
-    if (path === "/v1/admin/accounts" && method === "GET") {
-      const accounts = listAccounts();
-      return json({ accounts });
-    }
-
-    const accountMatch = path.match(/^\/v1\/admin\/accounts\/([^/]+)$/);
-    if (accountMatch && method === "PATCH") {
-      const accountId = accountMatch[1];
       let body: any;
-      try { body = await req.json(); } catch { return error("Invalid JSON body", 400); }
+      try {
+        body = await req.json();
+      } catch {
+        return error("Invalid JSON body", 400);
+      }
 
-      const parsed = UpdateAccountSchema.safeParse(body);
-      if (!parsed.success) return error("Validation error", 400);
+      const parsed = SignupSchema.safeParse(body);
+      if (!parsed.success) {
+        return error(`Validation error: ${parsed.error.issues[0]?.message ?? "invalid input"}`, 400);
+      }
 
-      if (parsed.data.status) updateAccountStatus(accountId, parsed.data.status);
-      if (parsed.data.tier) updateAccountTier(accountId, parsed.data.tier);
-      if (parsed.data.rateLimits) updateRateLimits(accountId, parsed.data.rateLimits);
+      // Check email uniqueness
+      const existing = getAccountByEmail(parsed.data.email);
+      if (existing) {
+        return error("Email already registered", 409);
+      }
 
-      const updated = getAccount(accountId);
-      return json({ account: updated });
+      const { account, apiKey } = signup(parsed.data.email, parsed.data.name);
+      return json({ accountId: account.id, apiKey }, 201);
     }
 
-    if (path === "/v1/admin/stats" && method === "GET") {
-      const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
-      return json({
-        accountCount: getAccountCount(),
-        ...stats,
-      });
-    }
+    // --- All other endpoints require authentication ---
+    const key = extractApiKey(req);
+    if (!key) return error("Missing API key", 401);
+    const auth = authenticate(key);
+    if (!auth.success || !auth.ctx) return error(auth.error ?? "Unauthorized", auth.code ?? 401);
 
-    if (path === "/v1/admin/health" && method === "GET") {
-      const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
-      const accounts = listAccounts();
-      const accountDetails = accounts.map((a) => {
-        const acctStats = state?.getAccountStats(a.id) ?? { nodes: 0, clients: 0, pending: 0 };
-        const limits = getRateLimits(a.id);
-        return {
-          id: a.id,
-          email: a.email,
-          name: a.name,
-          status: a.status,
-          tier: a.tier,
-          ...acctStats,
-          rateLimits: limits,
-        };
-      });
+    const ctx = auth.ctx;
 
-      return json({
-        status: "ok",
-        version: "0.2.0",
-        global: {
+    // --- Admin endpoints ---
+    if (path.startsWith("/v1/admin/")) {
+      const config = getRelayConfig();
+      const adminToken = config.auth.adminToken;
+
+      // Admin requires either admin permission or admin token
+      if (ctx.permissions !== "admin" && (!adminToken || key !== adminToken)) {
+        return error("Admin access required", 403);
+      }
+
+      if (path === "/v1/admin/accounts" && method === "GET") {
+        const accounts = listAccounts();
+        return json({ accounts });
+      }
+
+      const accountMatch = path.match(/^\/v1\/admin\/accounts\/([^/]+)$/);
+      if (accountMatch && method === "PATCH") {
+        const accountId = accountMatch[1];
+        let body: any;
+        try { body = await req.json(); } catch { return error("Invalid JSON body", 400); }
+
+        const parsed = UpdateAccountSchema.safeParse(body);
+        if (!parsed.success) return error("Validation error", 400);
+
+        if (parsed.data.status) updateAccountStatus(accountId, parsed.data.status);
+        if (parsed.data.tier) updateAccountTier(accountId, parsed.data.tier);
+        if (parsed.data.rateLimits) updateRateLimits(accountId, parsed.data.rateLimits);
+
+        const updated = getAccount(accountId);
+        return json({ account: updated });
+      }
+
+      if (path === "/v1/admin/stats" && method === "GET") {
+        const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
+        return json({
           accountCount: getAccountCount(),
           ...stats,
-        },
-        accounts: accountDetails,
-        config: {
-          signupEnabled: config.auth.signupEnabled,
-          rateLimits: config.rateLimits,
-          abuse: config.abuse,
-        },
+        });
+      }
+
+      if (path === "/v1/admin/health" && method === "GET") {
+        const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
+        const accounts = listAccounts();
+        const accountDetails = accounts.map((a) => {
+          const acctStats = state?.getAccountStats(a.id) ?? { nodes: 0, clients: 0, pending: 0 };
+          const limits = getRateLimits(a.id);
+          return {
+            id: a.id,
+            email: a.email,
+            name: a.name,
+            status: a.status,
+            tier: a.tier,
+            ...acctStats,
+            rateLimits: limits,
+          };
+        });
+
+        return json({
+          status: "ok",
+          version: "0.2.0",
+          global: {
+            accountCount: getAccountCount(),
+            ...stats,
+          },
+          accounts: accountDetails,
+          config: {
+            signupEnabled: config.auth.signupEnabled,
+            rateLimits: config.rateLimits,
+            abuse: config.abuse,
+          },
+        });
+      }
+
+      return error("Not found", 404);
+    }
+
+    // --- Account endpoints ---
+
+    // GET /v1/account
+    if (path === "/v1/account" && method === "GET") {
+      return json({
+        id: ctx.account.id,
+        email: ctx.account.email,
+        name: ctx.account.name,
+        status: ctx.account.status,
+        tier: ctx.account.tier,
+        createdAt: ctx.account.createdAt,
       });
     }
 
-    return error("Not found", 404);
-  }
+    // POST /v1/keys
+    if (path === "/v1/keys" && method === "POST") {
+      const config = getRelayConfig();
+      const existingKeys = listApiKeys(ctx.accountId);
+      if (existingKeys.length >= config.abuse.maxKeysPerAccount) {
+        return error(`Maximum ${config.abuse.maxKeysPerAccount} API keys per account`, 400);
+      }
 
-  // --- Account endpoints ---
+      let body: any = {};
+      try { body = await req.json(); } catch { /* empty body is OK */ }
 
-  // GET /v1/account
-  if (path === "/v1/account" && method === "GET") {
-    return json({
-      id: ctx.account.id,
-      email: ctx.account.email,
-      name: ctx.account.name,
-      status: ctx.account.status,
-      tier: ctx.account.tier,
-      createdAt: ctx.account.createdAt,
-    });
-  }
+      const parsed = CreateKeySchema.safeParse(body);
+      if (!parsed.success) return error("Validation error", 400);
 
-  // POST /v1/keys
-  if (path === "/v1/keys" && method === "POST") {
-    const config = getRelayConfig();
-    const existingKeys = listApiKeys(ctx.accountId);
-    if (existingKeys.length >= config.abuse.maxKeysPerAccount) {
-      return error(`Maximum ${config.abuse.maxKeysPerAccount} API keys per account`, 400);
+      const { key: newKey, record } = generateApiKey(ctx.accountId, {
+        label: parsed.data?.label,
+        permissions: parsed.data?.permissions,
+      });
+      insertApiKey(record);
+
+      return json({ keyId: record.id, apiKey: newKey, prefix: record.keyPrefix }, 201);
     }
 
-    let body: any = {};
-    try { body = await req.json(); } catch { /* empty body is OK */ }
+    // GET /v1/keys
+    if (path === "/v1/keys" && method === "GET") {
+      const keys = listApiKeys(ctx.accountId);
+      return json({
+        keys: keys.map((k) => ({
+          id: k.id,
+          prefix: k.keyPrefix,
+          label: k.label,
+          permissions: k.permissions,
+          status: k.status,
+          lastUsedAt: k.lastUsedAt,
+          createdAt: k.createdAt,
+        })),
+      });
+    }
 
-    const parsed = CreateKeySchema.safeParse(body);
-    if (!parsed.success) return error("Validation error", 400);
+    // DELETE /v1/keys/:id
+    const keyMatch = path.match(/^\/v1\/keys\/([^/]+)$/);
+    if (keyMatch && method === "DELETE") {
+      const keyId = keyMatch[1];
+      const revoked = revokeApiKey(keyId, ctx.accountId);
+      if (!revoked) return error("Key not found", 404);
+      return json({ revoked: true });
+    }
 
-    const { key: newKey, record } = generateApiKey(ctx.accountId, {
-      label: parsed.data?.label,
-      permissions: parsed.data?.permissions,
-    });
-    insertApiKey(record);
+    // GET /v1/usage
+    if (path === "/v1/usage" && method === "GET") {
+      const params = Object.fromEntries(url.searchParams);
+      const parsed = UsageQuerySchema.safeParse(params);
+      if (!parsed.success) return error("Invalid query parameters", 400);
 
-    return json({ keyId: record.id, apiKey: newKey, prefix: record.keyPrefix }, 201);
-  }
+      const now = new Date();
+      const from = parsed.data?.from ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
+      const to = parsed.data?.to ?? now.toISOString();
+      const granularity = parsed.data?.granularity ?? "hour";
 
-  // GET /v1/keys
-  if (path === "/v1/keys" && method === "GET") {
-    const keys = listApiKeys(ctx.accountId);
-    return json({
-      keys: keys.map((k) => ({
-        id: k.id,
-        prefix: k.keyPrefix,
-        label: k.label,
-        permissions: k.permissions,
-        status: k.status,
-        lastUsedAt: k.lastUsedAt,
-        createdAt: k.createdAt,
-      })),
-    });
-  }
+      const buckets = getAccountUsage(ctx.accountId, from, to, granularity);
+      return json({ buckets });
+    }
 
-  // DELETE /v1/keys/:id
-  const keyMatch = path.match(/^\/v1\/keys\/([^/]+)$/);
-  if (keyMatch && method === "DELETE") {
-    const keyId = keyMatch[1];
-    const revoked = revokeApiKey(keyId, ctx.accountId);
-    if (!revoked) return error("Key not found", 404);
-    return json({ revoked: true });
-  }
-
-  // GET /v1/usage
-  if (path === "/v1/usage" && method === "GET") {
-    const params = Object.fromEntries(url.searchParams);
-    const parsed = UsageQuerySchema.safeParse(params);
-    if (!parsed.success) return error("Invalid query parameters", 400);
-
-    const now = new Date();
-    const from = parsed.data?.from ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
-    const to = parsed.data?.to ?? now.toISOString();
-    const granularity = parsed.data?.granularity ?? "hour";
-
-    const buckets = getAccountUsage(ctx.accountId, from, to, granularity);
-    return json({ buckets });
-  }
-
-  return null; // Not an API route
+    return null; // Not an API route
+  });
 }

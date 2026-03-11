@@ -1,4 +1,4 @@
-import { metrics } from "./tracing";
+import { metrics, withSpanSync } from "./tracing";
 
 // --- Abuse Detection ---
 
@@ -37,47 +37,57 @@ export class AbuseDetector {
 
   /** Check on each message. Returns action to take. */
   checkMessage(accountId: string, messageBytes: number, rateLimit: number): AbuseAction {
-    const stats = this.getOrCreate(accountId);
-    const now = Date.now();
+    return withSpanSync("orka.relay.abuse.checkMessage", {
+      "orka.account.id": accountId,
+      "orka.bytes": messageBytes,
+    }, () => {
+      const stats = this.getOrCreate(accountId);
+      const now = Date.now();
 
-    // Track message timestamps (keep last 10 seconds)
-    stats.recentMessages.push(now);
-    stats.recentMessages = stats.recentMessages.filter((t) => now - t < 10_000);
+      // Track message timestamps (keep last 10 seconds)
+      stats.recentMessages.push(now);
+      stats.recentMessages = stats.recentMessages.filter((t) => now - t < 10_000);
 
-    // Burst detection: 10x rate limit within 10 seconds
-    const burstThreshold = (rateLimit / 6) * 10; // 10x the per-10s equivalent
-    if (stats.recentMessages.length > burstThreshold) {
-      return this.raiseSignal(accountId, {
-        type: "burst",
-        severity: "medium",
-        accountId,
-        details: { count: stats.recentMessages.length, threshold: burstThreshold, windowSec: 10 },
-        timestamp: new Date().toISOString(),
-      });
-    }
+      // Burst detection: 10x rate limit within 10 seconds
+      const burstThreshold = (rateLimit / 6) * 10; // 10x the per-10s equivalent
+      if (stats.recentMessages.length > burstThreshold) {
+        return this.raiseSignal(accountId, {
+          type: "burst",
+          severity: "medium",
+          accountId,
+          details: { count: stats.recentMessages.length, threshold: burstThreshold, windowSec: 10 },
+          timestamp: new Date().toISOString(),
+        });
+      }
 
-    return "none";
+      return "none";
+    });
   }
 
   /** Check on connection open */
   checkConnection(accountId: string, connectionRatePerMinute: number): AbuseAction {
-    const stats = this.getOrCreate(accountId);
-    const now = Date.now();
+    return withSpanSync("orka.relay.abuse.checkConnection", {
+      "orka.account.id": accountId,
+      "orka.connection_rate_limit": connectionRatePerMinute,
+    }, () => {
+      const stats = this.getOrCreate(accountId);
+      const now = Date.now();
 
-    stats.recentConnections.push(now);
-    stats.recentConnections = stats.recentConnections.filter((t) => now - t < 60_000);
+      stats.recentConnections.push(now);
+      stats.recentConnections = stats.recentConnections.filter((t) => now - t < 60_000);
 
-    if (stats.recentConnections.length > connectionRatePerMinute) {
-      return this.raiseSignal(accountId, {
-        type: "connection_churn",
-        severity: "medium",
-        accountId,
-        details: { count: stats.recentConnections.length, limit: connectionRatePerMinute },
-        timestamp: new Date().toISOString(),
-      });
-    }
+      if (stats.recentConnections.length > connectionRatePerMinute) {
+        return this.raiseSignal(accountId, {
+          type: "connection_churn",
+          severity: "medium",
+          accountId,
+          details: { count: stats.recentConnections.length, limit: connectionRatePerMinute },
+          timestamp: new Date().toISOString(),
+        });
+      }
 
-    return "none";
+      return "none";
+    });
   }
 
   /** Check on node registration */

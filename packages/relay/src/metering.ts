@@ -1,4 +1,5 @@
 import { type UsageEvent, insertUsageEvents, deleteOldUsageEvents } from "./db";
+import { withSpanSync } from "./tracing";
 
 export class UsageMeter {
   private buffer: UsageEvent[] = [];
@@ -21,8 +22,13 @@ export class UsageMeter {
   }
 
   record(event: UsageEvent): void {
-    this.buffer.push(event);
-    if (this.buffer.length >= 1000) this.flush();
+    withSpanSync("orka.relay.metering.record", {
+      "orka.account.id": event.accountId,
+      "orka.event.type": event.eventType,
+    }, () => {
+      this.buffer.push(event);
+      if (this.buffer.length >= 1000) this.flush();
+    });
   }
 
   recordRequest(accountId: string, method: string, bytesIn: number, nodeId?: string): void {
@@ -60,14 +66,18 @@ export class UsageMeter {
   }
 
   flush(): void {
-    if (this.buffer.length === 0) return;
-    const batch = this.buffer;
-    this.buffer = [];
-    try {
-      insertUsageEvents(batch);
-    } catch {
-      // Best effort — don't crash on metering failure
-    }
+    withSpanSync("orka.relay.metering.flush", {
+      "orka.buffer.size": this.buffer.length,
+    }, () => {
+      if (this.buffer.length === 0) return;
+      const batch = this.buffer;
+      this.buffer = [];
+      try {
+        insertUsageEvents(batch);
+      } catch {
+        // Best effort — don't crash on metering failure
+      }
+    });
   }
 
   private cleanOld(): void {
@@ -78,8 +88,10 @@ export class UsageMeter {
   }
 
   shutdown(): void {
-    clearInterval(this.flushTimer);
-    clearInterval(this.retentionTimer);
-    this.flush();
+    withSpanSync("orka.relay.metering.shutdown", {}, () => {
+      clearInterval(this.flushTimer);
+      clearInterval(this.retentionTimer);
+      this.flush();
+    });
   }
 }

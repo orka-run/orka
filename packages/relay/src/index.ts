@@ -58,123 +58,155 @@ export interface RelayHandle {
 
 export function startRelay(opts: RelayOptions): RelayHandle {
   const config = getRelayConfig();
-  const state = new RelayState();
-  const rateLimiter = new RateLimiter();
-  const globalLimiter = new GlobalRateLimiter(config.rateLimits.globalRequestsPerSecond);
-  const meter = new UsageMeter();
-  const abuseDetector = new AbuseDetector();
-  const cluster = new SingleInstanceCluster({ url: `ws://${opts.hostname ?? config.server.hostname}:${opts.port}` });
-  const startTime = Date.now();
-  let draining = false;
-
-  // Apply legacy token from opts to config
-  if (opts.token && !config.auth.legacyToken) {
-    config.auth.legacyToken = opts.token;
-  }
-
   initRelayTracing({ traceFile: config.observability.traceFile });
+  return withSpanSync("orka.relay.start", {
+    "orka.port": opts.port,
+    "orka.hostname": opts.hostname ?? config.server.hostname,
+  }, () => {
+    const state = new RelayState();
+    const rateLimiter = new RateLimiter();
+    const globalLimiter = new GlobalRateLimiter(config.rateLimits.globalRequestsPerSecond);
+    const meter = new UsageMeter();
+    const abuseDetector = new AbuseDetector();
+    const cluster = new SingleInstanceCluster({ url: `ws://${opts.hostname ?? config.server.hostname}:${opts.port}` });
+    const startTime = Date.now();
+    let draining = false;
 
-  const server = Bun.serve<SocketData>({
-    port: opts.port,
-    hostname: opts.hostname ?? config.server.hostname,
+    // Apply legacy token from opts to config
+    if (opts.token && !config.auth.legacyToken) {
+      config.auth.legacyToken = opts.token;
+    }
 
-    async fetch(req, server) {
-      const url = new URL(req.url);
+    const server = Bun.serve<SocketData>({
+      port: opts.port,
+      hostname: opts.hostname ?? config.server.hostname,
 
-      // --- Health endpoint (public, always available even during drain) ---
-      if (url.pathname === "/health") {
-        const gs = state.getGlobalStats();
-        cluster.updateStats(gs.accounts, gs.totalClients + gs.totalNodes);
-        const status = draining ? "draining" : "ok";
-        const uptime = Math.floor((Date.now() - startTime) / 1000);
+      async fetch(req, server) {
+        const url = new URL(req.url);
 
-        const key = extractApiKey(req);
-        if (key) {
-          // Authenticated health: include account-specific info
-          const auth = authenticate(key);
-          if (auth.success && auth.ctx) {
-            const stats = state.getAccountStats(auth.ctx.accountId);
-            const nodes = state.getAccountNodes(auth.ctx.accountId);
-            return jsonResponse({
-              status,
-              version: "0.2.0",
-              uptime,
-              account: {
-                id: auth.ctx.accountId,
-                tier: auth.ctx.tier,
-                nodes,
-                ...stats,
-              },
-            });
+        // --- Health endpoint (public, always available even during drain) ---
+        if (url.pathname === "/health") {
+          const gs = state.getGlobalStats();
+          cluster.updateStats(gs.accounts, gs.totalClients + gs.totalNodes);
+          const status = draining ? "draining" : "ok";
+          const uptime = Math.floor((Date.now() - startTime) / 1000);
+
+          const key = extractApiKey(req);
+          if (key) {
+            // Authenticated health: include account-specific info
+            const auth = authenticate(key);
+            if (auth.success && auth.ctx) {
+              const stats = state.getAccountStats(auth.ctx.accountId);
+              const nodes = state.getAccountNodes(auth.ctx.accountId);
+              return jsonResponse({
+                status,
+                version: "0.2.0",
+                uptime,
+                account: {
+                  id: auth.ctx.accountId,
+                  tier: auth.ctx.tier,
+                  nodes,
+                  ...stats,
+                },
+              });
+            }
           }
+          return jsonResponse({ status, version: "0.2.0", uptime });
         }
-        return jsonResponse({ status, version: "0.2.0", uptime });
-      }
 
-      // Reject all other requests when draining
-      if (draining) {
-        return new Response(JSON.stringify({ error: "Relay is shutting down" }), {
-          status: 503,
-          headers: { "content-type": "application/json", "retry-after": "5" },
-        });
-      }
+        // Reject all other requests when draining
+        if (draining) {
+          return new Response(JSON.stringify({ error: "Relay is shutting down" }), {
+            status: 503,
+            headers: { "content-type": "application/json", "retry-after": "5" },
+          });
+        }
 
-      // --- API endpoints ---
-      if (url.pathname.startsWith("/v1/")) {
-        const apiResponse = await handleApiRequest(req, url, state);
-        if (apiResponse) return apiResponse;
-        return new Response("Not found", { status: 404 });
-      }
+        // --- API endpoints ---
+        if (url.pathname.startsWith("/v1/")) {
+          const apiResponse = await handleApiRequest(req, url, state);
+          if (apiResponse) return apiResponse;
+          return new Response("Not found", { status: 404 });
+        }
 
-      // --- WebSocket endpoints require auth ---
-      const key = extractApiKey(req);
-      if (!key) {
-        return new Response(JSON.stringify({ error: "Missing API key" }), {
-          status: 401,
-          headers: { "content-type": "application/json" },
-        });
-      }
+        // --- WebSocket endpoints require auth ---
+        const key = extractApiKey(req);
+        if (!key) {
+          return new Response(JSON.stringify({ error: "Missing API key" }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
 
-      const auth = authenticate(key);
-      if (!auth.success || !auth.ctx) {
-        metrics.authFailures.inc({ reason: auth.error ?? "unknown" });
-        return new Response(JSON.stringify({ error: auth.error }), {
-          status: auth.code ?? 401,
-          headers: { "content-type": "application/json" },
-        });
-      }
+        const auth = authenticate(key);
+        if (!auth.success || !auth.ctx) {
+          metrics.authFailures.inc({ reason: auth.error ?? "unknown" });
+          return new Response(JSON.stringify({ error: auth.error }), {
+            status: auth.code ?? 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
 
-      const ctx = auth.ctx;
+        const ctx = auth.ctx;
 
-      // --- Node registration ---
-      if (url.pathname === "/register") {
-        const nodeId = url.searchParams.get("node");
-        return withSpan("orka.relay.node_register", {
-          "orka.account.id": ctx.accountId,
-          "orka.node.id": nodeId ?? "",
-        }, async () => {
-          if (ctx.permissions !== "node" && ctx.permissions !== "admin") {
-            return new Response("Node permission required", { status: 403 });
+        // --- Node registration ---
+        if (url.pathname === "/register") {
+          const nodeId = url.searchParams.get("node");
+          return withSpan("orka.relay.node_register", {
+            "orka.account.id": ctx.accountId,
+            "orka.node.id": nodeId ?? "",
+          }, async () => {
+            if (ctx.permissions !== "node" && ctx.permissions !== "admin") {
+              return new Response("Node permission required", { status: 403 });
+            }
+
+            if (!nodeId) {
+              return new Response("Missing ?node= parameter", { status: 400 });
+            }
+
+            // Check max nodes per account
+            if (state.getNodeCount(ctx.accountId) >= config.abuse.maxNodesPerAccount) {
+              return new Response(`Maximum ${config.abuse.maxNodesPerAccount} nodes per account`, { status: 429 });
+            }
+
+            // Check concurrent connections
+            const totalConns = state.getClientCount(ctx.accountId) + state.getNodeCount(ctx.accountId);
+            if (!rateLimiter.checkConnection(ctx.rateLimits, totalConns)) {
+              return new Response("Connection limit exceeded", { status: 429 });
+            }
+
+            const socketData: SocketData = {
+              role: "node",
+              nodeId,
+              accountId: ctx.accountId,
+              permissions: ctx.permissions,
+              keyHash: ctx.keyHash,
+              connectedAt: Date.now(),
+              messageCount: 0,
+              bytesIn: 0,
+              bytesOut: 0,
+            };
+
+            if (server.upgrade(req, { data: socketData })) {
+              return undefined;
+            }
+            return new Response("WebSocket upgrade failed", { status: 500 });
+          });
+        }
+
+        // --- Client connection ---
+        if (url.pathname === "/ws" || url.pathname === "/") {
+          if (ctx.permissions !== "client" && ctx.permissions !== "admin") {
+            return new Response("Client permission required", { status: 403 });
           }
 
-          if (!nodeId) {
-            return new Response("Missing ?node= parameter", { status: 400 });
-          }
-
-          // Check max nodes per account
-          if (state.getNodeCount(ctx.accountId) >= config.abuse.maxNodesPerAccount) {
-            return new Response(`Maximum ${config.abuse.maxNodesPerAccount} nodes per account`, { status: 429 });
-          }
-
-          // Check concurrent connections
           const totalConns = state.getClientCount(ctx.accountId) + state.getNodeCount(ctx.accountId);
           if (!rateLimiter.checkConnection(ctx.rateLimits, totalConns)) {
             return new Response("Connection limit exceeded", { status: 429 });
           }
 
           const socketData: SocketData = {
-            role: "node",
-            nodeId,
+            role: "client",
             accountId: ctx.accountId,
             permissions: ctx.permissions,
             keyHash: ctx.keyHash,
@@ -188,142 +220,118 @@ export function startRelay(opts: RelayOptions): RelayHandle {
             return undefined;
           }
           return new Response("WebSocket upgrade failed", { status: 500 });
-        });
-      }
-
-      // --- Client connection ---
-      if (url.pathname === "/ws" || url.pathname === "/") {
-        if (ctx.permissions !== "client" && ctx.permissions !== "admin") {
-          return new Response("Client permission required", { status: 403 });
         }
 
-        const totalConns = state.getClientCount(ctx.accountId) + state.getNodeCount(ctx.accountId);
-        if (!rateLimiter.checkConnection(ctx.rateLimits, totalConns)) {
-          return new Response("Connection limit exceeded", { status: 429 });
-        }
-
-        const socketData: SocketData = {
-          role: "client",
-          accountId: ctx.accountId,
-          permissions: ctx.permissions,
-          keyHash: ctx.keyHash,
-          connectedAt: Date.now(),
-          messageCount: 0,
-          bytesIn: 0,
-          bytesOut: 0,
-        };
-
-        if (server.upgrade(req, { data: socketData })) {
-          return undefined;
-        }
-        return new Response("WebSocket upgrade failed", { status: 500 });
-      }
-
-      return new Response("Not found", { status: 404 });
-    },
-
-    websocket: {
-      open(ws) {
-        const data = ws.data;
-        withSpanSync("orka.relay.connection.open", {
-          "orka.account.id": data.accountId,
-          "orka.role": data.role,
-          "orka.node.id": data.nodeId ?? "",
-        }, () => {
-          if (data.role === "node") {
-            state.registerNode(data.accountId, data.nodeId!, ws);
-            metrics.connectionsOpened.inc({ account_id: data.accountId, role: "node" });
-            metrics.registeredNodes.inc({ account_id: data.accountId });
-            meter.recordConnection(data.accountId, "node_connect", data.nodeId);
-          } else {
-            state.addClient(data.accountId, ws);
-            metrics.connectionsOpened.inc({ account_id: data.accountId, role: "client" });
-            meter.recordConnection(data.accountId, "ws_connect");
-          }
-          metrics.activeConnections.inc({ role: data.role });
-        });
+        return new Response("Not found", { status: 404 });
       },
 
-      message(ws, message) {
-        const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
-        const data = ws.data;
-        const bytes = raw.length;
-
-        data.messageCount++;
-        data.bytesIn += bytes;
-
-        if (data.role === "client") {
-          handleClientMessage(ws, raw, bytes, data, state, rateLimiter, globalLimiter, config, meter);
-        } else if (data.role === "node") {
-          handleNodeMessage(ws, raw, bytes, data, state, meter);
-        }
-      },
-
-      close(ws) {
-        const data = ws.data;
-        withSpanSync("orka.relay.connection.close", {
-          "orka.account.id": data.accountId,
-          "orka.role": data.role,
-          "orka.node.id": data.nodeId ?? "",
-        }, () => {
-          if (data.role === "node") {
-            // Fail pending requests for this node
-            const failed = state.failRequestsForNode(data.accountId, data.nodeId!);
-            for (const pr of failed) {
-              try {
-                pr.client.send(JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: pr.method,
-                  error: { code: 503, message: `Node ${data.nodeId} disconnected` },
-                }));
-              } catch { /* client gone */ }
+      websocket: {
+        open(ws) {
+          const data = ws.data;
+          withSpanSync("orka.relay.connection.open", {
+            "orka.account.id": data.accountId,
+            "orka.role": data.role,
+            "orka.node.id": data.nodeId ?? "",
+          }, () => {
+            if (data.role === "node") {
+              state.registerNode(data.accountId, data.nodeId!, ws);
+              metrics.connectionsOpened.inc({ account_id: data.accountId, role: "node" });
+              metrics.registeredNodes.inc({ account_id: data.accountId });
+              meter.recordConnection(data.accountId, "node_connect", data.nodeId);
+            } else {
+              state.addClient(data.accountId, ws);
+              metrics.connectionsOpened.inc({ account_id: data.accountId, role: "client" });
+              meter.recordConnection(data.accountId, "ws_connect");
             }
-            state.removeNode(data.accountId, data.nodeId!);
-            metrics.connectionsClosed.inc({ account_id: data.accountId, role: "node" });
-            metrics.registeredNodes.dec({ account_id: data.accountId });
-            meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
-          } else {
-            state.failRequestsForClient(ws);
-            state.removeClient(data.accountId, ws);
-            metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
-            meter.recordConnection(data.accountId, "ws_disconnect");
+            metrics.activeConnections.inc({ role: data.role });
+          });
+        },
+
+        message(ws, message) {
+          const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
+          const data = ws.data;
+          const bytes = raw.length;
+
+          data.messageCount++;
+          data.bytesIn += bytes;
+
+          if (data.role === "client") {
+            handleClientMessage(ws, raw, bytes, data, state, rateLimiter, globalLimiter, config, meter);
+          } else if (data.role === "node") {
+            handleNodeMessage(ws, raw, bytes, data, state, meter);
           }
-          metrics.activeConnections.dec({ role: data.role });
-        });
+        },
+
+        close(ws) {
+          const data = ws.data;
+          withSpanSync("orka.relay.connection.close", {
+            "orka.account.id": data.accountId,
+            "orka.role": data.role,
+            "orka.node.id": data.nodeId ?? "",
+          }, () => {
+            if (data.role === "node") {
+              // Fail pending requests for this node
+              const failed = state.failRequestsForNode(data.accountId, data.nodeId!);
+              for (const pr of failed) {
+                try {
+                  pr.client.send(JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: pr.method,
+                    error: { code: 503, message: `Node ${data.nodeId} disconnected` },
+                  }));
+                } catch { /* client gone */ }
+              }
+              state.removeNode(data.accountId, data.nodeId!);
+              metrics.connectionsClosed.inc({ account_id: data.accountId, role: "node" });
+              metrics.registeredNodes.dec({ account_id: data.accountId });
+              meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
+            } else {
+              state.failRequestsForClient(ws);
+              state.removeClient(data.accountId, ws);
+              metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
+              meter.recordConnection(data.accountId, "ws_disconnect");
+            }
+            metrics.activeConnections.dec({ role: data.role });
+          });
+        },
       },
-    },
+    });
+
+    async function shutdown(shutdownOpts?: { drainTimeoutMs?: number }): Promise<void> {
+      const timeout = shutdownOpts?.drainTimeoutMs ?? 30_000;
+      await withSpan("orka.relay.shutdown", {
+        "orka.drain_timeout_ms": timeout,
+      }, async () => {
+        console.log("relay: shutting down, draining requests...");
+        draining = true;
+
+        // Wait for in-flight requests to drain
+        const start = Date.now();
+        while (state.getGlobalStats().totalPending > 0 && Date.now() - start < timeout) {
+          await Bun.sleep(100);
+        }
+
+        const remaining = state.getGlobalStats().totalPending;
+        if (remaining > 0) {
+          console.log(`relay: drain timeout, ${remaining} requests still pending`);
+        }
+
+        // Flush all subsystems
+        flushAuthUpdates();
+        meter.shutdown();
+        abuseDetector.shutdown();
+        rateLimiter.shutdown();
+        closeDb();
+
+        // Stop the server
+        server.stop(true);
+        console.log("relay: shutdown complete");
+      });
+      await shutdownRelayTracing();
+    }
+
+    return { server, shutdown };
   });
-
-  async function shutdown(shutdownOpts?: { drainTimeoutMs?: number }): Promise<void> {
-    const timeout = shutdownOpts?.drainTimeoutMs ?? 30_000;
-    console.log("relay: shutting down, draining requests...");
-    draining = true;
-
-    // Wait for in-flight requests to drain
-    const start = Date.now();
-    while (state.getGlobalStats().totalPending > 0 && Date.now() - start < timeout) {
-      await Bun.sleep(100);
-    }
-
-    const remaining = state.getGlobalStats().totalPending;
-    if (remaining > 0) {
-      console.log(`relay: drain timeout, ${remaining} requests still pending`);
-    }
-
-    // Flush all subsystems
-    flushAuthUpdates();
-    meter.shutdown();
-    abuseDetector.shutdown();
-    rateLimiter.shutdown();
-    await shutdownRelayTracing();
-    closeDb();
-
-    // Stop the server
-    server.stop(true);
-    console.log("relay: shutdown complete");
-  }
-
-  return { server, shutdown };
 }
 
 // --- Message Handlers ---
