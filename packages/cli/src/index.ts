@@ -55,6 +55,23 @@ function enumType<T extends string>(values: readonly T[], typeName: string): Typ
 const statusValues = ["running", "completed", "failed", "cancelled", "queued", "preparing"] as const;
 const backendValues = ["claude-code", "codex", "shell"] as const;
 const modeValues = ["interactive", "background"] as const;
+const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
+
+type CliPruneOptions = {
+  maxAgeMs: number;
+  projectPath?: string;
+  confirm?: boolean;
+  purgeLogs?: boolean;
+  purgeDb?: boolean;
+};
+
+type CliPruneResult = {
+  pruned: number;
+  orphansCleaned: number;
+  dryRun?: boolean;
+  logsDeleted?: number;
+  dbRecordsDeleted?: number;
+};
 
 // Initialize OpenTelemetry tracing
 initTracing();
@@ -1024,23 +1041,50 @@ const pruneCmd = command({
   name: "prune",
   description: "Remove old completed/cancelled/failed sessions and orphaned worktrees",
   examples: [
-    { description: "Prune sessions older than 7 days", command: "orka prune --age 7d" },
-    { description: "Prune only for a specific project", command: "orka prune --project myapp" },
+    { description: "Preview pruning sessions older than 7 days", command: "orka prune --age 7d" },
+    { description: "Prune for a specific project and execute deletion", command: "orka prune --project myapp --confirm" },
+    { description: "Prune sessions and also delete logs and DB records", command: "orka prune --age 7d --confirm --purge-all" },
   ],
   args: {
     age: option({ type: optional(str), long: "age", description: "Max age to keep (e.g. 24h, 7d, 30m; default: 24h)" }),
     project: option({ type: optional(str), long: "project", description: "Only prune sessions for this project" }),
+    confirm: flag({ long: "confirm", description: "Actually execute deletion instead of running a dry run" }),
+    force: flag({ long: "force", description: "Allow prune ages under 1 hour" }),
+    purgeLogs: flag({ long: "purge-logs", description: "Also delete log and script files for pruned sessions" }),
+    purgeDb: flag({ long: "purge-db", description: "Also delete DB session records for pruned sessions" }),
+    purgeAll: flag({ long: "purge-all", description: "Equivalent to --purge-logs --purge-db" }),
   },
-  handler: async ({ age, project }) => runCliCommand("prune", async () => {
+  handler: async ({ age, project, confirm, force, purgeLogs: purgeLogsFlag, purgeDb: purgeDbFlag, purgeAll }) => runCliCommand("prune", async () => {
     const maxAgeMs = parseAge(age ?? "24h");
+    if (maxAgeMs < MIN_PRUNE_AGE_MS && !force) {
+      console.error("error: minimum prune age is 1 hour (use --force to override)");
+      process.exit(1);
+    }
+
     const projectPath = project ? resolveProject(project) : undefined;
+    const purgeLogs = purgeAll || purgeLogsFlag;
+    const purgeDb = purgeAll || purgeDbFlag;
+    const pruneOptions: CliPruneOptions = { maxAgeMs, projectPath, confirm, purgeLogs, purgeDb };
+    const result = await svc.pruneSessions(pruneOptions) as CliPruneResult;
+    const {
+      pruned,
+      orphansCleaned,
+      dryRun = !confirm,
+      logsDeleted = 0,
+      dbRecordsDeleted = 0,
+    } = result;
 
-    const { pruned, orphansCleaned } = await svc.pruneSessions({ maxAgeMs, projectPath });
-
-    if (pruned === 0) {
-      console.log("nothing to prune");
+    if (dryRun) {
+      console.log(`dry run — would prune ${pruned} session(s)`);
+      console.log("use --confirm to execute, --purge-logs to also delete logs, --purge-db to also delete DB records");
     } else {
       console.log(`pruned ${pruned} session(s)`);
+      if (logsDeleted > 0) {
+        console.log(`deleted ${logsDeleted} log/script file(s)`);
+      }
+      if (dbRecordsDeleted > 0) {
+        console.log(`deleted ${dbRecordsDeleted} DB record(s)`);
+      }
     }
     if (orphansCleaned > 0) {
       console.log(`cleaned ${orphansCleaned} orphaned worktree(s)`);
@@ -1614,7 +1658,7 @@ function printUsage(): void {
   console.log("  merge    Merge worktree into current      orka merge <id>");
   console.log("  keep     Protect worktree from cleanup    orka keep <id>");
   console.log("  unkeep   Remove worktree protection       orka unkeep <id>");
-  console.log("  prune    Remove old sessions              orka prune --age 7d");
+  console.log("  prune    Remove old sessions              orka prune --age 7d --confirm");
   console.log("");
   console.log("infrastructure:");
   console.log("  project  Register/list/remove aliases     orka project add myapp /path/to/repo");
