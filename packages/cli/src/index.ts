@@ -10,7 +10,7 @@ import {
   createLocalClient,
   createRemoteClient,
   startServer,
-  tmuxAttach,
+  defaultRunner,
   getConfig,
   getOrkaHome,
   initTracing,
@@ -282,7 +282,7 @@ async function cmdSpawn(): Promise<void> {
   if (session.mode === "interactive") {
     console.log("");
     console.log("attaching... (detach: Ctrl-b d)");
-    await tmuxAttach(session.tmuxSessionName);
+    await defaultRunner.attach(session.tmuxSessionName);
   }
 }
 
@@ -419,7 +419,7 @@ async function cmdAttach(): Promise<void> {
     return;
   }
 
-  await tmuxAttach(session.tmuxSessionName);
+  await defaultRunner.attach(session.tmuxSessionName);
 }
 
 async function cmdLogs(): Promise<void> {
@@ -580,7 +580,7 @@ async function cmdRetry(): Promise<void> {
   if (newSession.mode === "interactive") {
     console.log("");
     console.log("attaching... (detach: Ctrl-b d)");
-    await tmuxAttach(newSession.tmuxSessionName);
+    await defaultRunner.attach(newSession.tmuxSessionName);
   }
 }
 

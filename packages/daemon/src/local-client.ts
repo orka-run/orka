@@ -23,8 +23,7 @@ import {
   deleteSessions as dbDeleteSessions,
   getOrkaHome,
 } from "./db";
-import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
-import { tmuxHas, tmuxCapture, tmuxSendText } from "./tmux";
+import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees, getRunner } from "./orchestrator";
 import { parseSessionResult } from "./result-parser";
 import {
   worktreeMerge,
@@ -83,8 +82,9 @@ class LocalClient implements OrkaService {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    if (await tmuxHas(session.tmuxSessionName)) {
-      return tmuxCapture(session.tmuxSessionName);
+    const runner = getRunner();
+    if (await runner.has(session.tmuxSessionName)) {
+      return runner.capture(session.tmuxSessionName);
     }
 
     // Fall back to log file
@@ -104,16 +104,17 @@ class LocalClient implements OrkaService {
   async isAlive(sessionId: string): Promise<boolean> {
     const session = getSession(sessionId);
     if (!session) return false;
-    return tmuxHas(session.tmuxSessionName);
+    return getRunner().has(session.tmuxSessionName);
   }
 
   async sendInput(sessionId: string, text: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
-    if (!(await tmuxHas(session.tmuxSessionName))) {
+    const runner = getRunner();
+    if (!(await runner.has(session.tmuxSessionName))) {
       throw new Error(`Session ${sessionId} is not running`);
     }
-    await tmuxSendText(session.tmuxSessionName, text);
+    await runner.sendText(session.tmuxSessionName, text);
   }
 
   async getDiff(sessionId: string): Promise<DiffResult> {

@@ -7,11 +7,21 @@ import {
   type SpawnRequest,
 } from "@orka/core";
 import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
-import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
+import { type SessionRunner, defaultRunner } from "./tmux";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
 import { buildBackendCommand, assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";
 import { withSpan } from "./tracing";
+
+let _runner: SessionRunner = defaultRunner;
+
+export function setRunner(r: SessionRunner): void {
+  _runner = r;
+}
+
+export function getRunner(): SessionRunner {
+  return _runner;
+}
 
 /** Parse the exit code written by the backend into the log file.
  *  Looks for a line matching `[orka] exit_code=N` in the last 20 lines.
@@ -131,7 +141,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     writeFileSync(scriptPath, `#!/usr/bin/env bash\nunset CLAUDECODE\n${command}\n`);
 
     // 7. Spawn tmux session
-    await tmuxSpawn(tmuxName, scriptPath, workingDir);
+    await _runner.spawn(tmuxName, scriptPath, workingDir);
 
     updateSessionStatus(sessionId, "running", { startedAt: new Date().toISOString() });
 
@@ -148,7 +158,7 @@ export async function reapSessions(): Promise<number> {
   return withSpan("orka.reap", {
     "orka.reap.running_count": running.length,
   }, async (span) => {
-    const live = await tmuxList();
+    const live = await _runner.list();
     const liveNames = new Set(live.map((s) => s.name));
     let reaped = 0;
 
@@ -165,7 +175,7 @@ export async function reapSessions(): Promise<number> {
 
         // Double-check: tmuxList() may have returned stale/incomplete data.
         // Verify this specific session is truly dead before reaping.
-        if (await tmuxHas(s.tmuxSessionName)) {
+        if (await _runner.has(s.tmuxSessionName)) {
           span.addEvent("session.reap_skipped_alive", { "orka.session.id": s.id });
           continue;
         }
@@ -177,7 +187,7 @@ export async function reapSessions(): Promise<number> {
         });
 
         // Safety: kill tmux session in case it's lingering (e.g. remain-on-exit)
-        try { await tmuxKill(s.tmuxSessionName); } catch { /* already dead */ }
+        try { await _runner.kill(s.tmuxSessionName); } catch { /* already dead */ }
 
         span.addEvent("session.reaped", {
           "orka.session.id": s.id,
@@ -207,8 +217,8 @@ export async function stopSession(sessionId: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    if (await tmuxHas(session.tmuxSessionName)) {
-      await tmuxKill(session.tmuxSessionName);
+    if (await _runner.has(session.tmuxSessionName)) {
+      await _runner.kill(session.tmuxSessionName);
     }
 
     updateSessionStatus(sessionId, "cancelled", {
