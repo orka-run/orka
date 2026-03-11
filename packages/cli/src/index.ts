@@ -82,6 +82,9 @@ switch (command) {
   case "keep":
     await cmdKeep();
     break;
+  case "unkeep":
+    await cmdUnkeep();
+    break;
   case "merge":
     await cmdMerge();
     break;
@@ -115,6 +118,7 @@ function printUsage(): void {
   console.log("  wait    Wait for session(s) to complete");
   console.log("  result  Show final result from a background session");
   console.log("  keep    Protect a session's worktree from auto-cleanup");
+  console.log("  unkeep  Remove worktree protection");
   console.log("  merge   Merge session worktree branch into current branch");
   console.log("  project Register/list/remove project aliases");
   console.log("  retry   Re-run a session with the same prompt");
@@ -650,6 +654,23 @@ async function cmdKeep(): Promise<void> {
 
   setSessionKept(session.id, true);
   console.log(`session ${session.id} marked as kept (worktree protected from cleanup)`);
+}
+
+async function cmdUnkeep(): Promise<void> {
+  const sessionId = process.argv[3];
+  if (!sessionId) {
+    console.error("usage: orka unkeep <session-id>");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  setSessionKept(session.id, false);
+  console.log(`session ${session.id} unprotected (worktree may be cleaned up)`);
 }
 
 async function cmdResult(): Promise<void> {
