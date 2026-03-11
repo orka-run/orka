@@ -8,6 +8,7 @@
   "dependencies": {
     "@orka/core": "workspace:*",
     "@orka/daemon": "workspace:*",
-    "@orka/relay": "workspace:*"
+    "@orka/relay": "workspace:*",
+    "cmd-ts": "^0.15.0"
   }
 }
