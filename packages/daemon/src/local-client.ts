@@ -257,7 +257,7 @@ class LocalClient implements OrkaService {
       return { pruned: 0, orphansCleaned: 0 };
     }
 
-    // Delete log files and script files
+    // Delete log files and script files, but keep session records in DB
     const scriptsDir = join(getOrkaHome(), "scripts");
     for (const s of sessions) {
       if (s.logFile && existsSync(s.logFile)) {
@@ -269,7 +269,6 @@ class LocalClient implements OrkaService {
       }
     }
 
-    dbDeleteSessions(sessions.map((s) => s.id));
     const orphansCleaned = await cleanupOrphanedWorktrees();
 
     return { pruned: sessions.length, orphansCleaned };
