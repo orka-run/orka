@@ -27,7 +27,7 @@ import { AbuseDetector } from "./abuse";
 import { getRelayConfig } from "./config";
 import { closeDb } from "./db";
 import { SingleInstanceCluster } from "./cluster";
-import { metrics, initRelayTracing, shutdownRelayTracing, withSpan } from "./tracing";
+import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync } from "./tracing";
 
 // --- Allowed Methods (service enforcement) ---
 
@@ -148,42 +148,47 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 
       // --- Node registration ---
       if (url.pathname === "/register") {
-        if (ctx.permissions !== "node" && ctx.permissions !== "admin") {
-          return new Response("Node permission required", { status: 403 });
-        }
-
         const nodeId = url.searchParams.get("node");
-        if (!nodeId) {
-          return new Response("Missing ?node= parameter", { status: 400 });
-        }
+        return withSpan("orka.relay.node_register", {
+          "orka.account.id": ctx.accountId,
+          "orka.node.id": nodeId ?? "",
+        }, async () => {
+          if (ctx.permissions !== "node" && ctx.permissions !== "admin") {
+            return new Response("Node permission required", { status: 403 });
+          }
 
-        // Check max nodes per account
-        if (state.getNodeCount(ctx.accountId) >= config.abuse.maxNodesPerAccount) {
-          return new Response(`Maximum ${config.abuse.maxNodesPerAccount} nodes per account`, { status: 429 });
-        }
+          if (!nodeId) {
+            return new Response("Missing ?node= parameter", { status: 400 });
+          }
 
-        // Check concurrent connections
-        const totalConns = state.getClientCount(ctx.accountId) + state.getNodeCount(ctx.accountId);
-        if (!rateLimiter.checkConnection(ctx.rateLimits, totalConns)) {
-          return new Response("Connection limit exceeded", { status: 429 });
-        }
+          // Check max nodes per account
+          if (state.getNodeCount(ctx.accountId) >= config.abuse.maxNodesPerAccount) {
+            return new Response(`Maximum ${config.abuse.maxNodesPerAccount} nodes per account`, { status: 429 });
+          }
 
-        const socketData: SocketData = {
-          role: "node",
-          nodeId,
-          accountId: ctx.accountId,
-          permissions: ctx.permissions,
-          keyHash: ctx.keyHash,
-          connectedAt: Date.now(),
-          messageCount: 0,
-          bytesIn: 0,
-          bytesOut: 0,
-        };
+          // Check concurrent connections
+          const totalConns = state.getClientCount(ctx.accountId) + state.getNodeCount(ctx.accountId);
+          if (!rateLimiter.checkConnection(ctx.rateLimits, totalConns)) {
+            return new Response("Connection limit exceeded", { status: 429 });
+          }
 
-        if (server.upgrade(req, { data: socketData })) {
-          return undefined;
-        }
-        return new Response("WebSocket upgrade failed", { status: 500 });
+          const socketData: SocketData = {
+            role: "node",
+            nodeId,
+            accountId: ctx.accountId,
+            permissions: ctx.permissions,
+            keyHash: ctx.keyHash,
+            connectedAt: Date.now(),
+            messageCount: 0,
+            bytesIn: 0,
+            bytesOut: 0,
+          };
+
+          if (server.upgrade(req, { data: socketData })) {
+            return undefined;
+          }
+          return new Response("WebSocket upgrade failed", { status: 500 });
+        });
       }
 
       // --- Client connection ---
@@ -220,17 +225,23 @@ export function startRelay(opts: RelayOptions): RelayHandle {
     websocket: {
       open(ws) {
         const data = ws.data;
-        if (data.role === "node") {
-          state.registerNode(data.accountId, data.nodeId!, ws);
-          metrics.connectionsOpened.inc({ account_id: data.accountId, role: "node" });
-          metrics.registeredNodes.inc({ account_id: data.accountId });
-          meter.recordConnection(data.accountId, "node_connect", data.nodeId);
-        } else {
-          state.addClient(data.accountId, ws);
-          metrics.connectionsOpened.inc({ account_id: data.accountId, role: "client" });
-          meter.recordConnection(data.accountId, "ws_connect");
-        }
-        metrics.activeConnections.inc({ role: data.role });
+        withSpanSync("orka.relay.connection.open", {
+          "orka.account.id": data.accountId,
+          "orka.role": data.role,
+          "orka.node.id": data.nodeId ?? "",
+        }, () => {
+          if (data.role === "node") {
+            state.registerNode(data.accountId, data.nodeId!, ws);
+            metrics.connectionsOpened.inc({ account_id: data.accountId, role: "node" });
+            metrics.registeredNodes.inc({ account_id: data.accountId });
+            meter.recordConnection(data.accountId, "node_connect", data.nodeId);
+          } else {
+            state.addClient(data.accountId, ws);
+            metrics.connectionsOpened.inc({ account_id: data.accountId, role: "client" });
+            meter.recordConnection(data.accountId, "ws_connect");
+          }
+          metrics.activeConnections.inc({ role: data.role });
+        });
       },
 
       message(ws, message) {
@@ -250,29 +261,35 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 
       close(ws) {
         const data = ws.data;
-        if (data.role === "node") {
-          // Fail pending requests for this node
-          const failed = state.failRequestsForNode(data.accountId, data.nodeId!);
-          for (const pr of failed) {
-            try {
-              pr.client.send(JSON.stringify({
-                jsonrpc: "2.0",
-                id: pr.method,
-                error: { code: 503, message: `Node ${data.nodeId} disconnected` },
-              }));
-            } catch { /* client gone */ }
+        withSpanSync("orka.relay.connection.close", {
+          "orka.account.id": data.accountId,
+          "orka.role": data.role,
+          "orka.node.id": data.nodeId ?? "",
+        }, () => {
+          if (data.role === "node") {
+            // Fail pending requests for this node
+            const failed = state.failRequestsForNode(data.accountId, data.nodeId!);
+            for (const pr of failed) {
+              try {
+                pr.client.send(JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: pr.method,
+                  error: { code: 503, message: `Node ${data.nodeId} disconnected` },
+                }));
+              } catch { /* client gone */ }
+            }
+            state.removeNode(data.accountId, data.nodeId!);
+            metrics.connectionsClosed.inc({ account_id: data.accountId, role: "node" });
+            metrics.registeredNodes.dec({ account_id: data.accountId });
+            meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
+          } else {
+            state.failRequestsForClient(ws);
+            state.removeClient(data.accountId, ws);
+            metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
+            meter.recordConnection(data.accountId, "ws_disconnect");
           }
-          state.removeNode(data.accountId, data.nodeId!);
-          metrics.connectionsClosed.inc({ account_id: data.accountId, role: "node" });
-          metrics.registeredNodes.dec({ account_id: data.accountId });
-          meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
-        } else {
-          state.failRequestsForClient(ws);
-          state.removeClient(data.accountId, ws);
-          metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
-          meter.recordConnection(data.accountId, "ws_disconnect");
-        }
-        metrics.activeConnections.dec({ role: data.role });
+          metrics.activeConnections.dec({ role: data.role });
+        });
       },
     },
   });
@@ -352,95 +369,103 @@ function handleClientMessage(
     return;
   }
 
-  // Service enforcement: method must be in allowed set
-  if (method && !ALLOWED_METHODS.has(method)) {
-    ws.send(JSON.stringify({
-      jsonrpc: "2.0",
-      id: requestId ?? null,
-      error: { code: -32601, message: `Method not allowed: ${method}` },
-    }));
-    return;
-  }
-
-  // Global rate limit
-  if (!globalLimiter.check()) {
-    ws.send(JSON.stringify({
-      jsonrpc: "2.0",
-      id: requestId ?? null,
-      error: { code: 503, message: "Relay overloaded. Try again later." },
-    }));
-    return;
-  }
-
-  // Per-account rate limit
-  // Rate limits are loaded from config defaults; the auth context was validated on WS upgrade
-  const limits = config.rateLimits;
-  {
-    const accountLimits = {
-      accountId: data.accountId,
-      requestsPerMinute: limits.defaultRequestsPerMinute,
-      requestsPerHour: limits.defaultRequestsPerHour,
-      concurrentConnections: limits.defaultConcurrentConnections,
-      maxMessageBytes: limits.defaultMaxMessageBytes,
-    };
-    // Message size check
-    if (!rateLimiter.checkMessageSize(accountLimits, bytes)) {
+  withSpanSync("orka.relay.client_message", {
+    "orka.account.id": data.accountId,
+    "orka.method": method ?? "",
+    "orka.request.id": requestId ?? "",
+    "orka.bytes.in": bytes,
+  }, (span) => {
+    // Service enforcement: method must be in allowed set
+    if (method && !ALLOWED_METHODS.has(method)) {
       ws.send(JSON.stringify({
         jsonrpc: "2.0",
         id: requestId ?? null,
-        error: { code: 413, message: "Message too large" },
+        error: { code: -32601, message: `Method not allowed: ${method}` },
       }));
       return;
     }
 
-    const result = rateLimiter.check(data.accountId, accountLimits);
-    if (!result.allowed) {
-      metrics.rateLimitHits.inc({ account_id: data.accountId, limit_type: "request" });
+    // Global rate limit
+    if (!globalLimiter.check()) {
       ws.send(JSON.stringify({
         jsonrpc: "2.0",
         id: requestId ?? null,
-        error: { code: 429, message: "Rate limit exceeded", data: { retryAfter: result.retryAfter } },
+        error: { code: 503, message: "Relay overloaded. Try again later." },
       }));
       return;
     }
-  }
 
-  // Pick node within account scope
-  const node = state.pickNode(data.accountId, requestedNode);
-  if (!node) {
-    ws.send(JSON.stringify({
-      jsonrpc: "2.0",
-      id: requestId ?? null,
-      error: {
-        code: 503,
-        message: requestedNode
-          ? `Node not found: ${requestedNode}`
-          : "No nodes available",
-      },
-    }));
-    return;
-  }
+    // Per-account rate limit
+    // Rate limits are loaded from config defaults; the auth context was validated on WS upgrade
+    const limits = config.rateLimits;
+    {
+      const accountLimits = {
+        accountId: data.accountId,
+        requestsPerMinute: limits.defaultRequestsPerMinute,
+        requestsPerHour: limits.defaultRequestsPerHour,
+        concurrentConnections: limits.defaultConcurrentConnections,
+        maxMessageBytes: limits.defaultMaxMessageBytes,
+      };
+      // Message size check
+      if (!rateLimiter.checkMessageSize(accountLimits, bytes)) {
+        ws.send(JSON.stringify({
+          jsonrpc: "2.0",
+          id: requestId ?? null,
+          error: { code: 413, message: "Message too large" },
+        }));
+        return;
+      }
 
-  // Track request
-  if (requestId) {
-    state.trackRequest(data.accountId, requestId, {
-      client: ws,
-      nodeId: node.id,
-      accountId: data.accountId,
-      method: method ?? "unknown",
-      bytesIn: bytes,
-      startedAt: Date.now(),
-    });
-  }
+      const result = rateLimiter.check(data.accountId, accountLimits);
+      if (!result.allowed) {
+        metrics.rateLimitHits.inc({ account_id: data.accountId, limit_type: "request" });
+        ws.send(JSON.stringify({
+          jsonrpc: "2.0",
+          id: requestId ?? null,
+          error: { code: 429, message: "Rate limit exceeded", data: { retryAfter: result.retryAfter } },
+        }));
+        return;
+      }
+    }
 
-  // Forward to node as-is
-  node.ws.send(raw);
+    // Pick node within account scope
+    const node = state.pickNode(data.accountId, requestedNode);
+    if (!node) {
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id: requestId ?? null,
+        error: {
+          code: 503,
+          message: requestedNode
+            ? `Node not found: ${requestedNode}`
+            : "No nodes available",
+        },
+      }));
+      return;
+    }
 
-  // Metrics + metering
-  metrics.requestsTotal.inc({ account_id: data.accountId, method: method ?? "unknown" });
-  metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
-  metrics.messageSize.record({ account_id: data.accountId, direction: "client" }, bytes);
-  meter.recordRequest(data.accountId, method ?? "unknown", bytes, node.id);
+    // Track request
+    if (requestId) {
+      state.trackRequest(data.accountId, requestId, {
+        client: ws,
+        nodeId: node.id,
+        accountId: data.accountId,
+        method: method ?? "unknown",
+        bytesIn: bytes,
+        startedAt: Date.now(),
+      });
+    }
+
+    // Forward to node as-is
+    span.addEvent("orka.relay.forward", { "orka.node.id": node.id });
+    node.ws.send(raw);
+
+    // Metrics + metering
+    metrics.requestsTotal.inc({ account_id: data.accountId, method: method ?? "unknown" });
+    metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
+    metrics.messageSize.record({ account_id: data.accountId, direction: "client" }, bytes);
+    meter.recordRequest(data.accountId, method ?? "unknown", bytes, node.id);
+  });
 }
 
 function handleNodeMessage(
@@ -462,23 +487,30 @@ function handleNodeMessage(
 
   if (!responseId) return;
 
-  const pr = state.resolveRequest(data.accountId, responseId);
-  if (!pr) return;
+  withSpanSync("orka.relay.node_message", {
+    "orka.account.id": data.accountId,
+    "orka.node.id": data.nodeId ?? "",
+    "orka.request.id": responseId,
+    "orka.bytes.out": bytes,
+  }, () => {
+    const pr = state.resolveRequest(data.accountId, responseId!);
+    if (!pr) return;
 
-  // Compute latency
-  const latencyMs = Date.now() - pr.startedAt;
+    // Compute latency
+    const latencyMs = Date.now() - pr.startedAt;
 
-  // Forward to client
-  try {
-    pr.client.send(raw);
-  } catch {
-    // Client disconnected
-  }
+    // Forward to client
+    try {
+      pr.client.send(raw);
+    } catch {
+      // Client disconnected
+    }
 
-  // Metrics + metering
-  metrics.requestDuration.record({ account_id: data.accountId, method: pr.method }, latencyMs);
-  metrics.bytesOut.inc({ account_id: data.accountId, direction: "node" }, bytes);
-  meter.recordResponse(data.accountId, bytes, data.nodeId);
+    // Metrics + metering
+    metrics.requestDuration.record({ account_id: data.accountId, method: pr.method }, latencyMs);
+    metrics.bytesOut.inc({ account_id: data.accountId, direction: "node" }, bytes);
+    meter.recordResponse(data.accountId, bytes, data.nodeId);
+  });
 }
 
 // --- Helpers ---

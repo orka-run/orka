@@ -2,6 +2,7 @@ import { $ } from "bun";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { getOrkaHome } from "./db";
+import { withSpan } from "./tracing";
 
 export interface WorktreeInfo {
   path: string;
@@ -20,29 +21,36 @@ export async function worktreeCreate(
   sessionSlug: string,
   branch?: string,
 ): Promise<string> {
-  const wtDir = getWorktreeDir();
-  mkdirSync(wtDir, { recursive: true });
-  const wtPath = join(wtDir, sessionSlug);
+  const spanBranch = branch ?? `orka/${sessionSlug}`;
+  return withSpan("orka.worktree.create", {
+    projectPath: repoPath,
+    sessionId: sessionSlug,
+    branch: spanBranch,
+  }, async () => {
+    const wtDir = getWorktreeDir();
+    mkdirSync(wtDir, { recursive: true });
+    const wtPath = join(wtDir, sessionSlug);
 
-  if (branch) {
-    const branchExists =
-      await $`git -C ${repoPath} rev-parse --verify ${branch}`
-        .quiet()
-        .then(() => true)
-        .catch(() => false);
+    if (branch) {
+      const branchExists =
+        await $`git -C ${repoPath} rev-parse --verify ${branch}`
+          .quiet()
+          .then(() => true)
+          .catch(() => false);
 
-    if (branchExists) {
-      await $`git -C ${repoPath} worktree add ${wtPath} ${branch}`.quiet();
+      if (branchExists) {
+        await $`git -C ${repoPath} worktree add ${wtPath} ${branch}`.quiet();
+      } else {
+        await $`git -C ${repoPath} worktree add -b ${branch} ${wtPath}`.quiet();
+      }
     } else {
-      await $`git -C ${repoPath} worktree add -b ${branch} ${wtPath}`.quiet();
+      // Auto-create a named branch so commits are not lost on detached HEAD
+      const autoBranch = `orka/${sessionSlug}`;
+      await $`git -C ${repoPath} worktree add -b ${autoBranch} ${wtPath}`.quiet();
     }
-  } else {
-    // Auto-create a named branch so commits are not lost on detached HEAD
-    const autoBranch = `orka/${sessionSlug}`;
-    await $`git -C ${repoPath} worktree add -b ${autoBranch} ${wtPath}`.quiet();
-  }
 
-  return wtPath;
+    return wtPath;
+  });
 }
 
 /** Remove a git worktree. */
@@ -50,36 +58,45 @@ export async function worktreeRemove(
   repoPath: string,
   wtPath: string,
 ): Promise<void> {
-  await $`git -C ${repoPath} worktree remove --force ${wtPath}`.quiet();
+  await withSpan("orka.worktree.remove", {
+    repoPath,
+    worktreePath: wtPath,
+  }, async () => {
+    await $`git -C ${repoPath} worktree remove --force ${wtPath}`.quiet();
+  });
 }
 
 /** List all orka worktrees for a given repo. */
 export async function worktreeList(
   repoPath: string,
 ): Promise<WorktreeInfo[]> {
-  const wtDir = getWorktreeDir();
-  const result =
-    await $`git -C ${repoPath} worktree list --porcelain`.quiet().text();
+  return withSpan("orka.worktree.list", {
+    repoPath,
+  }, async () => {
+    const wtDir = getWorktreeDir();
+    const result =
+      await $`git -C ${repoPath} worktree list --porcelain`.quiet().text();
 
-  const worktrees: WorktreeInfo[] = [];
-  let current: Partial<WorktreeInfo> = {};
+    const worktrees: WorktreeInfo[] = [];
+    let current: Partial<WorktreeInfo> = {};
 
-  for (const line of result.split("\n")) {
-    if (line.startsWith("worktree ")) {
-      current.path = line.slice("worktree ".length);
-    } else if (line.startsWith("HEAD ")) {
-      current.commit = line.slice("HEAD ".length);
-    } else if (line.startsWith("branch ")) {
-      current.branch = line.slice("branch ".length);
-    } else if (line === "") {
-      if (current.path?.startsWith(wtDir)) {
-        worktrees.push(current as WorktreeInfo);
+    for (const line of result.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        current.path = line.slice("worktree ".length);
+      } else if (line.startsWith("HEAD ")) {
+        current.commit = line.slice("HEAD ".length);
+      } else if (line.startsWith("branch ")) {
+        current.branch = line.slice("branch ".length);
+      } else if (line === "") {
+        if (current.path?.startsWith(wtDir)) {
+          worktrees.push(current as WorktreeInfo);
+        }
+        current = {};
       }
-      current = {};
     }
-  }
 
-  return worktrees;
+    return worktrees;
+  });
 }
 
 /** Check if a worktree has commits ahead of the main branch (i.e. has new work). */
@@ -87,38 +104,64 @@ export async function worktreeHasCommitsAhead(
   repoPath: string,
   wtPath: string,
 ): Promise<boolean> {
-  try {
-    // Get the HEAD of the main repo
-    const mainHead = (await $`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
-    // Get the HEAD of the worktree
-    const wtHead = (await $`git -C ${wtPath} rev-parse HEAD`.quiet().text()).trim();
-    if (mainHead === wtHead) return false;
-    // Count commits in worktree that aren't in main
-    const count = (await $`git -C ${wtPath} rev-list --count ${mainHead}..${wtHead}`.quiet().text()).trim();
-    return parseInt(count, 10) > 0;
-  } catch {
-    return false;
-  }
+  return withSpan("orka.worktree.commits_ahead", {
+    repoPath,
+    worktreePath: wtPath,
+  }, async (span) => {
+    try {
+      // Get the HEAD of the main repo
+      const mainHead = (await $`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+      // Get the HEAD of the worktree
+      const wtHead = (await $`git -C ${wtPath} rev-parse HEAD`.quiet().text()).trim();
+      if (mainHead === wtHead) {
+        span.setAttribute("result", false);
+        return false;
+      }
+      // Count commits in worktree that aren't in main
+      const count = (await $`git -C ${wtPath} rev-list --count ${mainHead}..${wtHead}`.quiet().text()).trim();
+      const result = parseInt(count, 10) > 0;
+      span.setAttribute("result", result);
+      return result;
+    } catch {
+      span.setAttribute("result", false);
+      return false;
+    }
+  });
 }
 
 /** Check if a worktree has uncommitted changes. */
 export async function worktreeHasChanges(wtPath: string): Promise<boolean> {
-  try {
-    const status = (await $`git -C ${wtPath} status --porcelain`.quiet().text()).trim();
-    return status.length > 0;
-  } catch {
-    return false;
-  }
+  return withSpan("orka.worktree.has_changes", {
+    worktreePath: wtPath,
+  }, async (span) => {
+    try {
+      const status = (await $`git -C ${wtPath} status --porcelain`.quiet().text()).trim();
+      const result = status.length > 0;
+      span.setAttribute("result", result);
+      return result;
+    } catch {
+      span.setAttribute("result", false);
+      return false;
+    }
+  });
 }
 
 /** Get the branch name of a worktree. */
 export async function worktreeBranch(wtPath: string): Promise<string | null> {
-  try {
-    const branch = (await $`git -C ${wtPath} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
-    return branch === "HEAD" ? null : branch;
-  } catch {
-    return null;
-  }
+  return withSpan("orka.worktree.branch", {
+    worktreePath: wtPath,
+    branch: "",
+  }, async (span) => {
+    try {
+      const branch = (await $`git -C ${wtPath} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+      const result = branch === "HEAD" ? null : branch;
+      span.setAttribute("branch", result ?? "");
+      return result;
+    } catch {
+      span.setAttribute("branch", "");
+      return null;
+    }
+  });
 }
 
 /** Merge a worktree's branch into the current branch of the main repo. */
@@ -126,33 +169,51 @@ export async function worktreeMerge(
   repoPath: string,
   wtPath: string,
 ): Promise<{ branch: string; commits: number }> {
-  const branch = await worktreeBranch(wtPath);
-  if (!branch) throw new Error("Worktree is on detached HEAD — cannot merge");
+  return withSpan("orka.worktree.merge", {
+    repoPath,
+    worktreePath: wtPath,
+  }, async (span) => {
+    const branch = await worktreeBranch(wtPath);
+    if (!branch) throw new Error("Worktree is on detached HEAD — cannot merge");
+    span.setAttribute("branch", branch);
 
-  // Count commits to merge
-  const mainHead = (await $`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
-  const wtHead = (await $`git -C ${wtPath} rev-parse HEAD`.quiet().text()).trim();
-  const countStr = (await $`git -C ${repoPath} rev-list --count ${mainHead}..${wtHead}`.quiet().text()).trim();
-  const commits = parseInt(countStr, 10);
-  if (commits === 0) throw new Error(`No commits to merge from branch ${branch}`);
+    // Count commits to merge
+    const mainHead = (await $`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+    const wtHead = (await $`git -C ${wtPath} rev-parse HEAD`.quiet().text()).trim();
+    const countStr = (await $`git -C ${repoPath} rev-list --count ${mainHead}..${wtHead}`.quiet().text()).trim();
+    const commits = parseInt(countStr, 10);
+    span.setAttribute("commits", commits);
+    if (commits === 0) throw new Error(`No commits to merge from branch ${branch}`);
 
-  // Merge the branch
-  await $`git -C ${repoPath} merge ${branch} --no-edit`.quiet();
+    // Merge the branch
+    await $`git -C ${repoPath} merge ${branch} --no-edit`.quiet();
 
-  return { branch, commits };
+    return { branch, commits };
+  });
 }
 
 /** Delete the git branch associated with a worktree (after worktree removal). */
 export async function deleteBranch(repoPath: string, branch: string): Promise<void> {
-  await $`git -C ${repoPath} branch -d ${branch}`.quiet();
+  await withSpan("orka.worktree.delete_branch", {
+    repoPath,
+    branch,
+  }, async () => {
+    await $`git -C ${repoPath} branch -d ${branch}`.quiet();
+  });
 }
 
 /** Check if repo is a valid git repository. */
 export async function isGitRepo(path: string): Promise<boolean> {
-  try {
-    await $`git -C ${path} rev-parse --git-dir`.quiet();
-    return true;
-  } catch {
-    return false;
-  }
+  return withSpan("orka.worktree.is_git_repo", {
+    path,
+  }, async (span) => {
+    try {
+      await $`git -C ${path} rev-parse --git-dir`.quiet();
+      span.setAttribute("result", true);
+      return true;
+    } catch {
+      span.setAttribute("result", false);
+      return false;
+    }
+  });
 }
