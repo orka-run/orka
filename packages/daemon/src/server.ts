@@ -66,6 +66,21 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
           });
         }
 
+        // Session completion callback — called by session script on exit
+        if (url.pathname === "/session-ended") {
+          const sessionId = url.searchParams.get("id");
+          // Reap first to update DB status, then broadcast
+          await svc.reap();
+          if (sessionId) {
+            const session = await svc.getSession(sessionId);
+            pushHub.broadcast("orchestration.sessionUpdated", {
+              sessionId,
+              status: session?.status ?? "completed",
+            });
+          }
+          return new Response("ok");
+        }
+
         // Derive per-connection encryption key from client's public key
         let encKey: Buffer | undefined;
         if (nodeKeyPair) {

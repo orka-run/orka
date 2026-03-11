@@ -141,7 +141,16 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     const scriptsDir = join(getOrkaHome(), "scripts");
     mkdirSync(scriptsDir, { recursive: true });
     const scriptPath = join(scriptsDir, `${sessionId}.sh`);
-    writeFileSync(scriptPath, `#!/usr/bin/env bash\nunset CLAUDECODE\n${command}\n`);
+    const daemonPort = process.env.ORKA_DAEMON_PORT ?? "7394";
+    writeFileSync(scriptPath, [
+      `#!/usr/bin/env bash`,
+      `unset CLAUDECODE`,
+      command,
+      `_ORKA_EXIT=$?`,
+      `curl -sf "http://127.0.0.1:${daemonPort}/session-ended?id=${sessionId}&exitCode=$_ORKA_EXIT" 2>/dev/null || true`,
+      `exit $_ORKA_EXIT`,
+      "",
+    ].join("\n"));
 
     // 7. Spawn tmux session
     await _runner.spawn(tmuxName, scriptPath, workingDir);
