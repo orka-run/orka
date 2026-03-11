@@ -1,6 +1,28 @@
-import { describe, test, expect } from "bun:test";
+import { afterEach, beforeEach, describe, test, expect } from "bun:test";
 import { createEvent } from "@orka/core";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { initTracing } from "../tracing";
 import { OrchestrationEngine } from "./engine";
+
+const previousOrkaHome = process.env.ORKA_HOME;
+let testHome = "";
+
+beforeEach(() => {
+  testHome = mkdtempSync(join(tmpdir(), "orka-engine-home-"));
+  process.env.ORKA_HOME = testHome;
+  initTracing();
+});
+
+afterEach(() => {
+  rmSync(testHome, { recursive: true, force: true });
+  if (previousOrkaHome === undefined) {
+    delete process.env.ORKA_HOME;
+  } else {
+    process.env.ORKA_HOME = previousOrkaHome;
+  }
+});
 
 describe("OrchestrationEngine", () => {
   test("ingests session.started and notifies listeners with the mapped event", () => {
@@ -142,6 +164,10 @@ describe("OrchestrationEngine", () => {
       totalCost: 0,
       totalTokens: { input: 0, output: 0 },
       pendingRequests: [],
+      timeToFirstOutputMs: null,
+      bootTimeMs: null,
+      avgTurnDurationMs: null,
+      totalActiveDurationMs: null,
     });
 
     engine.ingest(
@@ -306,6 +332,113 @@ describe("OrchestrationEngine", () => {
       totalCost: 2,
       totalTokens: { input: 140, output: 70 },
       pendingRequests: [],
+      timeToFirstOutputMs: null,
+      bootTimeMs: null,
+      avgTurnDurationMs: null,
+      totalActiveDurationMs: null,
+    });
+  });
+
+  test("computes lifecycle timing metrics and emits them on session exit", () => {
+    const engine = new OrchestrationEngine({
+      getSessionTimeline: (sessionId) =>
+        sessionId === "session-1"
+          ? [
+              {
+                type: "session.created",
+                sessionId,
+                threadId: "thread-1",
+                backend: "codex",
+                timestamp: "2026-03-11T00:00:00.000Z",
+              },
+            ]
+          : [],
+    });
+
+    engine.loadSessionEvents("session-1");
+    engine.ingest(
+      "session-1",
+      createEvent("session.started", "thread-1", {}, { createdAt: "2026-03-11T00:00:01.000Z" }),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent("turn.started", "thread-1", {}, { turnId: "turn-1", createdAt: "2026-03-11T00:00:02.000Z" }),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "content.delta",
+        "thread-1",
+        { streamKind: "assistant_text", delta: "hello" },
+        { turnId: "turn-1", createdAt: "2026-03-11T00:00:04.000Z" },
+      ),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "turn.completed",
+        "thread-1",
+        { state: "completed" },
+        { turnId: "turn-1", createdAt: "2026-03-11T00:00:07.000Z" },
+      ),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent("session.exited", "thread-1", { exitKind: "graceful" }, { createdAt: "2026-03-11T00:00:11.000Z" }),
+    );
+
+    expect(engine.getSessionState("session-1")).toMatchObject({
+      status: "completed",
+      bootTimeMs: 1000,
+      timeToFirstOutputMs: 3000,
+      avgTurnDurationMs: 5000,
+      totalActiveDurationMs: 10000,
+    });
+
+    const lifecycleTimingSpan = readTraceEntries().findLast((entry) => entry.name === "orka.session.lifecycle_timing");
+    expect(lifecycleTimingSpan).toMatchObject({
+      attributes: {
+        "orka.session.id": "session-1",
+        "orka.timing.boot_ms": 1000,
+        "orka.timing.ttfo_ms": 3000,
+        "orka.timing.total_active_ms": 10000,
+        "orka.timing.avg_turn_ms": 5000,
+        "orka.timing.turn_count": 1,
+      },
+    });
+  });
+
+  test("keeps timing metrics null while lifecycle milestones are incomplete", () => {
+    const engine = new OrchestrationEngine({
+      getSessionTimeline: (sessionId) =>
+        sessionId === "session-1"
+          ? [
+              {
+                type: "session.created",
+                sessionId,
+                threadId: "thread-1",
+                backend: "codex",
+                timestamp: "2026-03-11T00:00:00.000Z",
+              },
+            ]
+          : [],
+    });
+
+    engine.loadSessionEvents("session-1");
+    engine.ingest(
+      "session-1",
+      createEvent("session.started", "thread-1", {}, { createdAt: "2026-03-11T00:00:01.000Z" }),
+    );
+    engine.ingest(
+      "session-1",
+      createEvent("turn.started", "thread-1", {}, { turnId: "turn-1", createdAt: "2026-03-11T00:00:02.000Z" }),
+    );
+
+    expect(engine.getSessionState("session-1")).toMatchObject({
+      bootTimeMs: 1000,
+      timeToFirstOutputMs: null,
+      avgTurnDurationMs: null,
+      totalActiveDurationMs: null,
     });
   });
 
@@ -429,3 +562,16 @@ describe("OrchestrationEngine", () => {
     expect(engine.getSessionState("session-1").currentTurnId).toBeNull();
   });
 });
+
+function readTraceEntries(): Array<{ name: string; attributes: Record<string, unknown> }> {
+  const traceFile = join(testHome, "traces.jsonl");
+  if (!existsSync(traceFile)) {
+    return [];
+  }
+
+  return readFileSync(traceFile, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { name: string; attributes: Record<string, unknown> });
+}

@@ -1,22 +1,17 @@
-import type { ProviderRuntimeEvent, RuntimeSessionState, SessionStatus } from "@orka/core";
+import type {
+  OrchestrationEvent,
+  PersistedOrchestrationEvent,
+  ProviderRuntimeEvent,
+  RuntimeSessionState,
+  SessionProjection,
+  SessionStatus,
+} from "@orka/core";
 import type { PushHub } from "../push-hub";
 import { withSpanSync } from "../tracing";
-import type { OrchestrationEvent, PersistedOrchestrationEvent } from "./events";
 import { mapProviderEvent } from "./ingestion";
 
 const UNKNOWN_TURN_PREFIX = "unknown-turn:";
-
-export interface SessionProjection {
-  sessionId: string;
-  status: SessionStatus;
-  currentTurnId: string | null;
-  totalCost: number;
-  totalTokens: {
-    input: number;
-    output: number;
-  };
-  pendingRequests: Array<{ requestId: string; requestType: string }>;
-}
+export type { SessionProjection } from "@orka/core";
 
 export interface OrchestrationEngineOptions {
   pushHub?: PushHub;
@@ -59,10 +54,18 @@ export class OrchestrationEngine {
           listener(orchestrationEvent);
         }
 
+        const derivedState = event.type === "session.exited" || this.options.pushHub
+          ? this.projectSessionState(sessionId)
+          : null;
+
+        if (event.type === "session.exited" && derivedState) {
+          emitLifecycleTimingSpan(sessionId, derivedState);
+        }
+
         this.options.pushHub?.broadcast("orchestration.event", orchestrationEvent);
         this.options.pushHub?.broadcast("orchestration.sessionUpdated", {
           sessionId,
-          status: this.getSessionState(sessionId).status,
+          status: derivedState?.projection.status ?? this.getSessionState(sessionId).status,
         });
       },
     );
@@ -104,98 +107,146 @@ export class OrchestrationEngine {
   }
 
   getSessionState(sessionId: string): SessionProjection {
-    return withSpanSync("orka.orchestration.get_session_state", { "orka.session.id": sessionId }, () => {
-      const projection: SessionProjection = {
-        sessionId,
-        status: "queued",
-        currentTurnId: null,
-        totalCost: 0,
-        totalTokens: { input: 0, output: 0 },
-        pendingRequests: [],
-      };
+    return withSpanSync("orka.orchestration.get_session_state", { "orka.session.id": sessionId }, () =>
+      this.projectSessionState(sessionId).projection,
+    );
+  }
 
-      for (const event of this.log) {
-        if (event.sessionId !== sessionId) {
-          continue;
-        }
+  private projectSessionState(sessionId: string): DerivedSessionState {
+    const projection: SessionProjection = {
+      sessionId,
+      status: "queued",
+      currentTurnId: null,
+      totalCost: 0,
+      totalTokens: { input: 0, output: 0 },
+      pendingRequests: [],
+      timeToFirstOutputMs: null,
+      bootTimeMs: null,
+      avgTurnDurationMs: null,
+      totalActiveDurationMs: null,
+    };
+    const turnDurationsMs: number[] = [];
+    const turnStartedAtMs = new Map<string, number>();
+    let sessionCreatedAtMs: number | null = null;
+    let sessionStartedAtMs: number | null = null;
+    let firstOutputAtMs: number | null = null;
+    let sessionExitedAtMs: number | null = null;
 
-        switch (event.type) {
-          case "session.created":
-            projection.status = "preparing";
-            break;
-          case "session.started":
-            projection.status = "running";
-            break;
-          case "session.state.changed":
-            projection.status = mapRuntimeState(event.state, projection.status);
-            if (event.state === "error") {
-              projection.currentTurnId = null;
-            }
-            break;
-          case "session.completed":
-            projection.status = "completed";
-            projection.currentTurnId = null;
-            break;
-          case "session.failed":
-            projection.status = "failed";
-            projection.currentTurnId = null;
-            break;
-          case "session.cancelled":
-            projection.status = "cancelled";
-            projection.currentTurnId = null;
-            break;
-          case "turn.started":
-            setRunning(projection, event.turnId);
-            break;
-          case "turn.completed":
-            setRunning(projection);
-            clearCurrentTurn(projection, event.turnId);
-            projection.totalCost += event.cost ?? 0;
-            projection.totalTokens.input += event.tokens?.input ?? 0;
-            projection.totalTokens.output += event.tokens?.output ?? 0;
-            break;
-          case "turn.aborted":
-            setRunning(projection);
-            clearCurrentTurn(projection, event.turnId);
-            break;
-          case "content.delta":
-            setRunning(projection, event.turnId);
-            break;
-          case "item.started":
-          case "item.updated":
-          case "item.completed":
-          case "tool.progress":
-            setRunning(projection, event.turnId);
-            break;
-          case "request.opened":
-            setRunning(projection);
-            if (!projection.pendingRequests.some((request) => request.requestId === event.requestId)) {
-              projection.pendingRequests.push({
-                requestId: event.requestId,
-                requestType: event.requestType,
-              });
-            }
-            break;
-          case "request.resolved":
-            setRunning(projection);
-            projection.pendingRequests = projection.pendingRequests.filter(
-              (request) => request.requestId !== event.requestId,
-            );
-            break;
-          case "runtime.error":
-            if (event.terminal) {
-              projection.status = "failed";
-              projection.currentTurnId = null;
-            }
-            break;
-          case "runtime.warning":
-            break;
-        }
+    for (const event of this.log) {
+      if (event.sessionId !== sessionId) {
+        continue;
       }
 
-      return projection;
-    });
+      const eventTimestampMs = toTimestampMs(event.timestamp);
+
+      switch (event.type) {
+        case "session.created":
+          projection.status = "preparing";
+          sessionCreatedAtMs ??= eventTimestampMs;
+          break;
+        case "session.started":
+          projection.status = "running";
+          sessionStartedAtMs ??= eventTimestampMs;
+          break;
+        case "session.state.changed":
+          projection.status = mapRuntimeState(event.state, projection.status);
+          if (event.state === "error") {
+            projection.currentTurnId = null;
+          }
+          break;
+        case "session.completed":
+          projection.status = "completed";
+          projection.currentTurnId = null;
+          sessionExitedAtMs = eventTimestampMs;
+          break;
+        case "session.failed":
+          projection.status = "failed";
+          projection.currentTurnId = null;
+          sessionExitedAtMs = eventTimestampMs;
+          break;
+        case "session.cancelled":
+          projection.status = "cancelled";
+          projection.currentTurnId = null;
+          sessionExitedAtMs = eventTimestampMs;
+          break;
+        case "turn.started":
+          setRunning(projection, event.turnId);
+          if (eventTimestampMs !== null) {
+            turnStartedAtMs.set(event.turnId, eventTimestampMs);
+          }
+          break;
+        case "turn.completed": {
+          setRunning(projection);
+          clearCurrentTurn(projection, event.turnId);
+          projection.totalCost += event.cost ?? 0;
+          projection.totalTokens.input += event.tokens?.input ?? 0;
+          projection.totalTokens.output += event.tokens?.output ?? 0;
+          const turnDurationMs = getDurationMs(turnStartedAtMs.get(event.turnId) ?? null, eventTimestampMs);
+          if (turnDurationMs !== null) {
+            turnDurationsMs.push(turnDurationMs);
+          }
+          turnStartedAtMs.delete(event.turnId);
+          break;
+        }
+        case "turn.aborted":
+          setRunning(projection);
+          clearCurrentTurn(projection, event.turnId);
+          turnStartedAtMs.delete(event.turnId);
+          break;
+        case "content.delta":
+          setRunning(projection, event.turnId);
+          firstOutputAtMs ??= eventTimestampMs;
+          break;
+        case "item.started":
+        case "item.updated":
+        case "item.completed":
+        case "tool.progress":
+          setRunning(projection, event.turnId);
+          break;
+        case "request.opened":
+          setRunning(projection);
+          if (!projection.pendingRequests.some((request) => request.requestId === event.requestId)) {
+            projection.pendingRequests.push({
+              requestId: event.requestId,
+              requestType: event.requestType,
+            });
+          }
+          break;
+        case "request.resolved":
+          setRunning(projection);
+          projection.pendingRequests = projection.pendingRequests.filter(
+            (request) => request.requestId !== event.requestId,
+          );
+          break;
+        case "runtime.error":
+          if (event.terminal) {
+            projection.status = "failed";
+            projection.currentTurnId = null;
+          }
+          break;
+        case "runtime.warning":
+          break;
+      }
+    }
+
+    projection.bootTimeMs = getDurationMs(sessionCreatedAtMs, sessionStartedAtMs);
+    projection.timeToFirstOutputMs = getDurationMs(sessionStartedAtMs, firstOutputAtMs);
+    projection.totalActiveDurationMs = getDurationMs(sessionStartedAtMs, sessionExitedAtMs);
+    projection.avgTurnDurationMs =
+      turnDurationsMs.length > 0
+        ? turnDurationsMs.reduce((total, duration) => total + duration, 0) / turnDurationsMs.length
+        : null;
+
+    return {
+      projection,
+      turnDurationsMs,
+    };
   }
+}
+
+interface DerivedSessionState {
+  projection: SessionProjection;
+  turnDurationsMs: number[];
 }
 
 function clearCurrentTurn(projection: SessionProjection, turnId: string): void {
@@ -239,4 +290,40 @@ function setRunning(projection: SessionProjection, turnId?: string): void {
   if (turnId && isKnownTurnId(turnId)) {
     projection.currentTurnId = turnId;
   }
+}
+
+function emitLifecycleTimingSpan(sessionId: string, derivedState: DerivedSessionState): void {
+  const { projection, turnDurationsMs } = derivedState;
+  const attributes: Record<string, string | number | boolean> = {
+    "orka.session.id": sessionId,
+    "orka.timing.turn_count": turnDurationsMs.length,
+  };
+
+  if (projection.bootTimeMs !== null) {
+    attributes["orka.timing.boot_ms"] = projection.bootTimeMs;
+  }
+  if (projection.timeToFirstOutputMs !== null) {
+    attributes["orka.timing.ttfo_ms"] = projection.timeToFirstOutputMs;
+  }
+  if (projection.totalActiveDurationMs !== null) {
+    attributes["orka.timing.total_active_ms"] = projection.totalActiveDurationMs;
+  }
+  if (projection.avgTurnDurationMs !== null) {
+    attributes["orka.timing.avg_turn_ms"] = projection.avgTurnDurationMs;
+  }
+
+  withSpanSync("orka.session.lifecycle_timing", attributes, () => undefined);
+}
+
+function toTimestampMs(timestamp: string): number | null {
+  const value = Date.parse(timestamp);
+  return Number.isNaN(value) ? null : value;
+}
+
+function getDurationMs(startMs: number | null, endMs: number | null): number | null {
+  if (startMs === null || endMs === null || endMs < startMs) {
+    return null;
+  }
+
+  return endMs - startMs;
 }

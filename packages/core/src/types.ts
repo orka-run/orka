@@ -70,6 +70,22 @@ export interface Session {
   autoMerge: boolean;
 }
 
+export interface SessionProjection {
+  sessionId: string;
+  status: SessionStatus;
+  currentTurnId: string | null;
+  totalCost: number;
+  totalTokens: {
+    input: number;
+    output: number;
+  };
+  pendingRequests: Array<{ requestId: string; requestType: string }>;
+  timeToFirstOutputMs: number | null;
+  bootTimeMs: number | null;
+  avgTurnDurationMs: number | null;
+  totalActiveDurationMs: number | null;
+}
+
 // --- Spawn Request ---
 
 export const ReasoningEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]);
