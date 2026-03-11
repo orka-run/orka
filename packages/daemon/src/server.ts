@@ -10,8 +10,8 @@ import {
   ReconnectStrategy,
 } from "@orka/core";
 import daemonPackageJson from "../package.json";
-import { PushHub } from "./push-hub";
 import { GracefulShutdown } from "./graceful-shutdown";
+import { pushHub } from "./push";
 import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
 import { getOrkaHome } from "./db";
@@ -34,7 +34,6 @@ interface ServerWebSocketData {
   encKey?: Buffer;
 }
 
-export const pushHub = new PushHub();
 export const gracefulShutdown = new GracefulShutdown();
 
 /**

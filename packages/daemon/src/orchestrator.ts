@@ -13,6 +13,7 @@ import type { SessionRunner } from "./runner";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
 import { buildBackendCommand, assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";
+import { pushHub } from "./push";
 import { withSpan } from "./tracing";
 
 let _runner: SessionRunner = defaultRunner;
@@ -194,6 +195,10 @@ export async function reapSessions(): Promise<number> {
           finishedAt: new Date().toISOString(),
           ...(exitCode !== undefined ? { exitCode } : {}),
         });
+        pushHub.broadcast("orchestration.sessionUpdated", {
+          sessionId: s.id,
+          status: "completed",
+        });
 
         // Safety: kill tmux session in case it's lingering (e.g. remain-on-exit)
         try { await _runner.kill(s.tmuxSessionName); } catch { /* already dead */ }
@@ -240,6 +245,10 @@ export async function stopSession(sessionId: string): Promise<void> {
 
     updateSessionStatus(sessionId, "cancelled", {
       finishedAt: new Date().toISOString(),
+    });
+    pushHub.broadcast("orchestration.sessionUpdated", {
+      sessionId,
+      status: "cancelled",
     });
 
     span.addEvent("session.cancelled");

@@ -42,7 +42,18 @@ export function App() {
   useEffect(() => {
     const unsubscribeState = transport.onStateChange(setConnectionStatus);
     const unsubscribeUpdated = transport.subscribe("orchestration.sessionUpdated", (data) => {
-      handleSessionUpdated(data as SessionUpdatedData);
+      const typedData = data as SessionUpdatedData;
+      const known = useSessionStore
+        .getState()
+        .sessions
+        .some((session) => session.id === typedData.sessionId);
+
+      if (known) {
+        handleSessionUpdated(typedData);
+        return;
+      }
+
+      void fetchSessions(transport);
     });
     const unsubscribeDeleted = transport.subscribe("orchestration.sessionDeleted", (data) => {
       handleSessionDeleted(data as SessionDeletedData);

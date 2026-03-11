@@ -97,6 +97,10 @@ describe("sessionStore", () => {
         finishedAt: null,
         exitCode: null,
         projectPath: "/tmp/project",
+        workingDir: "/tmp/project",
+        kept: false,
+        autoMerge: false,
+        prompt: "Build the dashboard session store",
       },
     ]);
     expect(store.getState().isLoading).toBe(false);
@@ -204,6 +208,10 @@ describe("sessionStore", () => {
         finishedAt: null,
         exitCode: null,
         projectPath: "/tmp/project",
+        workingDir: "/tmp/project",
+        kept: false,
+        autoMerge: false,
+        prompt: null,
       },
     ]);
     expect(store.getState().selectedId).toBe("sess-2");

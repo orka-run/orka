@@ -1,6 +1,7 @@
 import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
 import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR } from "@orka/core";
 import { decryptRequest, encryptResponse } from "@orka/core";
+import { pushHub } from "./push";
 import { withSpan } from "./tracing";
 
 /**
@@ -66,10 +67,25 @@ export async function handleRpcRequest(
 
 async function dispatch(svc: OrkaService, method: string, params: any): Promise<any> {
   switch (method) {
-    case "spawn":
-      return svc.spawn(params);
-    case "stop":
-      return svc.stop(params.sessionId);
+    case "spawn": {
+      const session = await svc.spawn(params);
+      pushHub.broadcast("orchestration.sessionUpdated", {
+        sessionId: session.id,
+        status: session.status,
+      });
+      return session;
+    }
+    case "stop": {
+      await svc.stop(params.sessionId);
+      const session = await svc.getSession(params.sessionId);
+      if (session) {
+        pushHub.broadcast("orchestration.sessionUpdated", {
+          sessionId: session.id,
+          status: session.status,
+        });
+      }
+      return null;
+    }
     case "reap":
       return svc.reap();
     case "getSession":
@@ -100,9 +116,14 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
       return svc.getDiff(params.sessionId);
     case "merge":
       return svc.merge(params.sessionId, params.cleanup);
-    case "deleteSessions":
-      svc.deleteSessions(params.ids);
+    case "deleteSessions": {
+      const ids: string[] = params.ids;
+      await svc.deleteSessions(ids);
+      for (const id of ids) {
+        pushHub.broadcast("orchestration.sessionDeleted", { sessionId: id });
+      }
       return null;
+    }
     case "pruneSessions":
       return svc.pruneSessions({
         maxAgeMs: params.maxAgeMs,
