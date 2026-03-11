@@ -2,12 +2,13 @@
 // See: apps/server/src/provider/ for original patterns
 
 import type { ProviderRuntimeEvent } from "./provider-events";
-import type { BackendKind } from "./types";
+import type { BackendKind, ReasoningEffort } from "./types";
 
 export interface ProviderSessionStartInput {
   threadId: string;
   cwd?: string;
   model?: string;
+  reasoningEffort?: ReasoningEffort;
   prompt?: string;
 }
 

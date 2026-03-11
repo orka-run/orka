@@ -1,22 +1,30 @@
 import type {
   ProviderAdapter,
   ProviderApprovalDecision,
+  ReasoningEffort,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSessionHandle,
   ProviderSessionStartInput,
 } from "@orka/core";
-import { createEvent } from "@orka/core";
+import { createEvent, generateId } from "@orka/core";
 import { withSpan } from "../tracing";
 
 type ClaudeProcess = ReturnType<typeof Bun.spawn>;
+type ClaudeSpawn = typeof Bun.spawn;
 type ClaudeMapMode = "primary" | "exit";
+
+interface ClaudeMapOptions {
+  mode?: ClaudeMapMode;
+  turnId?: string;
+}
 
 interface ClaudeHandleMeta {
   process: ClaudeProcess;
   events: AsyncEventQueue<ProviderRuntimeEvent>;
   exitEmitted: boolean;
   closed: boolean;
+  turnId: string;
 }
 
 function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
@@ -80,29 +88,28 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
 export class ClaudeCodeAdapter implements ProviderAdapter {
   readonly kind = "claude-code" as const;
 
+  constructor(private readonly spawnProcess: ClaudeSpawn = Bun.spawn.bind(Bun)) {}
+
   async startSession(input: ProviderSessionStartInput): Promise<ProviderSessionHandle> {
     return withSpan(
       "orka.provider.claude_code.start_session",
       { "orka.session.id": input.threadId, "orka.backend": this.kind },
       async () => {
-        const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "auto"];
-        if (input.model) {
-          command.push("--model", input.model);
-        }
-
-        const process = Bun.spawn(command, {
+        const events = new AsyncEventQueue<ProviderRuntimeEvent>();
+        const turnId = generateId("turn");
+        const command = buildClaudeCommand(input);
+        const process = this.spawnProcess(command, {
           cwd: input.cwd,
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
         });
-
-        const events = new AsyncEventQueue<ProviderRuntimeEvent>();
         const meta: ClaudeHandleMeta = {
           process,
           events,
           exitEmitted: false,
           closed: false,
+          turnId,
         };
 
         const handle: ProviderSessionHandle = {
@@ -132,7 +139,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           void drainStream(process.stderr);
         }
 
-        const outputTask = consumeClaudeOutput(input.threadId, stdout, meta);
+        const outputTask = consumeClaudeOutput(input.threadId, stdout, meta, input.model);
         void finalizeClaudeProcess(input.threadId, process, outputTask, meta);
 
         try {
@@ -200,9 +207,15 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 export function mapClaudeEvent(
   threadId: string,
   raw: unknown,
-  mode: ClaudeMapMode = "primary",
+  modeOrOptions: ClaudeMapMode | ClaudeMapOptions = "primary",
 ): ProviderRuntimeEvent | null {
+  const { mode, turnId } = normalizeClaudeMapOptions(modeOrOptions);
+
   if (!isRecord(raw) || typeof raw.type !== "string") {
+    return null;
+  }
+
+  if (mode === "exit" && raw.type !== "result") {
     return null;
   }
 
@@ -229,7 +242,7 @@ export function mapClaudeEvent(
         ...(typeof raw.total_cost_usd === "number" ? { totalCostUsd: raw.total_cost_usd } : {}),
         ...(usage ? { usage } : {}),
       },
-      { provider: "claude-code" },
+      { provider: "claude-code", turnId },
     );
   }
 
@@ -259,7 +272,7 @@ export function mapClaudeEvent(
             title: formatClaudeToolTitle(toolUse.name, toolUse.input),
             detail: formatClaudeToolDetail(toolUse.name, toolUse.input),
           },
-          { provider: "claude-code", itemId: toolUse.id },
+          { provider: "claude-code", turnId, itemId: toolUse.id },
         );
       }
 
@@ -272,7 +285,7 @@ export function mapClaudeEvent(
         "content.delta",
         threadId,
         { streamKind: "assistant_text", delta: text },
-        { provider: "claude-code" },
+        { provider: "claude-code", turnId },
       );
     }
 
@@ -286,7 +299,7 @@ export function mapClaudeEvent(
           status: "completed",
           ...(detail ? { detail } : {}),
         },
-        { provider: "claude-code", itemId: typeof raw.tool_use_id === "string" ? raw.tool_use_id : undefined },
+        { provider: "claude-code", turnId, itemId: typeof raw.tool_use_id === "string" ? raw.tool_use_id : undefined },
       );
     }
 
@@ -299,8 +312,10 @@ async function consumeClaudeOutput(
   threadId: string,
   stdout: ReadableStream<Uint8Array>,
   meta: ClaudeHandleMeta,
+  model?: string,
 ): Promise<boolean> {
   let sawSessionExit = false;
+  let emittedTurnStarted = false;
 
   try {
     for await (const line of readLines(stdout)) {
@@ -321,12 +336,23 @@ async function consumeClaudeOutput(
         continue;
       }
 
-      const primary = mapClaudeEvent(threadId, raw);
+      const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
       if (primary) {
         meta.events.push(primary);
+        if (!emittedTurnStarted && primary.type === "session.started") {
+          meta.events.push(
+            createEvent(
+              "turn.started",
+              threadId,
+              { ...(model ? { model } : {}) },
+              { provider: "claude-code", turnId: meta.turnId },
+            ),
+          );
+          emittedTurnStarted = true;
+        }
       }
 
-      const exit = mapClaudeEvent(threadId, raw, "exit");
+      const exit = mapClaudeEvent(threadId, raw, { mode: "exit", turnId: meta.turnId });
       if (exit) {
         meta.events.push(exit);
         meta.exitEmitted = true;
@@ -449,6 +475,23 @@ function emitSessionExited(
       { provider: "claude-code" },
     ),
   );
+}
+
+function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
+  const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "auto"];
+
+  if (input.model) {
+    command.push("--model", input.model);
+  }
+
+  command.push("--append-system-prompt", `[orka session: ${input.threadId}]`);
+
+  const effort = mapClaudeReasoningEffort(input.reasoningEffort);
+  if (effort) {
+    command.push("--effort", effort);
+  }
+
+  return command;
 }
 
 function closeEvents(meta: ClaudeHandleMeta): void {
@@ -608,4 +651,34 @@ function getClaudeHandleMeta(handle: ProviderSessionHandle): ClaudeHandleMeta {
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null;
+}
+
+function normalizeClaudeMapOptions(
+  modeOrOptions: ClaudeMapMode | ClaudeMapOptions,
+): { mode: ClaudeMapMode; turnId?: string } {
+  if (typeof modeOrOptions === "string") {
+    return { mode: modeOrOptions, turnId: undefined };
+  }
+
+  return {
+    mode: modeOrOptions.mode ?? "primary",
+    turnId: modeOrOptions.turnId,
+  };
+}
+
+function mapClaudeReasoningEffort(reasoningEffort?: ReasoningEffort): "low" | "medium" | "high" | "max" | undefined {
+  switch (reasoningEffort) {
+    case "none":
+    case "minimal":
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+      return "high";
+    case "xhigh":
+      return "max";
+    default:
+      return undefined;
+  }
 }
