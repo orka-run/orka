@@ -28,6 +28,7 @@ import {
   getWorktreeDir,
   parseSessionResult,
   setSessionKept,
+  tmuxSendText,
   initTracing,
   shutdownTracing,
   addProject,
@@ -79,6 +80,9 @@ switch (command) {
   case "result":
     await cmdResult();
     break;
+  case "send":
+    await cmdSend();
+    break;
   case "keep":
     await cmdKeep();
     break;
@@ -117,6 +121,7 @@ function printUsage(): void {
   console.log("  workdir Print session working directory");
   console.log("  wait    Wait for session(s) to complete");
   console.log("  result  Show final result from a background session");
+  console.log("  send    Send text input to a running session");
   console.log("  keep    Protect a session's worktree from auto-cleanup");
   console.log("  unkeep  Remove worktree protection");
   console.log("  merge   Merge session worktree branch into current branch");
@@ -637,6 +642,34 @@ async function cmdWait(): Promise<void> {
 
   console.log("all sessions finished");
   if (anyFailed) process.exit(1);
+}
+
+async function cmdSend(): Promise<void> {
+  const sessionId = process.argv[3];
+  if (!sessionId) {
+    console.error("usage: orka send <session-id> <text...>");
+    process.exit(1);
+  }
+
+  const text = process.argv.slice(4).join(" ");
+  if (!text) {
+    console.error("usage: orka send <session-id> <text...>");
+    process.exit(1);
+  }
+
+  const session = findSession(sessionId);
+  if (!session) {
+    console.error(`session not found: ${sessionId}`);
+    process.exit(1);
+  }
+
+  if (!(await tmuxHas(session.tmuxSessionName))) {
+    console.error(`session ${session.id} is not running`);
+    process.exit(1);
+  }
+
+  await tmuxSendText(session.tmuxSessionName, text);
+  console.log(`sent to ${session.id}`);
 }
 
 async function cmdKeep(): Promise<void> {

@@ -1,5 +1,5 @@
 export { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
-export { tmuxList, tmuxAttach, tmuxCapture, tmuxHas } from "./tmux";
+export { tmuxList, tmuxAttach, tmuxCapture, tmuxHas, tmuxSendKeys, tmuxSendText } from "./tmux";
 export { getDb, getOrkaHome } from "./db";
 export {
   getSession,

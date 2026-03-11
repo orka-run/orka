@@ -67,12 +67,21 @@ export async function tmuxCapture(
   return result;
 }
 
-/** Send keys (input) to a tmux session. */
+/** Send literal text to a tmux session (no Enter appended). */
 export async function tmuxSendKeys(
   sessionName: string,
   keys: string,
 ): Promise<void> {
-  await $`tmux send-keys -t ${sessionName} ${keys}`.quiet();
+  await $`tmux send-keys -t ${sessionName} -l ${keys}`.quiet();
+}
+
+/** Send literal text followed by Enter to a tmux session. */
+export async function tmuxSendText(
+  sessionName: string,
+  text: string,
+): Promise<void> {
+  await $`tmux send-keys -t ${sessionName} -l ${text}`.quiet();
+  await $`tmux send-keys -t ${sessionName} Enter`.quiet();
 }
 
 /** Kill a tmux session. */
