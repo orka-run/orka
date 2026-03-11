@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { existsSync } from "node:fs";
 import { readFileSync } from "node:fs";
 import type { BackendKind, SessionMode, OrkaService } from "@orka/core";
+import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
   createRemoteClient,
@@ -91,6 +92,9 @@ switch (command) {
   case "serve":
     await cmdServe();
     break;
+  case "relay":
+    await cmdRelay();
+    break;
   default:
     printUsage();
 }
@@ -122,6 +126,7 @@ function printUsage(): void {
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
   console.log("  serve   Start daemon WS server");
+  console.log("  relay   Start relay WS router (for multi-machine)");
   console.log("");
   console.log("ps options:");
   console.log("  --status       Filter by status (e.g. running, completed, failed, cancelled)");
@@ -152,6 +157,11 @@ function printUsage(): void {
   console.log("serve options:");
   console.log("  --port          Port to listen on (default: 7394)");
   console.log("  --host          Hostname to bind (default: 127.0.0.1)");
+  console.log("  --relay         Connect to relay (e.g. ws://relay:7390)");
+  console.log("  --node-id       Node ID for relay registration");
+  console.log("");
+  console.log("relay options:");
+  console.log("  --port          Port to listen on (default: 7390)");
   console.log("");
   console.log("global options:");
   console.log("  --remote <url>  Connect to remote daemon (e.g. ws://host:7394)");
@@ -901,6 +911,8 @@ async function cmdServe(): Promise<void> {
     options: {
       port: { type: "string", default: "7394" },
       host: { type: "string", default: "127.0.0.1" },
+      relay: { type: "string" },
+      "node-id": { type: "string" },
     },
     allowPositionals: false,
   });
@@ -908,8 +920,35 @@ async function cmdServe(): Promise<void> {
   const port = parseInt(args.values.port!, 10);
   const hostname = args.values.host!;
   const localSvc = createLocalClient();
-  const server = startServer(localSvc, { port, hostname });
+  const server = startServer(localSvc, {
+    port,
+    hostname,
+    relayUrl: args.values.relay,
+    nodeId: args.values["node-id"],
+  });
   console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
+  if (args.values.relay) {
+    console.log(`  relay: ${args.values.relay}`);
+  }
+
+  // Keep running until killed
+  await new Promise(() => {});
+}
+
+async function cmdRelay(): Promise<void> {
+  const args = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      port: { type: "string", default: "7390" },
+    },
+    allowPositionals: false,
+  });
+
+  const port = parseInt(args.values.port!, 10);
+  const server = startRelay({ port });
+  console.log(`orka relay listening on ws://0.0.0.0:${server.port}`);
+  console.log("  nodes register at:  /register?node=<id>");
+  console.log("  clients connect at: /ws");
 
   // Keep running until killed
   await new Promise(() => {});

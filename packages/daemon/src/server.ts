@@ -4,11 +4,16 @@ import { handleRpcRequest } from "./rpc-handler";
 export interface ServerOptions {
   port: number;
   hostname?: string;
+  /** If set, the daemon registers with this relay URL (e.g. ws://relay:7390/register?node=mynode). */
+  relayUrl?: string;
+  /** Node ID for relay registration. Defaults to hostname:port. */
+  nodeId?: string;
 }
 
 /**
  * Start the orka daemon WS server.
  * Accepts WebSocket connections, dispatches JSON-RPC to the OrkaService.
+ * Optionally registers with a relay for multi-machine routing.
  */
 export function startServer(svc: OrkaService, opts: ServerOptions) {
   const server = Bun.serve({
@@ -49,5 +54,44 @@ export function startServer(svc: OrkaService, opts: ServerOptions) {
     },
   });
 
+  // Register with relay if configured
+  if (opts.relayUrl) {
+    const nodeId = opts.nodeId ?? `${opts.hostname ?? "127.0.0.1"}:${server.port}`;
+    registerWithRelay(svc, opts.relayUrl, nodeId);
+  }
+
   return server;
+}
+
+/**
+ * Connect to relay as a node. Relay forwards client requests to us,
+ * we process them and send responses back through the relay.
+ */
+function registerWithRelay(svc: OrkaService, relayUrl: string, nodeId: string) {
+  const url = `${relayUrl}/register?node=${encodeURIComponent(nodeId)}`;
+
+  function connect() {
+    const ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      console.log(`registered with relay as node "${nodeId}"`);
+    };
+
+    ws.onmessage = async (event) => {
+      const raw = typeof event.data === "string" ? event.data : "";
+      const response = await handleRpcRequest(svc, raw);
+      ws.send(response);
+    };
+
+    ws.onclose = () => {
+      console.log("relay connection lost, reconnecting in 5s...");
+      setTimeout(connect, 5000);
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after onerror
+    };
+  }
+
+  connect();
 }

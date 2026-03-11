@@ -23,6 +23,7 @@
       "dependencies": {
         "@orka/core": "workspace:*",
         "@orka/daemon": "workspace:*",
+        "@orka/relay": "workspace:*",
       },
     },
     "packages/core": {
@@ -31,6 +32,13 @@
     },
     "packages/daemon": {
       "name": "@orka/daemon",
+      "version": "0.0.1",
+      "dependencies": {
+        "@orka/core": "workspace:*",
+      },
+    },
+    "packages/relay": {
+      "name": "@orka/relay",
       "version": "0.0.1",
       "dependencies": {
         "@orka/core": "workspace:*",
@@ -65,6 +73,8 @@
     "@orka/core": ["@orka/core@workspace:packages/core"],
 
     "@orka/daemon": ["@orka/daemon@workspace:packages/daemon"],
+
+    "@orka/relay": ["@orka/relay@workspace:packages/relay"],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 
