@@ -23,3 +23,4 @@ export {
 export type { ProjectEntry } from "./projects";
 export { getOrkaHome } from "./db";
 export { formatLog, formatEvent, parseLine } from "./log-formatter";
+export { createDrainableWorker, type DrainableWorker } from "./drainable-worker";
