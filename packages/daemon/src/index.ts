@@ -28,3 +28,4 @@ export * from "./adapters";
 export { ProviderAdapterRegistry } from "./provider-registry";
 export { ProviderService } from "./provider-service";
 export { ShellAdapter } from "./adapters";
+export * from "./orchestration";
