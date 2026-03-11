@@ -1,5 +1,16 @@
-import type { OrkaService, KeyPair } from "@orka/core";
-import { deriveSessionKey, ensureKeyPair, ReconnectStrategy } from "@orka/core";
+import type {
+  OrkaService,
+  KeyPair,
+  ServerWelcomeData,
+} from "@orka/core";
+import {
+  deriveSessionKey,
+  ensureKeyPair,
+  PushControlRequestSchema,
+  ReconnectStrategy,
+} from "@orka/core";
+import daemonPackageJson from "../package.json";
+import { PushHub } from "./push-hub";
 import { handleRpcRequest } from "./rpc-handler";
 import { getOrkaHome } from "./db";
 import { withSpan } from "./tracing";
@@ -17,6 +28,12 @@ export interface ServerOptions {
   encrypt?: boolean;
 }
 
+interface ServerWebSocketData {
+  encKey?: Buffer;
+}
+
+export const pushHub = new PushHub();
+
 /**
  * Start the orka daemon WS server.
  * Accepts WebSocket connections, dispatches JSON-RPC to the OrkaService.
@@ -31,7 +48,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
       console.log(`E2E encryption enabled (node pubkey: ${nodeKeyPair.publicKey.slice(0, 20)}...)`);
     }
 
-    const server = Bun.serve({
+    const server = Bun.serve<ServerWebSocketData>({
       port: opts.port,
       hostname: opts.hostname ?? "127.0.0.1",
 
@@ -67,17 +84,41 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
       websocket: {
         async message(ws, message) {
           const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
-          const encKey = (ws.data as any)?.encKey as Buffer | undefined;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            parsed = undefined;
+          }
+
+          const controlMessage = PushControlRequestSchema.safeParse(parsed);
+          if (controlMessage.success) {
+            if (controlMessage.data.type === "subscribe") {
+              pushHub.subscribe(ws, controlMessage.data.channels);
+            } else {
+              pushHub.unsubscribe(ws, controlMessage.data.channels);
+            }
+            return;
+          }
+
+          const encKey = ws.data?.encKey;
           const response = await handleRpcRequest(svc, raw, encKey);
           ws.send(response);
         },
 
         open(ws) {
-          // Connection established
+          void withSpan("orka.push.welcome", {}, async () => {
+            const sessions = await svc.listSessions();
+            const welcome: ServerWelcomeData = {
+              serverVersion: daemonPackageJson.version,
+              sessionCount: sessions.length,
+            };
+            pushHub.send(ws, "server.welcome", welcome);
+          });
         },
 
         close(ws) {
-          // Connection closed
+          pushHub.removeClient(ws);
         },
       },
     });
