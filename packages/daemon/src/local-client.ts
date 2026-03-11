@@ -16,6 +16,7 @@ import type {
   Task,
   ApprovalRequest,
   ApprovalDecision,
+  PushChannel,
 } from "@orka/core";
 import {
   getSession,
@@ -345,6 +346,8 @@ class LocalClient implements OrkaService {
       );
     }
   }
+
+  async reportEventGap(_channel: PushChannel, _expectedSeq: number, _gotSeq: number): Promise<void> {}
 
   async terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }> {
     const session = getSession(sessionId);

@@ -1,18 +1,11 @@
 // Attribution: WsTransport design inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import type { RpcRequest, RpcResponse } from "@orka/core";
+import type { PushEnvelope, RpcRequest, RpcResponse } from "@orka/core";
 import type { Span } from "@opentelemetry/api";
 import {
   finishDashboardSpan,
   injectSpanContext,
   startDashboardSpan,
 } from "./tracing";
-
-type PushEnvelope = {
-  type: "push";
-  channel: string;
-  sequence: number;
-  data: unknown;
-};
 
 type RpcResponseEnvelope = RpcResponse;
 
@@ -40,6 +33,7 @@ export class WsTransport {
   private pending = new Map<number, PendingRequest>();
   private pushHandlers = new Map<string, Set<PushHandler>>();
   private latestPush = new Map<string, { data: unknown; sequence: number }>();
+  private lastSequenceByChannel = new Map<string, number>();
   private outbox: string[] = [];
   private state: ConnectionState = "disconnected";
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -245,10 +239,37 @@ export class WsTransport {
     }
 
     if (this.isPushEnvelope(parsed)) {
+      const handledStartedAt = now();
       this.connectionSpan?.addEvent("push.received", {
         "orka.channel": parsed.channel,
         "orka.sequence": parsed.sequence,
       });
+
+      const previousSequence = this.lastSequenceByChannel.get(parsed.channel);
+      if (previousSequence !== undefined && parsed.sequence > previousSequence + 1) {
+        this.connectionSpan?.addEvent("push.gap_detected", {
+          "orka.channel": parsed.channel,
+          "orka.expected_sequence": previousSequence + 1,
+          "orka.got_sequence": parsed.sequence,
+        });
+        void this.request("reportEventGap", {
+          channel: parsed.channel,
+          expectedSeq: previousSequence + 1,
+          gotSeq: parsed.sequence,
+        }).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.connectionSpan?.addEvent("push.gap_report_failed", {
+            "orka.channel": parsed.channel,
+            "orka.expected_sequence": previousSequence + 1,
+            "orka.got_sequence": parsed.sequence,
+            "orka.error": message,
+          });
+        });
+      }
+
+      if (previousSequence === undefined || parsed.sequence > previousSequence) {
+        this.lastSequenceByChannel.set(parsed.channel, parsed.sequence);
+      }
 
       const current = this.latestPush.get(parsed.channel);
       if (!current || parsed.sequence >= current.sequence) {
@@ -263,8 +284,22 @@ export class WsTransport {
         return;
       }
 
-      for (const handler of handlers) {
-        handler(parsed.data, parsed.sequence);
+      try {
+        for (const handler of handlers) {
+          handler(parsed.data, parsed.sequence);
+        }
+      } catch (error) {
+        if (error instanceof Error) {
+          this.connectionSpan?.recordException(error);
+        }
+        throw error;
+      } finally {
+        this.connectionSpan?.addEvent("push.handlers_completed", {
+          "orka.channel": parsed.channel,
+          "orka.sequence": parsed.sequence,
+          "orka.duration_ms": Math.max(0, now() - handledStartedAt),
+          "orka.handler_count": handlers.size,
+        });
       }
       return;
     }

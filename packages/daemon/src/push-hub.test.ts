@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
 import { PushHub } from "./push-hub";
 
-function createMockWs() {
+function createMockWs(bufferedAmount = 0) {
   const sent: string[] = [];
   return {
+    bufferedAmount,
     send(data: string) {
       sent.push(data);
     },
@@ -64,16 +65,53 @@ describe("PushHub", () => {
     expect(hub.subscriberCount("orchestration.sessionDeleted")).toBe(0);
   });
 
-  test("increments sequence numbers per client across direct sends and broadcasts", () => {
+  test("increments broadcast sequence numbers per channel and shares them across subscribers", () => {
     const hub = new PushHub();
-    const ws = createMockWs();
-    const client = asServerWebSocket(ws);
+    const first = createMockWs();
+    const second = createMockWs();
+    const firstClient = asServerWebSocket(first);
+    const secondClient = asServerWebSocket(second);
 
-    hub.subscribe(client, ["orchestration.event"]);
-    hub.send(client, "server.welcome", { serverVersion: "0.0.1", sessionCount: 2 });
+    hub.subscribe(firstClient, ["orchestration.event", "orchestration.sessionDeleted"]);
+    hub.subscribe(secondClient, ["orchestration.event"]);
+
     hub.broadcast("orchestration.event", { sessionId: "sess-1" });
-    hub.send(client, "orchestration.sessionDeleted", { sessionId: "sess-1" });
+    hub.broadcast("orchestration.event", { sessionId: "sess-1" });
+    hub.broadcast("orchestration.sessionDeleted", { sessionId: "sess-1" });
 
-    expect(ws.sent.map((message) => JSON.parse(message).sequence)).toEqual([1, 2, 3]);
+    expect(first.sent.map((message) => JSON.parse(message))).toEqual([
+      {
+        type: "push",
+        channel: "orchestration.event",
+        sequence: 1,
+        data: { sessionId: "sess-1" },
+      },
+      {
+        type: "push",
+        channel: "orchestration.event",
+        sequence: 2,
+        data: { sessionId: "sess-1" },
+      },
+      {
+        type: "push",
+        channel: "orchestration.sessionDeleted",
+        sequence: 1,
+        data: { sessionId: "sess-1" },
+      },
+    ]);
+    expect(second.sent.map((message) => JSON.parse(message))).toEqual([
+      {
+        type: "push",
+        channel: "orchestration.event",
+        sequence: 1,
+        data: { sessionId: "sess-1" },
+      },
+      {
+        type: "push",
+        channel: "orchestration.event",
+        sequence: 2,
+        data: { sessionId: "sess-1" },
+      },
+    ]);
   });
 });

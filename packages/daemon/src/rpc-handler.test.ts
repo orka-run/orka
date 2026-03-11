@@ -158,6 +158,53 @@ describe("handleRpcRequest", () => {
     ]);
   });
 
+  test("dispatches reportEventGap and creates a delivery gap span", async () => {
+    await withTestTracing(async ({ exporter, provider }) => {
+      const reportedGaps: Array<{ channel: string; expectedSeq: number; gotSeq: number }> = [];
+
+      const svc = {
+        async reportEventGap(channel: string, expectedSeq: number, gotSeq: number) {
+          reportedGaps.push({ channel, expectedSeq, gotSeq });
+        },
+      } as OrkaService;
+
+      const response = await handleRpcRequest(
+        svc,
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 5,
+          method: "reportEventGap",
+          params: {
+            channel: "orchestration.sessionUpdated",
+            expectedSeq: 4,
+            gotSeq: 6,
+          },
+        }),
+      );
+
+      expect(JSON.parse(response)).toEqual({
+        jsonrpc: "2.0",
+        id: 5,
+        result: null,
+      });
+      expect(reportedGaps).toEqual([
+        {
+          channel: "orchestration.sessionUpdated",
+          expectedSeq: 4,
+          gotSeq: 6,
+        },
+      ]);
+
+      await provider.forceFlush();
+
+      const gapSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.push.delivery_gap");
+      expect(gapSpan).toBeDefined();
+      expect(gapSpan?.attributes["orka.channel"]).toBe("orchestration.sessionUpdated");
+      expect(gapSpan?.attributes["orka.expected_sequence"]).toBe(4);
+      expect(gapSpan?.attributes["orka.got_sequence"]).toBe(6);
+    });
+  });
+
   test("creates a child span from the caller traceparent", async () => {
     await withTestTracing(async ({ exporter, provider }) => {
       const svc = {

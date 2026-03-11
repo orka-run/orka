@@ -172,6 +172,19 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
           case "resolveApproval":
             await svc.resolveApproval(params.requestId, params.decision);
             return null;
+          case "reportEventGap":
+            return withSpan(
+              "orka.push.delivery_gap",
+              {
+                "orka.channel": params.channel,
+                "orka.expected_sequence": params.expectedSeq,
+                "orka.got_sequence": params.gotSeq,
+              },
+              async () => {
+                await svc.reportEventGap(params.channel, params.expectedSeq, params.gotSeq);
+                return null;
+              },
+            );
           case "terminalOpen":
             return svc.terminalOpen(params.sessionId, params.opts);
           case "terminalWrite":

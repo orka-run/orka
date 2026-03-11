@@ -16,6 +16,7 @@ import type {
   KeyPair,
   ApprovalRequest,
   ApprovalDecision,
+  PushChannel,
 } from "@orka/core";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy } from "@orka/core";
@@ -273,6 +274,10 @@ class RemoteClient implements OrkaService {
 
   async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
     return this.call("resolveApproval", { requestId, decision });
+  }
+
+  async reportEventGap(channel: PushChannel, expectedSeq: number, gotSeq: number): Promise<void> {
+    return this.call("reportEventGap", { channel, expectedSeq, gotSeq });
   }
 
   async terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }> {

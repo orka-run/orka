@@ -1,6 +1,7 @@
 import type { Session, SessionStatus, SpawnRequest, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
+import type { PushChannel } from "./push-protocol";
 
 // --- Session Result (moved from daemon/result-parser) ---
 
@@ -115,6 +116,7 @@ export interface OrkaService {
   // --- Approvals ---
   getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]>;
   resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
+  reportEventGap(channel: PushChannel, expectedSeq: number, gotSeq: number): Promise<void>;
 
   // --- Terminal PTY ---
   terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }>;

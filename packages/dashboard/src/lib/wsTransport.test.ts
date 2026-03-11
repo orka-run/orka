@@ -215,6 +215,70 @@ describe("WsTransport", () => {
     ]);
   });
 
+  test("reports push sequence gaps over RPC", () => {
+    const transport = new WsTransport("ws://orka.test");
+
+    transport.connect();
+    const socket = latestSocket();
+    socket.open();
+
+    transport.subscribe("orchestration.sessionUpdated", () => {});
+
+    socket.receive({
+      type: "push",
+      channel: "orchestration.sessionUpdated",
+      sequence: 8,
+      data: { sessionId: "sess-1", status: "running" },
+    });
+    socket.receive({
+      type: "push",
+      channel: "orchestration.sessionUpdated",
+      sequence: 10,
+      data: { sessionId: "sess-1", status: "completed" },
+    });
+
+    expect(socket.sent).toHaveLength(2);
+    const gapReport = JSON.parse(socket.sent[1]);
+    expect(gapReport).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "reportEventGap",
+      params: {
+        channel: "orchestration.sessionUpdated",
+        expectedSeq: 9,
+        gotSeq: 10,
+      },
+    });
+  });
+
+  test("records push handler latency on the connection span", () => {
+    const transport = new WsTransport("ws://orka.test");
+
+    transport.connect();
+    const socket = latestSocket();
+    socket.open();
+
+    transport.subscribe("orchestration.event", () => {});
+    socket.receive({
+      type: "push",
+      channel: "orchestration.event",
+      sequence: 4,
+      data: { sessionId: "sess-1" },
+    });
+
+    transport.disconnect();
+
+    const connectionSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.dashboard.ws");
+    const handledEvent = connectionSpan?.events.find((event) => event.name === "push.handlers_completed");
+
+    expect(connectionSpan).toBeDefined();
+    expect(handledEvent).toBeDefined();
+    expect(handledEvent?.attributes?.["orka.channel"]).toBe("orchestration.event");
+    expect(handledEvent?.attributes?.["orka.sequence"]).toBe(4);
+    expect(handledEvent?.attributes?.["orka.handler_count"]).toBe(1);
+    expect(Number(handledEvent?.attributes?.["orka.duration_ms"])).toBeGreaterThanOrEqual(0);
+  });
+
   test("subscribe() replays latest cached value for new subscribers", () => {
     const transport = new WsTransport("ws://orka.test");
     transport.connect();
