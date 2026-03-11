@@ -665,10 +665,11 @@ const waitCmd = command({
   description: "Wait for session(s) to complete",
   args: {
     all: flag({ long: "all" }),
+    verbose: flag({ long: "verbose", short: "v" }),
     project: option({ type: optional(str), long: "project" }),
     ids: restPositionals({ type: str, displayName: "session-id" }),
   },
-  handler: async ({ all, project, ids }) => runCliCommand("wait", async () => {
+  handler: async ({ all, verbose, project, ids }) => runCliCommand("wait", async () => {
     if (ids.length === 0 && !all) {
       fail("usage: orka wait <session-id...> | --all [--project <name>]");
     }
@@ -703,6 +704,10 @@ const waitCmd = command({
     console.log(`waiting for ${targets.length} session(s)...`);
     const pending = new Set(targets);
     let anyFailed = false;
+    let completedCount = 0;
+    let failedCount = 0;
+    let totalCost = 0;
+    const wallStart = Date.now();
 
     while (pending.size > 0) {
       await svc.reap();
@@ -713,14 +718,47 @@ const waitCmd = command({
           const status = s?.status ?? "unknown";
           const task = s ? await svc.getTask(s.taskId) : null;
           const label = task?.title?.slice(0, 50) ?? id;
-          console.log(`  ${id}  ${status}  ${label}`);
-          if (status === "failed") anyFailed = true;
+          const icon = status === "failed" ? "✗" : "✓";
+
+          const result = s ? await svc.getResult(s.id) : null;
+          if (result) {
+            const costStr = formatCost(result.costUsd);
+            const tokIn = formatTokens(result.inputTokens);
+            const tokOut = formatTokens(result.outputTokens);
+            const dur = formatDuration(result.durationMs);
+            console.log(`  ${icon} ${id}  ${status}  ${label}`);
+            console.log(`    cost: ${costStr}  tokens: ${tokIn} in / ${tokOut} out  duration: ${dur}`);
+
+            if (verbose && result.result) {
+              const lines = result.result.split("\n").slice(0, 5);
+              for (const line of lines) {
+                console.log(`    > ${line.slice(0, 120)}`);
+              }
+            }
+
+            if (result.costUsd != null) totalCost += result.costUsd;
+          } else {
+            console.log(`  ${icon} ${id}  ${status}  ${label}`);
+          }
+
+          if (status === "failed") {
+            anyFailed = true;
+            failedCount++;
+          } else {
+            completedCount++;
+          }
         }
       }
       if (pending.size > 0) await Bun.sleep(2000);
     }
 
-    console.log("all sessions finished");
+    const wallDuration = formatDuration(Date.now() - wallStart);
+    const total = completedCount + failedCount;
+    const parts: string[] = [];
+    if (completedCount > 0) parts.push(`${completedCount} completed`);
+    if (failedCount > 0) parts.push(`${failedCount} failed`);
+    const breakdown = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+    console.log(`all ${total} sessions finished${breakdown}  total cost: ${formatCost(totalCost)}  duration: ${wallDuration}`);
     if (anyFailed) process.exit(1);
   }),
 });
@@ -1533,7 +1571,17 @@ function formatDuration(ms: number): string {
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
   const remainSecs = secs % 60;
-  return `${mins}m${remainSecs}s`;
+  return remainSecs > 0 ? `${mins}m ${remainSecs}s` : `${mins}m`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatCost(usd: number | null): string {
+  if (usd == null) return "n/a";
+  return `$${usd.toFixed(2)}`;
 }
 
 // --- Relay API helpers ---
