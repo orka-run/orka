@@ -44,8 +44,9 @@ merge   — Merge session worktree branch into current branch (auto-cleans workt
 retry   — Re-run a session with same prompt/model/title/tags
 project — Register/list/remove project aliases
 prune   — Remove old completed sessions (--age, --project)
-serve   — Start daemon WS server (--port, --relay, --node-id)
+serve   — Start daemon WS server (--port, --relay, --node-id, --encrypt)
 relay   — Start relay WS router for multi-machine (--port, --token)
+keygen  — Manage E2E encryption keys (client, node, save-server, show)
 ```
 
 ### Prompt Input
@@ -62,13 +63,17 @@ relay   — Start relay WS router for multi-machine (--port, --token)
 # Start relay (central router)
 orka relay --port 7390 --token mysecret
 
-# Start daemon nodes (register with relay)
-orka serve --port 7394 --relay ws://relay:7390 --node-id node1 --relay-token mysecret
+# Start daemon nodes with E2E encryption (register with relay)
+orka serve --encrypt --port 7394 --relay ws://relay:7390 --node-id node1 --relay-token mysecret
 
-# CLI connects via relay
-orka --remote ws://relay:7390/ws --token mysecret ps
+# CLI: generate keys and save server's public key
+orka keygen client
+orka keygen save-server $(curl -s http://node1:7394/health | jq -r .publicKey)
+
+# CLI connects via relay with E2E encryption
+orka --remote ws://relay:7390/ws --token mysecret --encrypt ps
 # Or via env vars
-ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=mysecret orka ps
+ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=mysecret ORKA_ENCRYPT=1 orka ps
 ```
 
 ## Import Policy
@@ -100,13 +105,22 @@ The **OrkaService** interface (`@orka/core/service.ts`) is the contract between 
 - **LocalClient** (`@orka/daemon/local-client.ts`) — direct in-process calls, used by default
 - **RemoteClient** (`@orka/daemon/remote-client.ts`) — WS JSON-RPC client, used with `--remote`
 
-**Protocol:** JSON-RPC 2.0 over WebSocket. Request envelope includes optional `node` field for relay routing.
+**Protocol:** JSON-RPC 2.0 over WebSocket. Request envelope includes optional `node` field for relay routing. Supports E2E encryption (see below).
 
 **Relay** (`@orka/relay`) — transparent WS router. Reads only `id` and `node` from envelope, forwards payload as-is. Supports:
 - Least-loaded node scheduling (tracks active requests per node)
 - Auth tokens via `?token=` query param
 - Auto-reconnect for daemon nodes (5s backoff)
 - `/health` endpoint with node status
+
+**E2E Encryption** (`@orka/core/crypto.ts`):
+- X25519 ECDH key exchange + HKDF-SHA256 key derivation + AES-256-GCM symmetric encryption
+- Only `params` (request) and `result` (response) are encrypted into `_enc` field
+- Envelope fields (jsonrpc, id, method, node) stay plaintext for relay routing
+- User-owned keys — relay operator has zero access to payload content
+- Keys stored at `~/.orka/keys/` (client.pub/key, node.pub/key, server.pub)
+- Server exposes public key via `/health` endpoint for client discovery
+- Post-quantum ready: cipher field (`c`) enables future algorithm negotiation (hybrid X25519+Kyber768)
 
 ## Observability
 

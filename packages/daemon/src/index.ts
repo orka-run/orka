@@ -1,6 +1,7 @@
 // --- Primary exports: LocalClient + RemoteClient + Server ---
 export { createLocalClient } from "./local-client";
 export { createRemoteClient } from "./remote-client";
+export type { RemoteClientOptions } from "./remote-client";
 export { startServer } from "./server";
 export type { ServerOptions } from "./server";
 

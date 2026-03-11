@@ -11,7 +11,18 @@ import type {
   SessionResult,
   RpcRequest,
   RpcResponse,
+  KeyPair,
 } from "@orka/core";
+import { encryptRequest, decryptResponse, deriveSessionKey } from "@orka/core";
+
+export interface RemoteClientOptions {
+  /** WebSocket URL of the daemon or relay */
+  url: string;
+  /** Client keypair for E2E encryption. If provided with serverPublicKey, enables encryption. */
+  keyPair?: KeyPair;
+  /** Server/node public key (base64). Required for E2E encryption. */
+  serverPublicKey?: string;
+}
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -24,17 +35,39 @@ class RemoteClient implements OrkaService {
   private nextId = 1;
   private url: string;
   private connectPromise: Promise<void> | null = null;
+  private encKey: Buffer | null = null;
+  private keyPair?: KeyPair;
+  private serverPublicKey?: string;
 
-  constructor(url: string) {
-    this.url = url;
+  constructor(opts: RemoteClientOptions) {
+    this.url = opts.url;
+    this.keyPair = opts.keyPair;
+    this.serverPublicKey = opts.serverPublicKey;
   }
 
   private async connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) return;
     if (this.connectPromise) return this.connectPromise;
 
+    // Derive encryption key if E2E is configured
+    if (this.keyPair && this.serverPublicKey && !this.encKey) {
+      this.encKey = await deriveSessionKey(
+        this.keyPair.privateKey,
+        this.serverPublicKey,
+        // Use a fixed salt derived from both public keys for deterministic key derivation
+        Buffer.from(this.keyPair.publicKey + this.serverPublicKey).toString("base64").slice(0, 44),
+      );
+    }
+
+    // Append client public key to URL for server-side key derivation
+    let connectUrl = this.url;
+    if (this.keyPair) {
+      const sep = connectUrl.includes("?") ? "&" : "?";
+      connectUrl += `${sep}pubkey=${encodeURIComponent(this.keyPair.publicKey)}`;
+    }
+
     this.connectPromise = new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(this.url);
+      const ws = new WebSocket(connectUrl);
       ws.onopen = () => {
         this.ws = ws;
         this.connectPromise = null;
@@ -60,11 +93,26 @@ class RemoteClient implements OrkaService {
   }
 
   private handleMessage(raw: string): void {
-    let resp: RpcResponse;
+    let resp: any;
     try {
       resp = JSON.parse(raw);
     } catch {
       return;
+    }
+
+    // Decrypt response if encrypted
+    if (this.encKey && resp._enc) {
+      try {
+        resp = decryptResponse(this.encKey, resp);
+      } catch {
+        // Decryption failed — treat as error
+        const p = this.pending.get(resp.id);
+        if (p) {
+          this.pending.delete(resp.id);
+          p.reject(new Error("E2E decryption failed"));
+        }
+        return;
+      }
     }
 
     const p = this.pending.get(resp.id);
@@ -85,16 +133,20 @@ class RemoteClient implements OrkaService {
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
 
-      const req: RpcRequest = {
+      let req: any = {
         jsonrpc: "2.0",
         id,
         method,
         ...(params !== undefined ? { params } : {}),
       };
 
+      // Encrypt params if E2E is enabled
+      if (this.encKey && req.params) {
+        req = encryptRequest(this.encKey, req);
+      }
+
       this.ws!.send(JSON.stringify(req));
 
-      // Timeout after 30 seconds
       setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
@@ -179,6 +231,7 @@ class RemoteClient implements OrkaService {
   }
 }
 
-export function createRemoteClient(url: string): RemoteClient {
-  return new RemoteClient(url);
+export function createRemoteClient(urlOrOpts: string | RemoteClientOptions): RemoteClient {
+  const opts = typeof urlOrOpts === "string" ? { url: urlOrOpts } : urlOrOpts;
+  return new RemoteClient(opts);
 }

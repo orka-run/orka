@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { existsSync } from "node:fs";
 import { readFileSync } from "node:fs";
 import type { BackendKind, SessionMode, OrkaService } from "@orka/core";
+import { ensureKeyPair, loadKeyPair, loadPublicKey } from "@orka/core";
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
@@ -11,6 +12,7 @@ import {
   startServer,
   tmuxAttach,
   getConfig,
+  getOrkaHome,
   initTracing,
   shutdownTracing,
   resolveProject,
@@ -39,7 +41,43 @@ if (remoteUrl && remoteToken) {
   remoteUrl = `${remoteUrl}${sep}token=${encodeURIComponent(remoteToken)}`;
 }
 
-const svc: OrkaService = remoteUrl ? createRemoteClient(remoteUrl) : createLocalClient();
+// E2E encryption for remote connections
+const encryptIdx = process.argv.indexOf("--encrypt");
+const useEncrypt = encryptIdx !== -1 || !!process.env.ORKA_ENCRYPT;
+if (encryptIdx !== -1) {
+  process.argv.splice(encryptIdx, 1);
+}
+
+// Server public key for E2E (can be set via env or fetched from /health)
+const serverPubKeyIdx = process.argv.indexOf("--server-key");
+let serverPublicKey = serverPubKeyIdx !== -1 ? process.argv[serverPubKeyIdx + 1] : process.env.ORKA_SERVER_KEY;
+if (serverPubKeyIdx !== -1) {
+  process.argv.splice(serverPubKeyIdx, 2);
+}
+
+let svc: OrkaService;
+if (remoteUrl) {
+  if (useEncrypt) {
+    const orkaHome = getOrkaHome();
+    const keyPair = ensureKeyPair(orkaHome, "client");
+
+    // If server key not provided, try loading from saved keys
+    if (!serverPublicKey) {
+      serverPublicKey = loadPublicKey(orkaHome, "server") ?? undefined;
+    }
+    if (!serverPublicKey) {
+      console.error("error: E2E encryption requires server public key (--server-key or ORKA_SERVER_KEY)");
+      console.error("  get it from: curl <daemon-url>/health | jq -r .publicKey");
+      console.error("  or save it:  orka keygen save-server <pubkey>");
+      process.exit(1);
+    }
+    svc = createRemoteClient({ url: remoteUrl, keyPair, serverPublicKey });
+  } else {
+    svc = createRemoteClient(remoteUrl);
+  }
+} else {
+  svc = createLocalClient();
+}
 
 const command = process.argv[2];
 
@@ -104,6 +142,9 @@ switch (command) {
   case "relay":
     await cmdRelay();
     break;
+  case "keygen":
+    await cmdKeygen();
+    break;
   default:
     printUsage();
 }
@@ -136,6 +177,7 @@ function printUsage(): void {
   console.log("  prune   Remove old completed/cancelled/failed sessions");
   console.log("  serve   Start daemon WS server");
   console.log("  relay   Start relay WS router (for multi-machine)");
+  console.log("  keygen  Manage E2E encryption keys");
   console.log("");
   console.log("ps options:");
   console.log("  --status       Filter by status (e.g. running, completed, failed, cancelled)");
@@ -168,6 +210,7 @@ function printUsage(): void {
   console.log("  --host          Hostname to bind (default: 127.0.0.1)");
   console.log("  --relay         Connect to relay (e.g. ws://relay:7390)");
   console.log("  --node-id       Node ID for relay registration");
+  console.log("  --encrypt       Enable E2E encryption (generates node keypair)");
   console.log("");
   console.log("relay options:");
   console.log("  --port          Port to listen on (default: 7390)");
@@ -175,8 +218,12 @@ function printUsage(): void {
   console.log("global options:");
   console.log("  --remote <url>  Connect to remote daemon (e.g. ws://host:7394)");
   console.log("  --token <tok>   Auth token for relay/daemon connection");
+  console.log("  --encrypt       Enable E2E encryption for remote connections");
+  console.log("  --server-key    Server public key for E2E (or ORKA_SERVER_KEY)");
   console.log("  ORKA_REMOTE     Env var alternative to --remote");
   console.log("  ORKA_TOKEN      Env var alternative to --token");
+  console.log("  ORKA_ENCRYPT    Env var alternative to --encrypt");
+  console.log("  ORKA_SERVER_KEY Env var alternative to --server-key");
 }
 
 async function cmdSpawn(): Promise<void> {
@@ -944,12 +991,14 @@ async function cmdServe(): Promise<void> {
   const port = parseInt(args.values.port!, 10);
   const hostname = args.values.host!;
   const localSvc = createLocalClient();
-  const server = startServer(localSvc, {
+  // useEncrypt is set by global --encrypt flag parsing
+  const server = await startServer(localSvc, {
     port,
     hostname,
     relayUrl: args.values.relay,
     nodeId: args.values["node-id"],
     relayToken: args.values["relay-token"] ?? process.env.ORKA_TOKEN,
+    encrypt: useEncrypt,
   });
   console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
   if (args.values.relay) {
@@ -979,6 +1028,79 @@ async function cmdRelay(): Promise<void> {
 
   // Keep running until killed
   await new Promise(() => {});
+}
+
+async function cmdKeygen(): Promise<void> {
+  const sub = process.argv[3];
+  const orkaHome = getOrkaHome();
+
+  if (sub === "client") {
+    const kp = ensureKeyPair(orkaHome, "client");
+    console.log("client keypair:");
+    console.log(`  public:  ${kp.publicKey}`);
+    console.log(`  stored:  ${orkaHome}/keys/client.pub, ${orkaHome}/keys/client.key`);
+    return;
+  }
+
+  if (sub === "node") {
+    const kp = ensureKeyPair(orkaHome, "node");
+    console.log("node keypair:");
+    console.log(`  public:  ${kp.publicKey}`);
+    console.log(`  stored:  ${orkaHome}/keys/node.pub, ${orkaHome}/keys/node.key`);
+    return;
+  }
+
+  if (sub === "save-server") {
+    const pubkey = process.argv[4];
+    if (!pubkey) {
+      console.error("usage: orka keygen save-server <public-key>");
+      console.error("  get it from: curl <daemon-url>/health | jq -r .publicKey");
+      process.exit(1);
+    }
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const keysDir = join(orkaHome, "keys");
+    mkdirSync(keysDir, { recursive: true });
+    writeFileSync(join(keysDir, "server.pub"), pubkey, { mode: 0o644 });
+    console.log(`saved server public key to ${keysDir}/server.pub`);
+    return;
+  }
+
+  if (sub === "show") {
+    const clientKp = loadKeyPair(orkaHome, "client");
+    const nodeKp = loadKeyPair(orkaHome, "node");
+    const serverPub = loadPublicKey(orkaHome, "server");
+
+    if (clientKp) {
+      console.log(`client public key: ${clientKp.publicKey}`);
+    } else {
+      console.log("client keypair:    (not generated)");
+    }
+    if (nodeKp) {
+      console.log(`node public key:   ${nodeKp.publicKey}`);
+    } else {
+      console.log("node keypair:      (not generated)");
+    }
+    if (serverPub) {
+      console.log(`server public key: ${serverPub}`);
+    } else {
+      console.log("server public key: (not saved)");
+    }
+    return;
+  }
+
+  console.log("orka keygen — manage E2E encryption keys");
+  console.log("");
+  console.log("subcommands:");
+  console.log("  client         Generate/show client keypair (for CLI → daemon encryption)");
+  console.log("  node           Generate/show node keypair (for daemon server)");
+  console.log("  save-server    Save a remote server's public key");
+  console.log("  show           Show all stored keys");
+  console.log("");
+  console.log("usage:");
+  console.log("  orka keygen client                  # generate client keys");
+  console.log("  orka keygen save-server <pubkey>     # save server's public key");
+  console.log("  orka --remote ws://host:7394 --encrypt spawn ...  # use encryption");
 }
 
 function parseAge(age: string): number {

@@ -1,5 +1,7 @@
-import type { OrkaService } from "@orka/core";
+import type { OrkaService, KeyPair } from "@orka/core";
+import { deriveSessionKey, ensureKeyPair } from "@orka/core";
 import { handleRpcRequest } from "./rpc-handler";
+import { getOrkaHome } from "./db";
 
 export interface ServerOptions {
   port: number;
@@ -10,6 +12,8 @@ export interface ServerOptions {
   nodeId?: string;
   /** Token for relay authentication. */
   relayToken?: string;
+  /** Enable E2E encryption. Auto-generates a node keypair if needed. */
+  encrypt?: boolean;
 }
 
 /**
@@ -17,23 +21,42 @@ export interface ServerOptions {
  * Accepts WebSocket connections, dispatches JSON-RPC to the OrkaService.
  * Optionally registers with a relay for multi-machine routing.
  */
-export function startServer(svc: OrkaService, opts: ServerOptions) {
+export async function startServer(svc: OrkaService, opts: ServerOptions) {
+  // Load or generate node keypair for E2E encryption
+  let nodeKeyPair: KeyPair | undefined;
+  if (opts.encrypt) {
+    nodeKeyPair = ensureKeyPair(getOrkaHome(), "node");
+    console.log(`E2E encryption enabled (node pubkey: ${nodeKeyPair.publicKey.slice(0, 20)}...)`);
+  }
+
   const server = Bun.serve({
     port: opts.port,
     hostname: opts.hostname ?? "127.0.0.1",
 
-    fetch(req, server) {
+    async fetch(req, server) {
       const url = new URL(req.url);
 
-      // Health check endpoint
+      // Health check endpoint — includes public key for client discovery
       if (url.pathname === "/health") {
-        return new Response(JSON.stringify({ status: "ok" }), {
+        const body: any = { status: "ok" };
+        if (nodeKeyPair) body.publicKey = nodeKeyPair.publicKey;
+        return new Response(JSON.stringify(body), {
           headers: { "content-type": "application/json" },
         });
       }
 
-      // Upgrade to WebSocket
-      if (server.upgrade(req)) {
+      // Derive per-connection encryption key from client's public key
+      let encKey: Buffer | undefined;
+      if (nodeKeyPair) {
+        const clientPubKey = url.searchParams.get("pubkey");
+        if (clientPubKey) {
+          const salt = Buffer.from(clientPubKey + nodeKeyPair.publicKey).toString("base64").slice(0, 44);
+          encKey = await deriveSessionKey(nodeKeyPair.privateKey, clientPubKey, salt);
+        }
+      }
+
+      // Upgrade to WebSocket, pass encKey as data
+      if (server.upgrade(req, { data: { encKey } })) {
         return undefined;
       }
       return new Response("WebSocket upgrade required", { status: 426 });
@@ -42,7 +65,8 @@ export function startServer(svc: OrkaService, opts: ServerOptions) {
     websocket: {
       async message(ws, message) {
         const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
-        const response = await handleRpcRequest(svc, raw);
+        const encKey = (ws.data as any)?.encKey as Buffer | undefined;
+        const response = await handleRpcRequest(svc, raw, encKey);
         ws.send(response);
       },
 
