@@ -11,6 +11,7 @@ import {
 } from "@orka/core";
 import daemonPackageJson from "../package.json";
 import { PushHub } from "./push-hub";
+import { GracefulShutdown } from "./graceful-shutdown";
 import { handleRpcRequest } from "./rpc-handler";
 import { getOrkaHome } from "./db";
 import { withSpan } from "./tracing";
@@ -33,6 +34,7 @@ interface ServerWebSocketData {
 }
 
 export const pushHub = new PushHub();
+export const gracefulShutdown = new GracefulShutdown();
 
 /**
  * Start the orka daemon WS server.
@@ -101,6 +103,20 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             return;
           }
 
+          // Reject spawn requests during shutdown
+          if (gracefulShutdown.shuttingDown) {
+            const req = parsed as { id?: unknown; method?: string } | undefined;
+            if (req?.method === "spawn") {
+              const errResponse = JSON.stringify({
+                jsonrpc: "2.0",
+                id: req.id ?? null,
+                error: { code: -32000, message: "Server shutting down" },
+              });
+              ws.send(errResponse);
+              return;
+            }
+          }
+
           const encKey = ws.data?.encKey;
           const response = await handleRpcRequest(svc, raw, encKey);
           ws.send(response);
@@ -122,6 +138,22 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
         },
       },
     });
+
+    // Register cleanup tasks for graceful shutdown
+    gracefulShutdown.onShutdown(async () => {
+      pushHub.broadcast("server.shutdown", {});
+    });
+    gracefulShutdown.onShutdown(async () => {
+      server.stop();
+    });
+
+    // Handle signals for graceful shutdown
+    const onSignal = () => {
+      console.log("Received shutdown signal, shutting down gracefully...");
+      gracefulShutdown.shutdown().then(() => process.exit(0));
+    };
+    process.on("SIGTERM", onSignal);
+    process.on("SIGINT", onSignal);
 
     // Register with relay if configured
     if (opts.relayUrl) {
