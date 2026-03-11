@@ -1,0 +1,601 @@
+import type {
+  ProviderAdapter,
+  ProviderApprovalDecision,
+  ProviderRuntimeEvent,
+  ProviderSendTurnInput,
+  ProviderSessionHandle,
+  ProviderSessionStartInput,
+} from "@orka/core";
+import { createEvent } from "@orka/core";
+import { withSpan } from "../tracing";
+
+type ClaudeProcess = ReturnType<typeof Bun.spawn>;
+type ClaudeMapMode = "primary" | "exit";
+
+interface ClaudeHandleMeta {
+  process: ClaudeProcess;
+  events: AsyncEventQueue<ProviderRuntimeEvent>;
+  exitEmitted: boolean;
+  closed: boolean;
+}
+
+interface ClaudeUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+class AsyncEventQueue<T> implements AsyncIterable<T> {
+  private values: T[] = [];
+  private resolvers: Array<(result: IteratorResult<T>) => void> = [];
+  private closed = false;
+
+  push(value: T): void {
+    if (this.closed) return;
+
+    const resolve = this.resolvers.shift();
+    if (resolve) {
+      resolve({ value, done: false });
+      return;
+    }
+
+    this.values.push(value);
+  }
+
+  close(): void {
+    if (this.closed) return;
+
+    this.closed = true;
+    for (const resolve of this.resolvers.splice(0)) {
+      resolve({ value: undefined as T, done: true });
+    }
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: async (): Promise<IteratorResult<T>> => {
+        if (this.values.length > 0) {
+          return { value: this.values.shift() as T, done: false };
+        }
+
+        if (this.closed) {
+          return { value: undefined as T, done: true };
+        }
+
+        return new Promise<IteratorResult<T>>((resolve) => {
+          this.resolvers.push(resolve);
+        });
+      },
+    };
+  }
+}
+
+export class ClaudeCodeAdapter implements ProviderAdapter {
+  readonly kind = "claude-code" as const;
+
+  async startSession(input: ProviderSessionStartInput): Promise<ProviderSessionHandle> {
+    return withSpan(
+      "orka.provider.claude_code.start_session",
+      { "orka.session.id": input.threadId, "orka.backend": this.kind },
+      async () => {
+        const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "auto"];
+        if (input.model) {
+          command.push("--model", input.model);
+        }
+
+        const process = Bun.spawn(command, {
+          cwd: input.cwd,
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+
+        const events = new AsyncEventQueue<ProviderRuntimeEvent>();
+        const meta: ClaudeHandleMeta = {
+          process,
+          events,
+          exitEmitted: false,
+          closed: false,
+        };
+
+        const handle: ProviderSessionHandle = {
+          threadId: input.threadId,
+          provider: this.kind,
+          events,
+          meta,
+        };
+
+        if (!process.stdout || !process.stdin) {
+          events.push(
+            createEvent(
+              "runtime.error",
+              input.threadId,
+              { message: "Claude Code stdio is not available", class: "transport_error" },
+              { provider: this.kind },
+            ),
+          );
+          emitSessionExited(input.threadId, meta, "Claude Code failed to initialize stdio", "error");
+          closeEvents(meta);
+          throw new Error("Claude Code stdio is not available");
+        }
+
+        if (process.stderr) {
+          void drainStream(process.stderr);
+        }
+
+        const outputTask = consumeClaudeOutput(input.threadId, process.stdout, meta);
+        void finalizeClaudeProcess(input.threadId, process, outputTask, meta);
+
+        try {
+          if (input.prompt) {
+            await Promise.resolve(process.stdin.write(input.prompt));
+          }
+          await Promise.resolve(process.stdin.end());
+        } catch (error) {
+          emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error");
+          closeEvents(meta);
+          process.kill();
+          await process.exited;
+          throw error;
+        }
+
+        return handle;
+      },
+    );
+  }
+
+  async sendTurn(_handle: ProviderSessionHandle, _input: ProviderSendTurnInput): Promise<void> {
+    throw new Error("Claude Code -p mode does not support multi-turn. Start a new session.");
+  }
+
+  async interruptTurn(handle: ProviderSessionHandle): Promise<void> {
+    await withSpan(
+      "orka.provider.claude_code.interrupt_turn",
+      { "orka.session.id": handle.threadId, "orka.backend": this.kind },
+      async () => {
+        const meta = getClaudeHandleMeta(handle);
+        meta.process.kill("SIGINT");
+      },
+    );
+  }
+
+  async stopSession(handle: ProviderSessionHandle): Promise<void> {
+    await withSpan(
+      "orka.provider.claude_code.stop_session",
+      { "orka.session.id": handle.threadId, "orka.backend": this.kind },
+      async () => {
+        const meta = getClaudeHandleMeta(handle);
+
+        emitSessionExited(handle.threadId, meta, "stopped", "graceful");
+        closeEvents(meta);
+
+        meta.process.kill("SIGINT");
+        const exited = await waitForExit(meta.process, 250);
+        if (!exited) {
+          meta.process.kill();
+          await meta.process.exited;
+        }
+      },
+    );
+  }
+
+  async respondToRequest(
+    _handle: ProviderSessionHandle,
+    _requestId: string,
+    _decision: ProviderApprovalDecision,
+  ): Promise<void> {
+    throw new Error("Claude Code -p mode uses --permission-mode auto");
+  }
+}
+
+export function mapClaudeEvent(
+  threadId: string,
+  raw: unknown,
+  mode: ClaudeMapMode = "primary",
+): ProviderRuntimeEvent | null {
+  if (!isRecord(raw) || typeof raw.type !== "string") {
+    return null;
+  }
+
+  if (raw.type === "result") {
+    if (mode === "exit") {
+      return createEvent(
+        "session.exited",
+        threadId,
+        {
+          reason: typeof raw.subtype === "string" ? `Claude Code result: ${raw.subtype}` : "Claude Code completed",
+          exitKind: raw.is_error === true ? "error" : "graceful",
+        },
+        { provider: "claude-code" },
+      );
+    }
+
+    const usage = normalizeClaudeUsage(raw);
+    return createEvent(
+      "turn.completed",
+      threadId,
+      {
+        state: raw.is_error === true ? "failed" : "completed",
+        ...(typeof raw.subtype === "string" ? { stopReason: raw.subtype } : {}),
+        ...(typeof raw.total_cost_usd === "number" ? { totalCostUsd: raw.total_cost_usd } : {}),
+        ...(usage ? { usage } : {}),
+      },
+      { provider: "claude-code" },
+    );
+  }
+
+  switch (raw.type) {
+    case "system":
+      if (raw.subtype !== "init") {
+        return null;
+      }
+
+      return createEvent(
+        "session.started",
+        threadId,
+        { ...(typeof raw.message === "string" ? { message: raw.message } : {}) },
+        { provider: "claude-code" },
+      );
+
+    case "assistant": {
+      const content = Array.isArray(raw.message?.content) ? raw.message.content : [];
+      const toolUse = findClaudeToolUse(content);
+      if (toolUse) {
+        return createEvent(
+          "item.started",
+          threadId,
+          {
+            itemType: mapClaudeToolItemType(toolUse.name),
+            status: "in_progress",
+            title: formatClaudeToolTitle(toolUse.name, toolUse.input),
+            detail: formatClaudeToolDetail(toolUse.name, toolUse.input),
+          },
+          { provider: "claude-code", itemId: toolUse.id },
+        );
+      }
+
+      const text = extractClaudeAssistantText(content);
+      if (!text) {
+        return null;
+      }
+
+      return createEvent(
+        "content.delta",
+        threadId,
+        { streamKind: "assistant_text", delta: text },
+        { provider: "claude-code" },
+      );
+    }
+
+    case "tool": {
+      const detail = extractClaudeText(raw.content);
+      return createEvent(
+        "item.completed",
+        threadId,
+        {
+          itemType: "unknown",
+          status: "completed",
+          ...(detail ? { detail } : {}),
+        },
+        { provider: "claude-code", itemId: typeof raw.tool_use_id === "string" ? raw.tool_use_id : undefined },
+      );
+    }
+
+    default:
+      return null;
+  }
+}
+
+async function consumeClaudeOutput(
+  threadId: string,
+  stdout: NonNullable<ClaudeProcess["stdout"]>,
+  meta: ClaudeHandleMeta,
+): Promise<boolean> {
+  let sawSessionExit = false;
+
+  try {
+    for await (const line of readLines(stdout)) {
+      let raw: unknown;
+
+      try {
+        raw = JSON.parse(line);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown JSON parse failure";
+        meta.events.push(
+          createEvent(
+            "runtime.warning",
+            threadId,
+            { message: `Ignoring malformed Claude Code event: ${message}` },
+            { provider: "claude-code" },
+          ),
+        );
+        continue;
+      }
+
+      const primary = mapClaudeEvent(threadId, raw);
+      if (primary) {
+        meta.events.push(primary);
+      }
+
+      const exit = mapClaudeEvent(threadId, raw, "exit");
+      if (exit) {
+        meta.events.push(exit);
+        meta.exitEmitted = true;
+        sawSessionExit = true;
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown stream failure";
+    meta.events.push(
+      createEvent(
+        "runtime.error",
+        threadId,
+        { message: `Claude Code stream failed: ${message}`, class: "transport_error" },
+        { provider: "claude-code" },
+      ),
+    );
+  }
+
+  return sawSessionExit;
+}
+
+async function finalizeClaudeProcess(
+  threadId: string,
+  process: ClaudeProcess,
+  outputTask: Promise<boolean>,
+  meta: ClaudeHandleMeta,
+): Promise<void> {
+  const [sawSessionExit, exitCode] = await Promise.all([outputTask, process.exited]);
+
+  if (!sawSessionExit && !meta.exitEmitted) {
+    emitSessionExited(
+      threadId,
+      meta,
+      `Claude Code exited with code ${exitCode}`,
+      exitCode === 0 ? "graceful" : "error",
+    );
+  }
+
+  closeEvents(meta);
+}
+
+async function* readLines(stream: NonNullable<ClaudeProcess["stdout"]>): AsyncGenerator<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      while (true) {
+        const newlineIndex = buffer.indexOf("\n");
+        if (newlineIndex === -1) {
+          break;
+        }
+
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line.length > 0) {
+          yield line;
+        }
+      }
+    }
+
+    buffer += decoder.decode();
+    const finalLine = buffer.trim();
+    if (finalLine.length > 0) {
+      yield finalLine;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+  const reader = stream.getReader();
+
+  try {
+    while (true) {
+      const { done } = await reader.read();
+      if (done) {
+        return;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function waitForExit(process: ClaudeProcess, timeoutMs: number): Promise<boolean> {
+  const timeout = new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    process.exited.finally(() => clearTimeout(timer));
+  });
+  const exited = process.exited.then(() => true);
+  return Promise.race([exited, timeout]);
+}
+
+function emitSessionExited(
+  threadId: string,
+  meta: ClaudeHandleMeta,
+  reason: string,
+  exitKind: "graceful" | "error",
+): void {
+  if (meta.exitEmitted) {
+    return;
+  }
+
+  meta.exitEmitted = true;
+  meta.events.push(
+    createEvent(
+      "session.exited",
+      threadId,
+      { reason, exitKind },
+      { provider: "claude-code" },
+    ),
+  );
+}
+
+function closeEvents(meta: ClaudeHandleMeta): void {
+  if (meta.closed) {
+    return;
+  }
+
+  meta.closed = true;
+  meta.events.close();
+}
+
+function normalizeClaudeUsage(raw: Record<string, unknown>): ClaudeUsage | undefined {
+  const modelUsage = firstModelUsage(raw.modelUsage);
+  const modelUsageTokens = normalizeClaudeUsageValue(modelUsage);
+  if (modelUsageTokens) {
+    return modelUsageTokens;
+  }
+
+  return normalizeClaudeUsageValue(raw.usage);
+}
+
+function firstModelUsage(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const first = Object.values(value)[0];
+  return isRecord(first) ? first : undefined;
+}
+
+function normalizeClaudeUsageValue(value: unknown): ClaudeUsage | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const inputTokens =
+    typeof value.inputTokens === "number"
+      ? value.inputTokens
+      : typeof value.input_tokens === "number"
+        ? value.input_tokens
+        : undefined;
+  const outputTokens =
+    typeof value.outputTokens === "number"
+      ? value.outputTokens
+      : typeof value.output_tokens === "number"
+        ? value.output_tokens
+        : undefined;
+
+  if (inputTokens === undefined || outputTokens === undefined) {
+    return undefined;
+  }
+
+  return { inputTokens, outputTokens };
+}
+
+function extractClaudeAssistantText(content: unknown[]): string | null {
+  const text = content
+    .filter((item) => isRecord(item) && item.type === "text" && typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
+
+  return text.length > 0 ? text : null;
+}
+
+function findClaudeToolUse(content: unknown[]): { id: string; name: string; input: unknown } | null {
+  for (const item of content) {
+    if (!isRecord(item) || item.type !== "tool_use") {
+      continue;
+    }
+
+    if (typeof item.id !== "string" || typeof item.name !== "string") {
+      return null;
+    }
+
+    return {
+      id: item.id,
+      name: item.name,
+      input: item.input,
+    };
+  }
+
+  return null;
+}
+
+function mapClaudeToolItemType(name: string): "command_execution" | "file_change" | "unknown" {
+  if (name === "Bash") {
+    return "command_execution";
+  }
+
+  if (name === "Read" || name === "Write" || name === "Edit" || name === "MultiEdit") {
+    return "file_change";
+  }
+
+  return "unknown";
+}
+
+function formatClaudeToolTitle(name: string, input: unknown): string {
+  if (name === "Bash" && isRecord(input) && typeof input.command === "string") {
+    return input.command;
+  }
+
+  if (isRecord(input)) {
+    if (typeof input.file_path === "string") return input.file_path;
+    if (typeof input.filePath === "string") return input.filePath;
+  }
+
+  return name;
+}
+
+function formatClaudeToolDetail(name: string, input: unknown): string {
+  if (name === "Bash" && isRecord(input) && typeof input.command === "string") {
+    return input.command;
+  }
+
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (isRecord(input)) {
+    if (typeof input.file_path === "string") return input.file_path;
+    if (typeof input.filePath === "string") return input.filePath;
+  }
+
+  if (input == null) {
+    return name;
+  }
+
+  return JSON.stringify(input) ?? name;
+}
+
+function extractClaudeText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => extractClaudeText(entry)).filter(Boolean).join("\n");
+  }
+
+  if (isRecord(value)) {
+    if (typeof value.text === "string") return value.text;
+    if (typeof value.content === "string") return value.content;
+    return JSON.stringify(value) ?? "";
+  }
+
+  return "";
+}
+
+function getClaudeHandleMeta(handle: ProviderSessionHandle): ClaudeHandleMeta {
+  const meta = handle.meta as Partial<ClaudeHandleMeta>;
+  if (!meta.process || !meta.events) {
+    throw new Error("Invalid Claude Code provider session handle");
+  }
+
+  return meta as ClaudeHandleMeta;
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null;
+}
