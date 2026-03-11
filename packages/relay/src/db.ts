@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { z } from "zod/v4";
 import { generateId } from "@orka/core";
+import { withSpanSync } from "./tracing";
 
 // --- Zod Row Schemas ---
 
@@ -204,41 +205,43 @@ function migrate(db: Database): void {
 // --- Account CRUD ---
 
 export function createAccount(email: string, name: string): Account {
-  const now = new Date().toISOString();
-  const account: Account = {
-    id: generateId("acct"),
-    email,
-    name,
-    status: "active",
-    tier: "free",
-    createdAt: now,
-    updatedAt: now,
-  };
+  return withSpanSync("orka.db.createAccount", { "orka.account.email": email }, () => {
+    const now = new Date().toISOString();
+    const account: Account = {
+      id: generateId("acct"),
+      email,
+      name,
+      status: "active",
+      tier: "free",
+      createdAt: now,
+      updatedAt: now,
+    };
 
-  getDb()
-    .prepare(
-      `INSERT INTO accounts (id, email, name, status, tier, created_at, updated_at)
-       VALUES ($id, $email, $name, $status, $tier, $createdAt, $updatedAt)`,
-    )
-    .run({
-      $id: account.id,
-      $email: account.email,
-      $name: account.name,
-      $status: account.status,
-      $tier: account.tier,
-      $createdAt: account.createdAt,
-      $updatedAt: account.updatedAt,
-    });
+    getDb()
+      .prepare(
+        `INSERT INTO accounts (id, email, name, status, tier, created_at, updated_at)
+         VALUES ($id, $email, $name, $status, $tier, $createdAt, $updatedAt)`,
+      )
+      .run({
+        $id: account.id,
+        $email: account.email,
+        $name: account.name,
+        $status: account.status,
+        $tier: account.tier,
+        $createdAt: account.createdAt,
+        $updatedAt: account.updatedAt,
+      });
 
-  // Insert default rate limits
-  getDb()
-    .prepare(
-      `INSERT INTO rate_limit_config (account_id, requests_per_minute, requests_per_hour, concurrent_connections, max_message_bytes, updated_at)
-       VALUES (?, 60, 1000, 10, 1048576, ?)`,
-    )
-    .run(account.id, now);
+    // Insert default rate limits
+    getDb()
+      .prepare(
+        `INSERT INTO rate_limit_config (account_id, requests_per_minute, requests_per_hour, concurrent_connections, max_message_bytes, updated_at)
+         VALUES (?, 60, 1000, 10, 1048576, ?)`,
+      )
+      .run(account.id, now);
 
-  return account;
+    return account;
+  });
 }
 
 export function getAccount(id: string): Account | null {
@@ -271,21 +274,23 @@ export function listAccounts(): Account[] {
 // --- API Key CRUD ---
 
 export function insertApiKey(record: ApiKeyRecord): void {
-  getDb()
-    .prepare(
-      `INSERT INTO api_keys (id, account_id, key_hash, key_prefix, label, permissions, status, created_at)
-       VALUES ($id, $accountId, $keyHash, $keyPrefix, $label, $permissions, $status, $createdAt)`,
-    )
-    .run({
-      $id: record.id,
-      $accountId: record.accountId,
-      $keyHash: record.keyHash,
-      $keyPrefix: record.keyPrefix,
-      $label: record.label,
-      $permissions: record.permissions,
-      $status: record.status,
-      $createdAt: record.createdAt,
-    });
+  withSpanSync("orka.db.insertApiKey", { "orka.account.id": record.accountId }, () => {
+    getDb()
+      .prepare(
+        `INSERT INTO api_keys (id, account_id, key_hash, key_prefix, label, permissions, status, created_at)
+         VALUES ($id, $accountId, $keyHash, $keyPrefix, $label, $permissions, $status, $createdAt)`,
+      )
+      .run({
+        $id: record.id,
+        $accountId: record.accountId,
+        $keyHash: record.keyHash,
+        $keyPrefix: record.keyPrefix,
+        $label: record.label,
+        $permissions: record.permissions,
+        $status: record.status,
+        $createdAt: record.createdAt,
+      });
+  });
 }
 
 export function getApiKeyByHash(keyHash: string): ApiKeyRecord | null {
@@ -301,10 +306,12 @@ export function listApiKeys(accountId: string): ApiKeyRecord[] {
 }
 
 export function revokeApiKey(keyId: string, accountId: string): boolean {
-  const result = getDb()
-    .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ? AND account_id = ?")
-    .run(keyId, accountId);
-  return result.changes > 0;
+  return withSpanSync("orka.db.revokeApiKey", { "orka.account.id": accountId, "orka.key.id": keyId }, () => {
+    const result = getDb()
+      .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ? AND account_id = ?")
+      .run(keyId, accountId);
+    return result.changes > 0;
+  });
 }
 
 export function updateApiKeyLastUsed(keyHash: string): void {
@@ -337,16 +344,18 @@ export function updateRateLimits(accountId: string, limits: Partial<Omit<RateLim
 
 export function insertUsageEvents(events: UsageEvent[]): void {
   if (events.length === 0) return;
-  const db = getDb();
-  const stmt = db.prepare(
-    `INSERT INTO usage_events (account_id, event_type, bytes_in, bytes_out, node_id, request_method, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  );
-  db.exec("BEGIN");
-  for (const e of events) {
-    stmt.run(e.accountId, e.eventType, e.bytesIn, e.bytesOut, e.nodeId ?? null, e.requestMethod ?? null, e.timestamp);
-  }
-  db.exec("COMMIT");
+  withSpanSync("orka.db.insertUsageEvents", { "orka.event.count": events.length }, () => {
+    const db = getDb();
+    const stmt = db.prepare(
+      `INSERT INTO usage_events (account_id, event_type, bytes_in, bytes_out, node_id, request_method, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    db.exec("BEGIN");
+    for (const e of events) {
+      stmt.run(e.accountId, e.eventType, e.bytesIn, e.bytesOut, e.nodeId ?? null, e.requestMethod ?? null, e.timestamp);
+    }
+    db.exec("COMMIT");
+  });
 }
 
 export interface UsageBucket {

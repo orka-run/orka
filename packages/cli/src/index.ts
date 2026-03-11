@@ -15,6 +15,7 @@ import {
   getOrkaHome,
   initTracing,
   shutdownTracing,
+  withSpan,
   resolveProject,
   projectNameForPath,
   addProject,
@@ -96,69 +97,19 @@ if (command !== "wait") {
   await svc.reap();
 }
 
-switch (command) {
-  case "spawn":
-    await cmdSpawn();
-    break;
-  case "ps":
-    await cmdPs();
-    break;
-  case "attach":
-    await cmdAttach();
-    break;
-  case "logs":
-    await cmdLogs();
-    break;
-  case "stop":
-    await cmdStop();
-    break;
-  case "diff":
-    await cmdDiff();
-    break;
-  case "retry":
-    await cmdRetry();
-    break;
-  case "show":
-    await cmdShow();
-    break;
-  case "workdir":
-    await cmdWorkdir();
-    break;
-  case "wait":
-    await cmdWait();
-    break;
-  case "result":
-    await cmdResult();
-    break;
-  case "send":
-    await cmdSend();
-    break;
-  case "keep":
-    await cmdKeep();
-    break;
-  case "unkeep":
-    await cmdUnkeep();
-    break;
-  case "merge":
-    await cmdMerge();
-    break;
-  case "project":
-    await cmdProject();
-    break;
-  case "prune":
-    await cmdPrune();
-    break;
-  case "serve":
-    await cmdServe();
-    break;
-  case "relay":
-    await cmdRelay();
-    break;
-  case "keygen":
-    await cmdKeygen();
-    break;
-  default:
-    printUsage();
+const commands: Record<string, () => Promise<void>> = {
+  spawn: cmdSpawn, ps: cmdPs, attach: cmdAttach, logs: cmdLogs,
+  stop: cmdStop, diff: cmdDiff, retry: cmdRetry, show: cmdShow,
+  workdir: cmdWorkdir, wait: cmdWait, result: cmdResult, send: cmdSend,
+  keep: cmdKeep, unkeep: cmdUnkeep, merge: cmdMerge, project: cmdProject,
+  prune: cmdPrune, serve: cmdServe, relay: cmdRelay, keygen: cmdKeygen,
+};
+
+const handler = command ? commands[command] : undefined;
+if (handler) {
+  await withSpan(`orka.cli.${command}`, { "orka.command": command }, handler);
+} else {
+  printUsage();
 }
 
 // Flush pending spans before exit

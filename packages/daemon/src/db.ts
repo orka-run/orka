@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { z } from "zod/v4";
 import type { Session, Task, SessionStatus } from "@orka/core";
 import { BackendKindSchema, SessionModeSchema, SessionStatusSchema } from "@orka/core";
+import { withSpanSync } from "./tracing";
 
 const TaskRowSchema = z.object({
   id: z.string(),
@@ -117,20 +118,22 @@ function migrate(db: Database): void {
 // --- Task CRUD ---
 
 export function insertTask(task: Task): void {
-  getDb()
-    .prepare(
-      `INSERT INTO tasks (id, title, prompt, backend, mode, model, created_at)
-       VALUES ($id, $title, $prompt, $backend, $mode, $model, $createdAt)`,
-    )
-    .run({
-      $id: task.id,
-      $title: task.title,
-      $prompt: task.prompt,
-      $backend: task.backend,
-      $mode: task.mode,
-      $model: task.model,
-      $createdAt: task.createdAt,
-    });
+  withSpanSync("orka.db.insertTask", { "orka.task.id": task.id }, () => {
+    getDb()
+      .prepare(
+        `INSERT INTO tasks (id, title, prompt, backend, mode, model, created_at)
+         VALUES ($id, $title, $prompt, $backend, $mode, $model, $createdAt)`,
+      )
+      .run({
+        $id: task.id,
+        $title: task.title,
+        $prompt: task.prompt,
+        $backend: task.backend,
+        $mode: task.mode,
+        $model: task.model,
+        $createdAt: task.createdAt,
+      });
+  });
 }
 
 export function getTask(id: string): Task | null {
@@ -141,29 +144,31 @@ export function getTask(id: string): Task | null {
 // --- Session CRUD ---
 
 export function insertSession(session: Session): void {
-  getDb()
-    .prepare(
-      `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge)
-       VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge)`,
-    )
-    .run({
-      $id: session.id,
-      $taskId: session.taskId,
-      $workspaceId: session.workspaceId,
-      $status: session.status,
-      $backend: session.backend,
-      $mode: session.mode,
-      $tmuxSessionName: session.tmuxSessionName,
-      $projectPath: session.projectPath,
-      $workingDir: session.workingDir,
-      $logFile: session.logFile,
-      $createdAt: session.createdAt,
-      $startedAt: session.startedAt,
-      $finishedAt: session.finishedAt,
-      $exitCode: session.exitCode,
-      $kept: session.kept ? 1 : 0,
-      $autoMerge: session.autoMerge ? 1 : 0,
-    });
+  withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
+    getDb()
+      .prepare(
+        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge)
+         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge)`,
+      )
+      .run({
+        $id: session.id,
+        $taskId: session.taskId,
+        $workspaceId: session.workspaceId,
+        $status: session.status,
+        $backend: session.backend,
+        $mode: session.mode,
+        $tmuxSessionName: session.tmuxSessionName,
+        $projectPath: session.projectPath,
+        $workingDir: session.workingDir,
+        $logFile: session.logFile,
+        $createdAt: session.createdAt,
+        $startedAt: session.startedAt,
+        $finishedAt: session.finishedAt,
+        $exitCode: session.exitCode,
+        $kept: session.kept ? 1 : 0,
+        $autoMerge: session.autoMerge ? 1 : 0,
+      });
+  });
 }
 
 export function updateSessionStatus(
@@ -171,25 +176,27 @@ export function updateSessionStatus(
   status: SessionStatus,
   extra?: { startedAt?: string; finishedAt?: string; exitCode?: number },
 ): void {
-  const sets = ["status = $status"];
-  const params: Record<string, any> = { $id: id, $status: status };
+  withSpanSync("orka.db.updateSessionStatus", { "orka.session.id": id, "orka.session.status": status }, () => {
+    const sets = ["status = $status"];
+    const params: Record<string, any> = { $id: id, $status: status };
 
-  if (extra?.startedAt) {
-    sets.push("started_at = $startedAt");
-    params.$startedAt = extra.startedAt;
-  }
-  if (extra?.finishedAt) {
-    sets.push("finished_at = $finishedAt");
-    params.$finishedAt = extra.finishedAt;
-  }
-  if (extra?.exitCode !== undefined) {
-    sets.push("exit_code = $exitCode");
-    params.$exitCode = extra.exitCode;
-  }
+    if (extra?.startedAt) {
+      sets.push("started_at = $startedAt");
+      params.$startedAt = extra.startedAt;
+    }
+    if (extra?.finishedAt) {
+      sets.push("finished_at = $finishedAt");
+      params.$finishedAt = extra.finishedAt;
+    }
+    if (extra?.exitCode !== undefined) {
+      sets.push("exit_code = $exitCode");
+      params.$exitCode = extra.exitCode;
+    }
 
-  getDb()
-    .prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = $id`)
-    .run(params);
+    getDb()
+      .prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = $id`)
+      .run(params);
+  });
 }
 
 export function setSessionKept(id: string, kept: boolean): void {
@@ -228,21 +235,23 @@ export function findSessionByTmux(tmuxName: string): Session | null {
 
 export function deleteSessions(ids: string[]): void {
   if (ids.length === 0) return;
-  const db = getDb();
-  const placeholders = ids.map(() => "?").join(", ");
-  // Collect task_ids before deleting sessions
-  const taskIds = db
-    .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
-    .all(...ids) as { task_id: string }[];
-  db.prepare(`DELETE FROM session_tags WHERE session_id IN (${placeholders})`).run(...ids);
-  db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
-  // Delete orphaned tasks
-  for (const { task_id } of taskIds) {
-    const ref = db.prepare("SELECT 1 FROM sessions WHERE task_id = ? LIMIT 1").get(task_id);
-    if (!ref) {
-      db.prepare("DELETE FROM tasks WHERE id = ?").run(task_id);
+  withSpanSync("orka.db.deleteSessions", { "orka.session.count": ids.length }, () => {
+    const db = getDb();
+    const placeholders = ids.map(() => "?").join(", ");
+    // Collect task_ids before deleting sessions
+    const taskIds = db
+      .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
+      .all(...ids) as { task_id: string }[];
+    db.prepare(`DELETE FROM session_tags WHERE session_id IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
+    // Delete orphaned tasks
+    for (const { task_id } of taskIds) {
+      const ref = db.prepare("SELECT 1 FROM sessions WHERE task_id = ? LIMIT 1").get(task_id);
+      if (!ref) {
+        db.prepare("DELETE FROM tasks WHERE id = ?").run(task_id);
+      }
     }
-  }
+  });
 }
 
 // --- Tags ---
