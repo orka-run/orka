@@ -1,0 +1,271 @@
+import { z } from "zod/v4";
+import {
+  type Account,
+  getAccount,
+  getAccountByEmail,
+  listAccounts,
+  updateAccountStatus,
+  updateAccountTier,
+  updateRateLimits,
+  listApiKeys,
+  revokeApiKey,
+  getAccountUsage,
+  getAccountCount,
+  getRateLimits,
+} from "./db";
+import { signup, generateApiKey, authenticate, extractApiKey, type AuthContext } from "./auth";
+import { insertApiKey } from "./db";
+import { getRelayConfig } from "./config";
+import type { RelayState } from "./state";
+
+// --- Input Schemas ---
+
+const SignupSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(200),
+});
+
+const CreateKeySchema = z.object({
+  label: z.string().min(1).max(100).optional(),
+  permissions: z.enum(["client", "node"]).optional(),
+});
+
+const UpdateAccountSchema = z.object({
+  status: z.enum(["active", "suspended"]).optional(),
+  tier: z.enum(["free", "pro", "enterprise"]).optional(),
+  rateLimits: z.object({
+    requestsPerMinute: z.number().optional(),
+    requestsPerHour: z.number().optional(),
+    concurrentConnections: z.number().optional(),
+    maxMessageBytes: z.number().optional(),
+  }).optional(),
+});
+
+const UsageQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+  granularity: z.enum(["hour", "day"]).optional(),
+});
+
+// --- IP Rate Limiting for Signup ---
+
+const signupAttempts = new Map<string, { count: number; windowStart: number }>();
+const SIGNUP_WINDOW = 3_600_000; // 1 hour
+const SIGNUP_MAX_PER_IP = 5;
+
+function checkSignupRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = signupAttempts.get(ip);
+  if (!entry || now - entry.windowStart > SIGNUP_WINDOW) {
+    signupAttempts.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+  if (entry.count >= SIGNUP_MAX_PER_IP) return false;
+  entry.count++;
+  return true;
+}
+
+// Periodic cleanup
+const _cleanupTimer = setInterval(() => {
+  const cutoff = Date.now() - SIGNUP_WINDOW;
+  for (const [ip, entry] of signupAttempts) {
+    if (entry.windowStart < cutoff) signupAttempts.delete(ip);
+  }
+}, 60_000);
+if (typeof _cleanupTimer === "object" && "unref" in _cleanupTimer) {
+  (_cleanupTimer as any).unref();
+}
+
+// --- Helper ---
+
+function json(data: any, status: number = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function error(message: string, status: number): Response {
+  return json({ error: { code: status, message } }, status);
+}
+
+function getClientIp(req: Request): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? req.headers.get("x-real-ip")
+    ?? "unknown";
+}
+
+// --- Route Handler ---
+
+export async function handleApiRequest(
+  req: Request,
+  url: URL,
+  state?: RelayState,
+): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+
+  // POST /v1/signup — public, rate limited by IP
+  if (path === "/v1/signup" && method === "POST") {
+    const config = getRelayConfig();
+    if (!config.auth.signupEnabled) {
+      return error("Signup is disabled", 403);
+    }
+
+    const ip = getClientIp(req);
+    if (!checkSignupRateLimit(ip)) {
+      return error("Too many signup attempts. Try again later.", 429);
+    }
+
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return error("Invalid JSON body", 400);
+    }
+
+    const parsed = SignupSchema.safeParse(body);
+    if (!parsed.success) {
+      return error(`Validation error: ${parsed.error.issues[0]?.message ?? "invalid input"}`, 400);
+    }
+
+    // Check email uniqueness
+    const existing = getAccountByEmail(parsed.data.email);
+    if (existing) {
+      return error("Email already registered", 409);
+    }
+
+    const { account, apiKey } = signup(parsed.data.email, parsed.data.name);
+    return json({ accountId: account.id, apiKey }, 201);
+  }
+
+  // --- All other endpoints require authentication ---
+  const key = extractApiKey(req);
+  if (!key) return error("Missing API key", 401);
+  const auth = authenticate(key);
+  if (!auth.success || !auth.ctx) return error(auth.error ?? "Unauthorized", auth.code ?? 401);
+
+  const ctx = auth.ctx;
+
+  // --- Admin endpoints ---
+  if (path.startsWith("/v1/admin/")) {
+    const config = getRelayConfig();
+    const adminToken = config.auth.adminToken;
+
+    // Admin requires either admin permission or admin token
+    if (ctx.permissions !== "admin" && (!adminToken || key !== adminToken)) {
+      return error("Admin access required", 403);
+    }
+
+    if (path === "/v1/admin/accounts" && method === "GET") {
+      const accounts = listAccounts();
+      return json({ accounts });
+    }
+
+    const accountMatch = path.match(/^\/v1\/admin\/accounts\/([^/]+)$/);
+    if (accountMatch && method === "PATCH") {
+      const accountId = accountMatch[1];
+      let body: any;
+      try { body = await req.json(); } catch { return error("Invalid JSON body", 400); }
+
+      const parsed = UpdateAccountSchema.safeParse(body);
+      if (!parsed.success) return error("Validation error", 400);
+
+      if (parsed.data.status) updateAccountStatus(accountId, parsed.data.status);
+      if (parsed.data.tier) updateAccountTier(accountId, parsed.data.tier);
+      if (parsed.data.rateLimits) updateRateLimits(accountId, parsed.data.rateLimits);
+
+      const updated = getAccount(accountId);
+      return json({ account: updated });
+    }
+
+    if (path === "/v1/admin/stats" && method === "GET") {
+      const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
+      return json({
+        accountCount: getAccountCount(),
+        ...stats,
+      });
+    }
+
+    return error("Not found", 404);
+  }
+
+  // --- Account endpoints ---
+
+  // GET /v1/account
+  if (path === "/v1/account" && method === "GET") {
+    return json({
+      id: ctx.account.id,
+      email: ctx.account.email,
+      name: ctx.account.name,
+      status: ctx.account.status,
+      tier: ctx.account.tier,
+      createdAt: ctx.account.createdAt,
+    });
+  }
+
+  // POST /v1/keys
+  if (path === "/v1/keys" && method === "POST") {
+    const config = getRelayConfig();
+    const existingKeys = listApiKeys(ctx.accountId);
+    if (existingKeys.length >= config.abuse.maxKeysPerAccount) {
+      return error(`Maximum ${config.abuse.maxKeysPerAccount} API keys per account`, 400);
+    }
+
+    let body: any = {};
+    try { body = await req.json(); } catch { /* empty body is OK */ }
+
+    const parsed = CreateKeySchema.safeParse(body);
+    if (!parsed.success) return error("Validation error", 400);
+
+    const { key: newKey, record } = generateApiKey(ctx.accountId, {
+      label: parsed.data?.label,
+      permissions: parsed.data?.permissions,
+    });
+    insertApiKey(record);
+
+    return json({ keyId: record.id, apiKey: newKey, prefix: record.keyPrefix }, 201);
+  }
+
+  // GET /v1/keys
+  if (path === "/v1/keys" && method === "GET") {
+    const keys = listApiKeys(ctx.accountId);
+    return json({
+      keys: keys.map((k) => ({
+        id: k.id,
+        prefix: k.keyPrefix,
+        label: k.label,
+        permissions: k.permissions,
+        status: k.status,
+        lastUsedAt: k.lastUsedAt,
+        createdAt: k.createdAt,
+      })),
+    });
+  }
+
+  // DELETE /v1/keys/:id
+  const keyMatch = path.match(/^\/v1\/keys\/([^/]+)$/);
+  if (keyMatch && method === "DELETE") {
+    const keyId = keyMatch[1];
+    const revoked = revokeApiKey(keyId, ctx.accountId);
+    if (!revoked) return error("Key not found", 404);
+    return json({ revoked: true });
+  }
+
+  // GET /v1/usage
+  if (path === "/v1/usage" && method === "GET") {
+    const params = Object.fromEntries(url.searchParams);
+    const parsed = UsageQuerySchema.safeParse(params);
+    if (!parsed.success) return error("Invalid query parameters", 400);
+
+    const now = new Date();
+    const from = parsed.data?.from ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
+    const to = parsed.data?.to ?? now.toISOString();
+    const granularity = parsed.data?.granularity ?? "hour";
+
+    const buckets = getAccountUsage(ctx.accountId, from, to, granularity);
+    return json({ buckets });
+  }
+
+  return null; // Not an API route
+}
