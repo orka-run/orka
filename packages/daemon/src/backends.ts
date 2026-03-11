@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import type { BackendKind, SessionMode, ReasoningEffort } from "@orka/core";
+import { withSpanSync } from "./tracing";
 
 export interface BackendCommand {
   /** The shell command to run inside tmux. */
@@ -13,20 +14,22 @@ const BACKEND_CLI: Record<string, string> = {
 
 /** Check that the CLI binary for a backend is installed. Throws with install hint if not. */
 export function assertBackendInstalled(backend: BackendKind): void {
-  const bin = BACKEND_CLI[backend];
-  if (!bin) return; // shell backend — no binary to check
+  withSpanSync("orka.backend.assert_installed", { "orka.backend": backend }, () => {
+    const bin = BACKEND_CLI[backend];
+    if (!bin) return; // shell backend — no binary to check
 
-  try {
-    execSync(`command -v ${bin}`, { stdio: "ignore" });
-  } catch {
-    const hints: Record<string, string> = {
-      "claude-code": "npm install -g @anthropic-ai/claude-code",
-      codex: "bun install -g @openai/codex",
-    };
-    throw new Error(
-      `Backend "${backend}" requires "${bin}" CLI but it's not installed.\n  Install: ${hints[backend] ?? `install ${bin}`}`,
-    );
-  }
+    try {
+      execSync(`command -v ${bin}`, { stdio: "ignore" });
+    } catch {
+      const hints: Record<string, string> = {
+        "claude-code": "npm install -g @anthropic-ai/claude-code",
+        codex: "bun install -g @openai/codex",
+      };
+      throw new Error(
+        `Backend "${backend}" requires "${bin}" CLI but it's not installed.\n  Install: ${hints[backend] ?? `install ${bin}`}`,
+      );
+    }
+  });
 }
 
 /** Build the command string for a given backend + prompt. */
@@ -36,27 +39,29 @@ export function buildBackendCommand(
   mode: SessionMode,
   opts?: { logFile?: string; sessionId?: string; model?: string; reasoningEffort?: ReasoningEffort },
 ): BackendCommand {
-  let cmd: string;
+  return withSpanSync("orka.backend.build_command", { "orka.backend": backend }, () => {
+    let cmd: string;
 
-  switch (backend) {
-    case "claude-code":
-      cmd = buildClaudeCode(prompt, mode, opts?.sessionId, opts?.model);
-      break;
-    case "codex":
-      cmd = buildCodex(prompt, mode, opts?.model, opts?.reasoningEffort);
-      break;
-    case "shell":
-      cmd = prompt;
-      break;
-  }
+    switch (backend) {
+      case "claude-code":
+        cmd = buildClaudeCode(prompt, mode, opts?.sessionId, opts?.model);
+        break;
+      case "codex":
+        cmd = buildCodex(prompt, mode, opts?.model, opts?.reasoningEffort);
+        break;
+      case "shell":
+        cmd = prompt;
+        break;
+    }
 
-  // Wrap: tee output to log file + keep tmux alive after exit
-  if (opts?.logFile) {
-    const lf = shellEscape(opts.logFile);
-    cmd = `{ ${cmd} ; } 2>&1 | tee ${lf} ; echo "" >> ${lf} ; echo "[orka] exit_code=$?" >> ${lf}`;
-  }
+    // Wrap: tee output to log file + keep tmux alive after exit
+    if (opts?.logFile) {
+      const lf = shellEscape(opts.logFile);
+      cmd = `{ ${cmd} ; } 2>&1 | tee ${lf} ; echo "" >> ${lf} ; echo "[orka] exit_code=$?" >> ${lf}`;
+    }
 
-  return { command: cmd };
+    return { command: cmd };
+  });
 }
 
 function buildClaudeCode(prompt: string, mode: SessionMode, sessionId?: string, model?: string): string {

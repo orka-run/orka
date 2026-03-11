@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { z } from "zod/v4";
 import { getOrkaHome } from "./db";
+import { withSpanSync } from "./tracing";
 
 const DefaultsSchema = z.object({
   backend: z.string().default("claude-code"),
@@ -24,29 +25,31 @@ export type OrkaConfig = z.infer<typeof ConfigSchema>;
 let _config: OrkaConfig | null = null;
 
 export function getConfig(): OrkaConfig {
-  if (_config) return _config;
+  return withSpanSync("orka.config.load", {}, () => {
+    if (_config) return _config;
 
-  const configPath = join(getOrkaHome(), "config.toml");
-  if (!existsSync(configPath)) {
-    _config = ConfigSchema.parse({});
+    const configPath = join(getOrkaHome(), "config.toml");
+    if (!existsSync(configPath)) {
+      _config = ConfigSchema.parse({});
+      return _config;
+    }
+
+    try {
+      const raw = readFileSync(configPath, "utf-8");
+      const toml = parseSimpleToml(raw);
+      _config = ConfigSchema.parse({
+        defaults: toml.defaults,
+        limits:
+          toml.limits?.max_concurrent !== undefined
+            ? { maxConcurrent: parseInt(toml.limits.max_concurrent, 10) || 0 }
+            : undefined,
+      });
+    } catch {
+      _config = ConfigSchema.parse({});
+    }
+
     return _config;
-  }
-
-  try {
-    const raw = readFileSync(configPath, "utf-8");
-    const toml = parseSimpleToml(raw);
-    _config = ConfigSchema.parse({
-      defaults: toml.defaults,
-      limits:
-        toml.limits?.max_concurrent !== undefined
-          ? { maxConcurrent: parseInt(toml.limits.max_concurrent, 10) || 0 }
-          : undefined,
-    });
-  } catch {
-    _config = ConfigSchema.parse({});
-  }
-
-  return _config;
+  });
 }
 
 /** Minimal TOML parser — handles [section] and key = "value" */

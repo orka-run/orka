@@ -1,6 +1,7 @@
 import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
 import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR } from "@orka/core";
 import { decryptRequest, encryptResponse } from "@orka/core";
+import { withSpan } from "./tracing";
 
 /**
  * Dispatch a JSON-RPC request to the OrkaService implementation.
@@ -12,51 +13,55 @@ export async function handleRpcRequest(
   raw: string,
   encKey?: Buffer | null,
 ): Promise<string> {
-  let req: any;
-  try {
-    req = JSON.parse(raw);
-  } catch {
-    return JSON.stringify({
-      jsonrpc: "2.0",
-      id: null,
-      error: { code: RPC_PARSE_ERROR, message: "Parse error" },
-    });
-  }
-
-  const id = req.id;
-  const isEncrypted = !!req._enc;
-
-  // Decrypt request if encrypted
-  if (isEncrypted && encKey) {
+  return withSpan("orka.rpc.handle", { "orka.method": "unknown" }, async (span) => {
+    let req: any;
     try {
-      req = decryptRequest(encKey, req);
+      req = JSON.parse(raw);
+      span.setAttribute("orka.method", req?.method ?? "unknown");
     } catch {
       return JSON.stringify({
         jsonrpc: "2.0",
-        id,
-        error: { code: RPC_PARSE_ERROR, message: "E2E decryption failed" },
+        id: null,
+        error: { code: RPC_PARSE_ERROR, message: "Parse error" },
       });
     }
-  }
 
-  try {
-    const result = await dispatch(svc, req.method, req.params ?? {});
-    let response: any = { jsonrpc: "2.0", id, result };
+    const id = req.id;
+    const isEncrypted = !!req._enc;
 
-    // Encrypt response if request was encrypted
+    // Decrypt request if encrypted
     if (isEncrypted && encKey) {
-      response = encryptResponse(encKey, response);
+      try {
+        req = decryptRequest(encKey, req);
+        span.setAttribute("orka.method", req?.method ?? "unknown");
+      } catch {
+        return JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          error: { code: RPC_PARSE_ERROR, message: "E2E decryption failed" },
+        });
+      }
     }
 
-    return JSON.stringify(response);
-  } catch (e: any) {
-    const code = e.rpcCode ?? RPC_INTERNAL_ERROR;
-    return JSON.stringify({
-      jsonrpc: "2.0",
-      id,
-      error: { code, message: e.message },
-    } as RpcResponse);
-  }
+    try {
+      const result = await dispatch(svc, req.method, req.params ?? {});
+      let response: any = { jsonrpc: "2.0", id, result };
+
+      // Encrypt response if request was encrypted
+      if (isEncrypted && encKey) {
+        response = encryptResponse(encKey, response);
+      }
+
+      return JSON.stringify(response);
+    } catch (e: any) {
+      const code = e.rpcCode ?? RPC_INTERNAL_ERROR;
+      return JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        error: { code, message: e.message },
+      } as RpcResponse);
+    }
+  });
 }
 
 async function dispatch(svc: OrkaService, method: string, params: any): Promise<any> {
