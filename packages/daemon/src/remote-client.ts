@@ -12,6 +12,8 @@ import type {
   RpcRequest,
   RpcResponse,
   KeyPair,
+  ApprovalRequest,
+  ApprovalDecision,
 } from "@orka/core";
 import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy } from "@orka/core";
 import { withSpan } from "./tracing";
@@ -241,6 +243,14 @@ class RemoteClient implements OrkaService {
 
   async pruneSessions(opts: PruneOptions): Promise<PruneResult> {
     return this.call("pruneSessions", opts);
+  }
+
+  async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {
+    return this.call("getPendingApprovals", { sessionId });
+  }
+
+  async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
+    return this.call("resolveApproval", { requestId, decision });
   }
 }
 

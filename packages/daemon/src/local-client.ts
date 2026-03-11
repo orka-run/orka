@@ -12,6 +12,8 @@ import type {
   SpawnRequest,
   Session,
   Task,
+  ApprovalRequest,
+  ApprovalDecision,
 } from "@orka/core";
 import {
   getSession,
@@ -31,8 +33,11 @@ import {
   deleteBranch,
   getWorktreeDir,
 } from "./worktree";
+import { ApprovalManager } from "./approval-manager";
 
 class LocalClient implements OrkaService {
+  readonly approvals = new ApprovalManager();
+
   async spawn(req: SpawnRequest): Promise<Session> {
     return spawnSession(req);
   }
@@ -191,6 +196,20 @@ class LocalClient implements OrkaService {
     const orphansCleaned = await cleanupOrphanedWorktrees();
 
     return { pruned: sessions.length, orphansCleaned };
+  }
+
+  async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {
+    if (sessionId) {
+      return this.approvals.getPendingForSession(sessionId);
+    }
+    return this.approvals.getPending();
+  }
+
+  async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
+    const resolved = this.approvals.resolve(requestId, decision);
+    if (!resolved) {
+      throw new Error(`Approval request not found or already resolved: ${requestId}`);
+    }
   }
 }
 

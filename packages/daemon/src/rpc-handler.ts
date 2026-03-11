@@ -103,6 +103,11 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
       return null;
     case "pruneSessions":
       return svc.pruneSessions(params);
+    case "getPendingApprovals":
+      return svc.getPendingApprovals(params.sessionId);
+    case "resolveApproval":
+      await svc.resolveApproval(params.requestId, params.decision);
+      return null;
     default: {
       const err = new Error(`Method not found: ${method}`);
       (err as any).rpcCode = RPC_METHOD_NOT_FOUND;

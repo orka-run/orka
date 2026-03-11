@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./approval";
 export * from "./provider-adapter";
 export * from "./provider-events";
 export * from "./service";
