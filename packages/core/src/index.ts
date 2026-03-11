@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./provider-events";
 export * from "./service";
 export * from "./rpc";
 export * from "./crypto";
