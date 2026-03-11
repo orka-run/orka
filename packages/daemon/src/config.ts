@@ -61,6 +61,10 @@ export function getConfig(): OrkaConfig {
   });
 }
 
+export function resetConfigCache(): void {
+  _config = null;
+}
+
 /** Minimal TOML parser — handles [section] and key = "value"/bare */
 function parseSimpleToml(raw: string): Record<string, Record<string, string>> {
   const result: Record<string, Record<string, string>> = {};

@@ -94,21 +94,25 @@ class LocalClient implements OrkaService {
 
   async getResult(sessionId: string): Promise<SessionResult | null> {
     const session = getSession(sessionId);
-    if (!session?.logFile) return null;
-    const result = parseSessionResult(session.logFile, session);
-    if (result) {
+    if (!session) return null;
+
+    const result =
+      isProviderRuntimeEnabled() ? buildProviderSessionResult(sessionId, session) : null;
+    const parsedResult =
+      result ?? (session.logFile ? parseSessionResult(session.logFile, session) : null);
+    if (parsedResult) {
       insertUsageRecord({
         sessionId: session.id,
         backend: session.backend,
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
-        cacheReadTokens: result.cacheReadTokens,
-        costUsd: result.costUsd,
-        model: result.model,
+        inputTokens: parsedResult.inputTokens,
+        outputTokens: parsedResult.outputTokens,
+        cacheReadTokens: parsedResult.cacheReadTokens,
+        costUsd: parsedResult.costUsd,
+        model: parsedResult.model,
         recordedAt: session.finishedAt ?? new Date().toISOString(),
       });
     }
-    return result;
+    return parsedResult;
   }
 
   async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
@@ -170,6 +174,13 @@ class LocalClient implements OrkaService {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
+    if (isProviderRuntimeEnabled()) {
+      const output = getProviderOutput(getOrchestrationEvents(sessionId));
+      if (output) {
+        return output;
+      }
+    }
+
     const runner = getRunner();
     if (await runner.has(session.tmuxSessionName)) {
       return runner.capture(session.tmuxSessionName);
@@ -192,8 +203,9 @@ class LocalClient implements OrkaService {
   async isAlive(sessionId: string): Promise<boolean> {
     const session = getSession(sessionId);
     if (!session) return false;
-    if (providerService.getHandle(sessionId)) {
-      return true;
+    if (isProviderRuntimeEnabled()) {
+      const handle = providerService.getHandle(sessionId);
+      if (handle) return true;
     }
     return getRunner().has(session.tmuxSessionName);
   }
@@ -201,9 +213,12 @@ class LocalClient implements OrkaService {
   async sendInput(sessionId: string, text: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
-    if (providerService.getHandle(sessionId)) {
-      await providerService.sendTurn(sessionId, { input: text });
-      return;
+    if (isProviderRuntimeEnabled()) {
+      const handle = providerService.getHandle(sessionId);
+      if (handle) {
+        await providerService.sendTurn(sessionId, { input: text });
+        return;
+      }
     }
     const runner = getRunner();
     if (!(await runner.has(session.tmuxSessionName))) {
@@ -365,4 +380,76 @@ class LocalClient implements OrkaService {
 
 export function createLocalClient(): OrkaService {
   return new LocalClient();
+}
+
+function getProviderOutput(events: OrchestrationEvent[]): string {
+  return events
+    .filter((event): event is Extract<OrchestrationEvent, { type: "content.delta" }> => event.type === "content.delta")
+    .map((event) => event.delta)
+    .join("");
+}
+
+function buildProviderSessionResult(
+  sessionId: string,
+  session: { taskId: string; startedAt: string | null; finishedAt: string | null; status: string },
+): SessionResult | null {
+  const events = getOrchestrationEvents(sessionId);
+  const turnCompleted = events.filter(
+    (event): event is Extract<OrchestrationEvent, { type: "turn.completed" }> => event.type === "turn.completed",
+  );
+  const output = getProviderOutputForLastTurn(events, turnCompleted.at(-1)?.turnId);
+
+  if (turnCompleted.length === 0 && !output) {
+    return null;
+  }
+
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd: number | null = null;
+
+  for (const event of turnCompleted) {
+    inputTokens += event.tokens?.input ?? 0;
+    outputTokens += event.tokens?.output ?? 0;
+    if (event.cost !== undefined) {
+      costUsd = (costUsd ?? 0) + event.cost;
+    }
+  }
+
+  const hasFailedTurn = turnCompleted.some((event) => event.state === "failed");
+  const hasFailedItem = events.some(
+    (event) =>
+      event.type === "item.completed" &&
+      event.status === "failed" &&
+      (turnCompleted.length === 0 || event.turnId === turnCompleted.at(-1)?.turnId),
+  );
+  const hasRuntimeFailure = events.some(
+    (event) => event.type === "session.failed" || (event.type === "runtime.error" && event.terminal === true),
+  );
+  const durationMs =
+    session.startedAt && session.finishedAt
+      ? new Date(session.finishedAt).getTime() - new Date(session.startedAt).getTime()
+      : 0;
+
+  return {
+    result: output,
+    isError: session.status === "failed" || hasFailedTurn || hasFailedItem || hasRuntimeFailure,
+    durationMs,
+    costUsd,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens: 0,
+    cacheCreateTokens: 0,
+    model: getTask(session.taskId)?.model ?? null,
+    numTurns: turnCompleted.length,
+  };
+}
+
+function getProviderOutputForLastTurn(events: OrchestrationEvent[], turnId?: string): string {
+  return events
+    .filter(
+      (event): event is Extract<OrchestrationEvent, { type: "content.delta" }> =>
+        event.type === "content.delta" && (!turnId || event.turnId === turnId),
+    )
+    .map((event) => event.delta)
+    .join("");
 }
