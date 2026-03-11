@@ -9,7 +9,6 @@ import {
   createLocalClient,
   createRemoteClient,
   startServer,
-  defaultRunner,
   getConfig,
   getOrkaHome,
   initTracing,
@@ -100,28 +99,86 @@ if (serverPubKeyIdx !== -1) {
   process.argv.splice(serverPubKeyIdx, 2);
 }
 
-let svc: OrkaService;
-if (remoteUrl) {
+const DEFAULT_DAEMON_PORT = 7394;
+const DEFAULT_DAEMON_HOST = "127.0.0.1";
+const DEFAULT_DAEMON_URL = `ws://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}`;
+const DEFAULT_DAEMON_HEALTH = `http://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}/health`;
+
+async function isDaemonRunning(): Promise<boolean> {
+  try {
+    const resp = await fetch(DEFAULT_DAEMON_HEALTH, { signal: AbortSignal.timeout(500) });
+    const body = await resp.json() as { status?: string };
+    return body.status === "ok";
+  } catch {
+    return false;
+  }
+}
+
+async function startDaemonBackground(): Promise<void> {
+  const cliPath = new URL(import.meta.url).pathname;
+  const logsDir = join(getOrkaHome(), "logs");
+  mkdirSync(logsDir, { recursive: true });
+  const logPath = join(logsDir, "daemon.log");
+  const pidPath = join(getOrkaHome(), "daemon.pid");
+
+  // Use setsid to create a new session so daemon survives parent exit
+  const proc = Bun.spawn(
+    ["setsid", "bun", "run", cliPath, "serve"],
+    {
+      stdin: "ignore",
+      stdout: Bun.file(logPath),
+      stderr: Bun.file(logPath),
+      env: { ...process.env },
+    },
+  );
+  // Write PID for later management
+  writeFileSync(pidPath, String(proc.pid));
+  proc.unref();
+
+  // Wait for daemon to become healthy (up to 5s)
+  for (let i = 0; i < 50; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (await isDaemonRunning()) return;
+  }
+  throw new Error("Failed to start daemon — timed out waiting for health check. Check " + logPath);
+}
+
+async function ensureDaemon(): Promise<void> {
+  if (await isDaemonRunning()) return;
+  await startDaemonBackground();
+}
+
+function buildRemoteClient(url: string): OrkaService {
   if (useEncrypt) {
     const orkaHome = getOrkaHome();
     const keyPair = ensureKeyPair(orkaHome, "client");
-
-    // If server key not provided, try loading from saved keys
-    if (!serverPublicKey) {
-      serverPublicKey = loadPublicKey(orkaHome, "server") ?? undefined;
+    let pubKey = serverPublicKey;
+    if (!pubKey) {
+      pubKey = loadPublicKey(orkaHome, "server") ?? undefined;
     }
-    if (!serverPublicKey) {
+    if (!pubKey) {
       console.error("error: E2E encryption requires server public key (--server-key or ORKA_SERVER_KEY)");
       console.error("  get it from: curl <daemon-url>/health | jq -r .publicKey");
       console.error("  or save it:  orka keygen save-server <pubkey>");
       process.exit(1);
     }
-    svc = createRemoteClient({ url: remoteUrl, keyPair, serverPublicKey });
-  } else {
-    svc = createRemoteClient(remoteUrl);
+    return createRemoteClient({ url, keyPair, serverPublicKey: pubKey });
   }
-} else {
-  svc = createLocalClient();
+  return createRemoteClient(url);
+}
+
+// svc is initialized lazily — all commands go through the daemon via RPC.
+// Only `orka serve` uses LocalClient directly (it IS the daemon).
+let _svc: OrkaService | null = null;
+async function getSvc(): Promise<OrkaService> {
+  if (_svc) return _svc;
+  if (remoteUrl) {
+    _svc = buildRemoteClient(remoteUrl);
+  } else {
+    await ensureDaemon();
+    _svc = buildRemoteClient(DEFAULT_DAEMON_URL);
+  }
+  return _svc;
 }
 
 const TOP_LEVEL_COMMANDS = new Set([
@@ -153,10 +210,18 @@ const RELAY_SUBCOMMANDS = new Set(["serve", "signup", "keys", "account", "usage"
 const RELAY_KEYS_SUBCOMMANDS = new Set(["create", "revoke", "list"]);
 const KEYGEN_SUBCOMMANDS = new Set(["client", "node", "save-server", "show", "help"]);
 
+let svc: OrkaService;
+
+// Commands that don't need the daemon (local-only operations)
+const LOCAL_ONLY_COMMANDS = new Set(["serve", "project", "keygen", "relay"]);
+
 async function runCliCommand(name: string, fn: () => Promise<void>): Promise<void> {
   await withSpan(`orka.cli.${name}`, { "orka.command": name }, async () => {
-    if (name !== "wait") {
-      await svc.reap();
+    if (!LOCAL_ONLY_COMMANDS.has(name)) {
+      svc = await getSvc();
+      if (name !== "wait") {
+        await svc.reap();
+      }
     }
     await fn();
   });
@@ -277,16 +342,9 @@ const spawnCmd = command({
     console.log(`  backend:  ${session.backend}`);
     console.log(`  mode:     ${session.mode}`);
     console.log(`  workdir:  ${session.workingDir}`);
-    console.log(`  tmux:     ${session.tmuxSessionName}`);
     console.log(`  log:      ${session.logFile}`);
     if (args.tag.length > 0) {
       console.log(`  tags:     ${args.tag.join(", ")}`);
-    }
-
-    if (session.mode === "interactive") {
-      console.log("");
-      console.log("attaching... (detach: Ctrl-b d)");
-      await defaultRunner.attach(session.tmuxSessionName);
     }
   }),
 });
@@ -400,7 +458,7 @@ const psCmd = command({
 
 const attachCmd = command({
   name: "attach",
-  description: "Attach to a running tmux session (detach: Ctrl-b d)",
+  description: "Stream live session output (alias for logs -f)",
   args: {
     sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
@@ -416,21 +474,37 @@ const attachCmd = command({
     }
 
     if (!(await svc.isAlive(session.id))) {
-      fail(`tmux session not running: ${session.tmuxSessionName}`);
+      fail(`session not running: ${session.id}`);
     }
 
-    if (remoteUrl) {
-      console.log(`session ${session.id} is running remotely`);
-      console.log("");
-      console.log("to attach via SSH:");
-      console.log(`  ssh <host> -t tmux attach -t ${session.tmuxSessionName}`);
-      console.log("");
-      console.log("or use 'orka logs -f' to stream output remotely:");
-      console.log(`  orka --remote ${remoteUrl} logs -f ${session.id}`);
-      return;
+    // Stream live output
+    let offset = 0;
+    const formatter = createLogChunkFormatter();
+    while (true) {
+      try {
+        const output = await svc.captureOutput(session.id);
+        if (output.length < offset) {
+          offset = 0;
+          formatter.reset();
+        }
+        if (output.length > offset) {
+          formatter.push(output.slice(offset));
+          offset = output.length;
+        }
+      } catch {
+        break;
+      }
+      if (!(await svc.isAlive(session.id))) break;
+      await Bun.sleep(500);
     }
-
-    await defaultRunner.attach(session.tmuxSessionName);
+    // Final read after session ended
+    try {
+      const output = await svc.captureOutput(session.id);
+      if (output.length > offset) {
+        formatter.push(output.slice(offset));
+      }
+    } catch { /* ignore */ }
+    formatter.flush();
   }),
 });
 
@@ -518,7 +592,7 @@ const logsCmd = command({
 
 const stopCmd = command({
   name: "stop",
-  description: "Stop a running session (kills the tmux session)",
+  description: "Stop a running session",
   args: {
     sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
@@ -613,14 +687,7 @@ const retryCmd = command({
     console.log(`  backend:  ${newSession.backend}`);
     console.log(`  mode:     ${newSession.mode}`);
     console.log(`  workdir:  ${newSession.workingDir}`);
-    console.log(`  tmux:     ${newSession.tmuxSessionName}`);
     console.log(`  log:      ${newSession.logFile}`);
-
-    if (newSession.mode === "interactive") {
-      console.log("");
-      console.log("attaching... (detach: Ctrl-b d)");
-      await defaultRunner.attach(newSession.tmuxSessionName);
-    }
   }),
 });
 
@@ -651,7 +718,6 @@ const showCmd = command({
     if (task?.model) console.log(`  model:     ${task.model}`);
     console.log(`  project:   ${session.projectPath || "(unknown)"}`);
     console.log(`  workdir:   ${session.workingDir}`);
-    console.log(`  tmux:      ${session.tmuxSessionName}`);
     console.log(`  log:       ${session.logFile}`);
     console.log(`  created:   ${session.createdAt}`);
     console.log(`  started:   ${session.startedAt ?? "(not started)"}`);
@@ -923,7 +989,7 @@ const usageCmd = command({
 
 const sendCmd = command({
   name: "send",
-  description: "Send text input to a running interactive session via tmux",
+  description: "Send text input to a running session",
   args: {
     sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     text: restPositionals({ type: str, displayName: "text" }),
@@ -1089,7 +1155,9 @@ const serveCmd = command({
     nodeId: option({ type: optional(str), long: "node-id", description: "Node ID for relay registration" }),
     relayToken: option({ type: optional(str), long: "relay-token", description: "Auth token for relay connection" }),
   },
-  handler: async (args) => runCliCommand("serve", async () => {
+  handler: async (args) => {
+    // serve is the daemon itself — uses LocalClient directly, no getSvc()
+    await withSpan("orka.cli.serve", { "orka.command": "serve" }, async () => {
     const port = parseInt(args.port ?? "7394", 10);
     const hostname = args.host ?? "127.0.0.1";
     const localSvc = createLocalClient();
@@ -1107,7 +1175,8 @@ const serveCmd = command({
     }
 
     await new Promise(() => {});
-  }),
+    });
+  },
 });
 
 const projectAddCmd = command({
@@ -1625,7 +1694,7 @@ function printUsage(): void {
   console.log("session lifecycle:");
   console.log("  spawn    Spawn an agent session           orka spawn -m background fix the bug");
   console.log("  ps       List sessions                    orka ps --status running -v");
-  console.log("  attach   Attach to running tmux session   orka attach <id>");
+  console.log("  attach   Stream live session output        orka attach <id>");
   console.log("  logs     View session output              orka logs -f <id>");
   console.log("  stop     Stop a running session           orka stop <id>");
   console.log("  wait     Block until sessions complete    orka wait --all");

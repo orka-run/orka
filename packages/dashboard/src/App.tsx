@@ -13,14 +13,9 @@ import { useSessionStore } from "./stores/sessionStore";
 function getDaemonUrl(): string {
   // Explicit override via env (dev mode)
   if (import.meta.env.VITE_DAEMON_URL) return import.meta.env.VITE_DAEMON_URL as string;
-  // In production (nginx), use /ws proxy on same origin
-  if (import.meta.env.PROD) {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}/ws`;
-  }
-  // Dev fallback: direct to daemon on same host
+  // Both dev (vite proxy) and prod (nginx) use /ws on same origin
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${location.hostname}:7394`;
+  return `${proto}//${location.host}/ws`;
 }
 
 const DEFAULT_DAEMON_URL = getDaemonUrl();
