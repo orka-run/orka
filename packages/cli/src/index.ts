@@ -23,11 +23,20 @@ import {
 // Initialize OpenTelemetry tracing
 initTracing();
 
-// Check for --remote flag before command
+// Check for --remote and --token flags before command
 const remoteIdx = process.argv.indexOf("--remote");
-const remoteUrl = remoteIdx !== -1 ? process.argv[remoteIdx + 1] : process.env.ORKA_REMOTE;
+let remoteUrl = remoteIdx !== -1 ? process.argv[remoteIdx + 1] : process.env.ORKA_REMOTE;
 if (remoteIdx !== -1) {
-  process.argv.splice(remoteIdx, 2); // Remove --remote <url> from argv
+  process.argv.splice(remoteIdx, 2);
+}
+const tokenIdx = process.argv.indexOf("--token");
+const remoteToken = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : process.env.ORKA_TOKEN;
+if (tokenIdx !== -1) {
+  process.argv.splice(tokenIdx, 2);
+}
+if (remoteUrl && remoteToken) {
+  const sep = remoteUrl.includes("?") ? "&" : "?";
+  remoteUrl = `${remoteUrl}${sep}token=${encodeURIComponent(remoteToken)}`;
 }
 
 const svc: OrkaService = remoteUrl ? createRemoteClient(remoteUrl) : createLocalClient();
@@ -165,7 +174,9 @@ function printUsage(): void {
   console.log("");
   console.log("global options:");
   console.log("  --remote <url>  Connect to remote daemon (e.g. ws://host:7394)");
+  console.log("  --token <tok>   Auth token for relay/daemon connection");
   console.log("  ORKA_REMOTE     Env var alternative to --remote");
+  console.log("  ORKA_TOKEN      Env var alternative to --token");
 }
 
 async function cmdSpawn(): Promise<void> {
@@ -375,6 +386,18 @@ async function cmdAttach(): Promise<void> {
   if (!(await svc.isAlive(session.id))) {
     console.error(`tmux session not running: ${session.tmuxSessionName}`);
     process.exit(1);
+  }
+
+  if (remoteUrl) {
+    // Remote mode — can't attach directly, print SSH command
+    console.log(`session ${session.id} is running remotely`);
+    console.log("");
+    console.log("to attach via SSH:");
+    console.log(`  ssh <host> -t tmux attach -t ${session.tmuxSessionName}`);
+    console.log("");
+    console.log("or use 'orka logs -f' to stream output remotely:");
+    console.log(`  orka --remote ${remoteUrl} logs -f ${session.id}`);
+    return;
   }
 
   await tmuxAttach(session.tmuxSessionName);
@@ -913,6 +936,7 @@ async function cmdServe(): Promise<void> {
       host: { type: "string", default: "127.0.0.1" },
       relay: { type: "string" },
       "node-id": { type: "string" },
+      "relay-token": { type: "string" },
     },
     allowPositionals: false,
   });
@@ -925,6 +949,7 @@ async function cmdServe(): Promise<void> {
     hostname,
     relayUrl: args.values.relay,
     nodeId: args.values["node-id"],
+    relayToken: args.values["relay-token"] ?? process.env.ORKA_TOKEN,
   });
   console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
   if (args.values.relay) {
@@ -940,12 +965,14 @@ async function cmdRelay(): Promise<void> {
     args: process.argv.slice(3),
     options: {
       port: { type: "string", default: "7390" },
+      token: { type: "string" },
     },
     allowPositionals: false,
   });
 
   const port = parseInt(args.values.port!, 10);
-  const server = startRelay({ port });
+  const token = args.values.token ?? process.env.ORKA_TOKEN;
+  const server = startRelay({ port, token });
   console.log(`orka relay listening on ws://0.0.0.0:${server.port}`);
   console.log("  nodes register at:  /register?node=<id>");
   console.log("  clients connect at: /ws");

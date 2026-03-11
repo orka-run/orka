@@ -17,6 +17,7 @@ interface NodeConnection {
   id: string;
   ws: ServerWebSocket<SocketData>;
   registeredAt: number;
+  activeRequests: number;
 }
 
 type SocketRole = "client" | "node";
@@ -27,23 +28,30 @@ interface SocketData {
 }
 
 const nodes = new Map<string, NodeConnection>();
-// Maps request id → client WS for routing responses back
-const pendingRequests = new Map<string, ServerWebSocket<SocketData>>();
-let roundRobinIdx = 0;
+// Maps request id → { client WS, node id } for routing responses back
+const pendingRequests = new Map<string, { client: ServerWebSocket<SocketData>; nodeId: string }>();
 
 function pickNode(requestedNode?: string): NodeConnection | null {
   if (requestedNode) {
     return nodes.get(requestedNode) ?? null;
   }
+  // Least-loaded: pick node with fewest active requests
   const nodeList = [...nodes.values()];
   if (nodeList.length === 0) return null;
-  roundRobinIdx = roundRobinIdx % nodeList.length;
-  return nodeList[roundRobinIdx++];
+  let best = nodeList[0];
+  for (let i = 1; i < nodeList.length; i++) {
+    if (nodeList[i].activeRequests < best.activeRequests) {
+      best = nodeList[i];
+    }
+  }
+  return best;
 }
 
 export interface RelayOptions {
   port: number;
   hostname?: string;
+  /** Shared secret token. If set, all WS connections must provide ?token=<secret>. */
+  token?: string;
 }
 
 export function startRelay(opts: RelayOptions) {
@@ -54,12 +62,21 @@ export function startRelay(opts: RelayOptions) {
     fetch(req, server) {
       const url = new URL(req.url);
 
+      // Token validation (skip for health endpoint)
+      if (opts.token && url.pathname !== "/health") {
+        const provided = url.searchParams.get("token")
+          ?? req.headers.get("authorization")?.replace("Bearer ", "");
+        if (provided !== opts.token) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+      }
+
       if (url.pathname === "/health") {
         return new Response(
           JSON.stringify({
             status: "ok",
-            nodes: [...nodes.keys()],
-            clients: pendingRequests.size,
+            nodes: [...nodes.values()].map((n) => ({ id: n.id, activeRequests: n.activeRequests })),
+            pendingRequests: pendingRequests.size,
           }),
           { headers: { "content-type": "application/json" } },
         );
@@ -90,7 +107,7 @@ export function startRelay(opts: RelayOptions) {
       open(ws) {
         if (ws.data.role === "node") {
           const nodeId = ws.data.nodeId!;
-          nodes.set(nodeId, { id: nodeId, ws, registeredAt: Date.now() });
+          nodes.set(nodeId, { id: nodeId, ws, registeredAt: Date.now(), activeRequests: 0 });
         }
       },
 
@@ -131,7 +148,8 @@ export function startRelay(opts: RelayOptions) {
 
           // Track which client is waiting for this response
           if (requestId) {
-            pendingRequests.set(requestId, ws);
+            pendingRequests.set(requestId, { client: ws, nodeId: node.id });
+            node.activeRequests++;
           }
 
           // Forward request to node as-is
@@ -147,8 +165,10 @@ export function startRelay(opts: RelayOptions) {
           }
 
           if (responseId && pendingRequests.has(responseId)) {
-            const clientWs = pendingRequests.get(responseId)!;
+            const { client: clientWs, nodeId: reqNodeId } = pendingRequests.get(responseId)!;
             pendingRequests.delete(responseId);
+            const node = nodes.get(reqNodeId);
+            if (node) node.activeRequests = Math.max(0, node.activeRequests - 1);
             try {
               clientWs.send(raw);
             } catch {

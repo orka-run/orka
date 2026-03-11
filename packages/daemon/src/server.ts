@@ -4,10 +4,12 @@ import { handleRpcRequest } from "./rpc-handler";
 export interface ServerOptions {
   port: number;
   hostname?: string;
-  /** If set, the daemon registers with this relay URL (e.g. ws://relay:7390/register?node=mynode). */
+  /** If set, the daemon registers with this relay URL (e.g. ws://relay:7390). */
   relayUrl?: string;
   /** Node ID for relay registration. Defaults to hostname:port. */
   nodeId?: string;
+  /** Token for relay authentication. */
+  relayToken?: string;
 }
 
 /**
@@ -57,7 +59,7 @@ export function startServer(svc: OrkaService, opts: ServerOptions) {
   // Register with relay if configured
   if (opts.relayUrl) {
     const nodeId = opts.nodeId ?? `${opts.hostname ?? "127.0.0.1"}:${server.port}`;
-    registerWithRelay(svc, opts.relayUrl, nodeId);
+    registerWithRelay(svc, opts.relayUrl, nodeId, opts.relayToken);
   }
 
   return server;
@@ -67,8 +69,9 @@ export function startServer(svc: OrkaService, opts: ServerOptions) {
  * Connect to relay as a node. Relay forwards client requests to us,
  * we process them and send responses back through the relay.
  */
-function registerWithRelay(svc: OrkaService, relayUrl: string, nodeId: string) {
-  const url = `${relayUrl}/register?node=${encodeURIComponent(nodeId)}`;
+function registerWithRelay(svc: OrkaService, relayUrl: string, nodeId: string, token?: string) {
+  let url = `${relayUrl}/register?node=${encodeURIComponent(nodeId)}`;
+  if (token) url += `&token=${encodeURIComponent(token)}`;
 
   function connect() {
     const ws = new WebSocket(url);
