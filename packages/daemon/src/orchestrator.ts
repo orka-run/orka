@@ -131,10 +131,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     writeFileSync(scriptPath, `#!/usr/bin/env bash\nunset CLAUDECODE\n${command}\n`);
 
     // 7. Spawn tmux session
-    await withSpan("orka.tmux.spawn", {
-      "orka.session.id": sessionId,
-      "orka.tmux.name": tmuxName,
-    }, async () => tmuxSpawn(tmuxName, scriptPath, workingDir));
+    await tmuxSpawn(tmuxName, scriptPath, workingDir);
 
     updateSessionStatus(sessionId, "running", { startedAt: new Date().toISOString() });
 
@@ -157,11 +154,30 @@ export async function reapSessions(): Promise<number> {
 
     for (const s of running) {
       if (!liveNames.has(s.tmuxSessionName)) {
+        // Grace period: don't reap sessions started less than 30s ago.
+        // tmuxList() can return incomplete results if the tmux server is busy
+        // during concurrent spawns, causing false reaps.
+        const startedMs = s.startedAt ? new Date(s.startedAt).getTime() : 0;
+        if (Date.now() - startedMs < 30_000) {
+          span.addEvent("session.reap_skipped_grace", { "orka.session.id": s.id });
+          continue;
+        }
+
+        // Double-check: tmuxList() may have returned stale/incomplete data.
+        // Verify this specific session is truly dead before reaping.
+        if (await tmuxHas(s.tmuxSessionName)) {
+          span.addEvent("session.reap_skipped_alive", { "orka.session.id": s.id });
+          continue;
+        }
+
         const exitCode = parseExitCode(s.logFile);
         updateSessionStatus(s.id, "completed", {
           finishedAt: new Date().toISOString(),
           ...(exitCode !== undefined ? { exitCode } : {}),
         });
+
+        // Safety: kill tmux session in case it's lingering (e.g. remain-on-exit)
+        try { await tmuxKill(s.tmuxSessionName); } catch { /* already dead */ }
 
         span.addEvent("session.reaped", {
           "orka.session.id": s.id,
@@ -192,9 +208,7 @@ export async function stopSession(sessionId: string): Promise<void> {
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
     if (await tmuxHas(session.tmuxSessionName)) {
-      await withSpan("orka.tmux.kill", {
-        "orka.tmux.name": session.tmuxSessionName,
-      }, async () => tmuxKill(session.tmuxSessionName));
+      await tmuxKill(session.tmuxSessionName);
     }
 
     updateSessionStatus(sessionId, "cancelled", {

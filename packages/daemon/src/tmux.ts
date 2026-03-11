@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { withSpan } from "./tracing";
 
 const ORKA_PREFIX = "orka-";
 
@@ -16,35 +17,46 @@ export async function tmuxSpawn(
   scriptPath: string,
   cwd: string,
 ): Promise<void> {
-  await $`tmux new-session -d -s ${sessionName} -c ${cwd} bash ${scriptPath}`.quiet();
+  await withSpan("orka.tmux.spawn", {
+    "orka.tmux.name": sessionName,
+    "orka.tmux.cwd": cwd,
+  }, async () => {
+    await $`tmux new-session -d -s ${sessionName} -c ${cwd} bash ${scriptPath}`.quiet();
+  });
 }
 
 /** List orka-prefixed tmux sessions. */
 export async function tmuxList(): Promise<TmuxSession[]> {
-  try {
-    const result =
-      await $`tmux list-sessions -F #{session_name}\t#{session_created}\t#{session_attached}\t#{session_width}\t#{session_height}`
-        .quiet()
-        .text();
+  return withSpan("orka.tmux.list", {}, async (span) => {
+    try {
+      const result =
+        await $`tmux list-sessions -F #{session_name}\t#{session_created}\t#{session_attached}\t#{session_width}\t#{session_height}`
+          .quiet()
+          .text();
 
-    return result
-      .trim()
-      .split("\n")
-      .filter((line) => line.startsWith(ORKA_PREFIX))
-      .map((line) => {
-        const [name, created, attached, width, height] = line.split("\t");
-        return {
-          name,
-          created: parseInt(created, 10),
-          attached: attached === "1",
-          width: parseInt(width, 10),
-          height: parseInt(height, 10),
-        };
-      });
-  } catch {
-    // tmux returns error if no server running
-    return [];
-  }
+      const sessions = result
+        .trim()
+        .split("\n")
+        .filter((line) => line.startsWith(ORKA_PREFIX))
+        .map((line) => {
+          const [name, created, attached, width, height] = line.split("\t");
+          return {
+            name,
+            created: parseInt(created, 10),
+            attached: attached === "1",
+            width: parseInt(width, 10),
+            height: parseInt(height, 10),
+          };
+        });
+
+      span.setAttribute("orka.tmux.count", sessions.length);
+      return sessions;
+    } catch {
+      // tmux returns error if no server running
+      span.addEvent("orka.tmux.list_failed");
+      return [];
+    }
+  });
 }
 
 /** Check if a tmux session exists. */
@@ -86,7 +98,9 @@ export async function tmuxSendText(
 
 /** Kill a tmux session. */
 export async function tmuxKill(sessionName: string): Promise<void> {
-  await $`tmux kill-session -t ${sessionName}`.quiet();
+  await withSpan("orka.tmux.kill", { "orka.tmux.name": sessionName }, async () => {
+    await $`tmux kill-session -t ${sessionName}`.quiet();
+  });
 }
 
 /** Attach to a tmux session (replaces current process). */
