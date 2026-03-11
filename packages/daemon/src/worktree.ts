@@ -164,7 +164,9 @@ export async function worktreeBranch(wtPath: string): Promise<string | null> {
   });
 }
 
-/** Merge a worktree's branch into the current branch of the main repo. */
+/** Merge a worktree's branch into the current branch of the main repo.
+ *  Uses fast-forward when possible, otherwise rebases the branch onto HEAD
+ *  to keep a linear history (no merge commits). */
 export async function worktreeMerge(
   repoPath: string,
   wtPath: string,
@@ -185,8 +187,19 @@ export async function worktreeMerge(
     span.setAttribute("commits", commits);
     if (commits === 0) throw new Error(`No commits to merge from branch ${branch}`);
 
-    // Merge the branch
-    await $`git -C ${repoPath} merge ${branch} --no-edit`.quiet();
+    // Try fast-forward first (cleanest — no merge commit)
+    const ffResult = await $`git -C ${repoPath} merge --ff-only ${branch}`.quiet().nothrow();
+    if (ffResult.exitCode === 0) {
+      span.setAttribute("merge_strategy", "fast-forward");
+      return { branch, commits };
+    }
+
+    // HEAD has diverged — rebase worktree branch onto current HEAD for linear history
+    await $`git -C ${wtPath} rebase ${mainHead}`.quiet();
+    span.setAttribute("merge_strategy", "rebase");
+
+    // Now fast-forward should work
+    await $`git -C ${repoPath} merge --ff-only ${branch}`.quiet();
 
     return { branch, commits };
   });
