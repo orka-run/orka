@@ -19,10 +19,7 @@ export function buildBackendCommand(
       cmd = buildClaudeCode(prompt, mode, opts?.sessionId, opts?.model);
       break;
     case "codex":
-      cmd = buildCodex(prompt);
-      break;
-    case "aider":
-      cmd = buildAider(prompt);
+      cmd = buildCodex(prompt, mode, opts?.model);
       break;
     case "shell":
       cmd = prompt;
@@ -50,14 +47,20 @@ function buildClaudeCode(prompt: string, mode: SessionMode, sessionId?: string, 
   return parts.join(" ");
 }
 
-function buildCodex(prompt: string): string {
+function buildCodex(prompt: string, mode: SessionMode, model?: string): string {
   const escaped = shellEscape(prompt);
-  return `codex ${escaped}`;
-}
+  const parts: string[] = ["codex"];
 
-function buildAider(prompt: string): string {
-  const escaped = shellEscape(prompt);
-  return `aider --message ${escaped}`;
+  if (mode === "background") {
+    // Non-interactive: codex exec --full-auto --json
+    parts[0] = "codex exec";
+    parts.push("--full-auto");
+    parts.push("--json");
+  }
+
+  if (model) parts.push(`--model ${shellEscape(model)}`);
+  parts.push(escaped);
+  return parts.join(" ");
 }
 
 function shellEscape(s: string): string {

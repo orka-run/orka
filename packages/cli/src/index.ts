@@ -195,7 +195,7 @@ function printUsage(): void {
   console.log("");
   console.log("spawn options:");
   console.log("  --project, -p   Project directory (default: .)");
-  console.log("  --backend, -b   Agent backend: claude-code|codex|aider|shell (default: claude-code)");
+  console.log("  --backend, -b   Agent backend: claude-code|codex|shell (default: claude-code)");
   console.log("  --prompt        Prompt/task for the agent (or use positional args or pipe stdin)");
   console.log("  --prompt-file   Read prompt from file");
   console.log("  --mode, -m      Session mode: interactive|background (default: interactive)");

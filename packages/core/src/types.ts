@@ -13,7 +13,7 @@ export function generateId(prefix: string): string {
 
 // --- Enums ---
 
-export const BackendKindSchema = z.enum(["claude-code", "codex", "aider", "shell"]);
+export const BackendKindSchema = z.enum(["claude-code", "codex", "shell"]);
 export type BackendKind = z.infer<typeof BackendKindSchema>;
 
 export const SessionModeSchema = z.enum(["interactive", "background"]);
