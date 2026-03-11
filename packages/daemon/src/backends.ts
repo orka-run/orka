@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import type { BackendKind, SessionMode } from "@orka/core";
+import type { BackendKind, SessionMode, ReasoningEffort } from "@orka/core";
 
 export interface BackendCommand {
   /** The shell command to run inside tmux. */
@@ -34,7 +34,7 @@ export function buildBackendCommand(
   backend: BackendKind,
   prompt: string,
   mode: SessionMode,
-  opts?: { logFile?: string; sessionId?: string; model?: string },
+  opts?: { logFile?: string; sessionId?: string; model?: string; reasoningEffort?: ReasoningEffort },
 ): BackendCommand {
   let cmd: string;
 
@@ -43,7 +43,7 @@ export function buildBackendCommand(
       cmd = buildClaudeCode(prompt, mode, opts?.sessionId, opts?.model);
       break;
     case "codex":
-      cmd = buildCodex(prompt, mode, opts?.model);
+      cmd = buildCodex(prompt, mode, opts?.model, opts?.reasoningEffort);
       break;
     case "shell":
       cmd = prompt;
@@ -71,18 +71,21 @@ function buildClaudeCode(prompt: string, mode: SessionMode, sessionId?: string, 
   return parts.join(" ");
 }
 
-function buildCodex(prompt: string, mode: SessionMode, model?: string): string {
+function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoningEffort?: ReasoningEffort): string {
   const escaped = shellEscape(prompt);
   const parts: string[] = ["codex"];
 
   if (mode === "background") {
-    // Non-interactive: codex exec --full-auto --json
+    // Non-interactive: codex exec with full automation
     parts[0] = "codex exec";
     parts.push("--full-auto");
     parts.push("--json");
+    parts.push("--ephemeral");
+    parts.push("--skip-git-repo-check");
   }
 
   if (model) parts.push(`--model ${shellEscape(model)}`);
+  if (reasoningEffort) parts.push(`--config model_reasoning_effort=${shellEscape(reasoningEffort)}`);
   parts.push(escaped);
   return parts.join(" ");
 }

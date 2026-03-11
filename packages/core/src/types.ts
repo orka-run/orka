@@ -72,6 +72,9 @@ export interface Session {
 
 // --- Spawn Request ---
 
+export const ReasoningEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]);
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
 export interface SpawnRequest {
   prompt: string;
   title?: string;
@@ -80,6 +83,8 @@ export interface SpawnRequest {
   mode: SessionMode;
   branch?: string;
   model?: string;
+  /** Reasoning effort for models that support it (codex: none/minimal/low/medium/high/xhigh). */
+  reasoningEffort?: ReasoningEffort;
   autoMerge?: boolean;
   tags?: string[];
 }
