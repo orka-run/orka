@@ -1,8 +1,32 @@
+import { execSync } from "node:child_process";
 import type { BackendKind, SessionMode } from "@orka/core";
 
 export interface BackendCommand {
   /** The shell command to run inside tmux. */
   command: string;
+}
+
+const BACKEND_CLI: Record<string, string> = {
+  "claude-code": "claude",
+  codex: "codex",
+};
+
+/** Check that the CLI binary for a backend is installed. Throws with install hint if not. */
+export function assertBackendInstalled(backend: BackendKind): void {
+  const bin = BACKEND_CLI[backend];
+  if (!bin) return; // shell backend — no binary to check
+
+  try {
+    execSync(`command -v ${bin}`, { stdio: "ignore" });
+  } catch {
+    const hints: Record<string, string> = {
+      "claude-code": "npm install -g @anthropic-ai/claude-code",
+      codex: "bun install -g @openai/codex",
+    };
+    throw new Error(
+      `Backend "${backend}" requires "${bin}" CLI but it's not installed.\n  Install: ${hints[backend] ?? `install ${bin}`}`,
+    );
+  }
 }
 
 /** Build the command string for a given backend + prompt. */

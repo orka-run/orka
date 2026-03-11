@@ -9,7 +9,7 @@ import {
 import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions } from "./db";
 import { tmuxSpawn, tmuxHas, tmuxKill, tmuxList } from "./tmux";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
-import { buildBackendCommand } from "./backends";
+import { buildBackendCommand, assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";
 import { withSpan } from "./tracing";
 
@@ -35,6 +35,9 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     "orka.project": req.projectPath,
     ...(req.model ? { "orka.model": req.model } : {}),
   }, async (span) => {
+    // Verify backend CLI is installed
+    assertBackendInstalled(req.backend);
+
     // Check concurrent session limit
     const { maxConcurrent } = getConfig().limits;
     if (maxConcurrent > 0) {
