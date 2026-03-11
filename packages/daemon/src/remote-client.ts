@@ -13,7 +13,7 @@ import type {
   RpcResponse,
   KeyPair,
 } from "@orka/core";
-import { encryptRequest, decryptResponse, deriveSessionKey } from "@orka/core";
+import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy } from "@orka/core";
 
 export interface RemoteClientOptions {
   /** WebSocket URL of the daemon or relay */
@@ -38,6 +38,8 @@ class RemoteClient implements OrkaService {
   private encKey: Buffer | null = null;
   private keyPair?: KeyPair;
   private serverPublicKey?: string;
+  private backoff = new ReconnectStrategy();
+  private closed = false;
 
   constructor(opts: RemoteClientOptions) {
     this.url = opts.url;
@@ -71,6 +73,7 @@ class RemoteClient implements OrkaService {
       ws.onopen = () => {
         this.ws = ws;
         this.connectPromise = null;
+        this.backoff.reset();
         resolve();
       };
       ws.onerror = () => {
@@ -79,6 +82,8 @@ class RemoteClient implements OrkaService {
       };
       ws.onclose = () => {
         this.ws = null;
+        this.connectPromise = null;
+        // Reject all pending requests
         for (const [id, p] of this.pending) {
           p.reject(new Error("Connection closed"));
           this.pending.delete(id);
@@ -157,6 +162,7 @@ class RemoteClient implements OrkaService {
   }
 
   close(): void {
+    this.closed = true;
     this.ws?.close();
   }
 

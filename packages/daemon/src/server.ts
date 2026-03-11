@@ -1,5 +1,5 @@
 import type { OrkaService, KeyPair } from "@orka/core";
-import { deriveSessionKey, ensureKeyPair } from "@orka/core";
+import { deriveSessionKey, ensureKeyPair, ReconnectStrategy } from "@orka/core";
 import { handleRpcRequest } from "./rpc-handler";
 import { getOrkaHome } from "./db";
 
@@ -97,10 +97,13 @@ function registerWithRelay(svc: OrkaService, relayUrl: string, nodeId: string, t
   let url = `${relayUrl}/register?node=${encodeURIComponent(nodeId)}`;
   if (token) url += `&token=${encodeURIComponent(token)}`;
 
+  const backoff = new ReconnectStrategy();
+
   function connect() {
     const ws = new WebSocket(url);
 
     ws.onopen = () => {
+      backoff.reset();
       console.log(`registered with relay as node "${nodeId}"`);
     };
 
@@ -111,8 +114,9 @@ function registerWithRelay(svc: OrkaService, relayUrl: string, nodeId: string, t
     };
 
     ws.onclose = () => {
-      console.log("relay connection lost, reconnecting in 5s...");
-      setTimeout(connect, 5000);
+      const delay = backoff.nextDelay();
+      console.log(`relay connection lost, reconnecting in ${Math.round(delay / 1000)}s (attempt ${backoff.attempts})...`);
+      setTimeout(connect, delay);
     };
 
     ws.onerror = () => {
