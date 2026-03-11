@@ -394,6 +394,57 @@ describe("consumeProviderEvents", () => {
       },
     ]);
   });
+
+  test("mirrors provider content deltas onto session.logLine pushes", async () => {
+    const queue = new AsyncEventQueue<ProviderRuntimeEvent>();
+    const broadcasts: Array<{ channel: string; data: unknown }> = [];
+
+    const consumeTask = consumeProviderEvents(
+      "sess-logline",
+      {
+        threadId: "thread-logline",
+        provider: "codex" as const,
+        events: queue,
+        meta: {},
+      },
+      new OrchestrationEngine(),
+      {
+        updateSessionStatus: () => {},
+        saveSessionDiff: () => {},
+        insertUsageRecord: () => {},
+        approvalManager: new ApprovalManager(),
+        pushHub: {
+          broadcast(channel, data) {
+            broadcasts.push({ channel, data });
+          },
+        } as never,
+      },
+    );
+
+    queue.push(
+      createEvent(
+        "content.delta",
+        "thread-logline",
+        { streamKind: "assistant_text", delta: "hello from provider" },
+        {
+          turnId: "turn-logline",
+          createdAt: "2026-03-11T00:04:00.000Z",
+        },
+      ),
+    );
+    queue.close();
+
+    await consumeTask;
+
+    expect(broadcasts).toContainEqual({
+      channel: "session.logLine",
+      data: {
+        sessionId: "sess-logline",
+        content: "hello from provider",
+        line: "hello from provider",
+      },
+    });
+  });
 });
 
 async function createRepo(): Promise<string> {

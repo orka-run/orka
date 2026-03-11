@@ -69,6 +69,8 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
   switch (method) {
     case "spawn": {
       const session = await svc.spawn(params);
+      // Keep these RPC-triggered broadcasts for tmux-backed sessions until all session types
+      // are driven exclusively by orchestration engine events.
       pushHub.broadcast("orchestration.sessionUpdated", {
         sessionId: session.id,
         status: session.status,
@@ -79,6 +81,8 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
       await svc.stop(params.sessionId);
       const session = await svc.getSession(params.sessionId);
       if (session) {
+        // Provider runtime sessions also emit through the orchestration engine, but tmux-backed
+        // sessions still rely on this direct push.
         pushHub.broadcast("orchestration.sessionUpdated", {
           sessionId: session.id,
           status: session.status,
@@ -122,6 +126,7 @@ async function dispatch(svc: OrkaService, method: string, params: any): Promise<
       const ids: string[] = params.ids;
       await svc.deleteSessions(ids);
       for (const id of ids) {
+        // Keep the direct delete push until tmux-backed sessions are migrated to engine events.
         pushHub.broadcast("orchestration.sessionDeleted", { sessionId: id });
       }
       return null;

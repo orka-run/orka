@@ -74,6 +74,11 @@ async function handleProviderEvent(
   switch (event.type) {
     case "content.delta":
       await appendContentDelta(callbacks.logFile, event);
+      callbacks.pushHub?.broadcast("session.logLine", {
+        sessionId,
+        content: event.payload.delta,
+        line: event.payload.delta,
+      });
       return;
     case "request.opened":
       callbacks.approvalManager.addRequest(toApprovalRequest(sessionId, handle, event));

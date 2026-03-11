@@ -57,6 +57,17 @@ export function LogPanel({ sessionId, transport }: LogPanelProps) {
       const logLine = data as SessionLogLineData;
       if (logLine.sessionId !== sessionId) return;
 
+      const directLine = logLine.line ?? (logLine.offset === undefined ? logLine.content : undefined);
+      if (directLine !== undefined) {
+        setLogContent((prev) => prev + directLine);
+        offsetRef.current += new TextEncoder().encode(directLine).byteLength;
+        return;
+      }
+
+      if (logLine.offset === undefined || logLine.content === undefined) {
+        return;
+      }
+
       const expectedOffset = offsetRef.current;
 
       if (logLine.offset === expectedOffset) {

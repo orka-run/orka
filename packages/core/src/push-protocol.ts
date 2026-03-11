@@ -37,8 +37,9 @@ export interface SessionDeletedData {
 
 export interface SessionLogLineData {
   sessionId: string;
-  content: string;
-  offset: number;
+  content?: string;
+  offset?: number;
+  line?: string;
 }
 
 export const SubscribeRequestSchema = z.object({

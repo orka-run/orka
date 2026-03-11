@@ -1,5 +1,5 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
+import type { OrchestrationEvent, SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { useEffect, useRef, useState } from "react";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -55,6 +55,17 @@ export function App() {
 
       void fetchSessions(transport);
     });
+    const unsubscribeEvent = transport.subscribe("orchestration.event", (data) => {
+      const typedData = data as OrchestrationEvent;
+      const known = useSessionStore
+        .getState()
+        .sessions
+        .some((session) => session.id === typedData.sessionId);
+
+      if (!known) {
+        void fetchSessions(transport);
+      }
+    });
     const unsubscribeDeleted = transport.subscribe("orchestration.sessionDeleted", (data) => {
       handleSessionDeleted(data as SessionDeletedData);
     });
@@ -63,6 +74,7 @@ export function App() {
 
     return () => {
       unsubscribeDeleted();
+      unsubscribeEvent();
       unsubscribeUpdated();
       unsubscribeState();
       transport.disconnect();

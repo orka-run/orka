@@ -229,6 +229,46 @@ describe("OrchestrationEngine", () => {
     expect(engine.getSessionState("session-1").status).toBe("cancelled");
   });
 
+  test("broadcasts orchestration events and final session state when pushHub is configured", () => {
+    const broadcasts: Array<{ channel: string; data: unknown }> = [];
+    const engine = new OrchestrationEngine({
+      pushHub: {
+        broadcast(channel, data) {
+          broadcasts.push({ channel, data });
+        },
+      } as never,
+    });
+
+    engine.ingest(
+      "session-1",
+      createEvent(
+        "session.exited",
+        "thread-1",
+        { exitKind: "graceful", reason: "done" },
+        { createdAt: "2026-03-11T00:02:01.000Z" },
+      ),
+    );
+
+    expect(broadcasts).toEqual([
+      {
+        channel: "orchestration.event",
+        data: {
+          type: "session.completed",
+          sessionId: "session-1",
+          exitCode: null,
+          timestamp: "2026-03-11T00:02:01.000Z",
+        },
+      },
+      {
+        channel: "orchestration.sessionUpdated",
+        data: {
+          sessionId: "session-1",
+          status: "completed",
+        },
+      },
+    ]);
+  });
+
   test("accumulates turn cost and tokens in the session projection", () => {
     const engine = new OrchestrationEngine();
 
