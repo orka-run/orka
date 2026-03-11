@@ -76,8 +76,16 @@ function buildClaudeCode(prompt: string, mode: SessionMode, sessionId?: string, 
   return parts.join(" ");
 }
 
+/** Instruction prepended to codex prompts so agents don't waste tokens on beads/bd commands
+ *  that are unreachable inside the codex sandbox environment. */
+const CODEX_NO_BEADS = "IMPORTANT: Do not use beads (bd) commands. " +
+  "The beads/bd issue tracker is not available in this environment. " +
+  "Ignore any references to beads or bd in project documentation (AGENTS.md, CLAUDE.md). " +
+  "Do NOT run bd ready, bd create, bd close, bd update, bd sync, or any other bd command.\n\n";
+
 function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoningEffort?: ReasoningEffort, projectPath?: string): string {
-  const escaped = shellEscape(prompt);
+  const fullPrompt = CODEX_NO_BEADS + prompt;
+  const escaped = shellEscape(fullPrompt);
   const parts: string[] = ["codex"];
 
   if (mode === "background") {
