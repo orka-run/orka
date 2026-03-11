@@ -1,34 +1,86 @@
 import type {
+  CanonicalItemType,
+  CanonicalRequestType,
   ProviderAdapter,
+  ProviderApprovalDecision,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSessionHandle,
   ProviderSessionStartInput,
+  RuntimeItemStatus,
+  RuntimeSessionState,
+  RuntimeTurnState,
 } from "@orka/core";
 import { createEvent } from "@orka/core";
 import { withSpan } from "../tracing";
 
-type CodexRpcMethod = "startSession" | "sendMessage" | "interrupt" | "stop";
+type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/interrupt" | "thread/unsubscribe";
+type CodexClientNotificationMethod = "initialized";
 type CodexProcess = ReturnType<typeof Bun.spawn>;
+type JsonRpcId = string | number;
+
+interface CodexUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+interface CodexPendingRequest {
+  method: CodexClientRequestMethod;
+  resolve: (result: unknown) => void;
+  reject: (error: Error) => void;
+}
+
+interface CodexPendingServerRequest {
+  rawId: JsonRpcId;
+  method: string;
+  requestType: CanonicalRequestType;
+  detail?: string;
+  decision?: ProviderApprovalDecision;
+  args?: unknown;
+}
 
 interface CodexHandleMeta {
   process: CodexProcess;
-  writeRpc: (method: CodexRpcMethod, params?: unknown) => Promise<void>;
-}
-
-function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
-  return value instanceof ReadableStream;
-}
-
-function isWritableSink<T>(value: T): value is Exclude<T, number> {
-  return typeof value !== "number";
+  sendRequest: <TResult>(method: CodexClientRequestMethod, params?: unknown) => Promise<TResult>;
+  sendNotification: (method: CodexClientNotificationMethod, params?: unknown) => Promise<void>;
+  sendResponse: (requestId: JsonRpcId, result: unknown) => Promise<void>;
+  pendingRequests: Map<string, CodexPendingRequest>;
+  pendingServerRequests: Map<string, CodexPendingServerRequest>;
+  turnUsage: Map<string, CodexUsage>;
+  providerThreadId?: string;
+  activeTurnId?: string;
+  sawSessionExit: boolean;
 }
 
 interface JsonRpcRequest {
-  jsonrpc: "2.0";
-  id: string;
-  method: CodexRpcMethod;
+  id: JsonRpcId;
+  method: CodexClientRequestMethod;
   params?: unknown;
+}
+
+interface JsonRpcNotification {
+  method: string;
+  params?: unknown;
+}
+
+interface JsonRpcServerRequest {
+  id: JsonRpcId;
+  method: string;
+  params?: unknown;
+}
+
+interface JsonRpcResponse {
+  id: JsonRpcId;
+  result?: unknown;
+  error?: {
+    code?: number;
+    message?: string;
+    data?: unknown;
+  };
+}
+
+interface MapCodexEventContext {
+  meta?: Pick<CodexHandleMeta, "pendingServerRequests" | "turnUsage" | "activeTurnId" | "providerThreadId" | "sawSessionExit">;
 }
 
 class AsyncEventQueue<T> implements AsyncIterable<T> {
@@ -84,10 +136,11 @@ export class CodexAdapter implements ProviderAdapter {
       "orka.provider.codex.start_session",
       { "orka.session.id": input.threadId, "orka.backend": this.kind },
       async () => {
-        const command = ["codex", "app-server"];
+        const command = ["codex"];
         if (input.model) {
           command.push("--model", input.model);
         }
+        command.push("--dangerously-bypass-approvals-and-sandbox", "app-server");
 
         const process = Bun.spawn(command, {
           cwd: input.cwd,
@@ -97,19 +150,8 @@ export class CodexAdapter implements ProviderAdapter {
         });
 
         const events = new AsyncEventQueue<ProviderRuntimeEvent>();
-        const meta = this.createHandleMeta(input.threadId, process);
-        const handle: ProviderSessionHandle = {
-          threadId: input.threadId,
-          provider: this.kind,
-          events,
-          meta: {
-            process,
-            writeRpc: meta.writeRpc,
-          },
-        };
 
-        const stdout = process.stdout;
-        if (!isReadableStream(stdout)) {
+        if (!isReadableStream(process.stdout)) {
           events.push(
             createEvent(
               "runtime.error",
@@ -130,19 +172,54 @@ export class CodexAdapter implements ProviderAdapter {
           throw new Error("Codex app-server stdout is not available");
         }
 
+        const meta = this.createHandleMeta(input.threadId, process);
+        const handle: ProviderSessionHandle = {
+          threadId: input.threadId,
+          provider: this.kind,
+          events,
+          meta,
+        };
+
         if (isReadableStream(process.stderr)) {
           void drainStream(process.stderr);
         }
 
-        const outputTask = consumeCodexOutput(input.threadId, stdout, events);
-        void finalizeCodexProcess(input.threadId, process, outputTask, events);
+        const outputTask = consumeCodexOutput(input.threadId, process.stdout, meta, events);
+        void finalizeCodexProcess(input.threadId, process, meta, outputTask, events);
 
         try {
-          await meta.writeRpc("startSession", {
-            prompt: input.prompt ?? "",
-            model: input.model,
-            cwd: input.cwd,
+          await meta.sendRequest<{ userAgent: string }>("initialize", {
+            clientInfo: {
+              name: "orka",
+              title: "Orka",
+              version: "0.0.0",
+            },
+            capabilities: {
+              experimentalApi: true,
+            },
           });
+          await meta.sendNotification("initialized");
+
+          const thread = await meta.sendRequest<{ thread?: { id?: string } }>("thread/start", {
+            cwd: input.cwd,
+            model: input.model,
+            approvalPolicy: "never",
+            sandbox: "danger-full-access",
+            experimentalRawEvents: false,
+            persistExtendedHistory: false,
+            ephemeral: true,
+          });
+
+          const providerThreadId = thread.thread?.id;
+          if (typeof providerThreadId !== "string" || providerThreadId.length === 0) {
+            throw new Error("Codex app-server did not return a provider thread id");
+          }
+
+          meta.providerThreadId = providerThreadId;
+
+          if (input.prompt) {
+            await this.startTurn(handle, { input: input.prompt, model: input.model });
+          }
         } catch (error) {
           process.kill();
           await process.exited;
@@ -159,10 +236,7 @@ export class CodexAdapter implements ProviderAdapter {
       "orka.provider.codex.send_turn",
       { "orka.session.id": handle.threadId, "orka.backend": this.kind },
       async () => {
-        const meta = getCodexHandleMeta(handle);
-        await meta.writeRpc("sendMessage", {
-          message: input.input ?? "",
-        });
+        await this.startTurn(handle, input);
       },
     );
   }
@@ -173,7 +247,15 @@ export class CodexAdapter implements ProviderAdapter {
       { "orka.session.id": handle.threadId, "orka.backend": this.kind },
       async () => {
         const meta = getCodexHandleMeta(handle);
-        await meta.writeRpc("interrupt");
+
+        if (!meta.providerThreadId || !meta.activeTurnId) {
+          return;
+        }
+
+        await meta.sendRequest("turn/interrupt", {
+          threadId: meta.providerThreadId,
+          turnId: meta.activeTurnId,
+        });
       },
     );
   }
@@ -185,10 +267,12 @@ export class CodexAdapter implements ProviderAdapter {
       async () => {
         const meta = getCodexHandleMeta(handle);
 
-        try {
-          await meta.writeRpc("stop");
-        } catch {
-          // Best-effort stop; the subprocess may have already exited.
+        if (meta.providerThreadId) {
+          try {
+            await meta.sendRequest("thread/unsubscribe", { threadId: meta.providerThreadId });
+          } catch {
+            // Best-effort cleanup; the subprocess may have already exited.
+          }
         }
 
         const exited = await waitForExit(meta.process, 250);
@@ -200,118 +284,318 @@ export class CodexAdapter implements ProviderAdapter {
     );
   }
 
-  async respondToRequest(): Promise<void> {
-    throw new Error("Codex adapter does not support approval requests");
+  async respondToRequest(
+    handle: ProviderSessionHandle,
+    requestId: string,
+    decision: ProviderApprovalDecision,
+  ): Promise<void> {
+    await withSpan(
+      "orka.provider.codex.respond_to_request",
+      { "orka.session.id": handle.threadId, "orka.backend": this.kind, "orka.request.id": requestId },
+      async () => {
+        const meta = getCodexHandleMeta(handle);
+        const pending = meta.pendingServerRequests.get(requestId);
+        if (!pending) {
+          throw new Error(`Unknown Codex request id "${requestId}"`);
+        }
+
+        pending.decision = decision;
+        await meta.sendResponse(pending.rawId, createServerRequestResponse(pending, decision));
+      },
+    );
+  }
+
+  private async startTurn(handle: ProviderSessionHandle, input: ProviderSendTurnInput): Promise<void> {
+    const meta = getCodexHandleMeta(handle);
+    const providerThreadId = meta.providerThreadId;
+    if (!providerThreadId) {
+      throw new Error("Codex provider thread has not been initialized");
+    }
+
+    const turn = await meta.sendRequest<{ turn?: { id?: string } }>("turn/start", {
+      threadId: providerThreadId,
+      input: [
+        {
+          type: "text",
+          text: input.input ?? "",
+          text_elements: [],
+        },
+      ],
+      model: input.model,
+    });
+
+    const activeTurnId = turn.turn?.id;
+    if (typeof activeTurnId === "string" && activeTurnId.length > 0) {
+      meta.activeTurnId = activeTurnId;
+    }
   }
 
   private createHandleMeta(threadId: string, process: CodexProcess): CodexHandleMeta {
     let requestCount = 0;
+    const pendingRequests = new Map<string, CodexPendingRequest>();
+    const pendingServerRequests = new Map<string, CodexPendingServerRequest>();
+    const turnUsage = new Map<string, CodexUsage>();
+
+    const writeMessage = async (message: unknown): Promise<void> => {
+      const stdin = process.stdin;
+      if (!stdin || typeof stdin === "number") {
+        throw new Error("Codex app-server stdin is not available");
+      }
+
+      await Promise.resolve(stdin.write(`${JSON.stringify(message)}\n`));
+    };
+
+    const sendRequest = async <TResult>(method: CodexClientRequestMethod, params?: unknown): Promise<TResult> => {
+      return withSpan(
+        "orka.rpc.request",
+        { "orka.session.id": threadId, "orka.method": method, "orka.backend": this.kind },
+        async () => {
+          const id = `codex-rpc-${++requestCount}`;
+          const request: JsonRpcRequest = { id, method };
+          if (params !== undefined) {
+            request.params = params;
+          }
+
+          const result = new Promise<TResult>((resolve, reject) => {
+            pendingRequests.set(id, { method, resolve: resolve as (value: unknown) => void, reject });
+          });
+
+          try {
+            await writeMessage(request);
+          } catch (error) {
+            pendingRequests.delete(id);
+            throw error;
+          }
+
+          return result;
+        },
+      );
+    };
+
+    const sendNotification = async (method: CodexClientNotificationMethod, params?: unknown): Promise<void> => {
+      const notification: JsonRpcNotification = { method };
+      if (params !== undefined) {
+        notification.params = params;
+      }
+      await writeMessage(notification);
+    };
+
+    const sendResponse = async (requestId: JsonRpcId, result: unknown): Promise<void> => {
+      await writeMessage({ id: requestId, result });
+    };
 
     return {
       process,
-      writeRpc: async (method, params) => {
-        await withSpan(
-          "orka.rpc.request",
-          { "orka.session.id": threadId, "orka.method": method, "orka.backend": this.kind },
-          async () => {
-            const stdin = process.stdin;
-            if (!stdin || typeof stdin === "number") {
-              throw new Error("Codex app-server stdin is not available");
-            }
-
-            const request: JsonRpcRequest = {
-              jsonrpc: "2.0",
-              id: `codex-rpc-${++requestCount}`,
-              method,
-            };
-
-            if (params !== undefined) {
-              request.params = params;
-            }
-
-            await Promise.resolve(stdin.write(`${JSON.stringify(request)}\n`));
-          },
-        );
-      },
+      sendRequest,
+      sendNotification,
+      sendResponse,
+      pendingRequests,
+      pendingServerRequests,
+      turnUsage,
+      sawSessionExit: false,
     };
   }
 }
 
-export function mapCodexEvent(threadId: string, raw: unknown): ProviderRuntimeEvent | null {
-  if (!isRecord(raw) || typeof raw.type !== "string") {
+export function mapCodexEvent(
+  threadId: string,
+  raw: unknown,
+  context: MapCodexEventContext = {},
+): ProviderRuntimeEvent | null {
+  const meta = context.meta;
+
+  if (isJsonRpcResponse(raw)) {
     return null;
   }
 
-  switch (raw.type) {
-    case "session.started":
+  if (isJsonRpcServerRequest(raw)) {
+    const pending = mapServerRequest(raw);
+    if (!pending) {
+      return null;
+    }
+
+    meta?.pendingServerRequests.set(String(raw.id), pending);
+
+    return createEvent(
+      "request.opened",
+      threadId,
+      {
+        requestType: pending.requestType,
+        detail: pending.detail,
+        args: pending.args,
+      },
+      {
+        provider: "codex",
+        requestId: String(raw.id),
+      },
+    );
+  }
+
+  if (!isJsonRpcNotification(raw)) {
+    return null;
+  }
+
+  if (raw.method.startsWith("codex/event/")) {
+    return null;
+  }
+
+  switch (raw.method) {
+    case "thread/started": {
+      const providerThreadId = getString(raw.params, "thread", "id");
+      if (providerThreadId) {
+        meta && (meta.providerThreadId = providerThreadId);
+      }
       return createEvent("session.started", threadId, {}, { provider: "codex" });
+    }
 
-    case "turn.started":
-      if (typeof raw.turn_id !== "string") {
+    case "thread/status/changed": {
+      const state = mapThreadState(getRecord(raw.params)?.status);
+      if (!state) {
+        return null;
+      }
+      return createEvent("session.state.changed", threadId, { state }, { provider: "codex" });
+    }
+
+    case "turn/started": {
+      const turnId = getString(raw.params, "turn", "id");
+      if (!turnId) {
         return null;
       }
 
-      return createEvent("turn.started", threadId, {}, { provider: "codex", turnId: raw.turn_id });
+      meta && (meta.activeTurnId = turnId);
+      return createEvent("turn.started", threadId, {}, { provider: "codex", turnId });
+    }
 
-    case "message.delta":
-      if (typeof raw.delta !== "string") {
+    case "turn/completed": {
+      const turnRecord = getRecord(raw.params)?.turn;
+      if (!isRecord(turnRecord) || typeof turnRecord.id !== "string") {
         return null;
       }
 
-      return createEvent(
-        "content.delta",
-        threadId,
-        { streamKind: "assistant_text", delta: raw.delta },
-        { provider: "codex" },
-      );
-
-    case "command.start":
-      if (typeof raw.command !== "string") {
+      const turnId = turnRecord.id;
+      const state = mapTurnState(turnRecord.status);
+      if (!state) {
         return null;
       }
 
-      return createEvent(
-        "item.started",
-        threadId,
-        {
-          itemType: "command_execution",
-          status: "in_progress",
-          title: raw.command,
-          detail: raw.command,
-        },
-        { provider: "codex" },
-      );
-
-    case "command.output":
-      if (typeof raw.output !== "string") {
-        return null;
+      if (meta?.activeTurnId === turnId) {
+        meta.activeTurnId = undefined;
       }
 
-      return createEvent(
-        "content.delta",
-        threadId,
-        { streamKind: "command_output", delta: raw.output },
-        { provider: "codex" },
-      );
-
-    case "turn.completed": {
-      const usage = normalizeUsage(raw.usage);
+      const usage = meta?.turnUsage.get(turnId);
       return createEvent(
         "turn.completed",
         threadId,
         {
-          state: "completed",
+          state,
           usage,
         },
-        { provider: "codex" },
+        { provider: "codex", turnId },
       );
     }
 
-    case "session.ended":
+    case "item/started":
+    case "item/completed": {
+      const params = getRecord(raw.params);
+      const item = params?.item;
+      const turnId = typeof params?.turnId === "string" ? params.turnId : undefined;
+      if (!isRecord(item) || !turnId) {
+        return null;
+      }
+
+      const itemId = typeof item.id === "string" ? item.id : undefined;
+      const payload = {
+        itemType: getCanonicalItemType(item),
+        status: raw.method === "item/started" ? "in_progress" : getCanonicalItemStatus(item),
+        title: getItemTitle(item),
+        detail: getItemDetail(item),
+      } satisfies {
+        itemType: CanonicalItemType;
+        status?: RuntimeItemStatus;
+        title?: string;
+        detail?: string;
+      };
+
+      return createEvent(raw.method === "item/started" ? "item.started" : "item.completed", threadId, payload, {
+        provider: "codex",
+        turnId,
+        itemId,
+      });
+    }
+
+    case "item/agentMessage/delta":
+      return createContentDeltaEvent(threadId, raw.params, "assistant_text");
+
+    case "item/commandExecution/outputDelta":
+      return createContentDeltaEvent(threadId, raw.params, "command_output");
+
+    case "item/fileChange/outputDelta":
+      return createContentDeltaEvent(threadId, raw.params, "file_change_output");
+
+    case "item/reasoning/textDelta":
+    case "item/reasoning/summaryTextDelta":
+      return createContentDeltaEvent(threadId, raw.params, "reasoning_text");
+
+    case "thread/tokenUsage/updated": {
+      const params = getRecord(raw.params);
+      if (!params || typeof params.turnId !== "string") {
+        return null;
+      }
+
+      const usage = normalizeUsage(params.tokenUsage);
+      if (usage) {
+        meta?.turnUsage.set(params.turnId, usage);
+      }
+      return null;
+    }
+
+    case "error": {
+      const params = getRecord(raw.params);
+      const error = getRecord(params?.error);
+      const message = typeof error?.message === "string" ? error.message : "Codex reported an error";
+      return createEvent(
+        "runtime.error",
+        threadId,
+        { message, class: "provider_error" },
+        {
+          provider: "codex",
+          turnId: typeof params?.turnId === "string" ? params.turnId : undefined,
+        },
+      );
+    }
+
+    case "serverRequest/resolved": {
+      const params = getRecord(raw.params);
+      if (!params || (typeof params.requestId !== "string" && typeof params.requestId !== "number")) {
+        return null;
+      }
+
+      const requestId = String(params.requestId);
+      const pending = meta?.pendingServerRequests.get(requestId);
+      meta?.pendingServerRequests.delete(requestId);
+      const turnId = getString(pending?.args, "turnId");
+
+      return createEvent(
+        "request.resolved",
+        threadId,
+        {
+          requestType: pending?.requestType ?? "unknown",
+          decision: pending?.decision,
+        },
+        {
+          provider: "codex",
+          requestId,
+          turnId,
+        },
+      );
+    }
+
+    case "thread/closed":
+      meta && (meta.sawSessionExit = true);
       return createEvent(
         "session.exited",
         threadId,
-        { reason: "Codex session ended", exitKind: "graceful" },
+        { reason: "Codex thread closed", exitKind: "graceful" },
         { provider: "codex" },
       );
 
@@ -323,10 +607,9 @@ export function mapCodexEvent(threadId: string, raw: unknown): ProviderRuntimeEv
 async function consumeCodexOutput(
   threadId: string,
   stdout: ReadableStream<Uint8Array>,
+  meta: CodexHandleMeta,
   events: AsyncEventQueue<ProviderRuntimeEvent>,
-): Promise<boolean> {
-  let sawSessionExit = false;
-
+): Promise<void> {
   try {
     for await (const line of readLines(stdout)) {
       let raw: unknown;
@@ -346,16 +629,15 @@ async function consumeCodexOutput(
         continue;
       }
 
-      const mapped = mapCodexEvent(threadId, raw);
-      if (!mapped) {
+      if (isJsonRpcResponse(raw)) {
+        resolvePendingRequest(meta, raw);
         continue;
       }
 
-      if (mapped.type === "session.exited") {
-        sawSessionExit = true;
+      const mapped = mapCodexEvent(threadId, raw, { meta });
+      if (mapped) {
+        events.push(mapped);
       }
-
-      events.push(mapped);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown stream failure";
@@ -368,19 +650,25 @@ async function consumeCodexOutput(
       ),
     );
   }
-
-  return sawSessionExit;
 }
 
 async function finalizeCodexProcess(
   threadId: string,
   process: CodexProcess,
-  outputTask: Promise<boolean>,
+  meta: CodexHandleMeta,
+  outputTask: Promise<void>,
   events: AsyncEventQueue<ProviderRuntimeEvent>,
 ): Promise<void> {
-  const [sawSessionExit, exitCode] = await Promise.all([outputTask, process.exited]);
+  const exitCode = await process.exited;
+  await outputTask;
 
-  if (!sawSessionExit) {
+  for (const [requestId, pending] of meta.pendingRequests) {
+    pending.reject(new Error(`Codex app-server exited before replying to ${pending.method} (${requestId})`));
+  }
+  meta.pendingRequests.clear();
+  meta.pendingServerRequests.clear();
+
+  if (!meta.sawSessionExit) {
     events.push(
       createEvent(
         "session.exited",
@@ -395,6 +683,264 @@ async function finalizeCodexProcess(
   }
 
   events.close();
+}
+
+function resolvePendingRequest(meta: CodexHandleMeta, response: JsonRpcResponse): void {
+  const key = String(response.id);
+  const pending = meta.pendingRequests.get(key);
+  if (!pending) {
+    return;
+  }
+
+  meta.pendingRequests.delete(key);
+
+  if (response.error) {
+    const message = response.error.message ?? `Codex ${pending.method} request failed`;
+    pending.reject(new Error(message));
+    return;
+  }
+
+  pending.resolve(response.result);
+}
+
+function createServerRequestResponse(
+  pending: CodexPendingServerRequest,
+  decision: ProviderApprovalDecision,
+): unknown {
+  switch (pending.method) {
+    case "item/commandExecution/requestApproval":
+      return { decision: decision === "approve" ? "accept" : "decline" };
+
+    case "item/fileChange/requestApproval":
+      return { decision: decision === "approve" ? "accept" : "decline" };
+
+    case "item/permissions/requestApproval": {
+      const permissions = getRecord(pending.args)?.permissions;
+      return decision === "approve"
+        ? { permissions: isRecord(permissions) ? permissions : {}, scope: "turn" }
+        : { permissions: {}, scope: "turn" };
+    }
+
+    case "item/tool/requestUserInput":
+      if (decision === "deny") {
+        throw new Error("Codex tool user input requests require structured answers, not approve/deny");
+      }
+      return { answers: {} };
+
+    default:
+      throw new Error(`Unsupported Codex server request method "${pending.method}"`);
+  }
+}
+
+function mapServerRequest(raw: JsonRpcServerRequest): CodexPendingServerRequest | null {
+  switch (raw.method) {
+    case "item/commandExecution/requestApproval":
+      return {
+        rawId: raw.id,
+        method: raw.method,
+        requestType: "command_execution_approval",
+        detail: getRequestDetail(raw.params, ["command", "reason"]),
+        args: raw.params,
+      };
+
+    case "item/fileChange/requestApproval":
+      return {
+        rawId: raw.id,
+        method: raw.method,
+        requestType: "file_change_approval",
+        detail: getRequestDetail(raw.params, ["reason", "grantRoot"]),
+        args: raw.params,
+      };
+
+    case "item/permissions/requestApproval":
+      return {
+        rawId: raw.id,
+        method: raw.method,
+        requestType: "unknown",
+        detail: getRequestDetail(raw.params, ["reason"]),
+        args: raw.params,
+      };
+
+    case "item/tool/requestUserInput":
+      return {
+        rawId: raw.id,
+        method: raw.method,
+        requestType: "tool_user_input",
+        detail: getToolRequestDetail(raw.params),
+        args: raw.params,
+      };
+
+    default:
+      return null;
+  }
+}
+
+function createContentDeltaEvent(
+  threadId: string,
+  rawParams: unknown,
+  streamKind: "assistant_text" | "command_output" | "file_change_output" | "reasoning_text",
+): ProviderRuntimeEvent | null {
+  const params = getRecord(rawParams);
+  if (!params || typeof params.turnId !== "string" || typeof params.delta !== "string") {
+    return null;
+  }
+
+  return createEvent(
+    "content.delta",
+    threadId,
+    { streamKind, delta: params.delta },
+    {
+      provider: "codex",
+      turnId: params.turnId,
+      itemId: typeof params.itemId === "string" ? params.itemId : undefined,
+    },
+  );
+}
+
+function normalizeUsage(raw: unknown): CodexUsage | undefined {
+  const usage = getRecord(raw);
+  const total = getRecord(usage?.total);
+  if (!total || typeof total.inputTokens !== "number" || typeof total.outputTokens !== "number") {
+    return undefined;
+  }
+
+  return {
+    inputTokens: total.inputTokens,
+    outputTokens: total.outputTokens,
+  };
+}
+
+function mapThreadState(raw: unknown): RuntimeSessionState | null {
+  const type = getRecord(raw)?.type;
+  if (type === "idle") return "ready";
+  if (type === "active") return "running";
+  if (type === "notLoaded") return "stopped";
+  if (type === "systemError") return "error";
+  return null;
+}
+
+function mapTurnState(raw: unknown): RuntimeTurnState | null {
+  if (raw === "completed") return "completed";
+  if (raw === "failed") return "failed";
+  if (raw === "interrupted") return "interrupted";
+  return null;
+}
+
+function getCanonicalItemType(item: Record<string, unknown>): CanonicalItemType {
+  switch (item.type) {
+    case "userMessage":
+      return "user_message";
+    case "agentMessage":
+      return "assistant_message";
+    case "reasoning":
+      return "reasoning";
+    case "commandExecution":
+      return "command_execution";
+    case "fileChange":
+      return "file_change";
+    case "mcpToolCall":
+      return "mcp_tool_call";
+    default:
+      return "unknown";
+  }
+}
+
+function getCanonicalItemStatus(item: Record<string, unknown>): RuntimeItemStatus {
+  if (item.type === "commandExecution" || item.type === "fileChange") {
+    switch (item.status) {
+      case "failed":
+        return "failed";
+      case "declined":
+        return "declined";
+      default:
+        return "completed";
+    }
+  }
+
+  return "completed";
+}
+
+function getItemTitle(item: Record<string, unknown>): string | undefined {
+  switch (item.type) {
+    case "commandExecution":
+      return typeof item.command === "string" ? item.command : undefined;
+    case "fileChange":
+      return "File change";
+    case "reasoning":
+      return "Reasoning";
+    case "agentMessage":
+      return "Assistant message";
+    case "userMessage":
+      return "User message";
+    case "mcpToolCall": {
+      const server = typeof item.server === "string" ? item.server : undefined;
+      const tool = typeof item.tool === "string" ? item.tool : undefined;
+      if (server && tool) {
+        return `${server}/${tool}`;
+      }
+      return tool ?? server;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function getItemDetail(item: Record<string, unknown>): string | undefined {
+  switch (item.type) {
+    case "commandExecution":
+      return typeof item.command === "string" ? item.command : undefined;
+    case "agentMessage":
+      return typeof item.text === "string" && item.text.length > 0 ? item.text : undefined;
+    case "userMessage":
+      return getFirstUserMessageText(item.content);
+    case "fileChange": {
+      const changes = Array.isArray(item.changes) ? item.changes.length : 0;
+      return changes > 0 ? `${changes} file change${changes === 1 ? "" : "s"}` : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function getFirstUserMessageText(raw: unknown): string | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+
+  for (const entry of raw) {
+    if (!isRecord(entry) || entry.type !== "text" || typeof entry.text !== "string") {
+      continue;
+    }
+    return entry.text;
+  }
+
+  return undefined;
+}
+
+function getRequestDetail(raw: unknown, keys: string[]): string | undefined {
+  const record = getRecord(raw);
+  if (!record) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function getToolRequestDetail(raw: unknown): string | undefined {
+  const questions = getRecord(raw)?.questions;
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return undefined;
+  }
+
+  const first = questions.find((entry) => isRecord(entry) && typeof entry.question === "string");
+  return isRecord(first) && typeof first.question === "string" ? first.question : undefined;
 }
 
 async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -459,24 +1005,45 @@ async function waitForExit(process: CodexProcess, timeoutMs: number): Promise<bo
   return Promise.race([exited, timeout]);
 }
 
-function normalizeUsage(raw: unknown): { inputTokens: number; outputTokens: number } | undefined {
-  if (!isRecord(raw) || typeof raw.input_tokens !== "number" || typeof raw.output_tokens !== "number") {
-    return undefined;
-  }
-
-  return {
-    inputTokens: raw.input_tokens,
-    outputTokens: raw.output_tokens,
-  };
-}
-
 function getCodexHandleMeta(handle: ProviderSessionHandle): CodexHandleMeta {
   const meta = handle.meta as Partial<CodexHandleMeta>;
-  if (!meta.process || typeof meta.writeRpc !== "function") {
+  if (!meta.process || typeof meta.sendRequest !== "function" || typeof meta.sendResponse !== "function") {
     throw new Error("Invalid Codex provider session handle");
   }
 
   return meta as CodexHandleMeta;
+}
+
+function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return value instanceof ReadableStream;
+}
+
+function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
+  return isRecord(value) && "id" in value && !("method" in value) && ("result" in value || "error" in value);
+}
+
+function isJsonRpcNotification(value: unknown): value is JsonRpcNotification {
+  return isRecord(value) && typeof value.method === "string" && !("id" in value);
+}
+
+function isJsonRpcServerRequest(value: unknown): value is JsonRpcServerRequest {
+  return isRecord(value) && typeof value.method === "string" && "id" in value;
+}
+
+function getRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function getString(value: unknown, ...path: string[]): string | undefined {
+  let current: unknown = value;
+  for (const segment of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+
+  return typeof current === "string" ? current : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
