@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import { parseArgs } from "node:util";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService } from "@orka/core";
@@ -22,6 +21,21 @@ import {
   removeProject,
   listProjects,
 } from "@orka/daemon";
+import {
+  command,
+  subcommands,
+  run,
+  string as str,
+  boolean as bool,
+  flag,
+  option,
+  positional,
+  optional,
+  restPositionals,
+  multioption,
+} from "cmd-ts";
+
+void bool;
 
 // Initialize OpenTelemetry tracing
 initTracing();
@@ -90,30 +104,1294 @@ if (remoteUrl) {
   svc = createLocalClient();
 }
 
-const command = process.argv[2];
+const TOP_LEVEL_COMMANDS = new Set([
+  "spawn",
+  "ps",
+  "attach",
+  "logs",
+  "stop",
+  "diff",
+  "retry",
+  "show",
+  "workdir",
+  "wait",
+  "result",
+  "send",
+  "keep",
+  "unkeep",
+  "merge",
+  "project",
+  "prune",
+  "serve",
+  "relay",
+  "keygen",
+]);
 
-// Auto-reap dead sessions on every CLI invocation (skip for wait — it reaps in its own loop)
-if (command !== "wait") {
-  await svc.reap();
+const PROJECT_SUBCOMMANDS = new Set(["add", "remove", "rm", "list", "ls"]);
+const RELAY_SUBCOMMANDS = new Set(["serve", "signup", "keys", "account", "usage"]);
+const RELAY_KEYS_SUBCOMMANDS = new Set(["create", "revoke", "list"]);
+const KEYGEN_SUBCOMMANDS = new Set(["client", "node", "save-server", "show", "help"]);
+
+async function runCliCommand(name: string, fn: () => Promise<void>): Promise<void> {
+  await withSpan(`orka.cli.${name}`, { "orka.command": name }, async () => {
+    if (name !== "wait") {
+      await svc.reap();
+    }
+    await fn();
+  });
 }
 
-const commands: Record<string, () => Promise<void>> = {
-  spawn: cmdSpawn, ps: cmdPs, attach: cmdAttach, logs: cmdLogs,
-  stop: cmdStop, diff: cmdDiff, retry: cmdRetry, show: cmdShow,
-  workdir: cmdWorkdir, wait: cmdWait, result: cmdResult, send: cmdSend,
-  keep: cmdKeep, unkeep: cmdUnkeep, merge: cmdMerge, project: cmdProject,
-  prune: cmdPrune, serve: cmdServe, relay: cmdRelay, keygen: cmdKeygen,
-};
-
-const handler = command ? commands[command] : undefined;
-if (handler) {
-  await withSpan(`orka.cli.${command}`, { "orka.command": command }, handler);
-} else {
-  printUsage();
+function fail(message: string): never {
+  console.error(message);
+  process.exit(1);
 }
 
-// Flush pending spans before exit
-await shutdownTracing();
+async function readPromptFromStdin(): Promise<string> {
+  return await new Promise<string>((resolve) => {
+    let data = "";
+    process.stdin.setEncoding("utf-8");
+    process.stdin.on("data", (chunk) => (data += chunk));
+    process.stdin.on("end", () => resolve(data.trim()));
+  });
+}
+
+const spawnCmd = command({
+  name: "spawn",
+  description: "Spawn an agent session",
+  args: {
+    project: option({ type: optional(str), long: "project", short: "p" }),
+    backend: option({ type: optional(str), long: "backend", short: "b" }),
+    prompt: option({ type: optional(str), long: "prompt" }),
+    promptFile: option({ type: optional(str), long: "prompt-file" }),
+    mode: option({ type: optional(str), long: "mode", short: "m" }),
+    model: option({ type: optional(str), long: "model" }),
+    branch: option({ type: optional(str), long: "branch" }),
+    title: option({ type: optional(str), long: "title" }),
+    reasoningEffort: option({ type: optional(str), long: "reasoning-effort" }),
+    autoMerge: flag({ long: "auto-merge" }),
+    tag: multioption({ type: str, long: "tag" }),
+    words: restPositionals({ type: str, displayName: "prompt" }),
+  },
+  handler: async (args) => runCliCommand("spawn", async () => {
+    const cfg = getConfig().defaults;
+
+    if (args.prompt && args.promptFile) {
+      fail("error: cannot use both --prompt and --prompt-file");
+    }
+
+    let prompt: string;
+    if (args.promptFile) {
+      if (!existsSync(args.promptFile)) {
+        fail(`error: prompt file not found: ${args.promptFile}`);
+      }
+      prompt = readFileSync(args.promptFile, "utf-8").trim();
+    } else if (args.prompt) {
+      prompt = args.prompt;
+    } else if (args.words.length > 0) {
+      prompt = args.words.join(" ");
+    } else if (!process.stdin.isTTY) {
+      prompt = await readPromptFromStdin();
+    } else {
+      prompt = "";
+    }
+
+    if (!prompt) {
+      fail("error: prompt is required (use --prompt, --prompt-file, positional args, or pipe stdin)");
+    }
+
+    let session;
+    try {
+      session = await svc.spawn({
+        prompt,
+        title: args.title,
+        projectPath: resolveProject(args.project ?? cfg.project),
+        backend: (args.backend ?? cfg.backend) as BackendKind,
+        mode: (args.mode ?? cfg.mode) as SessionMode,
+        model: args.model || cfg.model || undefined,
+        reasoningEffort: args.reasoningEffort as any || undefined,
+        branch: args.branch,
+        autoMerge: args.autoMerge || false,
+        tags: args.tag.length > 0 ? args.tag : undefined,
+      });
+    } catch (e: any) {
+      fail(`error: ${e.message}`);
+    }
+
+    console.log(`spawned session ${session.id}`);
+    console.log(`  backend:  ${session.backend}`);
+    console.log(`  mode:     ${session.mode}`);
+    console.log(`  workdir:  ${session.workingDir}`);
+    console.log(`  tmux:     ${session.tmuxSessionName}`);
+    console.log(`  log:      ${session.logFile}`);
+    if (args.tag.length > 0) {
+      console.log(`  tags:     ${args.tag.join(", ")}`);
+    }
+
+    if (session.mode === "interactive") {
+      console.log("");
+      console.log("attaching... (detach: Ctrl-b d)");
+      await defaultRunner.attach(session.tmuxSessionName);
+    }
+  }),
+});
+
+const psCmd = command({
+  name: "ps",
+  description: "List active sessions",
+  args: {
+    status: option({ type: optional(str), long: "status" }),
+    backend: option({ type: optional(str), long: "backend" }),
+    project: option({ type: optional(str), long: "project" }),
+    tag: option({ type: optional(str), long: "tag" }),
+    verbose: flag({ long: "verbose", short: "v" }),
+  },
+  handler: async (args) => runCliCommand("ps", async () => {
+    let sessions = await svc.listSessions({
+      status: args.status as any,
+      tag: args.tag,
+    });
+    if (args.backend) {
+      sessions = sessions.filter((s) => s.backend === args.backend);
+    }
+    if (args.project) {
+      const proj = args.project;
+      const resolved = resolveProject(proj);
+      sessions = sessions.filter((s) =>
+        s.projectPath === resolved || s.projectPath === proj || projectName(s.projectPath) === proj,
+      );
+    }
+
+    if (sessions.length === 0) {
+      console.log("no sessions");
+      return;
+    }
+
+    const noColor = !!process.env["NO_COLOR"];
+    const c = (code: string, text: string): string =>
+      noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
+
+    const statusColor = (status: string): string => {
+      switch (status) {
+        case "running": return c("32", status);
+        case "completed": return c("2", status);
+        case "failed": return c("31", status);
+        case "cancelled": return c("33", status);
+        case "preparing": return c("34", status);
+        case "queued": return c("34", status);
+        default: return status;
+      }
+    };
+
+    const verbose = args.verbose ?? false;
+    const uniqueProjects = new Set(sessions.map((s) => s.projectPath));
+    const multiProject = uniqueProjects.size > 1;
+    const showProject = multiProject || verbose;
+
+    const running = sessions.filter((s) => s.status === "running").length;
+    console.log(c("1", `${running} running / ${sessions.length} total`));
+    console.log("");
+
+    let header =
+      padR("ID", 16) +
+      padR("STATUS", 20) +
+      padR("AGE", 10);
+    if (showProject) header += padR("PROJECT", 36);
+    header += padR("BACKEND", 14);
+    if (verbose) {
+      header += padR("COST", 10) + padR("DURATION", 10) + padR("TOKENS", 14);
+    }
+    header += "TITLE";
+    const lineWidth = 76 + (showProject ? 36 : 0) + (verbose ? 34 : 0);
+    console.log(header);
+    console.log("-".repeat(lineWidth));
+
+    for (const s of sessions) {
+      const task = await svc.getTask(s.taskId);
+      const statusText = s.kept ? `${s.status} [kept]` : s.status;
+      const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
+      const statusPad = 20 - statusText.length + colored.length;
+
+      let line =
+        padR(s.id, 16) +
+        colored.padEnd(statusPad) +
+        padR(formatAge(s.createdAt), 10);
+
+      if (showProject) {
+        const alias = projectNameForPath(s.projectPath);
+        const label = alias ? `${s.projectPath} (${alias})` : s.projectPath || "-";
+        line += padR(label, 36);
+      }
+      line += padR(s.backend, 14);
+
+      if (verbose) {
+        const result = await svc.getResult(s.id);
+        const cost = result?.costUsd != null ? `$${result.costUsd.toFixed(2)}` : "-";
+        const duration = result ? formatDuration(result.durationMs) : "-";
+        const tokens = result ? `${shortNum(result.outputTokens)} out` : "-";
+        line += padR(cost, 10) + padR(duration, 10) + padR(tokens, 14);
+      }
+
+      line += (task?.title ?? "").slice(0, verbose ? 40 : 50);
+      console.log(line);
+    }
+  }),
+});
+
+const attachCmd = command({
+  name: "attach",
+  description: "Attach to a session",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("attach", async () => {
+    if (!sessionId) {
+      fail("usage: orka attach <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    if (!(await svc.isAlive(session.id))) {
+      fail(`tmux session not running: ${session.tmuxSessionName}`);
+    }
+
+    if (remoteUrl) {
+      console.log(`session ${session.id} is running remotely`);
+      console.log("");
+      console.log("to attach via SSH:");
+      console.log(`  ssh <host> -t tmux attach -t ${session.tmuxSessionName}`);
+      console.log("");
+      console.log("or use 'orka logs -f' to stream output remotely:");
+      console.log(`  orka --remote ${remoteUrl} logs -f ${session.id}`);
+      return;
+    }
+
+    await defaultRunner.attach(session.tmuxSessionName);
+  }),
+});
+
+const logsCmd = command({
+  name: "logs",
+  description: "View session logs",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    follow: flag({ long: "follow", short: "f" }),
+  },
+  handler: async ({ sessionId, follow }) => runCliCommand("logs", async () => {
+    if (!sessionId) {
+      fail("usage: orka logs <session-id> [--follow]");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    if (!follow) {
+      try {
+        const output = await svc.captureOutput(session.id);
+        console.log(output);
+        return;
+      } catch {
+        fail("no logs available (session ended, no log file found)");
+      }
+    }
+
+    if (await svc.isAlive(session.id)) {
+      let offset = 0;
+      while (true) {
+        try {
+          const output = await svc.captureOutput(session.id);
+          if (output.length > offset) {
+            process.stdout.write(output.slice(offset));
+            offset = output.length;
+          }
+        } catch {
+          break;
+        }
+        if (!(await svc.isAlive(session.id))) break;
+        await Bun.sleep(500);
+      }
+      return;
+    }
+
+    if (session.logFile && existsSync(session.logFile)) {
+      const proc = Bun.spawn(["tail", "-f", session.logFile], {
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await proc.exited;
+      return;
+    }
+
+    fail("no logs available (session ended, no log file found)");
+  }),
+});
+
+const stopCmd = command({
+  name: "stop",
+  description: "Stop a session",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("stop", async () => {
+    if (!sessionId) {
+      fail("usage: orka stop <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    if (session.status !== "running" && session.status !== "preparing") {
+      fail(`session ${session.id} is already ${session.status}`);
+    }
+
+    await svc.stop(session.id);
+    console.log(`stopped session ${session.id}`);
+  }),
+});
+
+const diffCmd = command({
+  name: "diff",
+  description: "Show git changes in a session worktree",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("diff", async () => {
+    if (!sessionId) {
+      fail("usage: orka diff <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    try {
+      const { status, diff } = await svc.getDiff(session.id);
+      console.log(status);
+      if (diff) {
+        console.log("");
+        console.log(diff);
+      }
+    } catch (e: any) {
+      fail(`error: ${e.message}`);
+    }
+  }),
+});
+
+const retryCmd = command({
+  name: "retry",
+  description: "Re-run a session with the same prompt",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("retry", async () => {
+    if (!sessionId) {
+      fail("usage: orka retry <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    if (session.status === "running") {
+      fail(`session ${session.id} is still running — stop it first`);
+    }
+
+    const task = await svc.getTask(session.taskId);
+    if (!task) {
+      fail(`task not found for session: ${session.id}`);
+    }
+
+    const oldTags = await svc.getTags(session.id);
+    const newSession = await svc.spawn({
+      prompt: task.prompt,
+      title: task.title,
+      projectPath: session.projectPath || session.workingDir,
+      backend: session.backend,
+      mode: session.mode,
+      model: task.model || undefined,
+      tags: oldTags.length > 0 ? oldTags : undefined,
+    });
+
+    console.log(`retried session ${session.id} → ${newSession.id}`);
+    console.log(`  backend:  ${newSession.backend}`);
+    console.log(`  mode:     ${newSession.mode}`);
+    console.log(`  workdir:  ${newSession.workingDir}`);
+    console.log(`  tmux:     ${newSession.tmuxSessionName}`);
+    console.log(`  log:      ${newSession.logFile}`);
+
+    if (newSession.mode === "interactive") {
+      console.log("");
+      console.log("attaching... (detach: Ctrl-b d)");
+      await defaultRunner.attach(newSession.tmuxSessionName);
+    }
+  }),
+});
+
+const showCmd = command({
+  name: "show",
+  description: "Show full details for a session",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("show", async () => {
+    if (!sessionId) {
+      fail("usage: orka show <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    const task = await svc.getTask(session.taskId);
+
+    console.log(`session ${session.id}`);
+    console.log("");
+    console.log(`  status:    ${session.status}`);
+    console.log(`  backend:   ${session.backend}`);
+    console.log(`  mode:      ${session.mode}`);
+    if (task?.model) console.log(`  model:     ${task.model}`);
+    console.log(`  project:   ${session.projectPath || "(unknown)"}`);
+    console.log(`  workdir:   ${session.workingDir}`);
+    console.log(`  tmux:      ${session.tmuxSessionName}`);
+    console.log(`  log:       ${session.logFile}`);
+    console.log(`  created:   ${session.createdAt}`);
+    console.log(`  started:   ${session.startedAt ?? "(not started)"}`);
+    console.log(`  finished:  ${session.finishedAt ?? "(not finished)"}`);
+    console.log(`  exit code: ${session.exitCode ?? "(none)"}`);
+    if (session.kept) console.log("  kept:      yes (worktree protected)");
+    if (session.autoMerge) console.log("  auto-merge: yes");
+
+    const tags = await svc.getTags(session.id);
+    if (tags.length > 0) console.log(`  tags:      ${tags.join(", ")}`);
+
+    if (task) {
+      console.log("");
+      console.log(`  title:     ${task.title}`);
+      console.log(`  prompt:    ${task.prompt}`);
+    }
+  }),
+});
+
+const workdirCmd = command({
+  name: "workdir",
+  description: "Print session working directory",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("workdir", async () => {
+    if (!sessionId) {
+      fail("usage: orka workdir <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    console.log(session.workingDir);
+  }),
+});
+
+const waitCmd = command({
+  name: "wait",
+  description: "Wait for session(s) to complete",
+  args: {
+    all: flag({ long: "all" }),
+    project: option({ type: optional(str), long: "project" }),
+    ids: restPositionals({ type: str, displayName: "session-id" }),
+  },
+  handler: async ({ all, project, ids }) => runCliCommand("wait", async () => {
+    if (ids.length === 0 && !all) {
+      fail("usage: orka wait <session-id...> | --all [--project <name>]");
+    }
+
+    const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
+    let targets: string[];
+
+    if (all) {
+      let running = (await svc.listSessions()).filter((s) => !terminalStatuses.has(s.status));
+      if (project) {
+        const resolved = resolveProject(project);
+        running = running.filter((s) =>
+          s.projectPath === resolved || s.projectPath === project || projectName(s.projectPath) === project,
+        );
+      }
+      targets = running.map((s) => s.id);
+      if (targets.length === 0) {
+        console.log("no running sessions to wait for");
+        return;
+      }
+    } else {
+      targets = [];
+      for (const id of ids) {
+        const s = await findSession(id);
+        if (!s) {
+          fail(`session not found: ${id}`);
+        }
+        targets.push(s.id);
+      }
+    }
+
+    console.log(`waiting for ${targets.length} session(s)...`);
+    const pending = new Set(targets);
+    let anyFailed = false;
+
+    while (pending.size > 0) {
+      await svc.reap();
+      for (const id of [...pending]) {
+        const s = await svc.getSession(id);
+        if (!s || terminalStatuses.has(s.status)) {
+          pending.delete(id);
+          const status = s?.status ?? "unknown";
+          const task = s ? await svc.getTask(s.taskId) : null;
+          const label = task?.title?.slice(0, 50) ?? id;
+          console.log(`  ${id}  ${status}  ${label}`);
+          if (status === "failed") anyFailed = true;
+        }
+      }
+      if (pending.size > 0) await Bun.sleep(2000);
+    }
+
+    console.log("all sessions finished");
+    if (anyFailed) process.exit(1);
+  }),
+});
+
+const resultCmd = command({
+  name: "result",
+  description: "Show final result from a background session",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    json: flag({ long: "json" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId, json }) => runCliCommand("result", async () => {
+    if (!sessionId) {
+      fail("usage: orka result <session-id> [--json]");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    const result = await svc.getResult(session.id);
+    if (!result) {
+      fail("no result found in session log (session may not be a background claude-code session)");
+    }
+
+    if (json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    const noColor = !!process.env["NO_COLOR"];
+    const c = (code: string, text: string): string =>
+      noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
+
+    const task = await svc.getTask(session.taskId);
+    console.log(c("1", `session ${session.id}`));
+    if (task) console.log(`  title: ${task.title.slice(0, 80)}`);
+
+    console.log("");
+    if (result.isError) {
+      console.log(c("31", "STATUS: ERROR"));
+    } else {
+      console.log(c("32", "STATUS: SUCCESS"));
+    }
+
+    if (result.model) console.log(`  model:    ${result.model}`);
+    console.log(`  turns:    ${result.numTurns}`);
+    console.log(`  duration: ${formatDuration(result.durationMs)}`);
+    if (result.costUsd !== null) console.log(`  cost:     $${result.costUsd.toFixed(4)}`);
+    console.log(`  tokens:   ${result.inputTokens.toLocaleString()} in / ${result.outputTokens.toLocaleString()} out`);
+    if (result.cacheReadTokens > 0) {
+      console.log(
+        `  cache:    ${result.cacheReadTokens.toLocaleString()} read / ${result.cacheCreateTokens.toLocaleString()} created`,
+      );
+    }
+
+    console.log("");
+    console.log(c("1", "Result:"));
+    console.log(result.result);
+  }),
+});
+
+const sendCmd = command({
+  name: "send",
+  description: "Send text input to a running session",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    text: restPositionals({ type: str, displayName: "text" }),
+  },
+  handler: async ({ sessionId, text }) => runCliCommand("send", async () => {
+    if (!sessionId || text.length === 0) {
+      fail("usage: orka send <session-id> <text...>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    try {
+      await svc.sendInput(session.id, text.join(" "));
+      console.log(`sent to ${session.id}`);
+    } catch (e: any) {
+      fail(`error: ${e.message}`);
+    }
+  }),
+});
+
+const keepCmd = command({
+  name: "keep",
+  description: "Protect a session's worktree from auto-cleanup",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("keep", async () => {
+    if (!sessionId) {
+      fail("usage: orka keep <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    await svc.setKept(session.id, true);
+    console.log(`session ${session.id} marked as kept (worktree protected from cleanup)`);
+  }),
+});
+
+const unkeepCmd = command({
+  name: "unkeep",
+  description: "Remove worktree protection",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("unkeep", async () => {
+    if (!sessionId) {
+      fail("usage: orka unkeep <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    await svc.setKept(session.id, false);
+    console.log(`session ${session.id} unprotected (worktree may be cleaned up)`);
+  }),
+});
+
+const mergeCmd = command({
+  name: "merge",
+  description: "Merge session worktree branch into current branch",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id" }),
+    noCleanup: flag({ long: "no-cleanup" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId, noCleanup }) => runCliCommand("merge", async () => {
+    if (!sessionId) {
+      fail("usage: orka merge <session-id> [--no-cleanup]");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    try {
+      const { branch, commits, cleaned } = await svc.merge(session.id, !noCleanup);
+      console.log(`merged ${commits} commit(s) from ${branch}`);
+      if (cleaned) {
+        console.log(`cleaned up worktree and branch ${branch}`);
+      }
+    } catch (e: any) {
+      fail(`error: ${e.message}`);
+    }
+  }),
+});
+
+const pruneCmd = command({
+  name: "prune",
+  description: "Remove old completed/cancelled/failed sessions",
+  args: {
+    age: option({ type: optional(str), long: "age" }),
+    project: option({ type: optional(str), long: "project" }),
+  },
+  handler: async ({ age, project }) => runCliCommand("prune", async () => {
+    const maxAgeMs = parseAge(age ?? "24h");
+    const projectPath = project ? resolveProject(project) : undefined;
+
+    const { pruned, orphansCleaned } = await svc.pruneSessions({ maxAgeMs, projectPath });
+
+    if (pruned === 0) {
+      console.log("nothing to prune");
+    } else {
+      console.log(`pruned ${pruned} session(s)`);
+    }
+    if (orphansCleaned > 0) {
+      console.log(`cleaned ${orphansCleaned} orphaned worktree(s)`);
+    }
+  }),
+});
+
+const serveCmd = command({
+  name: "serve",
+  description: "Start daemon WS server",
+  args: {
+    port: option({ type: optional(str), long: "port" }),
+    host: option({ type: optional(str), long: "host" }),
+    relay: option({ type: optional(str), long: "relay" }),
+    nodeId: option({ type: optional(str), long: "node-id" }),
+    relayToken: option({ type: optional(str), long: "relay-token" }),
+  },
+  handler: async (args) => runCliCommand("serve", async () => {
+    const port = parseInt(args.port ?? "7394", 10);
+    const hostname = args.host ?? "127.0.0.1";
+    const localSvc = createLocalClient();
+    const server = await startServer(localSvc, {
+      port,
+      hostname,
+      relayUrl: args.relay,
+      nodeId: args.nodeId,
+      relayToken: args.relayToken ?? process.env.ORKA_TOKEN,
+      encrypt: useEncrypt,
+    });
+    console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
+    if (args.relay) {
+      console.log(`  relay: ${args.relay}`);
+    }
+
+    await new Promise(() => {});
+  }),
+});
+
+const projectAddCmd = command({
+  name: "add",
+  description: "Register a project alias",
+  args: {
+    name: positional({ type: optional(str), displayName: "name" }),
+    path: positional({ type: optional(str), displayName: "path" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ name, path }) => runCliCommand("project", async () => {
+    if (!name) {
+      fail("usage: orka project add <name> [path]");
+    }
+    const entry = addProject(name, path || ".");
+    console.log(`registered project ${entry.name} → ${entry.path}`);
+  }),
+});
+
+const projectRemoveCmd = command({
+  name: "remove",
+  description: "Unregister a project alias",
+  args: {
+    name: positional({ type: optional(str), displayName: "name" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ name }) => runCliCommand("project", async () => {
+    if (!name) {
+      fail("usage: orka project remove <name>");
+    }
+    if (removeProject(name)) {
+      console.log(`removed project ${name}`);
+    } else {
+      fail(`project not found: ${name}`);
+    }
+  }),
+});
+
+const projectRmCmd = command({
+  name: "rm",
+  description: "Unregister a project alias",
+  args: {
+    name: positional({ type: optional(str), displayName: "name" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ name }) => runCliCommand("project", async () => {
+    if (!name) {
+      fail("usage: orka project remove <name>");
+    }
+    if (removeProject(name)) {
+      console.log(`removed project ${name}`);
+    } else {
+      fail(`project not found: ${name}`);
+    }
+  }),
+});
+
+const projectListCmd = command({
+  name: "list",
+  description: "List project aliases",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("project", async () => {
+    const projects = listProjects();
+    if (projects.length === 0) {
+      console.log("no registered projects");
+      console.log("");
+      console.log("register with: orka project add <name> [path]");
+      return;
+    }
+    for (const p of projects) {
+      console.log(`${p.name.padEnd(20)} ${p.path}`);
+    }
+  }),
+});
+
+const projectLsCmd = command({
+  name: "ls",
+  description: "List project aliases",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("project", async () => {
+    const projects = listProjects();
+    if (projects.length === 0) {
+      console.log("no registered projects");
+      console.log("");
+      console.log("register with: orka project add <name> [path]");
+      return;
+    }
+    for (const p of projects) {
+      console.log(`${p.name.padEnd(20)} ${p.path}`);
+    }
+  }),
+});
+
+const projectCmd = subcommands({
+  name: "project",
+  description: "Register/list/remove project aliases",
+  cmds: {
+    add: projectAddCmd,
+    remove: projectRemoveCmd,
+    rm: projectRmCmd,
+    list: projectListCmd,
+    ls: projectLsCmd,
+  },
+});
+
+const relayServeCmd = command({
+  name: "serve",
+  description: "Start relay server",
+  args: {
+    port: option({ type: optional(str), long: "port" }),
+    token: option({ type: optional(str), long: "token" }),
+  },
+  handler: async ({ port, token }) => runCliCommand("relay", async () => {
+    const parsedPort = parseInt(port ?? "7390", 10);
+    const relayToken = token ?? process.env.ORKA_TOKEN;
+    const handle = startRelay({ port: parsedPort, token: relayToken });
+    console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
+    console.log("  nodes register at:  /register?node=<id>");
+    console.log("  clients connect at: /ws");
+
+    let shuttingDown = false;
+    for (const signal of ["SIGTERM", "SIGINT"] as const) {
+      process.on(signal, async () => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`\nreceived ${signal}, starting graceful shutdown...`);
+        await handle.shutdown();
+        process.exit(0);
+      });
+    }
+
+    await new Promise(() => {});
+  }),
+});
+
+const relaySignupCmd = command({
+  name: "signup",
+  description: "Sign up for a relay account",
+  args: {
+    email: option({ type: optional(str), long: "email" }),
+    name: option({ type: optional(str), long: "name" }),
+  },
+  handler: async ({ email, name }) => runCliCommand("relay", async () => {
+    if (!email || !name) {
+      fail("usage: orka relay signup --email <email> --name <name>");
+    }
+
+    const data = await relayFetch("/v1/signup", {
+      method: "POST",
+      body: { email, name },
+      auth: false,
+    });
+
+    saveApiKey(data.apiKey);
+
+    console.log("signup successful!");
+    console.log(`  account: ${data.accountId}`);
+    console.log(`  api key: ${data.apiKey}`);
+    console.log("");
+    console.log(`key saved to ${join(getOrkaHome(), "relay-key")}`);
+    console.log("it will be used automatically for future relay commands");
+  }),
+});
+
+const relayKeysCreateCmd = command({
+  name: "create",
+  description: "Create an API key",
+  args: {
+    label: option({ type: optional(str), long: "label" }),
+    permissions: option({ type: optional(str), long: "permissions" }),
+  },
+  handler: async ({ label, permissions }) => runCliCommand("relay", async () => {
+    const body: any = {};
+    if (label) body.label = label;
+    if (permissions) body.permissions = permissions;
+
+    const data = await relayFetch("/v1/keys", { method: "POST", body });
+    console.log("key created:");
+    console.log(`  id:     ${data.keyId}`);
+    console.log(`  key:    ${data.apiKey}`);
+    console.log(`  prefix: ${data.prefix}`);
+  }),
+});
+
+const relayKeysRevokeCmd = command({
+  name: "revoke",
+  description: "Revoke an API key",
+  args: {
+    keyId: positional({ type: optional(str), displayName: "key-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ keyId }) => runCliCommand("relay", async () => {
+    if (!keyId) {
+      fail("usage: orka relay keys revoke <key-id>");
+    }
+    await relayFetch(`/v1/keys/${keyId}`, { method: "DELETE" });
+    console.log(`revoked key ${keyId}`);
+  }),
+});
+
+const relayKeysListCmd = command({
+  name: "list",
+  description: "List API keys",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("relay", async () => {
+    const data = await relayFetch("/v1/keys");
+    if (data.keys.length === 0) {
+      console.log("no API keys");
+      return;
+    }
+    console.log(padR("ID", 20) + padR("PREFIX", 20) + padR("PERMS", 10) + padR("STATUS", 10) + padR("LABEL", 20) + "LAST USED");
+    for (const k of data.keys) {
+      console.log(
+        padR(k.id, 20) +
+        padR(k.prefix, 20) +
+        padR(k.permissions, 10) +
+        padR(k.status, 10) +
+        padR(k.label, 20) +
+        (k.lastUsedAt ?? "never"),
+      );
+    }
+  }),
+});
+
+const relayKeysCmd = subcommands({
+  name: "keys",
+  description: "Manage API keys",
+  cmds: {
+    create: relayKeysCreateCmd,
+    revoke: relayKeysRevokeCmd,
+    list: relayKeysListCmd,
+  },
+});
+
+const relayAccountCmd = command({
+  name: "account",
+  description: "Show account info",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("relay", async () => {
+    const data = await relayFetch("/v1/account");
+    console.log(`account ${data.id}`);
+    console.log(`  email:   ${data.email}`);
+    console.log(`  name:    ${data.name}`);
+    console.log(`  status:  ${data.status}`);
+    console.log(`  tier:    ${data.tier}`);
+    console.log(`  created: ${data.createdAt}`);
+  }),
+});
+
+const relayUsageCmd = command({
+  name: "usage",
+  description: "Show usage statistics",
+  args: {
+    from: option({ type: optional(str), long: "from" }),
+    to: option({ type: optional(str), long: "to" }),
+    granularity: option({ type: optional(str), long: "granularity" }),
+  },
+  handler: async ({ from, to, granularity }) => runCliCommand("relay", async () => {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    params.set("granularity", granularity ?? "hour");
+
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const data = await relayFetch(`/v1/usage${qs}`);
+
+    if (data.buckets.length === 0) {
+      console.log("no usage data for this period");
+      return;
+    }
+
+    console.log(padR("PERIOD", 24) + padR("REQUESTS", 12) + padR("BYTES IN", 12) + "BYTES OUT");
+    for (const b of data.buckets) {
+      console.log(
+        padR(b.period, 24) +
+        padR(String(b.requests), 12) +
+        padR(String(b.bytesIn), 12) +
+        String(b.bytesOut),
+      );
+    }
+  }),
+});
+
+const relayCmd = subcommands({
+  name: "relay",
+  description: "Start relay WS router / manage relay account",
+  cmds: {
+    serve: relayServeCmd,
+    signup: relaySignupCmd,
+    keys: relayKeysCmd,
+    account: relayAccountCmd,
+    usage: relayUsageCmd,
+  },
+});
+
+const keygenClientCmd = command({
+  name: "client",
+  description: "Generate/show client keypair",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("keygen", async () => {
+    const orkaHome = getOrkaHome();
+    const kp = ensureKeyPair(orkaHome, "client");
+    console.log("client keypair:");
+    console.log(`  public:  ${kp.publicKey}`);
+    console.log(`  stored:  ${orkaHome}/keys/client.pub, ${orkaHome}/keys/client.key`);
+  }),
+});
+
+const keygenNodeCmd = command({
+  name: "node",
+  description: "Generate/show node keypair",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("keygen", async () => {
+    const orkaHome = getOrkaHome();
+    const kp = ensureKeyPair(orkaHome, "node");
+    console.log("node keypair:");
+    console.log(`  public:  ${kp.publicKey}`);
+    console.log(`  stored:  ${orkaHome}/keys/node.pub, ${orkaHome}/keys/node.key`);
+  }),
+});
+
+const keygenSaveServerCmd = command({
+  name: "save-server",
+  description: "Save a remote server's public key",
+  args: {
+    pubkey: positional({ type: optional(str), displayName: "public-key" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ pubkey }) => runCliCommand("keygen", async () => {
+    if (!pubkey) {
+      console.error("usage: orka keygen save-server <public-key>");
+      console.error("  get it from: curl <daemon-url>/health | jq -r .publicKey");
+      process.exit(1);
+    }
+    const orkaHome = getOrkaHome();
+    const keysDir = join(orkaHome, "keys");
+    mkdirSync(keysDir, { recursive: true });
+    writeFileSync(join(keysDir, "server.pub"), pubkey, { mode: 0o644 });
+    console.log(`saved server public key to ${keysDir}/server.pub`);
+  }),
+});
+
+const keygenShowCmd = command({
+  name: "show",
+  description: "Show all stored keys",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("keygen", async () => {
+    const orkaHome = getOrkaHome();
+    const clientKp = loadKeyPair(orkaHome, "client");
+    const nodeKp = loadKeyPair(orkaHome, "node");
+    const serverPub = loadPublicKey(orkaHome, "server");
+
+    if (clientKp) {
+      console.log(`client public key: ${clientKp.publicKey}`);
+    } else {
+      console.log("client keypair:    (not generated)");
+    }
+    if (nodeKp) {
+      console.log(`node public key:   ${nodeKp.publicKey}`);
+    } else {
+      console.log("node keypair:      (not generated)");
+    }
+    if (serverPub) {
+      console.log(`server public key: ${serverPub}`);
+    } else {
+      console.log("server public key: (not saved)");
+    }
+  }),
+});
+
+const keygenHelpCmd = command({
+  name: "help",
+  description: "Show keygen usage",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => runCliCommand("keygen", async () => {
+    console.log("orka keygen — manage E2E encryption keys");
+    console.log("");
+    console.log("subcommands:");
+    console.log("  client         Generate/show client keypair (for CLI → daemon encryption)");
+    console.log("  node           Generate/show node keypair (for daemon server)");
+    console.log("  save-server    Save a remote server's public key");
+    console.log("  show           Show all stored keys");
+    console.log("");
+    console.log("usage:");
+    console.log("  orka keygen client                  # generate client keys");
+    console.log("  orka keygen save-server <pubkey>     # save server's public key");
+    console.log("  orka --remote ws://host:7394 --encrypt spawn ...  # use encryption");
+  }),
+});
+
+const keygenCmd = subcommands({
+  name: "keygen",
+  description: "Manage E2E encryption keys",
+  cmds: {
+    client: keygenClientCmd,
+    node: keygenNodeCmd,
+    "save-server": keygenSaveServerCmd,
+    show: keygenShowCmd,
+    help: keygenHelpCmd,
+  },
+});
+
+const app = subcommands({
+  name: "orka",
+  description: "agent session orchestrator",
+  cmds: {
+    spawn: spawnCmd,
+    ps: psCmd,
+    attach: attachCmd,
+    logs: logsCmd,
+    stop: stopCmd,
+    diff: diffCmd,
+    retry: retryCmd,
+    show: showCmd,
+    workdir: workdirCmd,
+    wait: waitCmd,
+    result: resultCmd,
+    send: sendCmd,
+    keep: keepCmd,
+    unkeep: unkeepCmd,
+    merge: mergeCmd,
+    project: projectCmd,
+    prune: pruneCmd,
+    serve: serveCmd,
+    relay: relayCmd,
+    keygen: keygenCmd,
+  },
+});
+
+function normalizeArgv(argv: string[]): string[] | null {
+  if (argv.length === 0) return null;
+
+  const normalized = [...argv];
+  const top = normalized[0];
+  if (!top || !TOP_LEVEL_COMMANDS.has(top)) return null;
+
+  if (top === "project") {
+    const sub = normalized[1];
+    if (!sub) {
+      normalized.splice(1, 0, "list");
+    } else if (!PROJECT_SUBCOMMANDS.has(sub)) {
+      console.error("usage: orka project <add|remove|list>");
+      console.error("  add <name> [path]  — register project (default path: .)");
+      console.error("  remove <name>      — unregister project");
+      console.error("  list               — show registered projects");
+      process.exit(1);
+    }
+  }
+
+  if (top === "relay") {
+    const sub = normalized[1];
+    if (!sub || sub.startsWith("-")) {
+      normalized.splice(1, 0, "serve");
+    }
+    const next = normalized[1];
+    if (next === "keys") {
+      const keysSub = normalized[2];
+      if (!keysSub) {
+        normalized.splice(2, 0, "list");
+      } else if (!RELAY_KEYS_SUBCOMMANDS.has(keysSub)) {
+        console.error("usage: orka relay keys [list|create|revoke]");
+        console.error("  list                          List API keys");
+        console.error("  create [--label L] [--permissions client|node]  Create a key");
+        console.error("  revoke <key-id>               Revoke a key");
+        process.exit(1);
+      }
+    } else if (next && !RELAY_SUBCOMMANDS.has(next)) {
+      normalized.splice(1, 0, "serve");
+    }
+  }
+
+  if (top === "keygen") {
+    const sub = normalized[1];
+    if (!sub || !KEYGEN_SUBCOMMANDS.has(sub)) {
+      normalized.splice(1, 0, "help");
+    }
+  }
+
+  return normalized;
+}
+
+try {
+  const argv = normalizeArgv(process.argv.slice(2));
+  if (!argv) {
+    printUsage();
+  } else {
+    await run(app, argv);
+  }
+} finally {
+  await shutdownTracing();
+}
 
 function printUsage(): void {
   console.log("orka — agent session orchestrator");
@@ -196,639 +1474,6 @@ function printUsage(): void {
   console.log("  ORKA_SERVER_KEY Env var alternative to --server-key");
 }
 
-async function cmdSpawn(): Promise<void> {
-  const cfg = getConfig().defaults;
-  const args = parseArgs({
-    args: process.argv.slice(3),
-    options: {
-      project: { type: "string", short: "p", default: cfg.project },
-      backend: { type: "string", short: "b", default: cfg.backend },
-      prompt: { type: "string" },
-      "prompt-file": { type: "string" },
-      mode: { type: "string", short: "m", default: cfg.mode },
-      model: { type: "string" },
-      branch: { type: "string" },
-      title: { type: "string" },
-      "reasoning-effort": { type: "string" },
-      "auto-merge": { type: "boolean", default: false },
-      tag: { type: "string", multiple: true },
-    },
-    allowPositionals: true,
-  });
-
-  if (args.values.prompt && args.values["prompt-file"]) {
-    console.error("error: cannot use both --prompt and --prompt-file");
-    process.exit(1);
-  }
-
-  let prompt: string;
-  if (args.values["prompt-file"]) {
-    const filePath = args.values["prompt-file"];
-    if (!existsSync(filePath)) {
-      console.error(`error: prompt file not found: ${filePath}`);
-      process.exit(1);
-    }
-    prompt = readFileSync(filePath, "utf-8").trim();
-  } else if (args.values.prompt) {
-    prompt = args.values.prompt;
-  } else if (args.positionals.length > 0) {
-    prompt = args.positionals.join(" ");
-  } else if (!process.stdin.isTTY) {
-    // Read from piped stdin
-    prompt = await new Promise<string>((resolve) => {
-      let data = "";
-      process.stdin.setEncoding("utf-8");
-      process.stdin.on("data", (chunk) => (data += chunk));
-      process.stdin.on("end", () => resolve(data.trim()));
-    });
-  } else {
-    prompt = "";
-  }
-
-  if (!prompt) {
-    console.error("error: prompt is required (use --prompt, --prompt-file, positional args, or pipe stdin)");
-    process.exit(1);
-  }
-
-  let session;
-  try {
-    session = await svc.spawn({
-      prompt,
-      title: args.values.title,
-      projectPath: resolveProject(args.values.project!),
-      backend: args.values.backend as BackendKind,
-      mode: args.values.mode as SessionMode,
-      model: args.values.model || cfg.model || undefined,
-      reasoningEffort: args.values["reasoning-effort"] as any || undefined,
-      branch: args.values.branch,
-      autoMerge: args.values["auto-merge"] || false,
-      tags: args.values.tag as string[] | undefined,
-    });
-  } catch (e: any) {
-    console.error(`error: ${e.message}`);
-    process.exit(1);
-  }
-
-  console.log(`spawned session ${session.id}`);
-  console.log(`  backend:  ${session.backend}`);
-  console.log(`  mode:     ${session.mode}`);
-  console.log(`  workdir:  ${session.workingDir}`);
-  console.log(`  tmux:     ${session.tmuxSessionName}`);
-  console.log(`  log:      ${session.logFile}`);
-  if (args.values.tag && (args.values.tag as string[]).length > 0) {
-    console.log(`  tags:     ${(args.values.tag as string[]).join(", ")}`);
-  }
-
-  if (session.mode === "interactive") {
-    console.log("");
-    console.log("attaching... (detach: Ctrl-b d)");
-    await defaultRunner.attach(session.tmuxSessionName);
-  }
-}
-
-async function cmdPs(): Promise<void> {
-  const args = parseArgs({
-    args: process.argv.slice(3),
-    options: {
-      status: { type: "string" },
-      backend: { type: "string" },
-      project: { type: "string" },
-      tag: { type: "string" },
-      verbose: { type: "boolean", short: "v", default: false },
-    },
-    allowPositionals: false,
-  });
-
-  let sessions = await svc.listSessions({
-    status: args.values.status as any,
-    tag: args.values.tag,
-  });
-  if (args.values.backend) {
-    sessions = sessions.filter((s) => s.backend === args.values.backend);
-  }
-  if (args.values.project) {
-    const proj = args.values.project;
-    const resolved = resolveProject(proj);
-    sessions = sessions.filter((s) =>
-      s.projectPath === resolved || s.projectPath === proj || projectName(s.projectPath) === proj,
-    );
-  }
-
-  if (sessions.length === 0) {
-    console.log("no sessions");
-    return;
-  }
-
-  const noColor = !!process.env["NO_COLOR"];
-  const c = (code: string, text: string): string =>
-    noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
-
-  const statusColor = (status: string): string => {
-    switch (status) {
-      case "running": return c("32", status);     // green
-      case "completed": return c("2", status);     // dim
-      case "failed": return c("31", status);       // red
-      case "cancelled": return c("33", status);    // yellow
-      case "preparing": return c("34", status);    // blue
-      case "queued": return c("34", status);       // blue
-      default: return status;
-    }
-  };
-
-  const verbose = args.values.verbose ?? false;
-  const uniqueProjects = new Set(sessions.map((s) => s.projectPath));
-  const multiProject = uniqueProjects.size > 1;
-  const showProject = multiProject || verbose;
-
-  const running = sessions.filter((s) => s.status === "running").length;
-  console.log(c("1", `${running} running / ${sessions.length} total`));
-  console.log("");
-
-  let header =
-    padR("ID", 16) +
-    padR("STATUS", 20) +
-    padR("AGE", 10);
-  if (showProject) header += padR("PROJECT", 36);
-  header += padR("BACKEND", 14);
-  if (verbose) {
-    header += padR("COST", 10) + padR("DURATION", 10) + padR("TOKENS", 14);
-  }
-  header += "TITLE";
-  const lineWidth = 76 + (showProject ? 36 : 0) + (verbose ? 34 : 0);
-  console.log(header);
-  console.log("-".repeat(lineWidth));
-
-  for (const s of sessions) {
-    const task = await svc.getTask(s.taskId);
-    const statusText = s.kept ? `${s.status} [kept]` : s.status;
-    const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
-    const statusPad = 20 - statusText.length + colored.length;
-
-    let line =
-      padR(s.id, 16) +
-      colored.padEnd(statusPad) +
-      padR(formatAge(s.createdAt), 10);
-
-    if (showProject) {
-      const alias = projectNameForPath(s.projectPath);
-      const label = alias ? `${s.projectPath} (${alias})` : s.projectPath || "-";
-      line += padR(label, 36);
-    }
-    line += padR(s.backend, 14);
-
-    if (verbose) {
-      const result = await svc.getResult(s.id);
-      const cost = result?.costUsd != null ? `$${result.costUsd.toFixed(2)}` : "-";
-      const duration = result ? formatDuration(result.durationMs) : "-";
-      const tokens = result ? `${shortNum(result.outputTokens)} out` : "-";
-      line += padR(cost, 10) + padR(duration, 10) + padR(tokens, 14);
-    }
-
-    line += (task?.title ?? "").slice(0, verbose ? 40 : 50);
-    console.log(line);
-  }
-}
-
-async function cmdAttach(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka attach <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  if (!(await svc.isAlive(session.id))) {
-    console.error(`tmux session not running: ${session.tmuxSessionName}`);
-    process.exit(1);
-  }
-
-  if (remoteUrl) {
-    // Remote mode — can't attach directly, print SSH command
-    console.log(`session ${session.id} is running remotely`);
-    console.log("");
-    console.log("to attach via SSH:");
-    console.log(`  ssh <host> -t tmux attach -t ${session.tmuxSessionName}`);
-    console.log("");
-    console.log("or use 'orka logs -f' to stream output remotely:");
-    console.log(`  orka --remote ${remoteUrl} logs -f ${session.id}`);
-    return;
-  }
-
-  await defaultRunner.attach(session.tmuxSessionName);
-}
-
-async function cmdLogs(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka logs <session-id> [--follow]");
-    process.exit(1);
-  }
-
-  const args = parseArgs({
-    args: process.argv.slice(4),
-    options: {
-      follow: { type: "boolean", short: "f", default: false },
-    },
-    allowPositionals: false,
-  });
-
-  const follow = args.values.follow ?? false;
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  if (!follow) {
-    try {
-      const output = await svc.captureOutput(session.id);
-      console.log(output);
-      return;
-    } catch {
-      console.error("no logs available (session ended, no log file found)");
-      process.exit(1);
-    }
-  }
-
-  // --follow mode
-  if (await svc.isAlive(session.id)) {
-    let offset = 0;
-    while (true) {
-      try {
-        const output = await svc.captureOutput(session.id);
-        if (output.length > offset) {
-          process.stdout.write(output.slice(offset));
-          offset = output.length;
-        }
-      } catch { break; }
-      if (!(await svc.isAlive(session.id))) break;
-      await Bun.sleep(500);
-    }
-    return;
-  }
-
-  // tmux dead — stream log file with tail -f (local-only, will be WS streaming in remote mode)
-  if (session.logFile && existsSync(session.logFile)) {
-    const proc = Bun.spawn(["tail", "-f", session.logFile], {
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    await proc.exited;
-    return;
-  }
-
-  console.error("no logs available (session ended, no log file found)");
-  process.exit(1);
-}
-
-async function cmdStop(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka stop <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  if (session.status !== "running" && session.status !== "preparing") {
-    console.error(`session ${session.id} is already ${session.status}`);
-    process.exit(1);
-  }
-
-  await svc.stop(session.id);
-  console.log(`stopped session ${session.id}`);
-}
-
-async function cmdDiff(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka diff <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  try {
-    const { status, diff } = await svc.getDiff(session.id);
-    console.log(status);
-    if (diff) {
-      console.log("");
-      console.log(diff);
-    }
-  } catch (e: any) {
-    console.error(`error: ${e.message}`);
-    process.exit(1);
-  }
-}
-
-async function cmdRetry(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka retry <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  if (session.status === "running") {
-    console.error(`session ${session.id} is still running — stop it first`);
-    process.exit(1);
-  }
-
-  const task = await svc.getTask(session.taskId);
-  if (!task) {
-    console.error(`task not found for session: ${session.id}`);
-    process.exit(1);
-  }
-
-  const oldTags = await svc.getTags(session.id);
-  const newSession = await svc.spawn({
-    prompt: task.prompt,
-    title: task.title,
-    projectPath: session.projectPath || session.workingDir,
-    backend: session.backend,
-    mode: session.mode,
-    model: task.model || undefined,
-    tags: oldTags.length > 0 ? oldTags : undefined,
-  });
-
-  console.log(`retried session ${session.id} → ${newSession.id}`);
-  console.log(`  backend:  ${newSession.backend}`);
-  console.log(`  mode:     ${newSession.mode}`);
-  console.log(`  workdir:  ${newSession.workingDir}`);
-  console.log(`  tmux:     ${newSession.tmuxSessionName}`);
-  console.log(`  log:      ${newSession.logFile}`);
-
-  if (newSession.mode === "interactive") {
-    console.log("");
-    console.log("attaching... (detach: Ctrl-b d)");
-    await defaultRunner.attach(newSession.tmuxSessionName);
-  }
-}
-
-async function cmdShow(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka show <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  const task = await svc.getTask(session.taskId);
-
-  console.log(`session ${session.id}`);
-  console.log("");
-  console.log(`  status:    ${session.status}`);
-  console.log(`  backend:   ${session.backend}`);
-  console.log(`  mode:      ${session.mode}`);
-  if (task?.model) console.log(`  model:     ${task.model}`);
-  console.log(`  project:   ${session.projectPath || "(unknown)"}`);
-  console.log(`  workdir:   ${session.workingDir}`);
-  console.log(`  tmux:      ${session.tmuxSessionName}`);
-  console.log(`  log:       ${session.logFile}`);
-  console.log(`  created:   ${session.createdAt}`);
-  console.log(`  started:   ${session.startedAt ?? "(not started)"}`);
-  console.log(`  finished:  ${session.finishedAt ?? "(not finished)"}`);
-  console.log(`  exit code: ${session.exitCode ?? "(none)"}`);
-  if (session.kept) console.log(`  kept:      yes (worktree protected)`);
-  if (session.autoMerge) console.log(`  auto-merge: yes`);
-
-  const tags = await svc.getTags(session.id);
-  if (tags.length > 0) console.log(`  tags:      ${tags.join(", ")}`);
-
-  if (task) {
-    console.log("");
-    console.log(`  title:     ${task.title}`);
-    console.log(`  prompt:    ${task.prompt}`);
-  }
-}
-
-async function cmdWorkdir(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka workdir <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  console.log(session.workingDir);
-}
-
-async function cmdWait(): Promise<void> {
-  const rawArgs = process.argv.slice(3);
-  const allFlag = rawArgs.includes("--all");
-  const projectIdx = rawArgs.indexOf("--project");
-  const projectFilter = projectIdx !== -1 ? rawArgs[projectIdx + 1] : undefined;
-  const ids = rawArgs.filter((a, i) => a !== "--all" && a !== "--project" && (projectIdx === -1 || i !== projectIdx + 1));
-
-  if (ids.length === 0 && !allFlag) {
-    console.error("usage: orka wait <session-id...> | --all [--project <name>]");
-    process.exit(1);
-  }
-
-  const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
-  let targets: string[];
-
-  if (allFlag) {
-    let running = (await svc.listSessions()).filter((s) => !terminalStatuses.has(s.status));
-    if (projectFilter) {
-      const resolved = resolveProject(projectFilter);
-      running = running.filter((s) =>
-        s.projectPath === resolved || s.projectPath === projectFilter || projectName(s.projectPath) === projectFilter,
-      );
-    }
-    targets = running.map((s) => s.id);
-    if (targets.length === 0) {
-      console.log("no running sessions to wait for");
-      return;
-    }
-  } else {
-    targets = [];
-    for (const id of ids) {
-      const s = await findSession(id);
-      if (!s) {
-        console.error(`session not found: ${id}`);
-        process.exit(1);
-      }
-      targets.push(s.id);
-    }
-  }
-
-  console.log(`waiting for ${targets.length} session(s)...`);
-  const pending = new Set(targets);
-  let anyFailed = false;
-
-  while (pending.size > 0) {
-    await svc.reap();
-    for (const id of [...pending]) {
-      const s = await svc.getSession(id);
-      if (!s || terminalStatuses.has(s.status)) {
-        pending.delete(id);
-        const status = s?.status ?? "unknown";
-        const task = s ? await svc.getTask(s.taskId) : null;
-        const label = task?.title?.slice(0, 50) ?? id;
-        console.log(`  ${id}  ${status}  ${label}`);
-        if (status === "failed") anyFailed = true;
-      }
-    }
-    if (pending.size > 0) await Bun.sleep(2000);
-  }
-
-  console.log("all sessions finished");
-  if (anyFailed) process.exit(1);
-}
-
-async function cmdSend(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka send <session-id> <text...>");
-    process.exit(1);
-  }
-
-  const text = process.argv.slice(4).join(" ");
-  if (!text) {
-    console.error("usage: orka send <session-id> <text...>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  try {
-    await svc.sendInput(session.id, text);
-    console.log(`sent to ${session.id}`);
-  } catch (e: any) {
-    console.error(`error: ${e.message}`);
-    process.exit(1);
-  }
-}
-
-async function cmdKeep(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka keep <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  await svc.setKept(session.id, true);
-  console.log(`session ${session.id} marked as kept (worktree protected from cleanup)`);
-}
-
-async function cmdUnkeep(): Promise<void> {
-  const sessionId = process.argv[3];
-  if (!sessionId) {
-    console.error("usage: orka unkeep <session-id>");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  await svc.setKept(session.id, false);
-  console.log(`session ${session.id} unprotected (worktree may be cleaned up)`);
-}
-
-async function cmdResult(): Promise<void> {
-  const args = parseArgs({
-    args: process.argv.slice(3),
-    options: {
-      json: { type: "boolean", default: false },
-    },
-    allowPositionals: true,
-  });
-
-  const sessionId = args.positionals[0];
-  if (!sessionId) {
-    console.error("usage: orka result <session-id> [--json]");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  const result = await svc.getResult(session.id);
-  if (!result) {
-    console.error("no result found in session log (session may not be a background claude-code session)");
-    process.exit(1);
-  }
-
-  if (args.values.json) {
-    console.log(JSON.stringify(result, null, 2));
-    return;
-  }
-
-  const noColor = !!process.env["NO_COLOR"];
-  const c = (code: string, text: string): string =>
-    noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
-
-  const task = await svc.getTask(session.taskId);
-  console.log(c("1", `session ${session.id}`));
-  if (task) console.log(`  title: ${task.title.slice(0, 80)}`);
-
-  console.log("");
-  if (result.isError) {
-    console.log(c("31", "STATUS: ERROR"));
-  } else {
-    console.log(c("32", "STATUS: SUCCESS"));
-  }
-
-  if (result.model) console.log(`  model:    ${result.model}`);
-  console.log(`  turns:    ${result.numTurns}`);
-  console.log(`  duration: ${formatDuration(result.durationMs)}`);
-  if (result.costUsd !== null) console.log(`  cost:     $${result.costUsd.toFixed(4)}`);
-  console.log(`  tokens:   ${result.inputTokens.toLocaleString()} in / ${result.outputTokens.toLocaleString()} out`);
-  if (result.cacheReadTokens > 0) {
-    console.log(`  cache:    ${result.cacheReadTokens.toLocaleString()} read / ${result.cacheCreateTokens.toLocaleString()} created`);
-  }
-
-  console.log("");
-  console.log(c("1", "Result:"));
-  console.log(result.result);
-}
-
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const secs = Math.floor(ms / 1000);
@@ -838,212 +1483,22 @@ function formatDuration(ms: number): string {
   return `${mins}m${remainSecs}s`;
 }
 
-async function cmdMerge(): Promise<void> {
-  const args = parseArgs({
-    args: process.argv.slice(3),
-    options: {
-      cleanup: { type: "boolean", default: true },
-    },
-    allowPositionals: true,
-  });
-
-  const sessionId = args.positionals[0];
-  if (!sessionId) {
-    console.error("usage: orka merge <session-id> [--no-cleanup]");
-    process.exit(1);
-  }
-
-  const session = await findSession(sessionId);
-  if (!session) {
-    console.error(`session not found: ${sessionId}`);
-    process.exit(1);
-  }
-
-  try {
-    const { branch, commits, cleaned } = await svc.merge(session.id, args.values.cleanup !== false);
-    console.log(`merged ${commits} commit(s) from ${branch}`);
-    if (cleaned) {
-      console.log(`cleaned up worktree and branch ${branch}`);
-    }
-  } catch (e: any) {
-    console.error(`error: ${e.message}`);
-    process.exit(1);
-  }
-}
-
-async function cmdProject(): Promise<void> {
-  const sub = process.argv[3];
-
-  if (sub === "add") {
-    const name = process.argv[4];
-    const path = process.argv[5] || ".";
-    if (!name) {
-      console.error("usage: orka project add <name> [path]");
-      process.exit(1);
-    }
-    const entry = addProject(name, path);
-    console.log(`registered project ${entry.name} → ${entry.path}`);
-    return;
-  }
-
-  if (sub === "remove" || sub === "rm") {
-    const name = process.argv[4];
-    if (!name) {
-      console.error("usage: orka project remove <name>");
-      process.exit(1);
-    }
-    if (removeProject(name)) {
-      console.log(`removed project ${name}`);
-    } else {
-      console.error(`project not found: ${name}`);
-      process.exit(1);
-    }
-    return;
-  }
-
-  if (sub === "list" || sub === "ls" || !sub) {
-    const projects = listProjects();
-    if (projects.length === 0) {
-      console.log("no registered projects");
-      console.log("");
-      console.log("register with: orka project add <name> [path]");
-      return;
-    }
-    for (const p of projects) {
-      console.log(`${p.name.padEnd(20)} ${p.path}`);
-    }
-    return;
-  }
-
-  console.error("usage: orka project <add|remove|list>");
-  console.error("  add <name> [path]  — register project (default path: .)");
-  console.error("  remove <name>      — unregister project");
-  console.error("  list               — show registered projects");
-  process.exit(1);
-}
-
-async function cmdPrune(): Promise<void> {
-  const args = parseArgs({
-    args: process.argv.slice(3),
-    options: {
-      age: { type: "string", default: "24h" },
-      project: { type: "string" },
-    },
-    allowPositionals: false,
-  });
-
-  const maxAgeMs = parseAge(args.values.age!);
-  const projectPath = args.values.project ? resolveProject(args.values.project) : undefined;
-
-  const { pruned, orphansCleaned } = await svc.pruneSessions({ maxAgeMs, projectPath });
-
-  if (pruned === 0) {
-    console.log("nothing to prune");
-  } else {
-    console.log(`pruned ${pruned} session(s)`);
-  }
-  if (orphansCleaned > 0) {
-    console.log(`cleaned ${orphansCleaned} orphaned worktree(s)`);
-  }
-}
-
-async function cmdServe(): Promise<void> {
-  const args = parseArgs({
-    args: process.argv.slice(3),
-    options: {
-      port: { type: "string", default: "7394" },
-      host: { type: "string", default: "127.0.0.1" },
-      relay: { type: "string" },
-      "node-id": { type: "string" },
-      "relay-token": { type: "string" },
-    },
-    allowPositionals: false,
-  });
-
-  const port = parseInt(args.values.port!, 10);
-  const hostname = args.values.host!;
-  const localSvc = createLocalClient();
-  // useEncrypt is set by global --encrypt flag parsing
-  const server = await startServer(localSvc, {
-    port,
-    hostname,
-    relayUrl: args.values.relay,
-    nodeId: args.values["node-id"],
-    relayToken: args.values["relay-token"] ?? process.env.ORKA_TOKEN,
-    encrypt: useEncrypt,
-  });
-  console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
-  if (args.values.relay) {
-    console.log(`  relay: ${args.values.relay}`);
-  }
-
-  // Keep running until killed
-  await new Promise(() => {});
-}
-
-async function cmdRelay(): Promise<void> {
-  const sub = process.argv[3];
-
-  // Relay subcommands that call the relay HTTP API
-  if (sub === "signup") return cmdRelaySignup();
-  if (sub === "keys") return cmdRelayKeys();
-  if (sub === "account") return cmdRelayAccount();
-  if (sub === "usage") return cmdRelayUsage();
-
-  // Default: start relay server
-  const args = parseArgs({
-    args: process.argv.slice(3),
-    options: {
-      port: { type: "string", default: "7390" },
-      token: { type: "string" },
-    },
-    allowPositionals: false,
-  });
-
-  const port = parseInt(args.values.port!, 10);
-  const token = args.values.token ?? process.env.ORKA_TOKEN;
-  const handle = startRelay({ port, token });
-  console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
-  console.log("  nodes register at:  /register?node=<id>");
-  console.log("  clients connect at: /ws");
-
-  // Graceful shutdown on SIGTERM/SIGINT
-  let shuttingDown = false;
-  for (const signal of ["SIGTERM", "SIGINT"] as const) {
-    process.on(signal, async () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      console.log(`\nreceived ${signal}, starting graceful shutdown...`);
-      await handle.shutdown();
-      process.exit(0);
-    });
-  }
-
-  // Keep running until killed
-  await new Promise(() => {});
-}
-
 // --- Relay API helpers ---
 
 function getRelayHttpUrl(): string {
-  // Use --remote / ORKA_REMOTE, converting ws:// to http://
   let base = remoteUrl ?? process.env.ORKA_RELAY_URL;
   if (!base) {
     console.error("error: relay URL required (use --remote <url> or ORKA_RELAY_URL)");
     process.exit(1);
   }
-  // Strip ?token= query params for HTTP API calls (we use Authorization header)
   base = base.split("?")[0];
   return base.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
 }
 
 function getApiKey(): string | null {
-  // 1. ORKA_API_KEY env var
   if (process.env.ORKA_API_KEY) return process.env.ORKA_API_KEY;
-  // 2. Saved key file
   const keyFile = join(getOrkaHome(), "relay-key");
   if (existsSync(keyFile)) return readFileSync(keyFile, "utf-8").trim();
-  // 3. Legacy token
   return remoteToken ?? null;
 }
 
@@ -1060,7 +1515,7 @@ async function relayFetch(path: string, opts?: { method?: string; body?: any; au
 
   if (opts?.auth !== false) {
     const key = getApiKey();
-    if (key) headers["authorization"] = `Bearer ${key}`;
+    if (key) headers.authorization = `Bearer ${key}`;
   }
 
   const fetchOpts: RequestInit = { method: opts?.method ?? "GET", headers };
@@ -1076,219 +1531,6 @@ async function relayFetch(path: string, opts?: { method?: string; body?: any; au
   }
 
   return data;
-}
-
-async function cmdRelaySignup(): Promise<void> {
-  const args = parseArgs({
-    args: process.argv.slice(4),
-    options: {
-      email: { type: "string" },
-      name: { type: "string" },
-    },
-    allowPositionals: false,
-  });
-
-  if (!args.values.email || !args.values.name) {
-    console.error("usage: orka relay signup --email <email> --name <name>");
-    process.exit(1);
-  }
-
-  const data = await relayFetch("/v1/signup", {
-    method: "POST",
-    body: { email: args.values.email, name: args.values.name },
-    auth: false,
-  });
-
-  // Auto-save the API key
-  saveApiKey(data.apiKey);
-
-  console.log("signup successful!");
-  console.log(`  account: ${data.accountId}`);
-  console.log(`  api key: ${data.apiKey}`);
-  console.log("");
-  console.log(`key saved to ${join(getOrkaHome(), "relay-key")}`);
-  console.log("it will be used automatically for future relay commands");
-}
-
-async function cmdRelayKeys(): Promise<void> {
-  const sub = process.argv[4];
-
-  if (sub === "create") {
-    const args = parseArgs({
-      args: process.argv.slice(5),
-      options: {
-        label: { type: "string" },
-        permissions: { type: "string" },
-      },
-      allowPositionals: false,
-    });
-
-    const body: any = {};
-    if (args.values.label) body.label = args.values.label;
-    if (args.values.permissions) body.permissions = args.values.permissions;
-
-    const data = await relayFetch("/v1/keys", { method: "POST", body });
-    console.log("key created:");
-    console.log(`  id:     ${data.keyId}`);
-    console.log(`  key:    ${data.apiKey}`);
-    console.log(`  prefix: ${data.prefix}`);
-    return;
-  }
-
-  if (sub === "revoke") {
-    const keyId = process.argv[5];
-    if (!keyId) {
-      console.error("usage: orka relay keys revoke <key-id>");
-      process.exit(1);
-    }
-    await relayFetch(`/v1/keys/${keyId}`, { method: "DELETE" });
-    console.log(`revoked key ${keyId}`);
-    return;
-  }
-
-  if (sub === "list" || !sub) {
-    const data = await relayFetch("/v1/keys");
-    if (data.keys.length === 0) {
-      console.log("no API keys");
-      return;
-    }
-    console.log(padR("ID", 20) + padR("PREFIX", 20) + padR("PERMS", 10) + padR("STATUS", 10) + padR("LABEL", 20) + "LAST USED");
-    for (const k of data.keys) {
-      console.log(
-        padR(k.id, 20) +
-        padR(k.prefix, 20) +
-        padR(k.permissions, 10) +
-        padR(k.status, 10) +
-        padR(k.label, 20) +
-        (k.lastUsedAt ?? "never"),
-      );
-    }
-    return;
-  }
-
-  console.error("usage: orka relay keys [list|create|revoke]");
-  console.error("  list                          List API keys");
-  console.error("  create [--label L] [--permissions client|node]  Create a key");
-  console.error("  revoke <key-id>               Revoke a key");
-  process.exit(1);
-}
-
-async function cmdRelayAccount(): Promise<void> {
-  const data = await relayFetch("/v1/account");
-  console.log(`account ${data.id}`);
-  console.log(`  email:   ${data.email}`);
-  console.log(`  name:    ${data.name}`);
-  console.log(`  status:  ${data.status}`);
-  console.log(`  tier:    ${data.tier}`);
-  console.log(`  created: ${data.createdAt}`);
-}
-
-async function cmdRelayUsage(): Promise<void> {
-  const args = parseArgs({
-    args: process.argv.slice(4),
-    options: {
-      from: { type: "string" },
-      to: { type: "string" },
-      granularity: { type: "string", default: "hour" },
-    },
-    allowPositionals: false,
-  });
-
-  const params = new URLSearchParams();
-  if (args.values.from) params.set("from", args.values.from);
-  if (args.values.to) params.set("to", args.values.to);
-  if (args.values.granularity) params.set("granularity", args.values.granularity);
-
-  const qs = params.toString() ? `?${params.toString()}` : "";
-  const data = await relayFetch(`/v1/usage${qs}`);
-
-  if (data.buckets.length === 0) {
-    console.log("no usage data for this period");
-    return;
-  }
-
-  console.log(padR("PERIOD", 24) + padR("REQUESTS", 12) + padR("BYTES IN", 12) + "BYTES OUT");
-  for (const b of data.buckets) {
-    console.log(
-      padR(b.period, 24) +
-      padR(String(b.requests), 12) +
-      padR(String(b.bytesIn), 12) +
-      String(b.bytesOut),
-    );
-  }
-}
-
-async function cmdKeygen(): Promise<void> {
-  const sub = process.argv[3];
-  const orkaHome = getOrkaHome();
-
-  if (sub === "client") {
-    const kp = ensureKeyPair(orkaHome, "client");
-    console.log("client keypair:");
-    console.log(`  public:  ${kp.publicKey}`);
-    console.log(`  stored:  ${orkaHome}/keys/client.pub, ${orkaHome}/keys/client.key`);
-    return;
-  }
-
-  if (sub === "node") {
-    const kp = ensureKeyPair(orkaHome, "node");
-    console.log("node keypair:");
-    console.log(`  public:  ${kp.publicKey}`);
-    console.log(`  stored:  ${orkaHome}/keys/node.pub, ${orkaHome}/keys/node.key`);
-    return;
-  }
-
-  if (sub === "save-server") {
-    const pubkey = process.argv[4];
-    if (!pubkey) {
-      console.error("usage: orka keygen save-server <public-key>");
-      console.error("  get it from: curl <daemon-url>/health | jq -r .publicKey");
-      process.exit(1);
-    }
-    const { writeFileSync, mkdirSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const keysDir = join(orkaHome, "keys");
-    mkdirSync(keysDir, { recursive: true });
-    writeFileSync(join(keysDir, "server.pub"), pubkey, { mode: 0o644 });
-    console.log(`saved server public key to ${keysDir}/server.pub`);
-    return;
-  }
-
-  if (sub === "show") {
-    const clientKp = loadKeyPair(orkaHome, "client");
-    const nodeKp = loadKeyPair(orkaHome, "node");
-    const serverPub = loadPublicKey(orkaHome, "server");
-
-    if (clientKp) {
-      console.log(`client public key: ${clientKp.publicKey}`);
-    } else {
-      console.log("client keypair:    (not generated)");
-    }
-    if (nodeKp) {
-      console.log(`node public key:   ${nodeKp.publicKey}`);
-    } else {
-      console.log("node keypair:      (not generated)");
-    }
-    if (serverPub) {
-      console.log(`server public key: ${serverPub}`);
-    } else {
-      console.log("server public key: (not saved)");
-    }
-    return;
-  }
-
-  console.log("orka keygen — manage E2E encryption keys");
-  console.log("");
-  console.log("subcommands:");
-  console.log("  client         Generate/show client keypair (for CLI → daemon encryption)");
-  console.log("  node           Generate/show node keypair (for daemon server)");
-  console.log("  save-server    Save a remote server's public key");
-  console.log("  show           Show all stored keys");
-  console.log("");
-  console.log("usage:");
-  console.log("  orka keygen client                  # generate client keys");
-  console.log("  orka keygen save-server <pubkey>     # save server's public key");
-  console.log("  orka --remote ws://host:7394 --encrypt spawn ...  # use encryption");
 }
 
 function parseAge(age: string): number {
