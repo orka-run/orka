@@ -124,10 +124,11 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model });
 
     // 6. Write command to script file (avoids bash -c escaping hell)
+    //    Unset CLAUDECODE so nested claude-code sessions don't detect parent and refuse to start.
     const scriptsDir = join(getOrkaHome(), "scripts");
     mkdirSync(scriptsDir, { recursive: true });
     const scriptPath = join(scriptsDir, `${sessionId}.sh`);
-    writeFileSync(scriptPath, `#!/usr/bin/env bash\n${command}\n`);
+    writeFileSync(scriptPath, `#!/usr/bin/env bash\nunset CLAUDECODE\n${command}\n`);
 
     // 7. Spawn tmux session
     await withSpan("orka.tmux.spawn", {
