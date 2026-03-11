@@ -35,7 +35,7 @@ stop    — Stop a running session
 diff    — Show git changes in session worktree
 show    — Full session detail view (status, project, model, prompt, tags, kept, auto-merge)
 workdir — Print session working directory (for shell: cd $(orka workdir <id>))
-wait    — Block until session(s) complete (supports --all, --project)
+wait    — Block until session(s) complete (supports --all, --project, multiple IDs)
 result  — Extract final result, cost, tokens from background session log (--json)
 send    — Send text input to a running interactive session
 keep    — Protect a session's worktree from auto-cleanup
@@ -208,11 +208,40 @@ bd ready
 bd list --status=open
 ```
 
-## Agent Sessions (orka-spawned claude-code)
+## Waiting for Agent Sessions
 
-- Background sessions use: `claude -p --verbose --output-format stream-json --permission-mode auto`
-- Interactive sessions use: `claude <prompt>`
+`orka wait` blocks until sessions complete. Use it instead of polling loops or `sleep`.
+
+```bash
+# Wait for a single session
+orka wait sess-abc123
+
+# Wait for multiple sessions
+orka wait sess-abc123 sess-def456
+
+# Wait for all running sessions
+orka wait --all
+
+# Wait for all sessions in a project
+orka wait --project /path/to/repo
+```
+
+**Important for Claude Code**: `orka wait` is a blocking CLI command — use it directly in Bash tool, not in a polling loop. Do NOT `sleep` + `orka ps` in a loop. Just run `orka wait <ids>` and it will return when done.
+
+To wait for tagged sessions (e.g. all migration agents):
+```bash
+# Get IDs of running sessions with a tag, then wait
+orka wait $(orka ps --status running --tag migration -v 2>/dev/null | grep -oP 'sess-\w+' | tr '\n' ' ')
+```
+
+## Agent Sessions (orka-spawned claude-code / codex)
+
+- **claude-code background**: `claude -p --verbose --output-format stream-json --permission-mode auto`
+- **claude-code interactive**: `claude <prompt>`
+- **codex background**: `codex exec --dangerously-bypass-approvals-and-sandbox --json --skip-git-repo-check`
 - All sessions get `--append-system-prompt "[orka session: <id>]"` for traceability
 - Logs are tee'd to ~/.orka/logs/ for post-mortem reading
 - Background sessions automatically get isolated worktrees with named branches
 - Use `orka result <id>` to extract final output, cost, and token usage from background sessions
+- **Codex agents must be explicitly told to `git commit` in the prompt** — they don't auto-commit
+- `--auto-merge` merges the worktree branch into parent on successful completion
