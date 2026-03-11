@@ -12,5 +12,8 @@
     "@opentelemetry/sdk-trace-base": "^2.6.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "testcontainers": "^11.12.0"
   }
 }
