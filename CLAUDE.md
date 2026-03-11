@@ -151,6 +151,8 @@ OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/s
 - **Auto-reap on every CLI invocation**: `reapSessions()` runs before every command, marking dead tmux sessions as completed and cleaning up worktrees.
 - **Concurrent limits**: Configurable via `[limits] max_concurrent = "5"` in config.toml (0 = unlimited).
 - **zod/v4 default gotcha**: When using `.default({})` on nested zod objects, inner field defaults are NOT applied. Always use `Schema.default(Schema.parse({}))` pattern (see config.ts).
+- **Timer unref**: Any `setInterval`/`setTimeout` at module scope in library code MUST call `.unref()` so the process can exit when imported in ad-hoc scripts/tests.
+- **Bun SQLite multi-statement**: `db.exec()` with multiple statements separated by `;` can fail with foreign key constraints. Split into individual `db.exec()` calls per statement.
 - **Relay transparency**: Relay routes by `node` field in JSON-RPC envelope, never parses `params`/`result`. Protocol changes don't require relay updates.
 
 ## Development Commands
