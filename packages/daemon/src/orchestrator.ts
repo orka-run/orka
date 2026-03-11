@@ -173,7 +173,9 @@ export async function reapSessions(): Promise<number> {
           await tryAutoMerge(s, span);
         }
 
-        await tryCleanupWorktree(s);
+        // NOTE: worktree cleanup is NOT done during reap — agents may commit to the
+        // main repo while working in a worktree, leaving the worktree "clean" but
+        // still needed. Worktrees are cleaned during explicit `orka prune` or `orka merge`.
         reaped++;
       }
     }
