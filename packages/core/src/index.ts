@@ -5,3 +5,4 @@ export * from "./service";
 export * from "./rpc";
 export * from "./crypto";
 export * from "./reconnect";
+export * from "./push-protocol";
