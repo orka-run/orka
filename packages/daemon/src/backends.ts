@@ -86,11 +86,9 @@ function buildCodex(prompt: string, mode: SessionMode, model?: string, reasoning
     parts.push("--full-auto");
     parts.push("--json");
     parts.push("--skip-git-repo-check");
-    // workspace-write sandbox + grant access to .git for worktree metadata (index.lock etc.)
-    parts.push("--sandbox workspace-write");
-    if (projectPath) {
-      parts.push(`--add-dir ${shellEscape(projectPath + "/.git")}`);
-    }
+    // Disable sandbox — agents need network (bun install), tmpdir, and .git access.
+    // TODO: re-enable with proper hooks system (orka-bt3) so deps are installed before agent starts
+    parts.push("--dangerously-bypass-approvals-and-sandbox");
   }
 
   if (model) parts.push(`--model ${shellEscape(model)}`);
