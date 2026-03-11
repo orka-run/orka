@@ -17,12 +17,15 @@
  * Self-service: POST /v1/signup, /v1/keys, /v1/account, /v1/usage
  */
 
-import type { ServerWebSocket } from "bun";
+import type { ServerWebSocket, Server } from "bun";
 import { RelayState, type SocketData } from "./state";
 import { authenticate, extractApiKey, flushAuthUpdates } from "./auth";
 import { handleApiRequest } from "./api";
 import { RateLimiter, GlobalRateLimiter } from "./rate-limiter";
+import { UsageMeter } from "./metering";
+import { AbuseDetector } from "./abuse";
 import { getRelayConfig } from "./config";
+import { closeDb } from "./db";
 import { metrics, initRelayTracing, shutdownRelayTracing, withSpan } from "./tracing";
 
 // --- Allowed Methods (service enforcement) ---
@@ -44,13 +47,22 @@ export interface RelayOptions {
   configPath?: string;
 }
 
+export interface RelayHandle {
+  server: Server;
+  /** Graceful shutdown: stop accepting, drain in-flight, flush, close DB. */
+  shutdown: (opts?: { drainTimeoutMs?: number }) => Promise<void>;
+}
+
 // --- Start Relay ---
 
-export function startRelay(opts: RelayOptions) {
+export function startRelay(opts: RelayOptions): RelayHandle {
   const config = getRelayConfig();
   const state = new RelayState();
   const rateLimiter = new RateLimiter();
   const globalLimiter = new GlobalRateLimiter(config.rateLimits.globalRequestsPerSecond);
+  const meter = new UsageMeter();
+  const abuseDetector = new AbuseDetector();
+  let draining = false;
 
   // Apply legacy token from opts to config
   if (opts.token && !config.auth.legacyToken) {
@@ -66,7 +78,7 @@ export function startRelay(opts: RelayOptions) {
     async fetch(req, server) {
       const url = new URL(req.url);
 
-      // --- Health endpoint (public) ---
+      // --- Health endpoint (public, always available even during drain) ---
       if (url.pathname === "/health") {
         const key = extractApiKey(req);
         if (key) {
@@ -86,7 +98,15 @@ export function startRelay(opts: RelayOptions) {
             });
           }
         }
-        return jsonResponse({ status: "ok", version: "0.2.0" });
+        return jsonResponse({ status: draining ? "draining" : "ok", version: "0.2.0" });
+      }
+
+      // Reject all other requests when draining
+      if (draining) {
+        return new Response(JSON.stringify({ error: "Relay is shutting down" }), {
+          status: 503,
+          headers: { "content-type": "application/json", "retry-after": "5" },
+        });
       }
 
       // --- API endpoints ---
@@ -194,9 +214,11 @@ export function startRelay(opts: RelayOptions) {
           state.registerNode(data.accountId, data.nodeId!, ws);
           metrics.connectionsOpened.inc({ account_id: data.accountId, role: "node" });
           metrics.registeredNodes.inc({ account_id: data.accountId });
+          meter.recordConnection(data.accountId, "node_connect", data.nodeId);
         } else {
           state.addClient(data.accountId, ws);
           metrics.connectionsOpened.inc({ account_id: data.accountId, role: "client" });
+          meter.recordConnection(data.accountId, "ws_connect");
         }
         metrics.activeConnections.inc({ role: data.role });
       },
@@ -210,9 +232,9 @@ export function startRelay(opts: RelayOptions) {
         data.bytesIn += bytes;
 
         if (data.role === "client") {
-          handleClientMessage(ws, raw, bytes, data, state, rateLimiter, globalLimiter, config);
+          handleClientMessage(ws, raw, bytes, data, state, rateLimiter, globalLimiter, config, meter);
         } else if (data.role === "node") {
-          handleNodeMessage(ws, raw, bytes, data, state);
+          handleNodeMessage(ws, raw, bytes, data, state, meter);
         }
       },
 
@@ -225,7 +247,7 @@ export function startRelay(opts: RelayOptions) {
             try {
               pr.client.send(JSON.stringify({
                 jsonrpc: "2.0",
-                id: pr.method, // We don't have the request ID here, but the client will handle timeout
+                id: pr.method,
                 error: { code: 503, message: `Node ${data.nodeId} disconnected` },
               }));
             } catch { /* client gone */ }
@@ -233,17 +255,48 @@ export function startRelay(opts: RelayOptions) {
           state.removeNode(data.accountId, data.nodeId!);
           metrics.connectionsClosed.inc({ account_id: data.accountId, role: "node" });
           metrics.registeredNodes.dec({ account_id: data.accountId });
+          meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
         } else {
           state.failRequestsForClient(ws);
           state.removeClient(data.accountId, ws);
           metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
+          meter.recordConnection(data.accountId, "ws_disconnect");
         }
         metrics.activeConnections.dec({ role: data.role });
       },
     },
   });
 
-  return server;
+  async function shutdown(shutdownOpts?: { drainTimeoutMs?: number }): Promise<void> {
+    const timeout = shutdownOpts?.drainTimeoutMs ?? 30_000;
+    console.log("relay: shutting down, draining requests...");
+    draining = true;
+
+    // Wait for in-flight requests to drain
+    const start = Date.now();
+    while (state.getGlobalStats().totalPending > 0 && Date.now() - start < timeout) {
+      await Bun.sleep(100);
+    }
+
+    const remaining = state.getGlobalStats().totalPending;
+    if (remaining > 0) {
+      console.log(`relay: drain timeout, ${remaining} requests still pending`);
+    }
+
+    // Flush all subsystems
+    flushAuthUpdates();
+    meter.shutdown();
+    abuseDetector.shutdown();
+    rateLimiter.shutdown();
+    await shutdownRelayTracing();
+    closeDb();
+
+    // Stop the server
+    server.stop(true);
+    console.log("relay: shutdown complete");
+  }
+
+  return { server, shutdown };
 }
 
 // --- Message Handlers ---
@@ -257,6 +310,7 @@ function handleClientMessage(
   rateLimiter: RateLimiter,
   globalLimiter: GlobalRateLimiter,
   config: any,
+  meter: UsageMeter,
 ): void {
   // Parse envelope (plaintext fields only)
   let requestId: string | undefined;
@@ -372,10 +426,11 @@ function handleClientMessage(
   // Forward to node as-is
   node.ws.send(raw);
 
-  // Metrics
+  // Metrics + metering
   metrics.requestsTotal.inc({ account_id: data.accountId, method: method ?? "unknown" });
   metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
   metrics.messageSize.record({ account_id: data.accountId, direction: "client" }, bytes);
+  meter.recordRequest(data.accountId, method ?? "unknown", bytes, node.id);
 }
 
 function handleNodeMessage(
@@ -384,6 +439,7 @@ function handleNodeMessage(
   bytes: number,
   data: SocketData,
   state: RelayState,
+  meter: UsageMeter,
 ): void {
   // Parse response ID
   let responseId: string | undefined;
@@ -409,9 +465,10 @@ function handleNodeMessage(
     // Client disconnected
   }
 
-  // Metrics
+  // Metrics + metering
   metrics.requestDuration.record({ account_id: data.accountId, method: pr.method }, latencyMs);
   metrics.bytesOut.inc({ account_id: data.accountId, direction: "node" }, bytes);
+  meter.recordResponse(data.accountId, bytes, data.nodeId);
 }
 
 // --- Helpers ---
@@ -427,9 +484,21 @@ function jsonResponse(data: any, status: number = 200): Response {
 
 if (import.meta.main) {
   const port = parseInt(process.argv[2] || "7390", 10);
-  const server = startRelay({ port });
-  console.log(`orka relay listening on ws://0.0.0.0:${server.port}`);
+  const handle = startRelay({ port });
+  console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
   console.log("  signup:           POST /v1/signup");
   console.log("  nodes register:   /register?node=<id>");
   console.log("  clients connect:  /ws");
+
+  // Graceful shutdown on SIGTERM/SIGINT
+  let shuttingDown = false;
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`\nreceived ${signal}, starting graceful shutdown...`);
+      await handle.shutdown();
+      process.exit(0);
+    });
+  }
 }

@@ -1021,10 +1021,22 @@ async function cmdRelay(): Promise<void> {
 
   const port = parseInt(args.values.port!, 10);
   const token = args.values.token ?? process.env.ORKA_TOKEN;
-  const server = startRelay({ port, token });
-  console.log(`orka relay listening on ws://0.0.0.0:${server.port}`);
+  const handle = startRelay({ port, token });
+  console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
   console.log("  nodes register at:  /register?node=<id>");
   console.log("  clients connect at: /ws");
+
+  // Graceful shutdown on SIGTERM/SIGINT
+  let shuttingDown = false;
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`\nreceived ${signal}, starting graceful shutdown...`);
+      await handle.shutdown();
+      process.exit(0);
+    });
+  }
 
   // Keep running until killed
   await new Promise(() => {});
