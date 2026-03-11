@@ -2,17 +2,19 @@ FROM oven/bun:1 AS base
 
 # Install system deps needed by daemon (tmux for sessions, git for worktrees)
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends tmux git \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tmux git python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy package manifests first for layer caching
+# Copy all package manifests (bun.lock references all workspaces)
 COPY package.json bun.lock ./
 COPY packages/core/package.json packages/core/
 COPY packages/daemon/package.json packages/daemon/
 COPY packages/cli/package.json packages/cli/
 COPY packages/relay/package.json packages/relay/
+COPY packages/dashboard/package.json packages/dashboard/
 
 RUN bun install --frozen-lockfile
 

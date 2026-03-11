@@ -1,0 +1,32 @@
+FROM oven/bun:1 AS build
+
+WORKDIR /app
+
+# Copy all package manifests for layer caching (bun.lock references all workspaces)
+COPY package.json bun.lock ./
+COPY packages/core/package.json packages/core/
+COPY packages/daemon/package.json packages/daemon/
+COPY packages/cli/package.json packages/cli/
+COPY packages/relay/package.json packages/relay/
+COPY packages/dashboard/package.json packages/dashboard/
+
+RUN bun install --frozen-lockfile --ignore-scripts
+
+# Copy source
+COPY tsconfig.json ./
+COPY packages/core/src packages/core/src
+COPY packages/core/tsconfig.json packages/core/
+COPY packages/dashboard/src packages/dashboard/src
+COPY packages/dashboard/tsconfig.json packages/dashboard/
+COPY packages/dashboard/vite.config.ts packages/dashboard/
+COPY packages/dashboard/index.html packages/dashboard/
+
+RUN cd packages/dashboard && bun run build
+
+# --- Production: nginx serves SPA ---
+FROM nginx:alpine
+
+COPY --from=build /app/packages/dashboard/dist /usr/share/nginx/html
+COPY nginx-dashboard.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 3773

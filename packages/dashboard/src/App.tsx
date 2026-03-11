@@ -10,7 +10,20 @@ import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useSessionStore } from "./stores/sessionStore";
 
-const DEFAULT_DAEMON_URL = "ws://127.0.0.1:7394";
+function getDaemonUrl(): string {
+  // Explicit override via env (dev mode)
+  if (import.meta.env.VITE_DAEMON_URL) return import.meta.env.VITE_DAEMON_URL as string;
+  // In production (nginx), use /ws proxy on same origin
+  if (import.meta.env.PROD) {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}/ws`;
+  }
+  // Dev fallback: direct to daemon on same host
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.hostname}:7394`;
+}
+
+const DEFAULT_DAEMON_URL = getDaemonUrl();
 
 export function App() {
   const transportRef = useRef<WsTransport | null>(null);

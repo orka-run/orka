@@ -1,0 +1,29 @@
+services:
+  daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.daemon
+    ports:
+      - "7394:7394"
+    volumes:
+      # Mount host's ~/.orka so daemon sees real sessions, logs, worktrees
+      - ${ORKA_HOME:-~/.orka}:/data
+      # Mount host project directory so agents can work on your code
+      - ${ORKA_PROJECT_PATH:-.}:/project
+    environment:
+      - ORKA_HOME=/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:7394/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    ports:
+      - "3773:3773"
+    depends_on:
+      daemon:
+        condition: service_healthy
