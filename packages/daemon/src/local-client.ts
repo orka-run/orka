@@ -29,11 +29,9 @@ import { parseSessionResult } from "./result-parser";
 import {
   worktreeMerge,
   worktreeRemove,
-  worktreeBranch,
   deleteBranch,
   getWorktreeDir,
 } from "./worktree";
-import { resolveProject } from "./projects";
 
 class LocalClient implements OrkaService {
   async spawn(req: SpawnRequest): Promise<Session> {
@@ -48,11 +46,11 @@ class LocalClient implements OrkaService {
     return reapSessions();
   }
 
-  getSession(id: string): Session | null {
+  async getSession(id: string): Promise<Session | null> {
     return getSession(id);
   }
 
-  listSessions(filters?: SessionFilters): Session[] {
+  async listSessions(filters?: SessionFilters): Promise<Session[]> {
     if (filters?.tag) {
       let sessions = listSessionsByTag(filters.tag);
       if (filters.status) {
@@ -63,19 +61,19 @@ class LocalClient implements OrkaService {
     return dbListSessions(filters?.status);
   }
 
-  getTask(id: string): Task | null {
+  async getTask(id: string): Promise<Task | null> {
     return getTask(id);
   }
 
-  setKept(sessionId: string, kept: boolean): void {
+  async setKept(sessionId: string, kept: boolean): Promise<void> {
     setSessionKept(sessionId, kept);
   }
 
-  getTags(sessionId: string): string[] {
+  async getTags(sessionId: string): Promise<string[]> {
     return getSessionTags(sessionId);
   }
 
-  getResult(sessionId: string): SessionResult | null {
+  async getResult(sessionId: string): Promise<SessionResult | null> {
     const session = getSession(sessionId);
     if (!session?.logFile) return null;
     return parseSessionResult(session.logFile);
@@ -97,7 +95,7 @@ class LocalClient implements OrkaService {
     throw new Error("No output available (session ended, no log file found)");
   }
 
-  getLogContent(sessionId: string): string | null {
+  async getLogContent(sessionId: string): Promise<string | null> {
     const session = getSession(sessionId);
     if (!session?.logFile || !existsSync(session.logFile)) return null;
     return readFileSync(session.logFile, "utf-8");
@@ -156,7 +154,7 @@ class LocalClient implements OrkaService {
     return { branch, commits, cleaned };
   }
 
-  deleteSessions(ids: string[]): void {
+  async deleteSessions(ids: string[]): Promise<void> {
     dbDeleteSessions(ids);
   }
 

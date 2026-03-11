@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import type { BackendKind, SessionMode, OrkaService } from "@orka/core";
 import {
   createLocalClient,
+  createRemoteClient,
+  startServer,
   tmuxAttach,
   getConfig,
   initTracing,
@@ -20,7 +22,14 @@ import {
 // Initialize OpenTelemetry tracing
 initTracing();
 
-const svc: OrkaService = createLocalClient();
+// Check for --remote flag before command
+const remoteIdx = process.argv.indexOf("--remote");
+const remoteUrl = remoteIdx !== -1 ? process.argv[remoteIdx + 1] : process.env.ORKA_REMOTE;
+if (remoteIdx !== -1) {
+  process.argv.splice(remoteIdx, 2); // Remove --remote <url> from argv
+}
+
+const svc: OrkaService = remoteUrl ? createRemoteClient(remoteUrl) : createLocalClient();
 
 const command = process.argv[2];
 
@@ -79,6 +88,9 @@ switch (command) {
   case "prune":
     await cmdPrune();
     break;
+  case "serve":
+    await cmdServe();
+    break;
   default:
     printUsage();
 }
@@ -109,6 +121,7 @@ function printUsage(): void {
   console.log("  project Register/list/remove project aliases");
   console.log("  retry   Re-run a session with the same prompt");
   console.log("  prune   Remove old completed/cancelled/failed sessions");
+  console.log("  serve   Start daemon WS server");
   console.log("");
   console.log("ps options:");
   console.log("  --status       Filter by status (e.g. running, completed, failed, cancelled)");
@@ -135,6 +148,14 @@ function printUsage(): void {
   console.log("  --title         Session title");
   console.log("  --auto-merge    Auto-merge worktree on successful completion");
   console.log("  --tag           Add tag(s) to session (repeatable: --tag foo --tag bar)");
+  console.log("");
+  console.log("serve options:");
+  console.log("  --port          Port to listen on (default: 7394)");
+  console.log("  --host          Hostname to bind (default: 127.0.0.1)");
+  console.log("");
+  console.log("global options:");
+  console.log("  --remote <url>  Connect to remote daemon (e.g. ws://host:7394)");
+  console.log("  ORKA_REMOTE     Env var alternative to --remote");
 }
 
 async function cmdSpawn(): Promise<void> {
@@ -238,7 +259,7 @@ async function cmdPs(): Promise<void> {
     allowPositionals: false,
   });
 
-  let sessions = svc.listSessions({
+  let sessions = await svc.listSessions({
     status: args.values.status as any,
     tag: args.values.tag,
   });
@@ -298,7 +319,7 @@ async function cmdPs(): Promise<void> {
   console.log("-".repeat(lineWidth));
 
   for (const s of sessions) {
-    const task = svc.getTask(s.taskId);
+    const task = await svc.getTask(s.taskId);
     const statusText = s.kept ? `${s.status} [kept]` : s.status;
     const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
     const statusPad = 20 - statusText.length + colored.length;
@@ -316,7 +337,7 @@ async function cmdPs(): Promise<void> {
     line += padR(s.backend, 14);
 
     if (verbose) {
-      const result = svc.getResult(s.id);
+      const result = await svc.getResult(s.id);
       const cost = result?.costUsd != null ? `$${result.costUsd.toFixed(2)}` : "-";
       const duration = result ? formatDuration(result.durationMs) : "-";
       const tokens = result ? `${shortNum(result.outputTokens)} out` : "-";
@@ -335,7 +356,7 @@ async function cmdAttach(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -366,7 +387,7 @@ async function cmdLogs(): Promise<void> {
 
   const follow = args.values.follow ?? false;
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -421,7 +442,7 @@ async function cmdStop(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -443,7 +464,7 @@ async function cmdDiff(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -469,7 +490,7 @@ async function cmdRetry(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -480,13 +501,13 @@ async function cmdRetry(): Promise<void> {
     process.exit(1);
   }
 
-  const task = svc.getTask(session.taskId);
+  const task = await svc.getTask(session.taskId);
   if (!task) {
     console.error(`task not found for session: ${session.id}`);
     process.exit(1);
   }
 
-  const oldTags = svc.getTags(session.id);
+  const oldTags = await svc.getTags(session.id);
   const newSession = await svc.spawn({
     prompt: task.prompt,
     title: task.title,
@@ -518,13 +539,13 @@ async function cmdShow(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
   }
 
-  const task = svc.getTask(session.taskId);
+  const task = await svc.getTask(session.taskId);
 
   console.log(`session ${session.id}`);
   console.log("");
@@ -543,7 +564,7 @@ async function cmdShow(): Promise<void> {
   if (session.kept) console.log(`  kept:      yes (worktree protected)`);
   if (session.autoMerge) console.log(`  auto-merge: yes`);
 
-  const tags = svc.getTags(session.id);
+  const tags = await svc.getTags(session.id);
   if (tags.length > 0) console.log(`  tags:      ${tags.join(", ")}`);
 
   if (task) {
@@ -560,7 +581,7 @@ async function cmdWorkdir(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -585,7 +606,7 @@ async function cmdWait(): Promise<void> {
   let targets: string[];
 
   if (allFlag) {
-    let running = svc.listSessions().filter((s) => !terminalStatuses.has(s.status));
+    let running = (await svc.listSessions()).filter((s) => !terminalStatuses.has(s.status));
     if (projectFilter) {
       const resolved = resolveProject(projectFilter);
       running = running.filter((s) =>
@@ -598,14 +619,15 @@ async function cmdWait(): Promise<void> {
       return;
     }
   } else {
-    targets = ids.map((id) => {
-      const s = findSession(id);
+    targets = [];
+    for (const id of ids) {
+      const s = await findSession(id);
       if (!s) {
         console.error(`session not found: ${id}`);
         process.exit(1);
       }
-      return s.id;
-    });
+      targets.push(s.id);
+    }
   }
 
   console.log(`waiting for ${targets.length} session(s)...`);
@@ -615,11 +637,11 @@ async function cmdWait(): Promise<void> {
   while (pending.size > 0) {
     await svc.reap();
     for (const id of [...pending]) {
-      const s = svc.getSession(id);
+      const s = await svc.getSession(id);
       if (!s || terminalStatuses.has(s.status)) {
         pending.delete(id);
         const status = s?.status ?? "unknown";
-        const task = s ? svc.getTask(s.taskId) : null;
+        const task = s ? await svc.getTask(s.taskId) : null;
         const label = task?.title?.slice(0, 50) ?? id;
         console.log(`  ${id}  ${status}  ${label}`);
         if (status === "failed") anyFailed = true;
@@ -645,7 +667,7 @@ async function cmdSend(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -667,13 +689,13 @@ async function cmdKeep(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
   }
 
-  svc.setKept(session.id, true);
+  await svc.setKept(session.id, true);
   console.log(`session ${session.id} marked as kept (worktree protected from cleanup)`);
 }
 
@@ -684,13 +706,13 @@ async function cmdUnkeep(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
   }
 
-  svc.setKept(session.id, false);
+  await svc.setKept(session.id, false);
   console.log(`session ${session.id} unprotected (worktree may be cleaned up)`);
 }
 
@@ -709,13 +731,13 @@ async function cmdResult(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
   }
 
-  const result = svc.getResult(session.id);
+  const result = await svc.getResult(session.id);
   if (!result) {
     console.error("no result found in session log (session may not be a background claude-code session)");
     process.exit(1);
@@ -730,7 +752,7 @@ async function cmdResult(): Promise<void> {
   const c = (code: string, text: string): string =>
     noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
 
-  const task = svc.getTask(session.taskId);
+  const task = await svc.getTask(session.taskId);
   console.log(c("1", `session ${session.id}`));
   if (task) console.log(`  title: ${task.title.slice(0, 80)}`);
 
@@ -779,7 +801,7 @@ async function cmdMerge(): Promise<void> {
     process.exit(1);
   }
 
-  const session = findSession(sessionId);
+  const session = await findSession(sessionId);
   if (!session) {
     console.error(`session not found: ${sessionId}`);
     process.exit(1);
@@ -873,6 +895,26 @@ async function cmdPrune(): Promise<void> {
   }
 }
 
+async function cmdServe(): Promise<void> {
+  const args = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      port: { type: "string", default: "7394" },
+      host: { type: "string", default: "127.0.0.1" },
+    },
+    allowPositionals: false,
+  });
+
+  const port = parseInt(args.values.port!, 10);
+  const hostname = args.values.host!;
+  const localSvc = createLocalClient();
+  const server = startServer(localSvc, { port, hostname });
+  console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
+
+  // Keep running until killed
+  await new Promise(() => {});
+}
+
 function parseAge(age: string): number {
   const match = age.match(/^(\d+)\s*(h|d|m)$/);
   if (!match) {
@@ -890,11 +932,11 @@ function parseAge(age: string): number {
 
 // --- Helpers ---
 
-function findSession(query: string) {
-  const exact = svc.getSession(query);
+async function findSession(query: string) {
+  const exact = await svc.getSession(query);
   if (exact) return exact;
 
-  const all = svc.listSessions();
+  const all = await svc.listSessions();
   const matches = all.filter((s) => s.id.includes(query));
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) {

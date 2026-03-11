@@ -1,5 +1,8 @@
-// --- Primary export: LocalClient implementing OrkaService ---
+// --- Primary exports: LocalClient + RemoteClient + Server ---
 export { createLocalClient } from "./local-client";
+export { createRemoteClient } from "./remote-client";
+export { startServer } from "./server";
+export type { ServerOptions } from "./server";
 
 // --- CLI-local utilities (not part of OrkaService) ---
 export { tmuxAttach } from "./tmux";
