@@ -12,6 +12,16 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
 
+interface ToolEntry {
+  id: string;
+  timestamp: string;
+  title: string;
+  summary: string;
+  icon: "command" | "file";
+  details: string[];
+  inProgress?: boolean;
+}
+
 type ChatEntry =
   | {
       id: string;
@@ -34,13 +44,9 @@ type ChatEntry =
     }
   | {
       id: string;
-      type: "tool";
+      type: "tool-group";
       timestamp: string;
-      title: string;
-      summary: string;
-      icon: "command" | "file";
-      details: string[];
-      defaultOpen?: boolean;
+      tools: ToolEntry[];
     }
   | {
       id: string;
@@ -66,143 +72,27 @@ function itemIcon(itemType: string): "command" | "file" {
   return "command";
 }
 
-/** Build a ChatEntry from a single OrchestrationEvent, returning null for events we skip. */
-function eventToEntry(event: OrchestrationEvent): ChatEntry | null {
-  switch (event.type) {
-    case "session.created":
-      return {
-        id: `${event.sessionId}-created-${event.timestamp}`,
-        type: "system",
-        timestamp: event.timestamp,
-        title: "Session created",
-        body: `${event.backend} session created.`,
-      };
-    case "session.started":
-      return {
-        id: `${event.sessionId}-started-${event.timestamp}`,
-        type: "system",
-        timestamp: event.timestamp,
-        title: "Session started",
-        body: "The agent session has started.",
-      };
-    case "turn.started":
-      return {
-        id: `turn-started-${event.turnId}`,
-        type: "system",
-        timestamp: event.timestamp,
-        title: "Turn started",
-        body: `Turn ${event.turnId} began.`,
-      };
-    case "turn.completed": {
-      const parts: string[] = [];
-      if (event.cost != null) parts.push(`Cost: $${event.cost.toFixed(4)}`);
-      if (event.tokens) parts.push(`Tokens: ${event.tokens.input} in / ${event.tokens.output} out`);
-      if (event.stopReason) parts.push(`Stop reason: ${event.stopReason}`);
-      return {
-        id: `turn-completed-${event.turnId}`,
-        type: "system",
-        timestamp: event.timestamp,
-        title: "Turn completed",
-        body: parts.length > 0 ? parts.join(" · ") : "Turn finished.",
-      };
-    }
-    case "turn.aborted":
-      return {
-        id: `turn-aborted-${event.turnId}`,
-        type: "error",
-        timestamp: event.timestamp,
-        title: "Turn aborted",
-        body: event.reason,
-      };
-    case "user.input":
-      return {
-        id: `user-input-${event.sessionId}-${event.timestamp}`,
-        type: "user",
-        timestamp: event.timestamp,
-        body: event.text,
-      };
-    case "content.delta":
-      // Deltas are accumulated externally into assistant messages — skip individual entries.
-      return null;
-    case "item.started":
-      return {
-        id: `item-started-${event.itemId}`,
-        type: "tool",
-        timestamp: event.timestamp,
-        title: event.title ?? event.itemType,
-        summary: event.detail ?? "In progress…",
-        icon: itemIcon(event.itemType),
-        defaultOpen: true,
-        details: event.detail ? [event.detail] : [],
-      };
-    case "item.completed":
-      return {
-        id: `item-completed-${event.itemId}`,
-        type: "tool",
-        timestamp: event.timestamp,
-        title: event.title ?? event.itemType,
-        summary: event.detail ?? "Completed",
-        icon: itemIcon(event.itemType),
-        details: event.detail ? [event.detail] : [],
-      };
-    case "item.updated":
-      // Skip updates — we render started + completed.
-      return null;
-    case "session.completed":
-      return {
-        id: `${event.sessionId}-completed-${event.timestamp}`,
-        type: "system",
-        timestamp: event.timestamp,
-        title: "Session completed",
-        body: event.exitCode != null ? `Exited with code ${event.exitCode}.` : "The agent finished cleanly.",
-      };
-    case "session.failed":
-      return {
-        id: `${event.sessionId}-failed-${event.timestamp}`,
-        type: "error",
-        timestamp: event.timestamp,
-        title: "Session failed",
-        body: event.error,
-      };
-    case "session.cancelled":
-      return {
-        id: `${event.sessionId}-cancelled-${event.timestamp}`,
-        type: "system",
-        timestamp: event.timestamp,
-        title: "Session cancelled",
-        body: event.reason ?? "The session was cancelled.",
-      };
-    case "runtime.error":
-      return {
-        id: `runtime-error-${event.timestamp}-${event.turnId ?? ""}`,
-        type: "error",
-        timestamp: event.timestamp,
-        title: "Runtime error",
-        body: event.error,
-      };
-    case "runtime.warning":
-      return {
-        id: `runtime-warning-${event.timestamp}`,
-        type: "system",
-        timestamp: event.timestamp,
-        title: "Warning",
-        body: event.message,
-      };
-    default:
-      // session.state.changed, request.opened, request.resolved, tool.progress — skip
-      return null;
-  }
-}
-
 /**
  * Process a full list of OrchestrationEvents into ChatEntries.
- * Content deltas are accumulated into assistant message entries.
+ *
+ * - Content deltas are accumulated into assistant message entries.
+ * - item.started/item.completed are deduplicated (completed wins) and grouped into tool-group entries.
+ * - Noisy system events (session.created, session.started, turn.started) are hidden.
  */
 function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): ChatEntry[] {
+  // First pass: collect items by itemId so we can deduplicate started/completed
+  const completedItemIds = new Set<string>();
+  for (const event of events) {
+    if (event.type === "item.completed") completedItemIds.add(event.itemId);
+  }
+
   const entries: ChatEntry[] = [];
   let accum = "";
   let accumTurnId: string | null = null;
   let accumStart: string | null = null;
+
+  // Pending tool entries to be grouped
+  let pendingTools: ToolEntry[] = [];
 
   function flushAssistant() {
     if (accum && accumStart) {
@@ -216,6 +106,18 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
     accum = "";
     accumTurnId = null;
     accumStart = null;
+  }
+
+  function flushToolGroup() {
+    if (pendingTools.length === 0) return;
+    const first = pendingTools[0]!;
+    entries.push({
+      id: `tool-group-${first.id}`,
+      type: "tool-group",
+      timestamp: first.timestamp,
+      tools: pendingTools,
+    });
+    pendingTools = [];
   }
 
   if (initialPrompt) {
@@ -241,23 +143,143 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
       continue;
     }
 
-    // A non-delta event: flush any accumulated assistant text first
+    // item.started: skip if we already have a completed event for this item
+    if (event.type === "item.started") {
+      if (completedItemIds.has(event.itemId)) continue;
+      flushAssistant();
+      pendingTools.push({
+        id: event.itemId,
+        timestamp: event.timestamp,
+        title: event.title ?? event.itemType,
+        summary: event.detail ?? "In progress…",
+        icon: itemIcon(event.itemType),
+        details: event.detail ? [event.detail] : [],
+        inProgress: true,
+      });
+      continue;
+    }
+
+    // item.completed: add as tool entry (replaces started)
+    if (event.type === "item.completed") {
+      flushAssistant();
+      pendingTools.push({
+        id: event.itemId,
+        timestamp: event.timestamp,
+        title: event.title ?? event.itemType,
+        summary: event.detail ?? "Completed",
+        icon: itemIcon(event.itemType),
+        details: event.detail ? [event.detail] : [],
+      });
+      continue;
+    }
+
+    // item.updated: skip
+    if (event.type === "item.updated") continue;
+
+    // Non-tool, non-delta event: flush both accumulators
     if (
       event.type === "turn.completed" ||
       event.type === "turn.aborted" ||
-      event.type === "item.started" ||
       event.type === "user.input"
     ) {
       flushAssistant();
+      flushToolGroup();
     }
 
-    const entry = eventToEntry(event);
-    if (entry) {
-      entries.push(entry);
+    // Skip noisy system events that don't add value in chat
+    if (event.type === "session.created" || event.type === "session.started" || event.type === "turn.started") {
+      continue;
+    }
+
+    // Map remaining events
+    switch (event.type) {
+      case "turn.completed": {
+        const parts: string[] = [];
+        if (event.cost != null) parts.push(`$${event.cost.toFixed(4)}`);
+        if (event.tokens) parts.push(`${event.tokens.input} in / ${event.tokens.output} out`);
+        if (parts.length > 0) {
+          entries.push({
+            id: `turn-completed-${event.turnId}`,
+            type: "system",
+            timestamp: event.timestamp,
+            title: "Turn completed",
+            body: parts.join(" · "),
+          });
+        }
+        break;
+      }
+      case "turn.aborted":
+        entries.push({
+          id: `turn-aborted-${event.turnId}`,
+          type: "error",
+          timestamp: event.timestamp,
+          title: "Turn aborted",
+          body: event.reason,
+        });
+        break;
+      case "user.input":
+        entries.push({
+          id: `user-input-${event.sessionId}-${event.timestamp}`,
+          type: "user",
+          timestamp: event.timestamp,
+          body: event.text,
+        });
+        break;
+      case "session.completed":
+        flushToolGroup();
+        entries.push({
+          id: `${event.sessionId}-completed-${event.timestamp}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Session completed",
+          body: event.exitCode != null ? `Exited with code ${event.exitCode}.` : "The agent finished cleanly.",
+        });
+        break;
+      case "session.failed":
+        flushToolGroup();
+        entries.push({
+          id: `${event.sessionId}-failed-${event.timestamp}`,
+          type: "error",
+          timestamp: event.timestamp,
+          title: "Session failed",
+          body: event.error,
+        });
+        break;
+      case "session.cancelled":
+        flushToolGroup();
+        entries.push({
+          id: `${event.sessionId}-cancelled-${event.timestamp}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Session cancelled",
+          body: event.reason ?? "The session was cancelled.",
+        });
+        break;
+      case "runtime.error":
+        entries.push({
+          id: `runtime-error-${event.timestamp}-${event.turnId ?? ""}`,
+          type: "error",
+          timestamp: event.timestamp,
+          title: "Runtime error",
+          body: event.error,
+        });
+        break;
+      case "runtime.warning":
+        entries.push({
+          id: `runtime-warning-${event.timestamp}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Warning",
+          body: event.message,
+        });
+        break;
+      default:
+        break;
     }
   }
 
   flushAssistant();
+  flushToolGroup();
   return entries;
 }
 
@@ -477,30 +499,48 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
     );
   }
 
-  if (entry.type === "tool") {
+  if (entry.type === "tool-group") {
+    const hasInProgress = entry.tools.some((t) => t.inProgress);
+    const label = hasInProgress
+      ? `Using ${entry.tools.length} tool${entry.tools.length > 1 ? "s" : ""}…`
+      : `Used ${entry.tools.length} tool${entry.tools.length > 1 ? "s" : ""}`;
     return (
       <details
-        open={entry.defaultOpen}
+        open={hasInProgress}
         className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70"
       >
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-800 text-zinc-300">
-              {entry.icon === "command" ? <TerminalSquare className="h-4 w-4" /> : <FileCode2 className="h-4 w-4" />}
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
+              {hasInProgress ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-zinc-100">{entry.title}</p>
-              <p className="truncate text-sm text-zinc-400">{entry.summary}</p>
-            </div>
+            <p className="text-sm text-zinc-400">{label}</p>
           </div>
           <div className="shrink-0 text-xs text-zinc-500">{formatRelativeTime(entry.timestamp)}</div>
         </summary>
-        <div className="border-t border-zinc-800 px-4 py-3">
-          <div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-zinc-500">
-            <Wrench className="h-3.5 w-3.5" />
-            Tool Activity
-          </div>
-          <ToolCallDetails title={entry.title} details={entry.details} />
+        <div className="border-t border-zinc-800">
+          {entry.tools.map((tool) => (
+            <details key={tool.id} className="border-b border-zinc-800/50 last:border-b-0">
+              <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2">
+                <div className="flex h-6 w-6 items-center justify-center rounded bg-zinc-800/80 text-zinc-400">
+                  {tool.inProgress ? (
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                  ) : tool.icon === "command" ? (
+                    <TerminalSquare className="h-3 w-3" />
+                  ) : (
+                    <FileCode2 className="h-3 w-3" />
+                  )}
+                </div>
+                <span className="min-w-0 truncate text-xs font-medium text-zinc-300">{tool.title}</span>
+                <span className="ml-auto shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
+              </summary>
+              {tool.details.length > 0 ? (
+                <div className="border-t border-zinc-800/30 px-4 py-2">
+                  <ToolCallDetails title={tool.title} details={tool.details} />
+                </div>
+              ) : null}
+            </details>
+          ))}
         </div>
       </details>
     );
