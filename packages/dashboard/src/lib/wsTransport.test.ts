@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { propagation, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
+import { rpcLatencyStore } from "./rpcLatencyStore";
 import { WsTransport } from "./wsTransport";
 
 class MockWebSocket {
@@ -64,16 +65,21 @@ type ScheduledTimer = {
 const originalWebSocket = globalThis.WebSocket;
 const originalSetTimeout = globalThis.setTimeout;
 const originalClearTimeout = globalThis.clearTimeout;
+const originalDateNow = Date.now;
 
 let timerId = 0;
 let scheduledTimers: ScheduledTimer[] = [];
 let provider: WebTracerProvider;
 let exporter: InMemorySpanExporter;
+let nowMs = 0;
 
 beforeEach(() => {
   MockWebSocket.instances = [];
   scheduledTimers = [];
   timerId = 0;
+  nowMs = 1_000;
+  Date.now = () => nowMs;
+  rpcLatencyStore.reset();
 
   globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
   globalThis.setTimeout = ((handler: TimerHandler, delay?: number) => {
@@ -110,6 +116,8 @@ afterEach(async () => {
   globalThis.WebSocket = originalWebSocket;
   globalThis.setTimeout = originalSetTimeout;
   globalThis.clearTimeout = originalClearTimeout;
+  Date.now = originalDateNow;
+  rpcLatencyStore.reset();
   await provider.shutdown();
   trace.disable();
   propagation.disable();
@@ -124,6 +132,7 @@ describe("WsTransport", () => {
     socket.open();
 
     const resultPromise = transport.request<string>("listSessions", { filter: "all" });
+    advanceTime(12);
 
     expect(socket.sent).toHaveLength(1);
     const request = JSON.parse(socket.sent[0] ?? "{}");
@@ -142,6 +151,16 @@ describe("WsTransport", () => {
     });
 
     await expect(resultPromise).resolves.toBe("ok");
+    expect(rpcLatencyStore.getLastRtt("listSessions")).toBe(12);
+    expect(rpcLatencyStore.getConnectionRtt()).toBe(12);
+    expect(rpcLatencyStore.getMethodStats("listSessions")).toMatchObject({
+      avg: 12,
+      p95: 12,
+      p99: 12,
+      min: 12,
+      max: 12,
+      count: 1,
+    });
     const rpcSpan = exporter.getFinishedSpans().find(
       (span) => span.name === "orka.dashboard.rpc" && span.attributes["orka.method"] === "listSessions",
     );
@@ -161,11 +180,14 @@ describe("WsTransport", () => {
     socket.open();
 
     const resultPromise = transport.request("listSessions");
+    advanceTime(5);
 
     runTimer(5);
 
     await expect(resultPromise).rejects.toThrow("Request timeout: listSessions");
     expect(socket.sent).toHaveLength(1);
+    expect(rpcLatencyStore.getLastRtt("listSessions")).toBe(5);
+    expect(rpcLatencyStore.getConnectionRtt()).toBe(5);
 
     const request = JSON.parse(socket.sent[0] ?? "{}");
     expect(request).toMatchObject({
@@ -179,6 +201,56 @@ describe("WsTransport", () => {
       (span) => span.name === "orka.dashboard.rpc" && span.attributes["orka.method"] === "listSessions",
     );
     expect(rpcSpan?.attributes["orka.status"]).toBe("timeout");
+  });
+
+  test("tracks per-method latency stats across successful and failed responses", async () => {
+    const transport = new WsTransport("ws://orka.test");
+    transport.connect();
+
+    const socket = latestSocket();
+    socket.open();
+
+    const successPromise = transport.request<string>("listSessions");
+    advanceTime(12);
+    socket.receive({
+      jsonrpc: "2.0",
+      id: 1,
+      result: "ok",
+    });
+    await expect(successPromise).resolves.toBe("ok");
+
+    const failedPromise = transport.request("listSessions");
+    advanceTime(8);
+    socket.receive({
+      jsonrpc: "2.0",
+      id: 2,
+      error: {
+        code: -32000,
+        message: "boom",
+      },
+    });
+    await expect(failedPromise).rejects.toThrow("boom");
+
+    expect(rpcLatencyStore.getLastRtt("listSessions")).toBe(8);
+    expect(rpcLatencyStore.getConnectionRtt()).toBe(8);
+    expect(rpcLatencyStore.getMethodStats("listSessions")).toMatchObject({
+      avg: 10,
+      p95: 12,
+      p99: 12,
+      min: 8,
+      max: 12,
+      count: 2,
+    });
+    expect(rpcLatencyStore.getAllStats()).toMatchObject({
+      listSessions: {
+        avg: 10,
+        p95: 12,
+        p99: 12,
+        min: 8,
+        max: 12,
+        count: 2,
+      },
+    });
   });
 
   test("subscribe() registers handler and receives push messages", () => {
@@ -413,4 +485,8 @@ function runTimer(delay: number): void {
 
   timer.cleared = true;
   timer.callback();
+}
+
+function advanceTime(deltaMs: number): void {
+  nowMs += deltaMs;
 }

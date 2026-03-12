@@ -6,6 +6,7 @@ import {
   injectSpanContext,
   startDashboardSpan,
 } from "./tracing";
+import { rpcLatencyStore } from "./rpcLatencyStore";
 
 type RpcResponseEnvelope = RpcResponse;
 
@@ -18,6 +19,8 @@ type PendingRequest = {
   method: string;
   span: Span;
   startedAt: number;
+  createdAt: number;
+  sentAt: number | null;
 };
 
 export type PushHandler = (data: unknown, sequence: number) => void;
@@ -151,6 +154,7 @@ export class WsTransport {
         this.pending.delete(id);
         this.outbox = this.outbox.filter((message) => message !== payload);
         const error = new Error(`Request timeout: ${method}`);
+        this.recordRpcCompletion(pending, Date.now() - (pending.sentAt ?? pending.createdAt), false);
         finishDashboardSpan(pending.span, pending.startedAt, "timeout", error);
         reject(error);
       }, this.options?.timeout ?? 60_000);
@@ -164,6 +168,8 @@ export class WsTransport {
         method,
         span,
         startedAt,
+        createdAt: Date.now(),
+        sentAt: null,
       });
 
       if (this.isOpen()) {
@@ -320,14 +326,18 @@ export class WsTransport {
 
     clearTimeout(pending.timer);
     this.pending.delete(id);
+    const completedAt = Date.now();
+    const duration = Math.max(0, completedAt - (pending.sentAt ?? pending.createdAt));
 
     if (parsed.error) {
       const error = new Error(parsed.error.message ?? `Request failed: ${pending.method}`);
+      this.recordRpcCompletion(pending, duration, false, completedAt);
       finishDashboardSpan(pending.span, pending.startedAt, "error", error);
       pending.reject(error);
       return;
     }
 
+    this.recordRpcCompletion(pending, duration, true, completedAt);
     finishDashboardSpan(pending.span, pending.startedAt, "ok");
     pending.resolve(parsed.result);
   }
@@ -341,6 +351,7 @@ export class WsTransport {
       clearTimeout(pending.timer);
       this.pending.delete(id);
       const error = new Error("Connection closed");
+      this.recordRpcCompletion(pending, Date.now() - (pending.sentAt ?? pending.createdAt), false);
       finishDashboardSpan(pending.span, pending.startedAt, "disconnected", error);
       pending.reject(error);
     }
@@ -404,6 +415,7 @@ export class WsTransport {
     const pending = this.pending.get(id);
     if (pending) {
       pending.sent = true;
+      pending.sentAt ??= Date.now();
     }
   }
 
@@ -418,10 +430,25 @@ export class WsTransport {
   private rejectAllPending(error: Error): void {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
+      this.recordRpcCompletion(pending, Date.now() - (pending.sentAt ?? pending.createdAt), false);
       finishDashboardSpan(pending.span, pending.startedAt, "error", error);
       pending.reject(error);
       this.pending.delete(id);
     }
+  }
+
+  private recordRpcCompletion(
+    pending: PendingRequest,
+    duration: number,
+    ok: boolean,
+    timestamp = Date.now(),
+  ): void {
+    rpcLatencyStore.onRpcComplete({
+      method: pending.method,
+      duration: Math.max(0, duration),
+      ok,
+      timestamp,
+    });
   }
 
   private isOpen(): boolean {
