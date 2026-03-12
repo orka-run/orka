@@ -94,7 +94,7 @@ export function MarkdownContent({ content }: MarkdownContentProps) {
           th: ({ children }) => <th className="px-3 py-2 font-medium">{children}</th>,
           td: ({ children }) => <td className="px-3 py-2 align-top text-zinc-300">{children}</td>,
           pre: ({ children }) => (
-            <pre className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-[13px] leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+            <pre className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-[13px] leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] whitespace-pre-wrap break-all [overflow-wrap:anywhere]">
               {children}
             </pre>
           ),
