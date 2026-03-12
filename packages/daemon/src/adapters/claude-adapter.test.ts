@@ -129,6 +129,59 @@ describe("mapClaudeEvent", () => {
 });
 
 describe("ClaudeCodeAdapter", () => {
+  test("sendTurn writes to stdin and emits turn.started with a new turnId", async () => {
+    const stdin = new MockWritableSink();
+    let resolveExited: (code: number) => void;
+    const exitedPromise = new Promise<number>((resolve) => { resolveExited = resolve; });
+    const adapter = new ClaudeCodeAdapter(((command, _options) => {
+      return {
+        stdout: createJsonLineStream([
+          { type: "system", subtype: "init", message: "Claude Code started" },
+          {
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            total_cost_usd: 0.01,
+            usage: { input_tokens: 10, output_tokens: 5 },
+          },
+        ]),
+        stderr: createTextStream([]),
+        stdin,
+        exited: exitedPromise,
+        kill() { resolveExited(0); },
+      } as unknown as ReturnType<typeof Bun.spawn>;
+    }) as typeof Bun.spawn);
+
+    const handle = await adapter.startSession({
+      threadId: "thread-mt",
+      prompt: "First prompt",
+      model: "claude-sonnet-4-6",
+    });
+
+    // Wait briefly for the stream events to be processed
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const firstTurnId = (handle.meta as { turnId: string }).turnId;
+
+    await adapter.sendTurn(handle, { input: "Follow-up message", model: "claude-sonnet-4-6" });
+
+    const secondTurnId = (handle.meta as { turnId: string }).turnId;
+    expect(secondTurnId).toMatch(/^turn-/);
+    expect(secondTurnId).not.toBe(firstTurnId);
+
+    expect(stdin.writes).toEqual(["First prompt\n", "Follow-up message\n"]);
+    expect(stdin.ended).toBe(false);
+
+    // Stop session to trigger process exit and close events
+    await adapter.stopSession(handle);
+
+    const events = await collectEvents(handle.events);
+    const turnStartedEvents = events.filter((e) => e.type === "turn.started");
+    expect(turnStartedEvents).toHaveLength(2);
+    expect(turnStartedEvents[0]?.turnId).toBe(firstTurnId);
+    expect(turnStartedEvents[1]?.turnId).toBe(secondTurnId);
+  });
+
   test("startSession includes live-path flags and emits turn-scoped events with a stable turnId", async () => {
     const spawnCalls: Array<{ command: string[]; options: Record<string, unknown> }> = [];
     const stdin = new MockWritableSink();
@@ -183,7 +236,6 @@ describe("ClaudeCodeAdapter", () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0]?.command).toEqual([
       "claude",
-      "-p",
       "--verbose",
       "--output-format",
       "stream-json",
@@ -212,8 +264,8 @@ describe("ClaudeCodeAdapter", () => {
         ? (env as Record<string, unknown>)["CLAUDECODE"]
         : undefined,
     ).toBeUndefined();
-    expect(stdin.writes).toEqual(["Inspect the project"]);
-    expect(stdin.ended).toBe(true);
+    expect(stdin.writes).toEqual(["Inspect the project\n"]);
+    expect(stdin.ended).toBe(false);
 
     expect(events.map((event) => event.type)).toEqual([
       "session.started",
