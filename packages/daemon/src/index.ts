@@ -11,8 +11,8 @@ export { TmuxRunner, defaultRunner, tmuxAttach } from "./tmux";
 export { setRunner, getRunner } from "./orchestrator";
 export { getConfig } from "./config";
 export type { OrkaConfig } from "./config";
-export { initTracing, shutdownTracing, getTracer, withSpan, withSpanSync, setLogLevel } from "./tracing";
-export type { LogLevel } from "./tracing";
+export { initTracing, shutdownTracing, getTracer, getMeter, getDaemonMetrics, queryMetricSnapshot, withSpan, withSpanSync, setLogLevel } from "./tracing";
+export type { DaemonMetrics, LogLevel, MetricSnapshot } from "./tracing";
 export {
   addProject,
   removeProject,

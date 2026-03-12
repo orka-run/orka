@@ -11,12 +11,12 @@ import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getS
 import { defaultRunner } from "./tmux";
 import type { SessionRunner } from "./runner";
 import { consumeProviderEvents } from "./orchestration";
-import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
+import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, deleteBranch } from "./worktree";
 import { buildBackendCommand, buildEnvExports, assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";
 import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerService } from "./provider-runtime";
 import { pushHub } from "./push";
-import { withSpan } from "./tracing";
+import { getDaemonMetrics, withSpan } from "./tracing";
 
 let _runner: SessionRunner = defaultRunner;
 
@@ -127,9 +127,9 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       exitCode: null,
       kept: false,
       autoMerge: req.autoMerge ?? false,
-      systemPrompt: req.systemPrompt,
-      allowedTools: req.allowedTools,
-      env: req.env,
+      ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
+      ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
+      ...(req.env ? { env: req.env } : {}),
     };
     insertSession(session);
 
@@ -147,12 +147,13 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
         ...(req.model ? { model: req.model } : {}),
         ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
         prompt: req.prompt,
-        systemPrompt: req.systemPrompt,
-        allowedTools: req.allowedTools,
-        env: req.env,
+        ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
+        ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
+        ...(req.env ? { env: req.env } : {}),
       });
 
       updateSessionStatus(sessionId, "running", { startedAt });
+      recordSessionStartedMetrics();
 
       void consumeProviderEvents(sessionId, handle, orchestrationEngine, {
         updateSessionStatus,
@@ -165,6 +166,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
         projectPath,
         autoMerge: session.autoMerge,
         model: req.model ?? null,
+        getSession,
         cleanupWorktree: async () => {
           const currentSession = getSession(sessionId);
           if (currentSession) {
@@ -190,8 +192,8 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       ...(req.model ? { model: req.model } : {}),
       ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
       projectPath,
-      systemPrompt: req.systemPrompt,
-      allowedTools: req.allowedTools,
+      ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
+      ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
     });
 
     // 6. Write command to script file (avoids bash -c escaping hell)
@@ -214,10 +216,12 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     // 7. Spawn tmux session
     await _runner.spawn(tmuxName, scriptPath, workingDir);
 
-    updateSessionStatus(sessionId, "running", { startedAt: new Date().toISOString() });
+    const startedAt = new Date().toISOString();
+    updateSessionStatus(sessionId, "running", { startedAt });
+    recordSessionStartedMetrics();
 
     span.addEvent("session.started");
-    return { ...session, status: "running", startedAt: new Date().toISOString() };
+    return { ...session, status: "running", startedAt };
   });
 }
 
@@ -265,13 +269,16 @@ export async function reapSessions(): Promise<number> {
         } catch {
           // Worktree may already be gone and diff persistence is best-effort.
         }
-        updateSessionStatus(s.id, "completed", {
-          finishedAt: new Date().toISOString(),
+        const finishedAt = new Date().toISOString();
+        const nextStatus = exitCode !== undefined && exitCode !== 0 ? "failed" : "completed";
+        updateSessionStatus(s.id, nextStatus, {
+          finishedAt,
           ...(exitCode !== undefined ? { exitCode } : {}),
         });
+        recordSessionTerminalMetrics(s.startedAt, finishedAt, nextStatus);
         pushHub.broadcast("orchestration.sessionUpdated", {
           sessionId: s.id,
-          status: "completed",
+          status: nextStatus,
         });
 
         // Safety: kill tmux session in case it's lingering (e.g. remain-on-exit)
@@ -279,11 +286,12 @@ export async function reapSessions(): Promise<number> {
 
         span.addEvent("session.reaped", {
           "orka.session.id": s.id,
+          "orka.status": nextStatus,
           "orka.exit_code": exitCode ?? -1,
         });
 
         // Auto-merge on success
-        if (s.autoMerge && (exitCode === undefined || exitCode === 0)) {
+        if (s.autoMerge && nextStatus === "completed") {
           await tryAutoMerge(s, span);
         }
 
@@ -330,9 +338,11 @@ export async function stopSession(sessionId: string): Promise<void> {
       // Worktree may already be gone and diff persistence is best-effort.
     }
 
+    const finishedAt = new Date().toISOString();
     updateSessionStatus(sessionId, "cancelled", {
-      finishedAt: new Date().toISOString(),
+      finishedAt,
     });
+    recordSessionTerminalMetrics(session.startedAt, finishedAt, "cancelled");
     pushHub.broadcast("orchestration.sessionUpdated", {
       sessionId,
       status: "cancelled",
@@ -402,6 +412,43 @@ async function tryCleanupWorktree(session: Session): Promise<void> {
   }).catch(() => {
     // Cleanup failure should not break reap/stop
   });
+}
+
+function recordSessionStartedMetrics(): void {
+  const metrics = getDaemonMetrics();
+  metrics.sessionsSpawned.add(1);
+  metrics.sessionsActive.add(1);
+}
+
+function recordSessionTerminalMetrics(
+  startedAt: string | null,
+  finishedAt: string,
+  status: "completed" | "failed" | "cancelled",
+): void {
+  const metrics = getDaemonMetrics();
+
+  switch (status) {
+    case "completed":
+      metrics.sessionsCompleted.add(1);
+      break;
+    case "failed":
+      metrics.sessionsFailed.add(1);
+      break;
+    case "cancelled":
+      metrics.sessionsCancelled.add(1);
+      break;
+  }
+
+  if (!startedAt) {
+    return;
+  }
+
+  metrics.sessionsActive.add(-1);
+
+  const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  if (Number.isFinite(durationMs) && durationMs >= 0) {
+    metrics.sessionDuration.record(durationMs);
+  }
 }
 
 /** Clean up orphaned worktree dirs that don't belong to any active session. */

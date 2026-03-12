@@ -1,14 +1,19 @@
 import {
   context,
+  metrics,
   propagation,
   trace,
   SpanStatusCode,
   type AttributeValue,
   type Attributes,
+  type Counter,
   type Context,
+  type Histogram,
   type HrTime,
+  type Meter,
   type Span,
   type Tracer,
+  type UpDownCounter,
 } from "@opentelemetry/api";
 import {
   BasicTracerProvider,
@@ -17,6 +22,17 @@ import {
   type ReadableSpan,
   type SpanExporter,
 } from "@opentelemetry/sdk-trace-base";
+import {
+  AggregationTemporality,
+  ConsoleMetricExporter,
+  DataPointType,
+  InMemoryMetricExporter,
+  MeterProvider,
+  PeriodicExportingMetricReader,
+  type MetricData,
+  type PushMetricExporter,
+  type ResourceMetrics,
+} from "@opentelemetry/sdk-metrics";
 import { ExportResultCode, W3CTraceContextPropagator, type ExportResult } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
@@ -27,7 +43,51 @@ import { getOrkaHome } from "./db";
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 let _initialized = false;
-let _provider: BasicTracerProvider | null = null;
+let _tracerProvider: BasicTracerProvider | null = null;
+let _meterProvider: MeterProvider | null = null;
+let _metricSnapshotExporter: InMemoryMetricExporter | null = null;
+let _daemonMetrics: DaemonMetrics | null = null;
+
+const OTEL_EXPORT_INTERVAL_MS = 15_000;
+const OTEL_EXPORT_TIMEOUT_MS = 10_000;
+
+export interface DaemonMetrics {
+  sessionsSpawned: Counter;
+  sessionsCompleted: Counter;
+  sessionsFailed: Counter;
+  sessionsCancelled: Counter;
+  rpcRequests: Counter;
+  rpcErrors: Counter;
+  pushEvents: Counter;
+  rpcDuration: Histogram;
+  sessionDuration: Histogram;
+  sessionsActive: UpDownCounter;
+  wsConnections: UpDownCounter;
+}
+
+export interface MetricSnapshot {
+  resourceAttributes: Record<string, unknown>;
+  scopeMetrics: Array<{
+    scope: {
+      name?: string;
+      version?: string;
+    };
+    metrics: Array<{
+      name: string;
+      description: string;
+      unit: string;
+      dataPointType: string;
+      aggregationTemporality: string;
+      isMonotonic?: boolean;
+      dataPoints: Array<{
+        startTime: number;
+        endTime: number;
+        attributes: Record<string, unknown>;
+        value: unknown;
+      }>;
+    }>;
+  }>;
+}
 
 export function setLogLevel(_level: LogLevel): void {
   // Reserved for future use with structured logging alongside tracing
@@ -113,10 +173,10 @@ export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
       const lines = combined.split("\n");
 
       // First element may be partial — carry to next chunk
-      tail = lines[0];
+      tail = lines[0] ?? "";
 
       for (let i = lines.length - 1; i >= 1 && results.length < limit; i--) {
-        const line = lines[i].trim();
+        const line = lines[i]?.trim();
         if (!line) continue;
 
         let entry: TraceLogEntry;
@@ -255,6 +315,55 @@ class OtlpHttpSpanExporter implements SpanExporter {
   async forceFlush(): Promise<void> {}
 }
 
+class OtlpHttpMetricExporter implements PushMetricExporter {
+  constructor(
+    private readonly endpoint: string,
+    private readonly fallbackExporter: PushMetricExporter | null,
+  ) {}
+
+  export(resourceMetrics: ResourceMetrics, resultCallback: (result: ExportResult) => void): void {
+    void this.exportBatch(resourceMetrics, resultCallback);
+  }
+
+  selectAggregationTemporality(): AggregationTemporality {
+    return AggregationTemporality.CUMULATIVE;
+  }
+
+  private async exportBatch(
+    resourceMetrics: ResourceMetrics,
+    resultCallback: (result: ExportResult) => void,
+  ): Promise<void> {
+    try {
+      const response = await fetch(this.endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(serializeMetricsToOtlpJson(resourceMetrics)),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Collector returned ${response.status}`);
+      }
+
+      resultCallback({ code: ExportResultCode.SUCCESS });
+    } catch (error) {
+      if (this.fallbackExporter) {
+        this.fallbackExporter.export(resourceMetrics, resultCallback);
+        return;
+      }
+
+      resultCallback({
+        code: ExportResultCode.FAILED,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
+  async shutdown(): Promise<void> {}
+  async forceFlush(): Promise<void> {}
+}
+
 function hrTimeToMs(hrTime: HrTime): number {
   return hrTime[0] * 1000 + hrTime[1] / 1_000_000;
 }
@@ -264,6 +373,9 @@ export function initTracing(options: TracingInitOptions = {}): void {
   if (_initialized) return;
   _initialized = true;
 
+  const traceEndpoint = options.otlpHttpEndpoint ?? process.env["OTEL_EXPORTER_OTLP_ENDPOINT"];
+  const metricEndpoint = process.env["OTEL_EXPORTER_OTLP_ENDPOINT"];
+
   const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: options.serviceName ?? "orka",
     [ATTR_SERVICE_VERSION]: options.serviceVersion ?? "0.1.0",
@@ -272,11 +384,11 @@ export function initTracing(options: TracingInitOptions = {}): void {
   const processors: SimpleSpanProcessor[] = [];
   const fileExporter = new FileSpanExporter();
 
-  if (options.otlpHttpEndpoint) {
+  if (traceEndpoint) {
     processors.push(
       new SimpleSpanProcessor(
         new OtlpHttpSpanExporter(
-          options.otlpHttpEndpoint,
+          normalizeOtlpHttpEndpoint(traceEndpoint, "traces"),
           options.otlpFallbackToFile === false ? null : fileExporter,
         ),
       ),
@@ -289,29 +401,131 @@ export function initTracing(options: TracingInitOptions = {}): void {
     processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   }
 
-  _provider = new BasicTracerProvider({
+  _tracerProvider = new BasicTracerProvider({
     resource,
     spanProcessors: processors,
   });
+  trace.setGlobalTracerProvider(_tracerProvider);
 
-  trace.setGlobalTracerProvider(_provider);
+  const metricReaders = [];
+  _metricSnapshotExporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  metricReaders.push(new PeriodicExportingMetricReader({
+    exporter: _metricSnapshotExporter,
+    exportIntervalMillis: OTEL_EXPORT_INTERVAL_MS,
+    exportTimeoutMillis: OTEL_EXPORT_TIMEOUT_MS,
+  }));
+
+  if (metricEndpoint) {
+    metricReaders.push(new PeriodicExportingMetricReader({
+      exporter: new OtlpHttpMetricExporter(
+        normalizeOtlpHttpEndpoint(metricEndpoint, "metrics"),
+        process.env["ORKA_TRACE"] === "console" ? new ConsoleMetricExporter() : null,
+      ),
+      exportIntervalMillis: OTEL_EXPORT_INTERVAL_MS,
+      exportTimeoutMillis: OTEL_EXPORT_TIMEOUT_MS,
+    }));
+  } else if (process.env["ORKA_TRACE"] === "console") {
+    metricReaders.push(new PeriodicExportingMetricReader({
+      exporter: new ConsoleMetricExporter(),
+      exportIntervalMillis: OTEL_EXPORT_INTERVAL_MS,
+      exportTimeoutMillis: OTEL_EXPORT_TIMEOUT_MS,
+    }));
+  }
+
+  _meterProvider = new MeterProvider({
+    resource,
+    readers: metricReaders,
+  });
+  metrics.setGlobalMeterProvider(_meterProvider);
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
 }
 
 /** Shutdown tracing — flush pending spans. */
 export async function shutdownTracing(): Promise<void> {
-  if (_provider) {
-    await _provider.shutdown();
-    _provider = null;
+  if (_meterProvider) {
+    await _meterProvider.shutdown();
+    _meterProvider = null;
+  }
+  if (_tracerProvider) {
+    await _tracerProvider.shutdown();
+    _tracerProvider = null;
   }
   trace.disable();
+  metrics.disable();
   propagation.disable();
+  _metricSnapshotExporter = null;
+  _daemonMetrics = null;
   _initialized = false;
 }
 
 /** Get the orka tracer. */
 export function getTracer(): Tracer {
   return trace.getTracer("orka", "0.1.0");
+}
+
+/** Get the orka meter. */
+export function getMeter(): Meter {
+  return metrics.getMeter("orka", "0.1.0");
+}
+
+export function getDaemonMetrics(): DaemonMetrics {
+  if (_daemonMetrics) {
+    return _daemonMetrics;
+  }
+
+  const meter = getMeter();
+  _daemonMetrics = {
+    sessionsSpawned: meter.createCounter("orka.sessions.spawned", {
+      description: "Total number of daemon sessions started.",
+    }),
+    sessionsCompleted: meter.createCounter("orka.sessions.completed", {
+      description: "Total number of sessions that completed successfully.",
+    }),
+    sessionsFailed: meter.createCounter("orka.sessions.failed", {
+      description: "Total number of sessions that ended in failure.",
+    }),
+    sessionsCancelled: meter.createCounter("orka.sessions.cancelled", {
+      description: "Total number of sessions cancelled by users or shutdown.",
+    }),
+    rpcRequests: meter.createCounter("orka.rpc.requests", {
+      description: "Total number of JSON-RPC requests handled by the daemon.",
+    }),
+    rpcErrors: meter.createCounter("orka.rpc.errors", {
+      description: "Total number of JSON-RPC requests that returned errors.",
+    }),
+    pushEvents: meter.createCounter("orka.push.events", {
+      description: "Total number of push events broadcast to subscribed clients.",
+    }),
+    rpcDuration: meter.createHistogram("orka.rpc.duration", {
+      description: "End-to-end JSON-RPC handler duration.",
+      unit: "ms",
+    }),
+    sessionDuration: meter.createHistogram("orka.session.duration", {
+      description: "Session wall-clock duration from startedAt to terminal state.",
+      unit: "ms",
+    }),
+    sessionsActive: meter.createUpDownCounter("orka.sessions.active", {
+      description: "Current number of running sessions.",
+    }),
+    wsConnections: meter.createUpDownCounter("orka.ws.connections", {
+      description: "Current number of daemon WebSocket connections.",
+    }),
+  };
+
+  return _daemonMetrics;
+}
+
+export async function queryMetricSnapshot(): Promise<MetricSnapshot | null> {
+  return withSpan("orka.metrics.query_snapshot", {}, async () => {
+    if (!_meterProvider || !_metricSnapshotExporter) {
+      return null;
+    }
+
+    await _meterProvider.forceFlush();
+    const snapshots = _metricSnapshotExporter.getMetrics();
+    const latest = snapshots.at(-1);
+    return latest ? serializeResourceMetricsSnapshot(latest) : null;
+  });
 }
 
 /**
@@ -386,6 +600,25 @@ function serializeSpansToOtlpJson(spans: ReadableSpan[]): { resourceSpans: Array
   };
 }
 
+function serializeMetricsToOtlpJson(resourceMetrics: ResourceMetrics): { resourceMetrics: Array<Record<string, unknown>> } {
+  return {
+    resourceMetrics: [
+      {
+        resource: {
+          attributes: attributesToOtlp(resourceMetrics.resource.attributes),
+        },
+        scopeMetrics: resourceMetrics.scopeMetrics.map((scopeMetrics) => ({
+          scope: {
+            name: scopeMetrics.scope.name,
+            version: scopeMetrics.scope.version,
+          },
+          metrics: scopeMetrics.metrics.map(serializeMetricToOtlp),
+        })),
+      },
+    ],
+  };
+}
+
 function serializeSpanToOtlp(span: ReadableSpan): Record<string, unknown> {
   return {
     traceId: span.spanContext().traceId,
@@ -410,6 +643,32 @@ function serializeSpanToOtlp(span: ReadableSpan): Record<string, unknown> {
 
 function hrTimeToUnixNanos(hrTime: HrTime): string {
   return (BigInt(hrTime[0]) * 1_000_000_000n + BigInt(hrTime[1])).toString();
+}
+
+function serializeResourceMetricsSnapshot(resourceMetrics: ResourceMetrics): MetricSnapshot {
+  return {
+    resourceAttributes: attributesToJson(resourceMetrics.resource.attributes),
+    scopeMetrics: resourceMetrics.scopeMetrics.map((scopeMetrics) => ({
+      scope: {
+        name: scopeMetrics.scope.name,
+        ...(scopeMetrics.scope.version ? { version: scopeMetrics.scope.version } : {}),
+      },
+      metrics: scopeMetrics.metrics.map((metric) => ({
+        name: metric.descriptor.name,
+        description: metric.descriptor.description,
+        unit: metric.descriptor.unit,
+        dataPointType: dataPointTypeToString(metric.dataPointType),
+        aggregationTemporality: aggregationTemporalityToString(metric.aggregationTemporality),
+        ...("isMonotonic" in metric ? { isMonotonic: metric.isMonotonic } : {}),
+        dataPoints: metric.dataPoints.map((dataPoint) => ({
+          startTime: hrTimeToMs(dataPoint.startTime),
+          endTime: hrTimeToMs(dataPoint.endTime),
+          attributes: attributesToJson(dataPoint.attributes),
+          value: serializeMetricPointValue(metric.dataPointType, dataPoint.value),
+        })),
+      })),
+    })),
+  };
 }
 
 function attributesToJson(attributes: Attributes | undefined): Record<string, unknown> {
@@ -479,6 +738,152 @@ function attributeArrayValueToOtlp(value: string | number | boolean): Record<str
     return { intValue: String(value) };
   }
   return { doubleValue: value };
+}
+
+function normalizeOtlpHttpEndpoint(endpoint: string, signal: "traces" | "metrics"): string {
+  try {
+    const url = new URL(endpoint);
+    if (/\/v1\/(?:traces|metrics)$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/v1\/(?:traces|metrics)$/, `/v1/${signal}`);
+      return url.toString();
+    }
+
+    const trimmedPath = url.pathname.replace(/\/+$/, "");
+    url.pathname = `${trimmedPath}/v1/${signal}`.replace(/\/{2,}/g, "/");
+    return url.toString();
+  } catch {
+    return endpoint;
+  }
+}
+
+function serializeMetricToOtlp(metric: MetricData): Record<string, unknown> {
+  const descriptor = {
+    name: metric.descriptor.name,
+    description: metric.descriptor.description,
+    unit: metric.descriptor.unit,
+  };
+
+  switch (metric.dataPointType) {
+    case DataPointType.GAUGE:
+      return {
+        ...descriptor,
+        gauge: {
+          dataPoints: metric.dataPoints.map((dataPoint) => serializeNumberDataPointToOtlp(dataPoint)),
+        },
+      };
+    case DataPointType.SUM:
+      return {
+        ...descriptor,
+        sum: {
+          aggregationTemporality: metric.aggregationTemporality,
+          isMonotonic: metric.isMonotonic,
+          dataPoints: metric.dataPoints.map((dataPoint) => serializeNumberDataPointToOtlp(dataPoint)),
+        },
+      };
+    case DataPointType.HISTOGRAM:
+      return {
+        ...descriptor,
+        histogram: {
+          aggregationTemporality: metric.aggregationTemporality,
+          dataPoints: metric.dataPoints.map((dataPoint) => serializeHistogramDataPointToOtlp(dataPoint)),
+        },
+      };
+    case DataPointType.EXPONENTIAL_HISTOGRAM:
+      return {
+        ...descriptor,
+        exponentialHistogram: {
+          aggregationTemporality: metric.aggregationTemporality,
+          dataPoints: metric.dataPoints.map((dataPoint) => serializeExponentialHistogramDataPointToOtlp(dataPoint)),
+        },
+      };
+  }
+}
+
+function serializeNumberDataPointToOtlp(
+  dataPoint:
+    | Extract<MetricData, { dataPointType: DataPointType.GAUGE }>["dataPoints"][number]
+    | Extract<MetricData, { dataPointType: DataPointType.SUM }>["dataPoints"][number],
+): Record<string, unknown> {
+  return {
+    attributes: attributesToOtlp(dataPoint.attributes),
+    startTimeUnixNano: hrTimeToUnixNanos(dataPoint.startTime),
+    timeUnixNano: hrTimeToUnixNanos(dataPoint.endTime),
+    asDouble: dataPoint.value,
+  };
+}
+
+function serializeHistogramDataPointToOtlp(
+  dataPoint: Extract<MetricData, { dataPointType: DataPointType.HISTOGRAM }>["dataPoints"][number],
+): Record<string, unknown> {
+  return {
+    attributes: attributesToOtlp(dataPoint.attributes),
+    startTimeUnixNano: hrTimeToUnixNanos(dataPoint.startTime),
+    timeUnixNano: hrTimeToUnixNanos(dataPoint.endTime),
+    count: String(dataPoint.value.count),
+    ...(dataPoint.value.sum !== undefined ? { sum: dataPoint.value.sum } : {}),
+    bucketCounts: dataPoint.value.buckets.counts.map((count) => String(count)),
+    explicitBounds: dataPoint.value.buckets.boundaries,
+    ...(dataPoint.value.min !== undefined ? { min: dataPoint.value.min } : {}),
+    ...(dataPoint.value.max !== undefined ? { max: dataPoint.value.max } : {}),
+  };
+}
+
+function serializeExponentialHistogramDataPointToOtlp(
+  dataPoint: Extract<MetricData, { dataPointType: DataPointType.EXPONENTIAL_HISTOGRAM }>["dataPoints"][number],
+): Record<string, unknown> {
+  return {
+    attributes: attributesToOtlp(dataPoint.attributes),
+    startTimeUnixNano: hrTimeToUnixNanos(dataPoint.startTime),
+    timeUnixNano: hrTimeToUnixNanos(dataPoint.endTime),
+    count: String(dataPoint.value.count),
+    ...(dataPoint.value.sum !== undefined ? { sum: dataPoint.value.sum } : {}),
+    scale: dataPoint.value.scale,
+    zeroCount: String(dataPoint.value.zeroCount),
+    positive: {
+      offset: dataPoint.value.positive.offset,
+      bucketCounts: dataPoint.value.positive.bucketCounts.map((count) => String(count)),
+    },
+    negative: {
+      offset: dataPoint.value.negative.offset,
+      bucketCounts: dataPoint.value.negative.bucketCounts.map((count) => String(count)),
+    },
+    ...(dataPoint.value.min !== undefined ? { min: dataPoint.value.min } : {}),
+    ...(dataPoint.value.max !== undefined ? { max: dataPoint.value.max } : {}),
+  };
+}
+
+function dataPointTypeToString(dataPointType: DataPointType): string {
+  switch (dataPointType) {
+    case DataPointType.GAUGE:
+      return "GAUGE";
+    case DataPointType.HISTOGRAM:
+      return "HISTOGRAM";
+    case DataPointType.EXPONENTIAL_HISTOGRAM:
+      return "EXPONENTIAL_HISTOGRAM";
+    case DataPointType.SUM:
+      return "SUM";
+  }
+}
+
+function aggregationTemporalityToString(temporality: AggregationTemporality): string {
+  switch (temporality) {
+    case AggregationTemporality.DELTA:
+      return "DELTA";
+    case AggregationTemporality.CUMULATIVE:
+      return "CUMULATIVE";
+  }
+}
+
+function serializeMetricPointValue(dataPointType: DataPointType, value: unknown): unknown {
+  if (dataPointType === DataPointType.SUM || dataPointType === DataPointType.GAUGE) {
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return JSON.parse(JSON.stringify(value));
 }
 
 function parseOtlpJsonTraceEntries(payload: unknown): TraceLogEntry[] {

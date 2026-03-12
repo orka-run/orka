@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from "bun";
 import type { PushChannel, PushEnvelope } from "@orka/core";
-import { withSpanSync } from "./tracing";
+import { getDaemonMetrics, withSpanSync } from "./tracing";
 
 const SEND_BUFFER_WARNING_THRESHOLD = 256 * 1024;
 
@@ -91,6 +91,7 @@ export class PushHub {
   broadcast<T>(channel: PushChannel, data: T): void {
     const sequence = this.nextBroadcastSequence(channel);
     const sessionId = getSessionId(data);
+    getDaemonMetrics().pushEvents.add(1, { channel });
     withSpanSync("orka.push.broadcast", {
       "orka.channel": channel,
       "orka.sequence": sequence,

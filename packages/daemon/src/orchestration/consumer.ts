@@ -5,12 +5,13 @@ import type {
   ProviderRuntimeEvent,
   ProviderRuntimeEventOf,
   ProviderSessionHandle,
+  Session,
   SessionStatus,
   UsageRecord,
 } from "@orka/core";
 import type { ApprovalManager } from "../approval-manager";
 import type { PushHub } from "../push-hub";
-import { withSpan } from "../tracing";
+import { getDaemonMetrics, withSpan } from "../tracing";
 import { deleteBranch, getWorktreeDir, worktreeMerge, worktreeRemove } from "../worktree";
 import type { OrchestrationEngine } from "./engine";
 
@@ -32,6 +33,7 @@ export interface ProviderEventConsumerCallbacks {
   autoMerge?: boolean;
   model?: string | null;
   cleanupWorktree?: () => Promise<void>;
+  getSession?: (sessionId: string) => Session | null;
 }
 
 export async function consumeProviderEvents(
@@ -55,6 +57,7 @@ export async function consumeProviderEvents(
       } catch (error) {
         const finishedAt = new Date().toISOString();
         callbacks.updateSessionStatus(sessionId, "failed", { finishedAt });
+        recordSessionTerminalMetrics(callbacks.getSession?.(sessionId)?.startedAt ?? null, finishedAt, "failed");
         callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
           sessionId,
           status: "failed",
@@ -155,6 +158,7 @@ async function finalizeSession(
   await captureSessionDiff(sessionId, callbacks);
 
   callbacks.updateSessionStatus(sessionId, status, { finishedAt });
+  recordSessionTerminalMetrics(callbacks.getSession?.(sessionId)?.startedAt ?? null, finishedAt, status);
   callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
     sessionId,
     status,
@@ -228,7 +232,10 @@ async function captureSessionDiff(
           }
         }
 
-        callbacks.saveSessionDiff(sessionId, diffText, statusText, { commitLog, commitDiff });
+        callbacks.saveSessionDiff(sessionId, diffText, statusText, {
+          ...(commitLog ? { commitLog } : {}),
+          ...(commitDiff ? { commitDiff } : {}),
+        });
       } catch {
         span.addEvent("orka.orchestration.capture_diff_skipped");
       }
@@ -275,4 +282,39 @@ async function tryAutoMerge(
       }
     },
   );
+}
+
+function recordSessionTerminalMetrics(
+  startedAt: string | null,
+  finishedAt: string,
+  status: SessionStatus,
+): void {
+  if (status !== "completed" && status !== "failed" && status !== "cancelled") {
+    return;
+  }
+
+  const metrics = getDaemonMetrics();
+
+  switch (status) {
+    case "completed":
+      metrics.sessionsCompleted.add(1);
+      break;
+    case "failed":
+      metrics.sessionsFailed.add(1);
+      break;
+    case "cancelled":
+      metrics.sessionsCancelled.add(1);
+      break;
+  }
+
+  if (!startedAt) {
+    return;
+  }
+
+  metrics.sessionsActive.add(-1);
+
+  const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  if (Number.isFinite(durationMs) && durationMs >= 0) {
+    metrics.sessionDuration.record(durationMs);
+  }
 }

@@ -16,7 +16,7 @@ import { pushHub } from "./push";
 import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
 import { getOrkaHome } from "./db";
-import { persistOtlpJsonTraces, withSpan } from "./tracing";
+import { getDaemonMetrics, persistOtlpJsonTraces, withSpan } from "./tracing";
 
 export interface ServerOptions {
   port: number;
@@ -161,6 +161,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
         },
 
         open(ws) {
+          getDaemonMetrics().wsConnections.add(1);
           void withSpan("orka.push.welcome", {}, async () => {
             const sessions = await svc.listSessions();
             const welcome: ServerWelcomeData = {
@@ -172,6 +173,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
         },
 
         close(ws) {
+          getDaemonMetrics().wsConnections.add(-1);
           pushHub.removeClient(ws);
         },
       },

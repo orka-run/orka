@@ -4,7 +4,7 @@ import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR } from "@orka
 import { decryptRequest, encryptResponse } from "@orka/core";
 import { pushHub } from "./push";
 import { insertClientError, listClientErrors } from "./db";
-import { getTracer, queryTraceLog, withSpan } from "./tracing";
+import { getDaemonMetrics, getTracer, queryTraceLog, withSpan } from "./tracing";
 
 const SLOW_RPC_THRESHOLD_MS = 1_000;
 
@@ -18,10 +18,12 @@ export async function handleRpcRequest(
   raw: string,
   encKey?: Buffer | null,
 ): Promise<string> {
+  const requestStartedAt = performance.now();
   let req: RpcRequest & { _enc?: unknown };
   try {
     req = JSON.parse(raw);
   } catch {
+    recordRpcMetrics("unknown", performance.now() - requestStartedAt, true);
     return JSON.stringify({
       jsonrpc: "2.0",
       id: null,
@@ -44,16 +46,19 @@ export async function handleRpcRequest(
     },
     parentContext,
     async (span) => {
-      const startedAt = performance.now();
       const id = req.id;
       const isEncrypted = !!req._enc;
       addPayloadEvent(span, "rpc.deserialize", raw);
+      let method = req.method ?? "unknown";
+      let isError = false;
 
       if (isEncrypted && encKey) {
         try {
           req = decryptRequest(encKey, req);
-          span.setAttribute("orka.method", req?.method ?? "unknown");
+          method = req?.method ?? "unknown";
+          span.setAttribute("orka.method", method);
         } catch {
+          isError = true;
           span.setStatus({ code: SpanStatusCode.ERROR, message: "E2E decryption failed" });
           return serializeRpcResponse(span, {
             jsonrpc: "2.0",
@@ -74,6 +79,7 @@ export async function handleRpcRequest(
         span.setStatus({ code: SpanStatusCode.OK });
         return serializeRpcResponse(span, response);
       } catch (error: any) {
+        isError = true;
         const code = error.rpcCode ?? RPC_INTERNAL_ERROR;
         span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
         span.recordException(error);
@@ -83,7 +89,9 @@ export async function handleRpcRequest(
           error: { code, message: error.message },
         } as RpcResponse);
       } finally {
-        applyRpcTiming(span, performance.now() - startedAt);
+        const durationMs = performance.now() - requestStartedAt;
+        applyRpcTiming(span, durationMs);
+        recordRpcMetrics(method, durationMs, isError);
         span.end();
       }
     },
@@ -253,4 +261,14 @@ function applyRpcTiming(span: Span, durationMs: number): void {
       "orka.rpc.slow_threshold_ms": SLOW_RPC_THRESHOLD_MS,
     });
   }
+}
+
+function recordRpcMetrics(method: string, durationMs: number, isError: boolean): void {
+  const attributes = { method };
+  const metrics = getDaemonMetrics();
+  metrics.rpcRequests.add(1, attributes);
+  if (isError) {
+    metrics.rpcErrors.add(1, attributes);
+  }
+  metrics.rpcDuration.record(durationMs, attributes);
 }

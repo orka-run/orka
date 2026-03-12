@@ -44,6 +44,7 @@
       "name": "@orka/daemon",
       "version": "0.0.1",
       "dependencies": {
+        "@opentelemetry/sdk-metrics": "^2.6.0",
         "@orka/core": "workspace:*",
         "node-pty": "^1.1.0",
         "smol-toml": "^1.6.0",
