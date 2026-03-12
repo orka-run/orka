@@ -331,6 +331,24 @@ async function consumeClaudeOutput(
     async (span) => {
       let sawSessionExit = false;
       let emittedTurnStarted = false;
+      // Track open item so we can emit item.completed when the next event implies it's done.
+      // Claude Code stream-json never emits "tool" type events, so item.completed must be inferred.
+      let openItemId: string | null = null;
+
+      function closeOpenItem() {
+        if (!openItemId) return;
+        emitClaudeEvent(
+          meta.events,
+          createEvent(
+            "item.completed",
+            threadId,
+            { itemType: "unknown", status: "completed" },
+            { provider: "claude-code", ...(meta.turnId ? { turnId: meta.turnId } : {}), itemId: openItemId },
+          ),
+          span,
+        );
+        openItemId = null;
+      }
 
       try {
         for await (const line of readLines(stdout)) {
@@ -355,7 +373,24 @@ async function consumeClaudeOutput(
 
           const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
           if (primary) {
+            // Close the previous open item when we see a different event.
+            // Skip if the incoming event is already item.completed for the same item (from "tool" events).
+            if (openItemId) {
+              const isCompletionForSameItem = primary.type === "item.completed" && primary.itemId === openItemId;
+              if (isCompletionForSameItem) {
+                openItemId = null; // Already completed by the mapped event
+              } else if (primary.type !== "item.started" || primary.itemId !== openItemId) {
+                closeOpenItem();
+              }
+            }
+
             emitClaudeEvent(meta.events, primary, span);
+
+            // Track new open item
+            if (primary.type === "item.started") {
+              openItemId = primary.itemId;
+            }
+
             if (!emittedTurnStarted && primary.type === "session.started") {
               emitClaudeEvent(
                 meta.events,
@@ -373,6 +408,7 @@ async function consumeClaudeOutput(
 
           const exit = mapClaudeEvent(threadId, raw, { mode: "exit", turnId: meta.turnId });
           if (exit) {
+            closeOpenItem();
             emitClaudeEvent(meta.events, exit, span);
             meta.exitEmitted = true;
             sawSessionExit = true;
@@ -391,6 +427,9 @@ async function consumeClaudeOutput(
           span,
         );
       }
+
+      // Close any remaining open item on stream end
+      closeOpenItem();
 
       const exitCode = await process.exited;
       span.addEvent("process.exited", { "orka.exit_code": exitCode });

@@ -205,7 +205,9 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
       flushAssistant();
       const title = event.title ?? event.itemType;
       const detail = event.detail ?? "";
-      const summary = detail && detail !== title ? detail : "In progress…";
+      // Item is in-progress only if no subsequent item.completed exists for it
+      const isInProgress = !completedItemIds.has(event.itemId);
+      const summary = detail && detail !== title ? detail : (isInProgress ? "In progress…" : "Completed");
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
@@ -213,7 +215,7 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
         summary,
         icon: itemIcon(event.itemType),
         details: detail && detail !== title ? [detail] : [],
-        inProgress: true,
+        ...(isInProgress ? { inProgress: true } : {}),
       });
       continue;
     }
