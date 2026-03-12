@@ -108,7 +108,7 @@ export interface OrkaService {
   captureOutput(sessionId: string): Promise<string>;
   getLogContent(sessionId: string): Promise<string | null>;
   isAlive(sessionId: string): Promise<boolean>;
-  sendInput(sessionId: string, text: string): Promise<void>;
+  sendTurn(sessionId: string, text: string): Promise<void>;
 
   // --- Worktree ---
   getDiff(sessionId: string): Promise<DiffResult>;

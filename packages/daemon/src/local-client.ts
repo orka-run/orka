@@ -221,7 +221,7 @@ class LocalClient implements OrkaService {
     return getRunner().has(session.tmuxSessionName);
   }
 
-  async sendInput(sessionId: string, text: string): Promise<void> {
+  async sendTurn(sessionId: string, text: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     if (isProviderRuntimeEnabled()) {

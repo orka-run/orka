@@ -456,7 +456,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
       },
       async () => {
         setAutoScroll(true);
-        await transport.request<void>("sendInput", { sessionId, text });
+        await transport.request<void>("sendTurn", { sessionId, text });
       },
     );
   }

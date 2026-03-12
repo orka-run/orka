@@ -154,8 +154,8 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             return svc.getLogContent(params.sessionId);
           case "isAlive":
             return svc.isAlive(params.sessionId);
-          case "sendInput":
-            await svc.sendInput(params.sessionId, params.text);
+          case "sendTurn":
+            await svc.sendTurn(params.sessionId, params.text);
             return null;
           case "getDiff":
             return svc.getDiff(params.sessionId);

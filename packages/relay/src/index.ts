@@ -34,7 +34,7 @@ import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync
 const ALLOWED_METHODS = new Set([
   "spawn", "stop", "reap", "getSession", "listSessions", "getTask",
   "setKept", "getTags", "getResult", "captureOutput", "getLogContent",
-  "isAlive", "sendInput", "getDiff", "merge", "deleteSessions", "pruneSessions",
+  "isAlive", "sendTurn", "getDiff", "merge", "deleteSessions", "pruneSessions",
 ]);
 
 // --- Relay Options ---

@@ -1117,7 +1117,7 @@ const sendCmd = command({
     }
 
     try {
-      await svc.sendInput(session.id, text.join(" "));
+      await svc.sendTurn(session.id, text.join(" "));
       console.log(`sent to ${session.id}`);
     } catch (e: any) {
       fail(`error: ${e.message}`);

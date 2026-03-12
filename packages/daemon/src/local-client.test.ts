@@ -109,7 +109,7 @@ describe("LocalClient provider runtime support", () => {
       const client = createLocalClient();
 
       await expect(client.isAlive("sess-live")).resolves.toBe(true);
-      await client.sendInput("sess-live", "continue");
+      await client.sendTurn("sess-live", "continue");
 
       expect(sendTurnCalls).toEqual([{ sessionId: "sess-live", input: { input: "continue" } }]);
       expect(runner.sendTextCalls).toEqual([]);

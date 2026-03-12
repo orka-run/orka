@@ -255,8 +255,8 @@ class RemoteClient implements OrkaService {
     return this.call("isAlive", { sessionId });
   }
 
-  async sendInput(sessionId: string, text: string): Promise<void> {
-    return this.call("sendInput", { sessionId, text });
+  async sendTurn(sessionId: string, text: string): Promise<void> {
+    return this.call("sendTurn", { sessionId, text });
   }
 
   async getDiff(sessionId: string): Promise<DiffResult> {

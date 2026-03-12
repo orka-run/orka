@@ -244,9 +244,9 @@ describeE2E("Daemon Session Lifecycle", () => {
     await client.stop(session.id);
   });
 
-  // ---- sendInput ----
+  // ---- sendTurn ----
 
-  test("sendInput delivers text to running session", async () => {
+  test("sendTurn delivers text to running session", async () => {
     // Start a cat session that reads stdin
     const session = await client.spawn({
       prompt: "read -p '> ' line && echo \"GOT: $line\"",
@@ -257,7 +257,7 @@ describeE2E("Daemon Session Lifecycle", () => {
     spawnedTmuxNames.push(session.tmuxSessionName);
 
     await Bun.sleep(500);
-    await client.sendInput(session.id, "hello-from-test");
+    await client.sendTurn(session.id, "hello-from-test");
 
     // Wait for session to complete
     await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 5_000 });
