@@ -20,12 +20,18 @@ interface ClaudeMapOptions {
   turnId?: string;
 }
 
+interface ClaudeStdinWriter {
+  write(value: string): unknown;
+  end(): void;
+}
+
 interface ClaudeHandleMeta {
   process: ClaudeProcess;
   events: AsyncEventQueue<ProviderRuntimeEvent>;
   exitEmitted: boolean;
   closed: boolean;
   turnId: string;
+  stdinWriter: ClaudeStdinWriter;
 }
 
 function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
@@ -111,12 +117,16 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           env: spawnEnv,
         });
         span.addEvent("process.spawned", { "orka.command": command.join(" ") });
+        const stdout = process.stdout;
+        const stdin = process.stdin;
+
         const meta: ClaudeHandleMeta = {
           process,
           events,
           exitEmitted: false,
           closed: false,
           turnId,
+          stdinWriter: stdin as unknown as ClaudeStdinWriter,
         };
 
         const handle: ProviderSessionHandle = {
@@ -126,8 +136,6 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           meta: meta as unknown as Record<string, unknown>,
         };
 
-        const stdout = process.stdout;
-        const stdin = process.stdin;
         if (!isReadableStream(stdout) || !isWritableSink(stdin)) {
           emitClaudeEvent(
             events,
@@ -152,9 +160,14 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
         try {
           if (input.prompt) {
-            await Promise.resolve(stdin.write(input.prompt));
+            const msg = JSON.stringify({
+              type: "user",
+              message: { role: "user", content: input.prompt },
+              parent_tool_use_id: null,
+            }) + "\n";
+            await Promise.resolve(stdin.write(msg));
           }
-          await Promise.resolve(stdin.end());
+          // Do NOT call stdin.end() — keep stdin open for multi-turn
         } catch (error) {
           emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error", span);
           closeEvents(meta);
@@ -168,8 +181,18 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     );
   }
 
-  async sendTurn(_handle: ProviderSessionHandle, _input: ProviderSendTurnInput): Promise<void> {
-    throw new Error("Claude Code -p mode does not support multi-turn. Start a new session.");
+  async sendTurn(handle: ProviderSessionHandle, input: ProviderSendTurnInput): Promise<void> {
+    const meta = getClaudeHandleMeta(handle);
+    const newTurnId = generateId("turn");
+    meta.turnId = newTurnId;
+
+    const msg = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: input.input ?? "" },
+      parent_tool_use_id: null,
+    }) + "\n";
+
+    await Promise.resolve(meta.stdinWriter.write(msg));
   }
 
   async interruptTurn(handle: ProviderSessionHandle): Promise<void> {
@@ -193,11 +216,18 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         emitSessionExited(handle.threadId, meta, "stopped", "graceful");
         closeEvents(meta);
 
-        meta.process.kill("SIGINT");
-        const exited = await waitForExit(meta.process, 250);
-        if (!exited) {
-          meta.process.kill();
-          await meta.process.exited;
+        // Close stdin to signal Claude Code to finish and exit
+        try { meta.stdinWriter.end(); } catch { /* already closed */ }
+
+        // Wait for graceful exit, then escalate
+        const exitedGracefully = await waitForExit(meta.process, 10_000);
+        if (!exitedGracefully) {
+          meta.process.kill("SIGINT");
+          const exitedAfterInt = await waitForExit(meta.process, 5_000);
+          if (!exitedAfterInt) {
+            meta.process.kill();
+            await meta.process.exited;
+          }
         }
       },
     );
@@ -329,7 +359,6 @@ async function consumeClaudeOutput(
     "orka.provider.claude_code.parse_output",
     { "orka.session.id": threadId, "orka.backend": "claude-code" },
     async (span) => {
-      let sawSessionExit = false;
       let emittedTurnStarted = false;
       // Track open item so we can emit item.completed when the next event implies it's done.
       // Claude Code stream-json never emits "tool" type events, so item.completed must be inferred.
@@ -391,27 +420,42 @@ async function consumeClaudeOutput(
               openItemId = primary.itemId;
             }
 
-            if (!emittedTurnStarted && primary.type === "session.started") {
-              emitClaudeEvent(
-                meta.events,
-                createEvent(
-                  "turn.started",
-                  threadId,
-                  { ...(model ? { model } : {}) },
-                  { provider: "claude-code", turnId: meta.turnId },
-                ),
-                span,
-              );
-              emittedTurnStarted = true;
+            if (primary.type === "session.started") {
+              if (emittedTurnStarted) {
+                // New turn: system:init re-emitted after a previous turn completed
+                const newTurnId = generateId("turn");
+                meta.turnId = newTurnId;
+                emitClaudeEvent(
+                  meta.events,
+                  createEvent(
+                    "turn.started",
+                    threadId,
+                    { ...(model ? { model } : {}) },
+                    { provider: "claude-code", turnId: newTurnId },
+                  ),
+                  span,
+                );
+              } else {
+                // First turn
+                emitClaudeEvent(
+                  meta.events,
+                  createEvent(
+                    "turn.started",
+                    threadId,
+                    { ...(model ? { model } : {}) },
+                    { provider: "claude-code", turnId: meta.turnId },
+                  ),
+                  span,
+                );
+                emittedTurnStarted = true;
+              }
             }
-          }
 
-          const exit = mapClaudeEvent(threadId, raw, { mode: "exit", turnId: meta.turnId });
-          if (exit) {
-            closeOpenItem();
-            emitClaudeEvent(meta.events, exit, span);
-            meta.exitEmitted = true;
-            sawSessionExit = true;
+            // On result (turn.completed), close any open item but do NOT emit session.exited.
+            // session.exited is emitted only when the process actually exits.
+            if (primary.type === "turn.completed") {
+              closeOpenItem();
+            }
           }
         }
       } catch (error) {
@@ -434,7 +478,7 @@ async function consumeClaudeOutput(
       const exitCode = await process.exited;
       span.addEvent("process.exited", { "orka.exit_code": exitCode });
 
-      if (!sawSessionExit && !meta.exitEmitted) {
+      if (!meta.exitEmitted) {
         emitSessionExited(
           threadId,
           meta,
@@ -445,7 +489,7 @@ async function consumeClaudeOutput(
       }
 
       closeEvents(meta);
-      return sawSessionExit;
+      return meta.exitEmitted;
     },
   );
 }
@@ -542,7 +586,7 @@ function emitClaudeEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: Pr
 }
 
 function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
-  const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "auto"];
+  const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json", "--permission-mode", "auto"];
 
   if (input.model) {
     command.push("--model", input.model);

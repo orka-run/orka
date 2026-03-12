@@ -187,6 +187,8 @@ describe("ClaudeCodeAdapter", () => {
       "--verbose",
       "--output-format",
       "stream-json",
+      "--input-format",
+      "stream-json",
       "--permission-mode",
       "auto",
       "--model",
@@ -212,8 +214,14 @@ describe("ClaudeCodeAdapter", () => {
         ? (env as Record<string, unknown>)["CLAUDECODE"]
         : undefined,
     ).toBeUndefined();
-    expect(stdin.writes).toEqual(["Inspect the project"]);
-    expect(stdin.ended).toBe(true);
+    expect(stdin.writes).toHaveLength(1);
+    const sentMsg = JSON.parse(stdin.writes[0]!);
+    expect(sentMsg).toEqual({
+      type: "user",
+      message: { role: "user", content: "Inspect the project" },
+      parent_tool_use_id: null,
+    });
+    expect(stdin.ended).toBe(false);
 
     expect(events.map((event) => event.type)).toEqual([
       "session.started",
@@ -241,6 +249,91 @@ describe("ClaudeCodeAdapter", () => {
     expect(turnIds[0]).toMatch(/^turn-/);
     expect(turnIds.every((turnId) => turnId === turnIds[0])).toBe(true);
   });
+
+  test("sendTurn sends JSON message and new turn events are emitted on system:init", async () => {
+    const stdin = new MockWritableSink();
+
+    const adapter = new ClaudeCodeAdapter((() => {
+      return {
+        stdout: createJsonLineStream([
+          // Turn 1
+          { type: "system", subtype: "init", message: "Claude Code started" },
+          {
+            type: "assistant",
+            message: { role: "assistant", content: [{ type: "text", text: "Done with turn 1." }] },
+          },
+          {
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            total_cost_usd: 0.05,
+            usage: { input_tokens: 10, output_tokens: 5 },
+          },
+          // Turn 2 (triggered by sendTurn)
+          { type: "system", subtype: "init", message: "Claude Code started" },
+          {
+            type: "assistant",
+            message: { role: "assistant", content: [{ type: "text", text: "Done with turn 2." }] },
+          },
+          {
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            total_cost_usd: 0.08,
+            usage: { input_tokens: 20, output_tokens: 10 },
+          },
+        ]),
+        stderr: createTextStream([]),
+        stdin,
+        exited: Promise.resolve(0),
+        kill() {},
+      } as unknown as ReturnType<typeof Bun.spawn>;
+    }) as typeof Bun.spawn);
+
+    const handle = await adapter.startSession({
+      threadId: "thread-2",
+      model: "claude-sonnet-4-6",
+      prompt: "First task",
+    });
+
+    // sendTurn writes a second JSON message to stdin
+    await adapter.sendTurn(handle, { input: "Second task" });
+
+    // Process exits naturally after stdout is consumed
+    const events = await collectEvents(handle.events);
+
+    const types = events.map((e) => e.type);
+    expect(types).toEqual([
+      "session.started",  // turn 1 init
+      "turn.started",     // turn 1
+      "content.delta",    // turn 1 text
+      "turn.completed",   // turn 1 result
+      "session.started",  // turn 2 init
+      "turn.started",     // turn 2
+      "content.delta",    // turn 2 text
+      "turn.completed",   // turn 2 result
+      "session.exited",   // from process exit
+    ]);
+
+    // Turn 1 and Turn 2 should have different turnIds
+    const turnStartedEvents = events.filter((e) => e.type === "turn.started");
+    expect(turnStartedEvents).toHaveLength(2);
+    expect(turnStartedEvents[0]!.turnId).toMatch(/^turn-/);
+    expect(turnStartedEvents[1]!.turnId).toMatch(/^turn-/);
+    expect(turnStartedEvents[0]!.turnId).not.toBe(turnStartedEvents[1]!.turnId);
+
+    // sendTurn should have written a JSON message
+    expect(stdin.writes).toHaveLength(2);
+    const secondMsg = JSON.parse(stdin.writes[1]!);
+    expect(secondMsg).toEqual({
+      type: "user",
+      message: { role: "user", content: "Second task" },
+      parent_tool_use_id: null,
+    });
+
+    // stdin stays open (not ended by sendTurn or process exit)
+    expect(stdin.ended).toBe(false);
+  });
 });
 
 async function collectEvents(events: AsyncIterable<ProviderRuntimeEvent>): Promise<ProviderRuntimeEvent[]> {
@@ -266,6 +359,11 @@ async function collectEvents(events: AsyncIterable<ProviderRuntimeEvent>): Promi
 class MockWritableSink {
   writes: string[] = [];
   ended = false;
+  private onEnd?: () => void;
+
+  constructor(onEnd?: () => void) {
+    this.onEnd = onEnd;
+  }
 
   write(value: string): void {
     this.writes.push(value);
@@ -273,6 +371,7 @@ class MockWritableSink {
 
   end(): void {
     this.ended = true;
+    this.onEnd?.();
   }
 }
 
