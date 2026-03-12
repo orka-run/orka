@@ -23,6 +23,7 @@ export class OrchestrationEngine {
   private log: OrchestrationEvent[] = [];
   private listeners: Array<(event: OrchestrationEvent) => void> = [];
   private readonly options: OrchestrationEngineOptions;
+  private sessionStatusCache = new Map<string, SessionStatus>();
 
   constructor(pushHub?: PushHub);
   constructor(options?: OrchestrationEngineOptions);
@@ -63,10 +64,21 @@ export class OrchestrationEngine {
         }
 
         this.options.pushHub?.broadcast("orchestration.event", orchestrationEvent);
-        this.options.pushHub?.broadcast("orchestration.sessionUpdated", {
-          sessionId,
-          status: derivedState?.projection.status ?? this.getSessionState(sessionId).status,
-        });
+
+        // Only broadcast sessionUpdated when the derived status actually changes.
+        // Previously this fired on every event, causing the dashboard to re-render
+        // the full session list on every content.delta — killing scroll position.
+        if (derivedState) {
+          const derivedStatus = derivedState.projection.status;
+          const prevStatus = this.sessionStatusCache.get(sessionId);
+          if (derivedStatus !== prevStatus) {
+            this.sessionStatusCache.set(sessionId, derivedStatus);
+            this.options.pushHub?.broadcast("orchestration.sessionUpdated", {
+              sessionId,
+              status: derivedStatus,
+            });
+          }
+        }
       },
     );
   }
