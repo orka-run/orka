@@ -447,7 +447,7 @@ export class WsTransport {
     rpcLatencyStore.onRpcComplete({
       method: pending.method,
       duration: Math.max(0, duration),
-      success,
+      ok: success,
       timestamp,
     });
   }

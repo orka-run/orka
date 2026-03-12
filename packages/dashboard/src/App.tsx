@@ -2,6 +2,7 @@
 import type { OrchestrationEvent, SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { DevOverlay } from "./components/DevOverlay";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -193,6 +194,7 @@ export function App() {
   return (
     <ErrorBoundary reportError={reportError}>
       <AppShell transport={transport} />
+      <DevOverlay />
     </ErrorBoundary>
   );
 }

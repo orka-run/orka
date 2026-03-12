@@ -2,6 +2,10 @@
 
 See also: [AGENTS.md](./AGENTS.md) for issue tracking and agent workflow conventions.
 
+## Command Output Policy
+
+**NEVER truncate command output.** Do not use `| tail`, `| head`, or any other output truncation when running shell commands. Always capture and read the FULL output. Truncated output hides errors, warnings, and context that are critical for debugging.
+
 ## Commit Policy
 
 **MANDATORY: After completing each task/issue, create a git commit BEFORE moving to the next task.**
