@@ -41,10 +41,28 @@ describe("worktreeCreate", () => {
     expect(readFileSync(join(wtPath, "hook.txt"), "utf8")).toBe("hook ran");
   });
 
-  test("warns and still returns the worktree when the hook fails", async () => {
+  test("runs multiple configured post-create hooks", async () => {
     writeConfig([
       "[hooks]",
-      `post_worktree_create = "exit 7"`,
+      `post_worktree_create = ["printf 'first' > first.txt", "printf 'second' > second.txt"]`,
+    ]);
+
+    const wtPath = await worktreeCreate(repoPath, "sess-hook-multi");
+
+    expect(readFileSync(join(wtPath, "first.txt"), "utf8")).toBe("first");
+    expect(readFileSync(join(wtPath, "second.txt"), "utf8")).toBe("second");
+  });
+
+  test("warns and continues when one post-create hook fails", async () => {
+    writeConfig([
+      "[[hooks.post_worktree_create]]",
+      `run = "printf 'first' > first.txt"`,
+      "",
+      "[[hooks.post_worktree_create]]",
+      `run = "exit 7"`,
+      "",
+      "[[hooks.post_worktree_create]]",
+      `run = "printf 'second' > second.txt"`,
     ]);
 
     const originalWarn = console.warn;
@@ -57,6 +75,8 @@ describe("worktreeCreate", () => {
       const wtPath = await worktreeCreate(repoPath, "sess-hook-fail");
 
       expect(existsSync(wtPath)).toBe(true);
+      expect(readFileSync(join(wtPath, "first.txt"), "utf8")).toBe("first");
+      expect(readFileSync(join(wtPath, "second.txt"), "utf8")).toBe("second");
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("sess-hook-fail");
       expect(warnings[0]).toContain("exit code 7");

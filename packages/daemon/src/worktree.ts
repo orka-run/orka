@@ -57,31 +57,38 @@ export async function worktreeCreate(
 }
 
 async function runPostCreateHook(wtPath: string, sessionSlug: string): Promise<void> {
-  const hookCommand = getConfig().hooks.postWorktreeCreate.trim();
-  if (!hookCommand) {
+  const hookCommands = getConfig().hooks.postWorktreeCreate
+    .map((command) => command.trim())
+    .filter((command) => command.length > 0);
+
+  if (hookCommands.length === 0) {
     return;
   }
 
-  try {
-    await withSpan("orka.worktree.post_create_hook", {
-      "orka.session.id": sessionSlug,
-      "orka.command": hookCommand,
-      "orka.worktree.path": wtPath,
-    }, async (span) => {
-      const proc = Bun.spawn(["bash", "-c", hookCommand], {
-        cwd: wtPath,
-        stdout: "inherit",
-        stderr: "inherit",
-      });
-      const exitCode = await proc.exited;
-      span.setAttribute("orka.exit_code", exitCode);
+  for (const hookCommand of hookCommands) {
+    try {
+      await withSpan("orka.worktree.post_create_hook", {
+        "orka.session.id": sessionSlug,
+        "orka.command": hookCommand,
+        "orka.worktree.path": wtPath,
+      }, async (span) => {
+        const proc = Bun.spawn(["bash", "-c", hookCommand], {
+          cwd: wtPath,
+          stdout: "inherit",
+          stderr: "inherit",
+        });
+        const exitCode = await proc.exited;
+        span.setAttribute("orka.exit_code", exitCode);
 
-      if (exitCode !== 0) {
-        console.warn(`Post-worktree-create hook failed for ${sessionSlug} with exit code ${exitCode}: ${hookCommand}`);
-      }
-    });
-  } catch (error) {
-    console.warn(`Post-worktree-create hook errored for ${sessionSlug}: ${error instanceof Error ? error.message : String(error)}`);
+        if (exitCode !== 0) {
+          throw new Error(`exit code ${exitCode}`);
+        }
+      });
+    } catch (error) {
+      console.warn(
+        `Post-worktree-create hook failed for ${sessionSlug}: ${hookCommand} (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
   }
 }
 

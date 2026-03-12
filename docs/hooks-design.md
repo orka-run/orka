@@ -14,11 +14,36 @@ These cover the current use cases:
 
 ## Config
 
-Hooks live in `~/.orka/config.toml` as simple shell command strings.
+Hooks live in `~/.orka/config.toml`.
+
+`post_worktree_create` accepts three formats:
+
+- a single string for backward compatibility
+- an array of strings for multiple commands
+- an array of tables with `run` keys for more expressive TOML
 
 ```toml
 [hooks]
 post_worktree_create = "bun install"
+```
+
+```toml
+[hooks]
+post_worktree_create = ["bun install", "cp .env.example .env"]
+```
+
+```toml
+[[hooks.post_worktree_create]]
+run = "bun install"
+
+[[hooks.post_worktree_create]]
+run = "cp .env.example .env"
+```
+
+Other hooks remain single command strings.
+
+```toml
+[hooks]
 pre_merge = "bun test"
 ```
 
@@ -29,9 +54,11 @@ Commands run on the host with a hardcoded 60 second timeout.
 ## Execution
 
 - `post_worktree_create` runs after the worktree exists and before the agent starts
+- `post_worktree_create` runs each configured command in order and ignores empty entries
+- a failing `post_worktree_create` command warns and the next command still runs
 - `pre_merge` runs immediately before merge logic starts
 - hooks run with `sh -lc "<command>"`
-- non-zero exit stops the current operation
+- non-zero exit for hooks other than `post_worktree_create` stops the current operation
 - stdout/stderr are appended to the session log
 - `--no-hooks` skips all hooks for that command
 

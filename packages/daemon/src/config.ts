@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
+import { parse, type TomlTable, type TomlValue } from "smol-toml";
 import { z } from "zod/v4";
 import { getOrkaHome } from "./db";
 import { withSpanSync } from "./tracing";
@@ -19,8 +20,12 @@ const ProvidersSchema = z.object({
   useRuntime: z.boolean().default(true),
 });
 
+const HookCommandSchema = z.object({
+  run: z.string(),
+});
+
 const HooksSchema = z.object({
-  postWorktreeCreate: z.string().default(""),
+  postWorktreeCreate: z.array(z.string()).default([]),
 });
 
 export const ConfigSchema = z.object({
@@ -46,23 +51,33 @@ export function getConfig(): OrkaConfig {
 
     try {
       const raw = readFileSync(configPath, "utf-8");
-      const toml = parseSimpleToml(raw);
-      const defaults = toml["defaults"];
-      const limits = toml["limits"];
-      const providers = toml["providers"];
+      const toml = parse(raw);
+      const defaults = getTable(toml.defaults);
+      const limits = getTable(toml.limits);
+      const providers = getTable(toml.providers);
+      const hooks = getTable(toml.hooks);
+
       _config = ConfigSchema.parse({
-        defaults,
+        defaults:
+          defaults !== undefined
+            ? {
+                backend: getString(defaults.backend),
+                mode: getString(defaults.mode),
+                model: getString(defaults.model),
+                project: getString(defaults.project),
+              }
+            : undefined,
         limits:
-          limits?.["max_concurrent"] !== undefined
-            ? { maxConcurrent: parseInt(limits["max_concurrent"], 10) || 0 }
+          limits?.max_concurrent !== undefined
+            ? { maxConcurrent: getNumber(limits.max_concurrent) }
             : undefined,
         providers:
-          providers?.["use_runtime"] !== undefined
-            ? { useRuntime: providers["use_runtime"] === "true" || providers["use_runtime"] === "1" }
+          providers?.use_runtime !== undefined
+            ? { useRuntime: getBoolean(providers.use_runtime) }
             : undefined,
         hooks:
-          toml.hooks?.post_worktree_create !== undefined
-            ? { postWorktreeCreate: toml.hooks.post_worktree_create }
+          hooks?.post_worktree_create !== undefined
+            ? { postWorktreeCreate: normalizeHookCommands(hooks.post_worktree_create) }
             : undefined,
       });
     } catch {
@@ -77,53 +92,42 @@ export function resetConfigCache(): void {
   _config = null;
 }
 
-/** Minimal TOML parser — handles [section] and key = "value"/bare */
-function parseSimpleToml(raw: string): Record<string, Record<string, string>> {
-  const result: Record<string, Record<string, string>> = {};
-  let section = "";
-
-  for (const line of raw.split("\n")) {
-    const trimmed = stripInlineComment(line).trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const sectionMatch = trimmed.match(/^\[(.+)]$/);
-    if (sectionMatch) {
-      const matchedSection = sectionMatch[1];
-      if (!matchedSection) {
-        continue;
-      }
-      section = matchedSection;
-      result[section] ??= {};
-      continue;
-    }
-
-    const kvMatch = trimmed.match(/^(\w+)\s*=\s*(?:"([^"]*)"|(\S+))$/);
-    if (kvMatch && section) {
-      const key = kvMatch[1];
-      if (!key) {
-        continue;
-      }
-      result[section]![key] = kvMatch[2] ?? kvMatch[3] ?? "";
-    }
+function getTable(value: TomlValue | undefined): TomlTable | undefined {
+  if (value === undefined || Array.isArray(value) || typeof value !== "object" || value === null) {
+    return undefined;
   }
 
-  return result;
+  return value;
 }
 
-function stripInlineComment(line: string): string {
-  let inQuotes = false;
+function getString(value: TomlValue | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
 
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (char === "\"") {
-      inQuotes = !inQuotes;
-      continue;
-    }
+function getNumber(value: TomlValue | undefined): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
 
-    if (char === "#" && !inQuotes) {
-      return line.slice(0, index);
-    }
+function getBoolean(value: TomlValue | undefined): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizeHookCommands(value: TomlValue | undefined): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
   }
 
-  return line;
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("hooks.post_worktree_create must be a string or array");
+  }
+
+  if (value.every((item) => typeof item === "string")) {
+    return value;
+  }
+
+  return z.array(HookCommandSchema).parse(value).map((item) => item.run);
 }

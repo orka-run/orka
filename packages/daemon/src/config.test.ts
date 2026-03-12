@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("daemon config", () => {
-  test("parses hooks.post_worktree_create", () => {
+  test("parses hooks.post_worktree_create as a single string for backward compatibility", () => {
     writeFileSync(
       join(testHome, "config.toml"),
       [
@@ -36,6 +36,41 @@ describe("daemon config", () => {
       "utf8",
     );
 
-    expect(getConfig().hooks.postWorktreeCreate).toBe("bun install");
+    expect(getConfig().hooks.postWorktreeCreate).toEqual(["bun install"]);
+  });
+
+  test("parses hooks.post_worktree_create as a string array", () => {
+    writeFileSync(
+      join(testHome, "config.toml"),
+      [
+        "[hooks]",
+        'post_worktree_create = ["bun install", "cp .env.example .env"]',
+      ].join("\n"),
+      "utf8",
+    );
+
+    expect(getConfig().hooks.postWorktreeCreate).toEqual([
+      "bun install",
+      "cp .env.example .env",
+    ]);
+  });
+
+  test("parses hooks.post_worktree_create as an array of tables", () => {
+    writeFileSync(
+      join(testHome, "config.toml"),
+      [
+        "[[hooks.post_worktree_create]]",
+        'run = "bun install"',
+        "",
+        "[[hooks.post_worktree_create]]",
+        'run = "cp .env.example .env"',
+      ].join("\n"),
+      "utf8",
+    );
+
+    expect(getConfig().hooks.postWorktreeCreate).toEqual([
+      "bun install",
+      "cp .env.example .env",
+    ]);
   });
 });
