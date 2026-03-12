@@ -195,7 +195,11 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
             onSelectionLoadSettled={reportSelectionLoad}
           />
         ) : activeTab === "chat" ? (
-          <ChatView sessionId={sessionId} onSelectionLoadSettled={reportSelectionLoad} />
+          <ChatView
+            sessionId={sessionId}
+            {...(activeSession.prompt ? { initialPrompt: activeSession.prompt } : {})}
+            onSelectionLoadSettled={reportSelectionLoad}
+          />
         ) : (
           <DiffPanel sessionId={sessionId} onSelectionLoadSettled={reportSelectionLoad} />
         )}

@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, User, Wrench } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { MarkdownContent } from "./MarkdownContent";
@@ -25,6 +25,12 @@ type ChatEntry =
     }
   | {
       id: string;
+      type: "user";
+      timestamp: string;
+      body: string;
+    }
+  | {
+      id: string;
       type: "tool";
       timestamp: string;
       title: string;
@@ -43,6 +49,7 @@ type ChatEntry =
 
 interface ChatViewProps {
   sessionId: string;
+  initialPrompt?: string;
   onSelectionLoadSettled?: (status: "ok" | "error", error?: unknown) => void;
 }
 
@@ -57,7 +64,7 @@ function itemIcon(itemType: string): "command" | "file" {
 }
 
 /** Build a ChatEntry from a single OrchestrationEvent, returning null for events we skip. */
-function eventToEntry(event: OrchestrationEvent, assistantAccum: string | null): ChatEntry | null {
+function eventToEntry(event: OrchestrationEvent): ChatEntry | null {
   switch (event.type) {
     case "session.created":
       return {
@@ -103,6 +110,13 @@ function eventToEntry(event: OrchestrationEvent, assistantAccum: string | null):
         timestamp: event.timestamp,
         title: "Turn aborted",
         body: event.reason,
+      };
+    case "user.input":
+      return {
+        id: `user-input-${event.sessionId}-${event.timestamp}`,
+        type: "user",
+        timestamp: event.timestamp,
+        body: event.text,
       };
     case "content.delta":
       // Deltas are accumulated externally into assistant messages — skip individual entries.
@@ -181,7 +195,7 @@ function eventToEntry(event: OrchestrationEvent, assistantAccum: string | null):
  * Process a full list of OrchestrationEvents into ChatEntries.
  * Content deltas are accumulated into assistant message entries.
  */
-function eventsToEntries(events: OrchestrationEvent[]): ChatEntry[] {
+function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): ChatEntry[] {
   const entries: ChatEntry[] = [];
   let accum = "";
   let accumTurnId: string | null = null;
@@ -201,6 +215,16 @@ function eventsToEntries(events: OrchestrationEvent[]): ChatEntry[] {
     accumStart = null;
   }
 
+  if (initialPrompt) {
+    const timestamp = events[0]?.timestamp ?? new Date().toISOString();
+    entries.push({
+      id: `initial-prompt-${timestamp}`,
+      type: "user",
+      timestamp,
+      body: initialPrompt,
+    });
+  }
+
   for (const event of events) {
     if (event.type === "content.delta") {
       if (event.streamKind === "assistant_text" || event.streamKind === "reasoning_text") {
@@ -215,11 +239,16 @@ function eventsToEntries(events: OrchestrationEvent[]): ChatEntry[] {
     }
 
     // A non-delta event: flush any accumulated assistant text first
-    if (event.type === "turn.completed" || event.type === "turn.aborted" || event.type === "item.started") {
+    if (
+      event.type === "turn.completed" ||
+      event.type === "turn.aborted" ||
+      event.type === "item.started" ||
+      event.type === "user.input"
+    ) {
       flushAssistant();
     }
 
-    const entry = eventToEntry(event, null);
+    const entry = eventToEntry(event);
     if (entry) {
       entries.push(entry);
     }
@@ -229,7 +258,7 @@ function eventsToEntries(events: OrchestrationEvent[]): ChatEntry[] {
   return entries;
 }
 
-export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
+export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const transport = useTransport();
 
@@ -261,7 +290,7 @@ export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
 
         const filtered = timeline.filter((e) => e.sessionId === sessionId);
         eventsRef.current = filtered;
-        setEntries(eventsToEntries(filtered));
+        setEntries(eventsToEntries(filtered, initialPrompt));
         onSelectionLoadSettled?.("ok");
       } catch (e) {
         if (cancelled) return;
@@ -274,7 +303,7 @@ export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
 
     void load();
     return () => { cancelled = true; };
-  }, [sessionId, transport, onSelectionLoadSettled]);
+  }, [initialPrompt, sessionId, transport, onSelectionLoadSettled]);
 
   // Subscribe to real-time orchestration events
   useEffect(() => {
@@ -283,11 +312,11 @@ export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
       if (event.sessionId !== sessionId) return;
 
       eventsRef.current = [...eventsRef.current, event];
-      setEntries(eventsToEntries(eventsRef.current));
+      setEntries(eventsToEntries(eventsRef.current, initialPrompt));
     });
 
     return unsubscribe;
-  }, [sessionId, transport]);
+  }, [initialPrompt, sessionId, transport]);
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
@@ -397,6 +426,22 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
         <div className="max-w-3xl rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-900 px-4 py-3">
           <MarkdownContent content={entry.body} />
           <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.type === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="flex max-w-3xl items-start gap-3">
+          <div className="rounded-2xl rounded-tr-md border border-sky-900 bg-zinc-900 px-4 py-3 text-right">
+            <MarkdownContent content={entry.body} />
+            <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+          </div>
+          <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-indigo-300">
+            <User className="h-4 w-4" />
+          </div>
         </div>
       </div>
     );
