@@ -31,9 +31,9 @@ describe("eventsToChat", () => {
 
   test("accumulates content.delta into assistant entries grouped by turn", () => {
     const events: OrchestrationEvent[] = [
-      { type: "content.delta", sessionId: "s1", turnId: "t1", streamKind: "text", delta: "Hello ", timestamp: "2026-01-01T00:00:10Z" },
-      { type: "content.delta", sessionId: "s1", turnId: "t1", streamKind: "text", delta: "world", timestamp: "2026-01-01T00:00:11Z" },
-      { type: "content.delta", sessionId: "s1", turnId: "t2", streamKind: "text", delta: "Second turn", timestamp: "2026-01-01T00:01:00Z" },
+      { type: "content.delta", sessionId: "s1", turnId: "t1", streamKind: "assistant_text", delta: "Hello ", timestamp: "2026-01-01T00:00:10Z" },
+      { type: "content.delta", sessionId: "s1", turnId: "t1", streamKind: "assistant_text", delta: "world", timestamp: "2026-01-01T00:00:11Z" },
+      { type: "content.delta", sessionId: "s1", turnId: "t2", streamKind: "assistant_text", delta: "Second turn", timestamp: "2026-01-01T00:01:00Z" },
     ];
     const entries = eventsToChat(events);
     expect(entries).toHaveLength(2);
@@ -70,20 +70,35 @@ describe("eventsToChat", () => {
     expect(entries).toHaveLength(2);
     expect(entries[0]).toMatchObject({ kind: "system", title: "Turn started" });
     expect(entries[1]).toMatchObject({ kind: "system", title: "Turn completed" });
-    expect(entries[1].kind === "system" && entries[1].body).toContain("Tokens: 1000 in / 500 out");
-    expect(entries[1].kind === "system" && entries[1].body).toContain("Cost: $0.0150");
+    const completedEntry = entries[1];
+    if (!completedEntry || completedEntry.kind !== "system" || !completedEntry.body) {
+      throw new Error("expected a system turn completion entry with body text");
+    }
+    expect(completedEntry.body).toContain("Tokens: 1000 in / 500 out");
+    expect(completedEntry.body).toContain("Cost: $0.0150");
+  });
+
+  test("maps user.input to a user chat entry", () => {
+    const events: OrchestrationEvent[] = [
+      { type: "user.input", sessionId: "s1", text: "continue", timestamp: "2026-01-01T00:00:05Z" },
+    ];
+    const entries = eventsToChat(events);
+    expect(entries).toEqual([
+      { kind: "user", timestamp: "2026-01-01T00:00:05Z", body: "continue" },
+    ]);
   });
 
   test("entries are sorted by timestamp", () => {
     const events: OrchestrationEvent[] = [
       { type: "session.started", sessionId: "s1", timestamp: "2026-01-01T00:00:01Z" },
       { type: "session.created", sessionId: "s1", threadId: "t1", backend: "shell", timestamp: "2026-01-01T00:00:00Z" },
-      { type: "content.delta", sessionId: "s1", turnId: "t1", streamKind: "text", delta: "hi", timestamp: "2026-01-01T00:00:02Z" },
+      { type: "content.delta", sessionId: "s1", turnId: "t1", streamKind: "assistant_text", delta: "hi", timestamp: "2026-01-01T00:00:02Z" },
     ];
     const entries = eventsToChat(events);
     expect(entries).toHaveLength(3);
-    expect(entries[0].kind).toBe("system"); // created
-    expect(entries[1].kind).toBe("system"); // started
-    expect(entries[2].kind).toBe("assistant"); // delta
+    const [createdEntry, startedEntry, deltaEntry] = entries;
+    expect(createdEntry?.kind).toBe("system"); // created
+    expect(startedEntry?.kind).toBe("system"); // started
+    expect(deltaEntry?.kind).toBe("assistant"); // delta
   });
 });

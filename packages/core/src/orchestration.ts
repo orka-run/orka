@@ -71,6 +71,13 @@ export type OrchestrationEvent =
       timestamp: string;
     }
   | {
+      type: "user.input";
+      sessionId: string;
+      turnId?: string;
+      text: string;
+      timestamp: string;
+    }
+  | {
       type: "content.delta";
       sessionId: string;
       turnId: string;

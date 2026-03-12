@@ -93,6 +93,7 @@ export interface SessionProjection {
 
 export type ChatEntry =
   | { kind: "system"; timestamp: string; title: string; body?: string }
+  | { kind: "user"; timestamp: string; body: string }
   | { kind: "assistant"; timestamp: string; body: string }
   | { kind: "tool"; timestamp: string; title: string; summary: string; icon: "command" | "file"; details?: string[] }
   | { kind: "error"; timestamp: string; title: string; body: string };

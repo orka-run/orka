@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
+import { generateId } from "@orka/core";
 import type {
   ChatEntry,
   OrchestrationEvent,
@@ -32,9 +33,11 @@ import {
   getOrkaHome,
   getSessionDiff,
   getOrchestrationEvents,
+  insertOrchestrationEvent,
   insertUsageRecord,
 } from "./db";
 import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees, getRunner } from "./orchestrator";
+import { pushHub } from "./push";
 import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
 import {
@@ -224,6 +227,18 @@ class LocalClient implements OrkaService {
     if (isProviderRuntimeEnabled()) {
       const handle = providerService.getHandle(sessionId);
       if (handle) {
+        const event: OrchestrationEvent = {
+          type: "user.input",
+          sessionId,
+          text,
+          timestamp: new Date().toISOString(),
+        };
+        insertOrchestrationEvent({
+          ...event,
+          provider: handle.provider,
+          eventId: generateId("evt"),
+        });
+        pushHub.broadcast("orchestration.event", event);
         await providerService.sendTurn(sessionId, { input: text });
         return;
       }
@@ -356,7 +371,7 @@ class LocalClient implements OrkaService {
   }
 
   async getMetrics(): Promise<Record<string, unknown> | null> {
-    return queryMetricSnapshot();
+    return (await queryMetricSnapshot()) as unknown as Record<string, unknown> | null;
   }
 
   async reportEventGap(_channel: PushChannel, _expectedSeq: number, _gotSeq: number): Promise<void> {}
@@ -497,7 +512,7 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
           kind: "system",
           timestamp: event.timestamp,
           title: "Session completed",
-          body: event.exitCode != null ? `Exit code: ${String(event.exitCode)}` : undefined,
+          ...(event.exitCode != null ? { body: `Exit code: ${String(event.exitCode)}` } : {}),
         });
         break;
 
@@ -515,7 +530,7 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
           kind: "system",
           timestamp: event.timestamp,
           title: "Session cancelled",
-          body: event.reason,
+          ...(event.reason ? { body: event.reason } : {}),
         });
         break;
 
@@ -524,6 +539,14 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
           kind: "system",
           timestamp: event.timestamp,
           title: "Turn started",
+        });
+        break;
+
+      case "user.input":
+        entries.push({
+          kind: "user",
+          timestamp: event.timestamp,
+          body: event.text,
         });
         break;
 
@@ -539,7 +562,7 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
           kind: "system",
           timestamp: event.timestamp,
           title: "Turn completed",
-          body: parts.length > 0 ? parts.join(" · ") : undefined,
+          ...(parts.length > 0 ? { body: parts.join(" · ") } : {}),
         });
         break;
       }
@@ -555,15 +578,14 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
       }
 
       case "item.started": {
-        const icon: ChatEntry extends infer T ? T extends { kind: "tool" } ? T["icon"] : never : never =
-          event.itemType === "file_change" ? "file" : "command";
+        const icon: "command" | "file" = event.itemType === "file_change" ? "file" : "command";
         entries.push({
           kind: "tool",
           timestamp: event.timestamp,
           title: event.title ?? event.itemType,
           summary: event.detail ?? "",
           icon,
-          details: event.detail ? [event.detail] : undefined,
+          ...(event.detail ? { details: [event.detail] } : {}),
         });
         break;
       }
@@ -576,7 +598,7 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
           title: event.title ?? `${event.itemType} completed`,
           summary: event.status ?? "done",
           icon: icon2,
-          details: event.detail ? [event.detail] : undefined,
+          ...(event.detail ? { details: [event.detail] } : {}),
         });
         break;
       }

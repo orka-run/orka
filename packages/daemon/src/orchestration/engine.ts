@@ -193,6 +193,8 @@ export class OrchestrationEngine {
           clearCurrentTurn(projection, event.turnId);
           turnStartedAtMs.delete(event.turnId);
           break;
+        case "user.input":
+          break;
         case "content.delta":
           setRunning(projection, event.turnId);
           firstOutputAtMs ??= eventTimestampMs;

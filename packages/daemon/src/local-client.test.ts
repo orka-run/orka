@@ -3,9 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ProviderSessionHandle } from "@orka/core";
-import { closeDb, getUsageBySession, insertOrchestrationEvent, insertSession, insertTask } from "./db";
+import { closeDb, getOrchestrationEvents, getUsageBySession, insertOrchestrationEvent, insertSession, insertTask } from "./db";
 import { createLocalClient } from "./local-client";
 import { getRunner, setRunner } from "./orchestrator";
+import { pushHub } from "./push";
 import { resetConfigCache } from "./config";
 import { providerService } from "./provider-runtime";
 import type { SessionRunner } from "./runner";
@@ -92,12 +93,17 @@ describe("LocalClient provider runtime support", () => {
 
     const originalGetHandle = providerService.getHandle;
     const originalSendTurn = providerService.sendTurn;
+    const originalBroadcast = pushHub.broadcast.bind(pushHub);
     const sendTurnCalls: Array<{ sessionId: string; input: { input: string } }> = [];
+    const broadcasts: Array<{ channel: string; data: unknown }> = [];
 
     (providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
     (providerService as any).sendTurn = async (sessionId: string, input: { input: string }) => {
       sendTurnCalls.push({ sessionId, input });
     };
+    (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = ((channel, data) => {
+      broadcasts.push({ channel, data });
+    }) as typeof pushHub.broadcast;
 
     try {
       const client = createLocalClient();
@@ -107,9 +113,25 @@ describe("LocalClient provider runtime support", () => {
 
       expect(sendTurnCalls).toEqual([{ sessionId: "sess-live", input: { input: "continue" } }]);
       expect(runner.sendTextCalls).toEqual([]);
+      expect(getOrchestrationEvents("sess-live")).toContainEqual({
+        type: "user.input",
+        sessionId: "sess-live",
+        text: "continue",
+        timestamp: expect.any(String),
+      });
+      expect(broadcasts).toHaveLength(1);
+      expect(broadcasts[0]).toMatchObject({
+        channel: "orchestration.event",
+        data: {
+          type: "user.input",
+          sessionId: "sess-live",
+          text: "continue",
+        },
+      });
     } finally {
       (providerService as any).getHandle = originalGetHandle;
       (providerService as any).sendTurn = originalSendTurn;
+      (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = originalBroadcast;
     }
   });
 });
