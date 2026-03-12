@@ -509,9 +509,9 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-full flex-1 overflow-y-auto px-4 py-4"
+          className="h-full flex-1 overflow-y-auto overflow-x-hidden px-4 py-4"
         >
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             {entries.length === 0 ? (
               <div className="py-12 text-center text-sm text-zinc-500">No messages yet.</div>
             ) : (
@@ -611,7 +611,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
         <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
           <Bot className="h-4 w-4" />
         </div>
-        <div className="max-w-3xl rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-900 px-4 py-3">
+        <div className="min-w-0 max-w-3xl rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-900 px-4 py-3 [overflow-wrap:anywhere]">
           <MarkdownContent content={entry.body} />
           <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
         </div>
@@ -623,7 +623,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
     return (
       <div className="flex justify-end">
         <div className="flex max-w-3xl items-start gap-3">
-          <div className="rounded-2xl rounded-tr-md border border-indigo-900/50 bg-zinc-900 px-4 py-3">
+          <div className="min-w-0 max-w-3xl rounded-2xl rounded-tr-md border border-indigo-900/50 bg-zinc-900 px-4 py-3 [overflow-wrap:anywhere]">
             <MarkdownContent content={entry.body} />
             <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
           </div>
@@ -642,7 +642,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
     if (entry.tools.length === 1) {
       const tool = entry.tools[0]!;
       return (
-        <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-2.5">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
             {tool.inProgress ? (
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
