@@ -256,6 +256,14 @@ To wait for tagged sessions (e.g. all migration agents):
 orka wait $(orka ps --status running --tag migration -v 2>/dev/null | grep -oP 'sess-\w+' | tr '\n' ' ')
 ```
 
+## Agent Models
+
+This project uses two agent backends with high reasoning:
+- **Claude Code** — Opus 4.6 (default for complex tasks requiring deep codebase understanding)
+- **Codex** — GPT-5.4 with `--reasoning-effort high` (for parallelizable implementation tasks)
+
+When spawning agents, always use `--reasoning-effort high` for codex.
+
 ## Agent Sessions
 
 - The default execution path is provider-backed and event-sourced inside the daemon.
