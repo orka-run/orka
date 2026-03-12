@@ -170,6 +170,22 @@ async function ensureDaemon(): Promise<void> {
   await startDaemonBackground();
 }
 
+async function stopDaemon(): Promise<boolean> {
+  const pidPath = join(getOrkaHome(), "daemon.pid");
+  if (existsSync(pidPath)) {
+    const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+    if (pid) {
+      try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+    }
+  }
+  // Wait for daemon to stop (up to 3s)
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (!(await isDaemonRunning())) return true;
+  }
+  return false;
+}
+
 function buildRemoteClient(url: string): OrkaService {
   if (useEncrypt) {
     const orkaHome = getOrkaHome();
@@ -222,6 +238,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "merge",
   "project",
   "prune",
+  "restart",
   "serve",
   "relay",
   "keygen",
@@ -1242,6 +1259,27 @@ const pruneCmd = command({
   }),
 });
 
+const restartCmd = command({
+  name: "restart",
+  description: "Restart the daemon process (applies migrations and code changes)",
+  args: {},
+  handler: async () => {
+    const wasRunning = await isDaemonRunning();
+    if (wasRunning) {
+      process.stdout.write("stopping daemon... ");
+      const stopped = await stopDaemon();
+      if (!stopped) {
+        console.error("failed to stop daemon");
+        process.exit(1);
+      }
+      console.log("done");
+    }
+    process.stdout.write("starting daemon... ");
+    await startDaemonBackground();
+    console.log("done");
+  },
+});
+
 const serveCmd = command({
   name: "serve",
   description: "Start daemon WebSocket server for remote access",
@@ -1723,6 +1761,7 @@ const app = subcommands({
     merge: mergeCmd,
     project: projectCmd,
     prune: pruneCmd,
+    restart: restartCmd,
     serve: serveCmd,
     relay: relayCmd,
     keygen: keygenCmd,
