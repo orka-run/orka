@@ -238,15 +238,21 @@ let svc: OrkaService;
 const LOCAL_ONLY_COMMANDS = new Set(["serve", "project", "keygen", "relay"]);
 
 async function runCliCommand(name: string, fn: () => Promise<void>): Promise<void> {
-  await withSpan(`orka.cli.${name}`, { "orka.command": name }, async () => {
-    if (!LOCAL_ONLY_COMMANDS.has(name)) {
-      svc = await getSvc();
-      if (name !== "wait") {
-        await svc.reap();
+  try {
+    await withSpan(`orka.cli.${name}`, { "orka.command": name }, async () => {
+      if (!LOCAL_ONLY_COMMANDS.has(name)) {
+        svc = await getSvc();
+        if (name !== "wait") {
+          await svc.reap();
+        }
       }
+      await fn();
+    });
+  } finally {
+    if (svc && typeof (svc as any).close === "function") {
+      (svc as any).close();
     }
-    await fn();
-  });
+  }
 }
 
 function createLogChunkFormatter() {
