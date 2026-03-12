@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type {
   ProviderAdapter,
   ProviderApprovalDecision,
+  RawProviderLine,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSessionHandle,
@@ -79,6 +80,7 @@ interface ShellSessionRuntime {
   sessionName: string;
   scriptPath: string;
   queue: AsyncEventQueue<ProviderRuntimeEvent>;
+  rawEvents: AsyncEventQueue<RawProviderLine>;
   closed: boolean;
   exitEmitted: boolean;
   lastCapture: string;
@@ -111,10 +113,12 @@ export class ShellAdapter implements ProviderAdapter {
         await this.runner.spawn(sessionName, scriptPath, cwd);
         span.addEvent("process.spawned", { "orka.command": command });
 
+        const rawEventsQueue = new AsyncEventQueue<RawProviderLine>();
         const runtime: ShellSessionRuntime = {
           sessionName,
           scriptPath,
           queue: new AsyncEventQueue<ProviderRuntimeEvent>(),
+          rawEvents: rawEventsQueue,
           closed: false,
           exitEmitted: false,
           lastCapture: "",
@@ -137,6 +141,7 @@ export class ShellAdapter implements ProviderAdapter {
           threadId,
           provider: this.kind,
           events: runtime.queue,
+          rawEvents: rawEventsQueue,
           meta: {
             sessionName,
             scriptPath,
@@ -211,6 +216,7 @@ export class ShellAdapter implements ProviderAdapter {
             runtime.lastCapture = capture;
 
             if (delta.length > 0) {
+              runtime.rawEvents.push({ direction: "out", data: delta, ts: new Date().toISOString() });
               emitShellEvent(
                 runtime.queue,
                 createEvent(
@@ -266,6 +272,19 @@ export class ShellAdapter implements ProviderAdapter {
       span,
     );
     runtime.queue.close();
+    runtime.rawEvents.close();
+  }
+
+  async *replayRawLog(threadId: string, lines: RawProviderLine[]): AsyncIterable<ProviderRuntimeEvent> {
+    for (const line of lines) {
+      if (line.direction !== "out") continue;
+      yield createEvent(
+        "content.delta",
+        threadId,
+        { streamKind: "command_output", delta: line.data },
+        { provider: this.kind, createdAt: line.ts },
+      );
+    }
   }
 }
 

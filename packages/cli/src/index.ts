@@ -231,6 +231,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "workdir",
   "wait",
   "result",
+  "backfill",
   "usage",
   "send",
   "keep",
@@ -1042,6 +1043,31 @@ const resultCmd = command({
   }),
 });
 
+const backfillCmd = command({
+  name: "backfill",
+  description: "Re-derive orchestration events from raw provider logs",
+  examples: [
+    { description: "Backfill a session", command: "orka backfill <session-id>" },
+  ],
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("backfill", async () => {
+    if (!sessionId) {
+      fail("usage: orka backfill <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    const result = await svc.backfillSession(session.id);
+    console.log(`backfilled ${result.eventsReplayed} events for session ${session.id}`);
+  }),
+});
+
 const usageCmd = command({
   name: "usage",
   description: "Show usage totals by session and backend",
@@ -1754,6 +1780,7 @@ const app = subcommands({
     workdir: workdirCmd,
     wait: waitCmd,
     result: resultCmd,
+    backfill: backfillCmd,
     usage: usageCmd,
     send: sendCmd,
     keep: keepCmd,

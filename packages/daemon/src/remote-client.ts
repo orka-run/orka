@@ -289,6 +289,10 @@ class RemoteClient implements OrkaService {
     return this.call("resolveApproval", { requestId, decision });
   }
 
+  async backfillSession(sessionId: string): Promise<{ eventsReplayed: number }> {
+    return this.call("backfillSession", { sessionId });
+  }
+
   async getMetrics(): Promise<Record<string, unknown> | null> {
     return this.call("getMetrics", {});
   }

@@ -2,6 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { $ } from "bun";
 import type {
   ApprovalRequest,
+  RawProviderLine,
   ProviderRuntimeEvent,
   ProviderRuntimeEventOf,
   ProviderSessionHandle,
@@ -27,6 +28,7 @@ export interface ProviderEventConsumerCallbacks {
   insertUsageRecord: (record: UsageRecord) => void;
   approvalManager: ApprovalManager;
   logFile?: string;
+  rawLogPath?: string;
   pushHub?: PushHub;
   workingDir?: string;
   projectPath?: string;
@@ -46,6 +48,15 @@ export async function consumeProviderEvents(
     "orka.orchestration.consume_provider_events",
     { "orka.session.id": sessionId, "orka.backend": handle.provider },
     async (span) => {
+      // Start raw log writer in parallel (fire-and-forget with error handling)
+      if (callbacks.rawLogPath && handle.rawEvents) {
+        void writeRawLog(callbacks.rawLogPath, handle.rawEvents).catch((error) => {
+          span.addEvent("orka.orchestration.raw_log_write_failed", {
+            "orka.error": error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
       try {
         for await (const event of handle.events) {
           span.addEvent("orka.orchestration.provider_event", {
@@ -316,5 +327,11 @@ function recordSessionTerminalMetrics(
   const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
   if (Number.isFinite(durationMs) && durationMs >= 0) {
     metrics.sessionDuration.record(durationMs);
+  }
+}
+
+async function writeRawLog(path: string, rawEvents: AsyncIterable<RawProviderLine>): Promise<void> {
+  for await (const line of rawEvents) {
+    await appendFile(path, JSON.stringify(line) + "\n", "utf8");
   }
 }

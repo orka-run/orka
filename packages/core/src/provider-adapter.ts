@@ -4,6 +4,12 @@
 import type { ProviderRuntimeEvent } from "./provider-events";
 import type { BackendKind, ReasoningEffort } from "./types";
 
+export interface RawProviderLine {
+  direction: "in" | "out";
+  data: string;
+  ts: string;
+}
+
 export interface ProviderSessionStartInput {
   threadId: string;
   cwd?: string;
@@ -28,6 +34,7 @@ export interface ProviderSessionHandle {
   threadId: string;
   provider: BackendKind;
   events: AsyncIterable<ProviderRuntimeEvent>;
+  rawEvents?: AsyncIterable<RawProviderLine>;
   meta: Record<string, unknown>;
 }
 
@@ -42,4 +49,5 @@ export interface ProviderAdapter {
     requestId: string,
     decision: ProviderApprovalDecision,
   ): Promise<void>;
+  replayRawLog?(threadId: string, lines: RawProviderLine[]): AsyncIterable<ProviderRuntimeEvent>;
 }

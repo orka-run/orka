@@ -209,6 +209,8 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             return null;
           case "terminalList":
             return svc.terminalList(params.sessionId);
+          case "backfillSession":
+            return svc.backfillSession(params.sessionId);
           case "reportClientError":
             insertClientError({
               error: params.error ?? "unknown",

@@ -123,6 +123,9 @@ export interface OrkaService {
   resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   reportEventGap(channel: PushChannel, expectedSeq: number, gotSeq: number): Promise<void>;
 
+  // --- Backfill ---
+  backfillSession(sessionId: string): Promise<{ eventsReplayed: number }>;
+
   // --- Metrics ---
   getMetrics(): Promise<Record<string, unknown> | null>;
 

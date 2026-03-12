@@ -7,7 +7,7 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, insertSessionTags, updateSessionStatus, getSession, getOrkaHome, listSessions, saveSessionDiff, insertUsageRecord } from "./db";
+import { insertTask, insertSession, insertSessionTags, updateSessionStatus, updateSessionRawLogFile, getSession, getOrkaHome, listSessions, saveSessionDiff, insertUsageRecord } from "./db";
 import { defaultRunner } from "./tmux";
 import type { SessionRunner } from "./runner";
 import { consumeProviderEvents } from "./orchestration";
@@ -153,6 +153,9 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
         interactive: req.mode === "interactive",
       });
 
+      const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
+      updateSessionRawLogFile(sessionId, rawLogPath);
+
       updateSessionStatus(sessionId, "running", { startedAt });
       recordSessionStartedMetrics();
 
@@ -162,6 +165,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
         insertUsageRecord,
         approvalManager,
         logFile,
+        rawLogPath,
         pushHub,
         workingDir,
         projectPath,

@@ -44,6 +44,7 @@ const SessionRowSchema = z.object({
   system_prompt: z.string().nullable().default(null),
   allowed_tools: z.string().nullable().default(null),
   env_json: z.string().nullable().default(null),
+  raw_log_file: z.string().nullable().default(null),
 });
 
 const UsageLogRowSchema = z.object({
@@ -116,6 +117,7 @@ const MIGRATIONS = [
   { version: 19, sql: `ALTER TABLE orchestration_events ADD COLUMN seq INTEGER` },
   { version: 20, sql: `UPDATE orchestration_events SET seq = (SELECT COUNT(*) FROM orchestration_events e2 WHERE e2.session_id = orchestration_events.session_id AND e2.rowid <= orchestration_events.rowid) WHERE seq IS NULL` },
   { version: 21, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_session_seq ON orchestration_events(session_id, seq)` },
+  { version: 22, sql: `ALTER TABLE sessions ADD COLUMN raw_log_file TEXT` },
 ];
 
 function migrate(db: Database): void {
@@ -214,8 +216,8 @@ export function insertSession(session: Session): void {
   withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
     getDb()
       .prepare(
-        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json)
-         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson)`,
+        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file)
+         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile)`,
       )
       .run({
         $id: session.id,
@@ -237,6 +239,7 @@ export function insertSession(session: Session): void {
         $systemPrompt: session.systemPrompt ?? null,
         $allowedTools: session.allowedTools ? JSON.stringify(session.allowedTools) : null,
         $envJson: session.env ? JSON.stringify(session.env) : null,
+        $rawLogFile: session.rawLogFile ?? null,
       });
   });
 }
@@ -266,6 +269,14 @@ export function updateSessionStatus(
     getDb()
       .prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = $id`)
       .run(params);
+  });
+}
+
+export function updateSessionRawLogFile(id: string, rawLogFile: string): void {
+  withSpanSync("orka.db.updateSessionRawLogFile", { "orka.session.id": id }, () => {
+    getDb()
+      .prepare("UPDATE sessions SET raw_log_file = ? WHERE id = ?")
+      .run(rawLogFile, id);
   });
 }
 
@@ -661,6 +672,7 @@ function rowToSession(row: unknown): Session {
     exitCode: data.exit_code,
     kept: data.kept === 1,
     autoMerge: data.auto_merge === 1,
+    ...(data.raw_log_file ? { rawLogFile: data.raw_log_file } : {}),
     ...(data.system_prompt ? { systemPrompt: data.system_prompt } : {}),
     ...(data.allowed_tools ? { allowedTools: JSON.parse(data.allowed_tools) as string[] } : {}),
     ...(data.env_json ? { env: JSON.parse(data.env_json) as Record<string, string> } : {}),

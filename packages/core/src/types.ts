@@ -68,6 +68,7 @@ export interface Session {
   exitCode: number | null;
   kept: boolean;
   autoMerge: boolean;
+  rawLogFile?: string;
   systemPrompt?: string;
   allowedTools?: string[];
   env?: Record<string, string>;

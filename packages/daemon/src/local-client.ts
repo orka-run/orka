@@ -6,6 +6,7 @@ import type {
   ChatEntry,
   OrchestrationEvent,
   OrkaService,
+  RawProviderLine,
   SessionFilters,
   PruneOptions,
   PruneResult,
@@ -33,6 +34,7 @@ import {
   getOrkaHome,
   getSessionDiff,
   getOrchestrationEvents,
+  deleteOrchestrationEvents,
   insertOrchestrationEvent,
   insertUsageRecord,
 } from "./db";
@@ -46,7 +48,7 @@ import {
   deleteBranch,
   getWorktreeDir,
 } from "./worktree";
-import { approvalManager, isProviderRuntimeEnabled, providerService } from "./provider-runtime";
+import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerAdapterRegistry, providerService } from "./provider-runtime";
 import { queryMetricSnapshot } from "./tracing";
 
 class LocalClient implements OrkaService {
@@ -368,6 +370,36 @@ class LocalClient implements OrkaService {
         decision === "approve" || decision === "approve_session" ? "approve" : "deny",
       );
     }
+  }
+
+  async backfillSession(sessionId: string): Promise<{ eventsReplayed: number }> {
+    const session = getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (!session.rawLogFile || !existsSync(session.rawLogFile)) {
+      throw new Error(`No raw log file for session ${sessionId}`);
+    }
+
+    const adapter = providerAdapterRegistry.get(session.backend);
+    if (!adapter?.replayRawLog) {
+      throw new Error(`Backend "${session.backend}" does not support replay`);
+    }
+
+    const rawContent = readFileSync(session.rawLogFile, "utf-8");
+    const lines: RawProviderLine[] = rawContent
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as RawProviderLine);
+
+    // Delete existing orchestration events for this session
+    deleteOrchestrationEvents([sessionId]);
+
+    let eventsReplayed = 0;
+    for await (const event of adapter.replayRawLog(sessionId, lines)) {
+      orchestrationEngine.ingest(sessionId, event);
+      eventsReplayed++;
+    }
+
+    return { eventsReplayed };
   }
 
   async getMetrics(): Promise<Record<string, unknown> | null> {

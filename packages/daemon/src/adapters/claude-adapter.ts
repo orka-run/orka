@@ -2,6 +2,7 @@ import type {
   CanonicalItemType,
   ProviderAdapter,
   ProviderApprovalDecision,
+  RawProviderLine,
   ReasoningEffort,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -29,6 +30,7 @@ interface ClaudeStdinWriter {
 interface ClaudeHandleMeta {
   process: ClaudeProcess;
   events: AsyncEventQueue<ProviderRuntimeEvent>;
+  rawEvents: AsyncEventQueue<RawProviderLine>;
   exitEmitted: boolean;
   closed: boolean;
   turnId: string;
@@ -104,6 +106,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       { "orka.session.id": input.threadId, "orka.backend": this.kind },
       async (span) => {
         const events = new AsyncEventQueue<ProviderRuntimeEvent>();
+        const rawEvents = new AsyncEventQueue<RawProviderLine>();
         const turnId = generateId("turn");
         const command = buildClaudeCommand(input);
         // Remove CLAUDECODE env to prevent nested session detection
@@ -124,6 +127,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const meta: ClaudeHandleMeta = {
           process,
           events,
+          rawEvents,
           exitEmitted: false,
           closed: false,
           turnId,
@@ -134,6 +138,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           threadId: input.threadId,
           provider: this.kind,
           events,
+          rawEvents,
           meta: meta as unknown as Record<string, unknown>,
         };
 
@@ -166,6 +171,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
               message: { role: "user", content: input.prompt },
               parent_tool_use_id: null,
             }) + "\n";
+            rawEvents.push({ direction: "in", data: msg.trimEnd(), ts: new Date().toISOString() });
             await Promise.resolve(stdin.write(msg));
           }
           // Close stdin for non-interactive (background) sessions so Claude Code exits after one turn.
@@ -197,6 +203,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       parent_tool_use_id: null,
     }) + "\n";
 
+    meta.rawEvents.push({ direction: "in", data: msg.trimEnd(), ts: new Date().toISOString() });
     await Promise.resolve(meta.stdinWriter.write(msg));
   }
 
@@ -244,6 +251,100 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     _decision: ProviderApprovalDecision,
   ): Promise<void> {
     throw new Error("Claude Code -p mode uses --permission-mode auto");
+  }
+
+  async *replayRawLog(threadId: string, lines: RawProviderLine[]): AsyncIterable<ProviderRuntimeEvent> {
+    let turnId = generateId("turn");
+    let openItemId: string | null = null;
+    let openItemType: CanonicalItemType = "unknown";
+
+    for (const line of lines) {
+      if (line.direction !== "out") continue;
+
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line.data);
+      } catch {
+        continue;
+      }
+
+      const primary = mapClaudeEvent(threadId, raw, { turnId });
+      if (!primary) continue;
+
+      // Close previous open item when a new item starts
+      if (openItemId) {
+        const isCompletionForSameItem = primary.type === "item.completed" && primary.itemId === openItemId;
+        if (isCompletionForSameItem) {
+          openItemId = null;
+          openItemType = "unknown";
+        } else if (primary.type !== "item.started" || primary.itemId !== openItemId) {
+          yield createEvent(
+            "item.completed",
+            threadId,
+            { itemType: openItemType, status: "completed" },
+            { provider: "claude-code", turnId, itemId: openItemId, createdAt: line.ts },
+          );
+          openItemId = null;
+          openItemType = "unknown";
+        }
+      }
+
+      yield primary;
+
+      if (primary.type === "item.started") {
+        openItemId = primary.itemId ?? null;
+        openItemType = primary.payload.itemType ?? "unknown";
+      }
+
+      if (primary.type === "session.started") {
+        yield createEvent(
+          "turn.started",
+          threadId,
+          {},
+          { provider: "claude-code", turnId, createdAt: line.ts },
+        );
+      }
+
+      if (primary.type === "turn.completed") {
+        if (openItemId) {
+          yield createEvent(
+            "item.completed",
+            threadId,
+            { itemType: openItemType, status: "completed" },
+            { provider: "claude-code", turnId, itemId: openItemId, createdAt: line.ts },
+          );
+          openItemId = null;
+          openItemType = "unknown";
+        }
+        turnId = generateId("turn");
+      }
+    }
+
+    // Close any remaining open item
+    if (openItemId) {
+      yield createEvent(
+        "item.completed",
+        threadId,
+        { itemType: openItemType, status: "completed" },
+        { provider: "claude-code", turnId, itemId: openItemId },
+      );
+    }
+
+    // Emit session.exited from the last "result" line (exit mode)
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (line.direction !== "out") continue;
+      try {
+        const raw = JSON.parse(line.data);
+        const exitEvent = mapClaudeEvent(threadId, raw, "exit");
+        if (exitEvent) {
+          yield exitEvent;
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
   }
 }
 
@@ -388,6 +489,7 @@ async function consumeClaudeOutput(
 
       try {
         for await (const line of readLines(stdout)) {
+          meta.rawEvents.push({ direction: "out", data: line, ts: new Date().toISOString() });
           let raw: unknown;
 
           try {
@@ -624,6 +726,7 @@ function closeEvents(meta: ClaudeHandleMeta): void {
 
   meta.closed = true;
   meta.events.close();
+  meta.rawEvents.close();
 }
 
 function normalizeClaudeUsage(raw: Record<string, unknown>): ClaudeUsage | undefined {

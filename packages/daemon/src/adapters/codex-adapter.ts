@@ -3,6 +3,7 @@ import type {
   CanonicalRequestType,
   ProviderAdapter,
   ProviderApprovalDecision,
+  RawProviderLine,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSessionHandle,
@@ -47,6 +48,7 @@ interface CodexHandleMeta {
   sendRequest: <TResult>(method: CodexClientRequestMethod, params?: unknown) => Promise<TResult>;
   sendNotification: (method: CodexClientNotificationMethod, params?: unknown) => Promise<void>;
   sendResponse: (requestId: JsonRpcId, result: unknown) => Promise<void>;
+  rawEvents: AsyncEventQueue<RawProviderLine>;
   pendingRequests: Map<string, CodexPendingRequest>;
   pendingServerRequests: Map<string, CodexPendingServerRequest>;
   turnUsage: Map<string, CodexUsage>;
@@ -198,6 +200,7 @@ export class CodexAdapter implements ProviderAdapter {
         span.addEvent("process.spawned", { "orka.command": command.join(" ") });
 
         const events = new AsyncEventQueue<ProviderRuntimeEvent>();
+        const rawEventsQueue = new AsyncEventQueue<RawProviderLine>();
 
         if (!isReadableStream(process.stdout)) {
           emitCodexEvent(
@@ -224,11 +227,12 @@ export class CodexAdapter implements ProviderAdapter {
           throw new Error("Codex app-server stdout is not available");
         }
 
-        const meta = this.createHandleMeta(input.threadId, process);
+        const meta = this.createHandleMeta(input.threadId, process, rawEventsQueue);
         const handle: ProviderSessionHandle = {
           threadId: input.threadId,
           provider: this.kind,
           events,
+          rawEvents: rawEventsQueue,
           meta: meta as unknown as Record<string, unknown>,
         };
 
@@ -384,7 +388,7 @@ export class CodexAdapter implements ProviderAdapter {
     }
   }
 
-  private createHandleMeta(threadId: string, process: CodexProcess): CodexHandleMeta {
+  private createHandleMeta(threadId: string, process: CodexProcess, rawEventsQueue: AsyncEventQueue<RawProviderLine>): CodexHandleMeta {
     let requestCount = 0;
     const pendingRequests = new Map<string, CodexPendingRequest>();
     const pendingServerRequests = new Map<string, CodexPendingServerRequest>();
@@ -396,7 +400,9 @@ export class CodexAdapter implements ProviderAdapter {
         throw new Error("Codex app-server stdin is not available");
       }
 
-      await Promise.resolve(stdin.write(`${JSON.stringify(message)}\n`));
+      const json = JSON.stringify(message);
+      rawEventsQueue.push({ direction: "in", data: json, ts: new Date().toISOString() });
+      await Promise.resolve(stdin.write(`${json}\n`));
     };
 
     const sendRequest = async <TResult>(method: CodexClientRequestMethod, params?: unknown): Promise<TResult> => {
@@ -443,11 +449,39 @@ export class CodexAdapter implements ProviderAdapter {
       sendRequest,
       sendNotification,
       sendResponse,
+      rawEvents: rawEventsQueue,
       pendingRequests,
       pendingServerRequests,
       turnUsage,
       sawSessionExit: false,
     };
+  }
+
+  async *replayRawLog(threadId: string, lines: RawProviderLine[]): AsyncIterable<ProviderRuntimeEvent> {
+    const meta: MapCodexEventContext["meta"] = {
+      pendingServerRequests: new Map(),
+      turnUsage: new Map(),
+      sawSessionExit: false,
+    };
+
+    for (const line of lines) {
+      if (line.direction !== "out") continue;
+
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line.data);
+      } catch {
+        continue;
+      }
+
+      // Skip JSON-RPC responses — they don't produce events
+      if (isJsonRpcResponse(raw)) continue;
+
+      const mapped = mapCodexEvent(threadId, raw, { meta });
+      if (mapped) {
+        yield mapped;
+      }
+    }
   }
 }
 
@@ -675,6 +709,7 @@ async function consumeCodexOutput(
 
       try {
         for await (const line of readLines(stdout)) {
+          meta.rawEvents.push({ direction: "out", data: line, ts: new Date().toISOString() });
           let raw: unknown;
 
           try {
@@ -766,6 +801,7 @@ async function consumeCodexOutput(
       }
 
       events.close();
+      meta.rawEvents.close();
     },
   );
 }
