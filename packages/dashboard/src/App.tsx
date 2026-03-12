@@ -1,5 +1,10 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import type { OrchestrationEvent, SessionDeletedData, SessionUpdatedData } from "@orka/core";
+import type {
+  OrchestrationEvent,
+  ServerWelcomeData,
+  SessionDeletedData,
+  SessionUpdatedData,
+} from "@orka/core";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { DevOverlay } from "./components/DevOverlay";
@@ -43,6 +48,7 @@ interface AppShellProps {
 function AppShell({ transport }: AppShellProps) {
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
+  const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
   const selectedId = useSessionStore((state) => state.selectedId);
   const selectSession = useSessionStore((state) => state.selectSession);
@@ -98,7 +104,12 @@ function AppShell({ transport }: AppShellProps) {
   });
 
   useEffect(() => {
-    const unsubscribeState = transport.onStateChange(setConnectionStatus);
+    const unsubscribeState = transport.onStateChange((connection) => {
+      setConnectionStatus(connection.state, connection.reconnectAttempts);
+    });
+    const unsubscribeWelcome = transport.subscribe("server.welcome", (data) => {
+      setServerSessionCount((data as ServerWelcomeData).sessionCount);
+    });
     const unsubscribeUpdated = transport.subscribe("orchestration.sessionUpdated", (data) => {
       const typedData = data as SessionUpdatedData;
       const known = useSessionStore
@@ -142,6 +153,7 @@ function AppShell({ transport }: AppShellProps) {
       unsubscribeDeleted();
       unsubscribeEvent();
       unsubscribeUpdated();
+      unsubscribeWelcome();
       unsubscribeState();
       transport.disconnect();
     };
@@ -177,7 +189,7 @@ function AppShell({ transport }: AppShellProps) {
           defaultProjectPath={defaultProjectPath}
           onClose={() => setIsNewSessionOpen(false)}
         />
-        <StatusBar sessionCount={sessions.length} />
+        <StatusBar sessionCount={sessions.length} serverSessionCount={serverSessionCount} />
       </div>
     </TransportContext.Provider>
   );

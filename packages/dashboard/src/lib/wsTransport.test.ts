@@ -434,6 +434,33 @@ describe("WsTransport", () => {
     expect(pendingDelays()).toEqual([1_000]);
   });
 
+  test("reports reconnect attempt counts to state listeners", () => {
+    const transport = new WsTransport("ws://orka.test");
+    const updates: Array<{ state: string; reconnectAttempts: number }> = [];
+
+    transport.onStateChange((snapshot) => {
+      updates.push(snapshot);
+    });
+
+    transport.connect();
+
+    const firstSocket = latestSocket();
+    firstSocket.open();
+    firstSocket.close();
+
+    runTimer(500);
+
+    const secondSocket = latestSocket();
+    secondSocket.close();
+
+    expect(updates).toEqual([
+      { state: "connecting", reconnectAttempts: 0 },
+      { state: "connected", reconnectAttempts: 0 },
+      { state: "reconnecting", reconnectAttempts: 1 },
+      { state: "reconnecting", reconnectAttempts: 2 },
+    ]);
+  });
+
   test("outbox messages queued while disconnected are sent on reconnect", async () => {
     const transport = new WsTransport("ws://orka.test");
     transport.connect();

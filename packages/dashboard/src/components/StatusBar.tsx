@@ -1,11 +1,56 @@
+import { useRpcLatency } from "../lib/rpcLatencyStore";
+import { useConnectionStore } from "../stores/connectionStore";
+
 interface StatusBarProps {
   sessionCount: number;
+  serverSessionCount?: number | null;
 }
 
-export function StatusBar({ sessionCount }: StatusBarProps) {
+function getConnectionIndicator(status: ReturnType<typeof useConnectionStore.getState>["status"]) {
+  if (status === "connected") {
+    return {
+      dotClassName: "bg-emerald-400",
+      label: "Connected",
+    };
+  }
+
+  if (status === "connecting" || status === "reconnecting") {
+    return {
+      dotClassName: "bg-amber-400",
+      label: "Connecting...",
+    };
+  }
+
+  return {
+    dotClassName: "bg-red-400",
+    label: "Disconnected",
+  };
+}
+
+export function StatusBar({ sessionCount, serverSessionCount = null }: StatusBarProps) {
+  const status = useConnectionStore((state) => state.status);
+  const reconnectAttempts = useConnectionStore((state) => state.reconnectAttempts);
+  const { connectionRtt } = useRpcLatency();
+  const { dotClassName, label } = getConnectionIndicator(status);
+  const displayedSessionCount = serverSessionCount ?? sessionCount;
+  const showRtt = status === "connected" && connectionRtt !== null;
+  const reconnectLabel = status === "reconnecting" ? ` (attempt ${reconnectAttempts})` : "";
+
   return (
     <footer className="flex items-center justify-between border-t border-zinc-800 bg-zinc-900 px-4 py-1.5 text-xs text-zinc-500">
-      <span>{sessionCount} session{sessionCount !== 1 ? "s" : ""}</span>
+      <div className="flex items-center gap-3">
+        <span className="inline-flex items-center gap-1.5 text-zinc-300">
+          <span className={`h-2 w-2 rounded-full ${dotClassName}`} />
+          <span>
+            {label}
+            {reconnectLabel}
+          </span>
+        </span>
+        {showRtt ? <span>RTT: {Math.round(connectionRtt)}ms</span> : null}
+        <span>
+          {displayedSessionCount} session{displayedSessionCount !== 1 ? "s" : ""}
+        </span>
+      </div>
       <span>orka dashboard</span>
     </footer>
   );

@@ -25,6 +25,10 @@ type PendingRequest = {
 
 export type PushHandler = (data: unknown, sequence: number) => void;
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
+export interface ConnectionStatusSnapshot {
+  state: ConnectionState;
+  reconnectAttempts: number;
+}
 
 function now(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -39,9 +43,12 @@ export class WsTransport {
   private lastSequenceByChannel = new Map<string, number>();
   private outbox: string[] = [];
   private state: ConnectionState = "disconnected";
+  private reconnectAttempts = 0;
+  private lastEmittedState: ConnectionState | null = null;
+  private lastEmittedReconnectAttempts = -1;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 500;
-  private stateListeners = new Set<(state: ConnectionState) => void>();
+  private stateListeners = new Set<(snapshot: ConnectionStatusSnapshot) => void>();
   private shouldReconnect = false;
   private connectionSpan: Span | null = null;
   private connectionStartedAt = 0;
@@ -81,6 +88,7 @@ export class WsTransport {
 
       this.connectionSpan?.addEvent("ws.connected");
       this.reconnectDelay = 500;
+      this.reconnectAttempts = 0;
       this.setState("connected");
       this.syncSubscriptions();
       this.flushOutbox();
@@ -124,6 +132,7 @@ export class WsTransport {
     this.rejectAllPending(new Error("Connection closed"));
     this.endConnectionSpan("disconnected");
     this.reconnectDelay = 500;
+    this.reconnectAttempts = 0;
     this.setState("disconnected");
   }
 
@@ -226,7 +235,7 @@ export class WsTransport {
     };
   }
 
-  onStateChange(listener: (state: ConnectionState) => void): () => void {
+  onStateChange(listener: (snapshot: ConnectionStatusSnapshot) => void): () => void {
     this.stateListeners.add(listener);
     return () => {
       this.stateListeners.delete(listener);
@@ -372,6 +381,7 @@ export class WsTransport {
       "orka.reconnect.delay_ms": delay,
     });
     this.endConnectionSpan("reconnecting");
+    this.reconnectAttempts += 1;
     this.setState("reconnecting");
     this.reconnectDelay = Math.min(delay * 2, this.options?.maxReconnectDelay ?? 8_000);
 
@@ -457,13 +467,22 @@ export class WsTransport {
   }
 
   private setState(nextState: ConnectionState): void {
-    if (this.state === nextState) {
+    this.state = nextState;
+    const snapshot: ConnectionStatusSnapshot = {
+      state: nextState,
+      reconnectAttempts: nextState === "reconnecting" ? this.reconnectAttempts : 0,
+    };
+    if (
+      this.lastEmittedState === snapshot.state
+      && this.lastEmittedReconnectAttempts === snapshot.reconnectAttempts
+    ) {
       return;
     }
 
-    this.state = nextState;
+    this.lastEmittedState = snapshot.state;
+    this.lastEmittedReconnectAttempts = snapshot.reconnectAttempts;
     for (const listener of this.stateListeners) {
-      listener(nextState);
+      listener(snapshot);
     }
   }
 
