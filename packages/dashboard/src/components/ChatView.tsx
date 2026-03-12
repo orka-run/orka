@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, RotateCcw, Square, TerminalSquare, User, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, LoaderCircle, RotateCcw, Square, TerminalSquare, User, Wrench } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { withDashboardSpan } from "../lib/tracing";
@@ -122,6 +122,26 @@ function isTerminal(status: SessionSummary["status"]): boolean {
 function itemIcon(itemType: string): "command" | "file" {
   if (itemType === "file_change") return "file";
   return "command";
+}
+
+/** Build a descriptive summary line for a collapsed tool group. */
+function buildToolGroupSummary(tools: ToolEntry[]): string {
+  const fileCount = tools.filter((t) => t.icon === "file").length;
+  const cmdCount = tools.filter((t) => t.icon === "command").length;
+  const inProgressCount = tools.filter((t) => t.inProgress).length;
+
+  const parts: string[] = [];
+  if (fileCount > 0 && cmdCount > 0) {
+    parts.push(`${fileCount} file ${fileCount === 1 ? "change" : "changes"}`);
+    parts.push(`${cmdCount} ${cmdCount === 1 ? "command" : "commands"}`);
+  } else {
+    parts.push(`${tools.length} tool ${tools.length === 1 ? "call" : "calls"}`);
+  }
+
+  if (inProgressCount > 0) {
+    return parts.join(", ") + ` (${inProgressCount} in progress)`;
+  }
+  return parts.join(", ");
 }
 
 /**
@@ -357,6 +377,19 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  const handleToggleGroup = useCallback((groupId: string, isOpen: boolean) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (isOpen) {
+        next.add(groupId);
+      } else {
+        next.delete(groupId);
+      }
+      return next;
+    });
+  }, []);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -537,7 +570,12 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
               <div className="py-12 text-center text-sm text-zinc-500">No messages yet.</div>
             ) : (
               entries.map((entry) => (
-                <TimelineEntry key={entry.id} entry={entry} />
+                <TimelineEntry
+                  key={entry.id}
+                  entry={entry}
+                  isExpanded={expandedGroups.has(entry.id)}
+                  onToggleExpand={handleToggleGroup}
+                />
               ))
             )}
             {isRunning(activeSession.status) ? <ThinkingIndicator state={deriveThinkingState(events)} /> : null}
@@ -627,7 +665,15 @@ function ThinkingIndicator({ state }: { state: ThinkingState }) {
   return null;
 }
 
-function TimelineEntry({ entry }: { entry: ChatEntry }) {
+function TimelineEntry({
+  entry,
+  isExpanded,
+  onToggleExpand,
+}: {
+  entry: ChatEntry;
+  isExpanded?: boolean;
+  onToggleExpand?: (groupId: string, isOpen: boolean) => void;
+}) {
   if (entry.type === "assistant") {
     return (
       <div className="flex items-start gap-3">
@@ -680,13 +726,73 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
       );
     }
 
-    // Multiple tools: collapsible group with "Used N tools" summary
+    // Shared inner tool list for multi-tool groups
+    const toolsList = (
+      <div className="border-t border-zinc-800">
+        {entry.tools.map((tool) => (
+          <details key={tool.id} className="border-b border-zinc-800/50 last:border-b-0">
+            <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-zinc-800/80 text-zinc-400">
+                {tool.inProgress ? (
+                  <LoaderCircle className="h-3 w-3 animate-spin" />
+                ) : tool.icon === "command" ? (
+                  <TerminalSquare className="h-3 w-3" />
+                ) : (
+                  <FileCode2 className="h-3 w-3" />
+                )}
+              </div>
+              <span className="min-w-0 truncate text-xs font-medium text-zinc-300">{tool.title}</span>
+              <span className="ml-auto shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
+            </summary>
+            {tool.details.length > 0 ? (
+              <div className="border-t border-zinc-800/30 px-4 py-2">
+                <ToolCallDetails title={tool.title} details={tool.details} />
+              </div>
+            ) : null}
+          </details>
+        ))}
+      </div>
+    );
+
+    // 3+ tools: collapsed by default, with chevron and smart summary
+    if (entry.tools.length >= 3) {
+      const isOpen = hasInProgress || (isExpanded ?? false);
+      const summary = buildToolGroupSummary(entry.tools);
+      return (
+        <details
+          open={isOpen}
+          onToggle={(e) => {
+            const newState = (e.currentTarget as HTMLDetailsElement).open;
+            if (newState !== isOpen) onToggleExpand?.(entry.id, newState);
+          }}
+          className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70"
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-2.5">
+            <div className="flex items-center gap-2.5">
+              {isOpen ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform" />
+              )}
+              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
+                {hasInProgress ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
+              </div>
+              <p className="text-sm text-zinc-400">{summary}</p>
+            </div>
+            <div className="shrink-0 text-xs text-zinc-500">{formatRelativeTime(entry.timestamp)}</div>
+          </summary>
+          {toolsList}
+        </details>
+      );
+    }
+
+    // 2 tools: always open, simple summary
     const label = hasInProgress
       ? `Using ${entry.tools.length} tools…`
       : `Used ${entry.tools.length} tools`;
     return (
       <details
-        open={hasInProgress}
+        open
         className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70"
       >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-2.5">
@@ -698,30 +804,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
           </div>
           <div className="shrink-0 text-xs text-zinc-500">{formatRelativeTime(entry.timestamp)}</div>
         </summary>
-        <div className="border-t border-zinc-800">
-          {entry.tools.map((tool) => (
-            <details key={tool.id} className="border-b border-zinc-800/50 last:border-b-0">
-              <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded bg-zinc-800/80 text-zinc-400">
-                  {tool.inProgress ? (
-                    <LoaderCircle className="h-3 w-3 animate-spin" />
-                  ) : tool.icon === "command" ? (
-                    <TerminalSquare className="h-3 w-3" />
-                  ) : (
-                    <FileCode2 className="h-3 w-3" />
-                  )}
-                </div>
-                <span className="min-w-0 truncate text-xs font-medium text-zinc-300">{tool.title}</span>
-                <span className="ml-auto shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
-              </summary>
-              {tool.details.length > 0 ? (
-                <div className="border-t border-zinc-800/30 px-4 py-2">
-                  <ToolCallDetails title={tool.title} details={tool.details} />
-                </div>
-              ) : null}
-            </details>
-          ))}
-        </div>
+        {toolsList}
       </details>
     );
   }
