@@ -1,4 +1,5 @@
 import type {
+  CanonicalItemType,
   ProviderAdapter,
   ProviderApprovalDecision,
   ReasoningEffort,
@@ -367,6 +368,7 @@ async function consumeClaudeOutput(
       // Track open item so we can emit item.completed when the next event implies it's done.
       // Claude Code stream-json never emits "tool" type events, so item.completed must be inferred.
       let openItemId: string | null = null;
+      let openItemType: CanonicalItemType = "unknown";
 
       function closeOpenItem() {
         if (!openItemId) return;
@@ -375,12 +377,13 @@ async function consumeClaudeOutput(
           createEvent(
             "item.completed",
             threadId,
-            { itemType: "unknown", status: "completed" },
+            { itemType: openItemType, status: "completed" },
             { provider: "claude-code", ...(meta.turnId ? { turnId: meta.turnId } : {}), itemId: openItemId },
           ),
           span,
         );
         openItemId = null;
+        openItemType = "unknown";
       }
 
       try {
@@ -411,7 +414,8 @@ async function consumeClaudeOutput(
             if (openItemId) {
               const isCompletionForSameItem = primary.type === "item.completed" && primary.itemId === openItemId;
               if (isCompletionForSameItem) {
-                openItemId = null; // Already completed by the mapped event
+                openItemId = null;
+                openItemType = "unknown"; // Already completed by the mapped event
               } else if (primary.type !== "item.started" || primary.itemId !== openItemId) {
                 closeOpenItem();
               }
@@ -422,6 +426,7 @@ async function consumeClaudeOutput(
             // Track new open item
             if (primary.type === "item.started") {
               openItemId = primary.itemId;
+              openItemType = primary.payload.itemType ?? "unknown";
             }
 
             if (primary.type === "session.started") {
