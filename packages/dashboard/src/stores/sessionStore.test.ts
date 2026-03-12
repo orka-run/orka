@@ -8,6 +8,7 @@ class MockWsTransport {
   sessions: Session[] = [];
   tasks = new Map<string, Task>();
   spawnResult: Session | null = null;
+  spawnParams: SpawnRequest | null = null;
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     switch (method) {
@@ -21,6 +22,7 @@ class MockWsTransport {
         if (!this.spawnResult) {
           throw new Error("Missing spawn result");
         }
+        this.spawnParams = params as SpawnRequest;
         return this.spawnResult as T;
       case "stop":
         return undefined as T;
@@ -188,6 +190,7 @@ describe("sessionStore", () => {
       id: "sess-2",
       taskId: "task-2",
       createdAt: "2026-03-11T11:00:00.000Z",
+      autoMerge: true,
     });
 
     const request: SpawnRequest = {
@@ -197,11 +200,15 @@ describe("sessionStore", () => {
       backend: "codex",
       mode: "interactive",
       model: "gpt-5",
+      autoMerge: true,
+      tags: ["dashboard", "polish"],
+      systemPrompt: "Keep the response concise and implementation-focused.",
     };
 
     const sessionId = await store.getState().spawnSession(asTransport(transport), request);
 
     expect(sessionId).toBe("sess-2");
+    expect(transport.spawnParams).toEqual(request);
     expect(store.getState().sessions).toEqual([
       {
         id: "sess-2",
@@ -218,7 +225,7 @@ describe("sessionStore", () => {
         projectPath: "/tmp/project",
         workingDir: "/tmp/project",
         kept: false,
-        autoMerge: false,
+        autoMerge: true,
         prompt: null,
       },
     ]);

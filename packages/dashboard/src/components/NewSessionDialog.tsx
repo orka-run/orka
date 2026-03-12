@@ -1,8 +1,8 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import type { FormEvent } from "react";
 import { useEffect, useId, useState } from "react";
-import { X } from "lucide-react";
-import type { BackendKind, SessionMode } from "@orka/core";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
+import type { BackendKind, SessionMode, SpawnRequest } from "@orka/core";
 import { withDashboardSpan } from "../lib/tracing";
 import type { WsTransport } from "../lib/wsTransport";
 import { useSessionStore } from "../stores/sessionStore";
@@ -21,15 +21,24 @@ export function NewSessionDialog({
   onClose,
 }: NewSessionDialogProps) {
   const promptId = useId();
+  const titleId = useId();
   const projectPathId = useId();
   const modelId = useId();
+  const tagsId = useId();
+  const autoMergeId = useId();
+  const systemPromptId = useId();
   const spawnSession = useSessionStore((state) => state.spawnSession);
   const storeError = useSessionStore((state) => state.error);
   const [prompt, setPrompt] = useState("");
+  const [title, setTitle] = useState("");
   const [backend, setBackend] = useState<BackendKind>("codex");
   const [model, setModel] = useState("");
   const [mode, setMode] = useState<SessionMode>("interactive");
   const [projectPath, setProjectPath] = useState(defaultProjectPath);
+  const [tags, setTags] = useState("");
+  const [autoMerge, setAutoMerge] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -60,12 +69,28 @@ export function NewSessionDialog({
     return null;
   }
 
+  function parseTags(value: string): SpawnRequest["tags"] {
+    const parsedTags = Array.from(
+      new Set(
+        value
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    return parsedTags.length > 0 ? parsedTags : undefined;
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const trimmedPrompt = prompt.trim();
+    const trimmedTitle = title.trim();
     const trimmedProjectPath = projectPath.trim();
     const trimmedModel = model.trim();
+    const trimmedSystemPrompt = systemPrompt.trim();
+    const parsedTags = parseTags(tags);
 
     if (!trimmedPrompt) {
       setLocalError("Prompt is required.");
@@ -87,24 +112,36 @@ export function NewSessionDialog({
           "orka.backend": backend,
           "orka.mode": mode,
           "orka.project_path": trimmedProjectPath,
+          "orka.auto_merge": autoMerge,
         },
         async (span) => {
           span.addEvent("session.spawn_clicked");
 
-          await spawnSession(transport, {
+          const request: SpawnRequest = {
             prompt: trimmedPrompt,
             projectPath: trimmedProjectPath,
             backend,
             mode,
+            autoMerge,
+            ...(trimmedTitle ? { title: trimmedTitle } : {}),
             ...(trimmedModel ? { model: trimmedModel } : {}),
-          });
+            ...(parsedTags ? { tags: parsedTags } : {}),
+            ...(trimmedSystemPrompt ? { systemPrompt: trimmedSystemPrompt } : {}),
+          };
+
+          await spawnSession(transport, request);
         },
       );
 
       setPrompt("");
+      setTitle("");
       setModel("");
       setMode("interactive");
       setBackend("codex");
+      setTags("");
+      setAutoMerge(false);
+      setSystemPrompt("");
+      setShowAdvanced(false);
       onClose();
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Failed to spawn session.");
@@ -143,6 +180,20 @@ export function NewSessionDialog({
               onChange={(event) => setPrompt(event.target.value)}
               rows={6}
               placeholder="Describe the work you want the agent to do"
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+            />
+          </div>
+
+          <div>
+            <label htmlFor={titleId} className="mb-2 block text-sm font-medium text-zinc-200">
+              Title
+            </label>
+            <input
+              id={titleId}
+              type="text"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Optional"
               className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
             />
           </div>
@@ -194,24 +245,91 @@ export function NewSessionDialog({
 
             <div>
               <p className="mb-2 text-sm font-medium text-zinc-200">Mode</p>
-              <div className="flex rounded-xl border border-zinc-800 bg-zinc-900 p-1">
+              <div className="grid grid-cols-2 gap-2">
                 {(["background", "interactive"] as const).map((option) => (
-                  <button
+                  <ToggleButton
                     key={option}
-                    type="button"
+                    active={mode === option}
+                    label={option}
                     onClick={() => setMode(option)}
-                    className={`rounded-lg px-4 py-2 text-sm transition ${
-                      mode === option
-                        ? "bg-zinc-100 text-zinc-950"
-                        : "text-zinc-400 hover:text-zinc-100"
-                    }`}
-                  >
-                    {option}
-                  </button>
+                  />
                 ))}
               </div>
             </div>
           </div>
+
+          <label
+            htmlFor={autoMergeId}
+            className="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 transition hover:border-zinc-700"
+          >
+            <input
+              id={autoMergeId}
+              type="checkbox"
+              checked={autoMerge}
+              onChange={(event) => setAutoMerge(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-zinc-700 bg-zinc-950 accent-zinc-100"
+            />
+            <div>
+              <p className="text-sm font-medium text-zinc-200">Auto-merge</p>
+              <p className="mt-1 text-sm text-zinc-500">
+                Automatically merge changes when the session completes successfully.
+              </p>
+            </div>
+          </label>
+
+          <section className="rounded-xl border border-zinc-800 bg-zinc-950/60">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((current) => !current)}
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              aria-expanded={showAdvanced}
+            >
+              <div>
+                <p className="text-sm font-medium text-zinc-200">Advanced</p>
+                <p className="mt-1 text-sm text-zinc-500">Tags and system prompt overrides.</p>
+              </div>
+              {showAdvanced ? (
+                <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
+              ) : (
+                <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
+              )}
+            </button>
+
+            {showAdvanced ? (
+              <div className="space-y-4 border-t border-zinc-800 px-4 py-4">
+                <div>
+                  <label htmlFor={tagsId} className="mb-2 block text-sm font-medium text-zinc-200">
+                    Tags
+                  </label>
+                  <input
+                    id={tagsId}
+                    type="text"
+                    value={tags}
+                    onChange={(event) => setTags(event.target.value)}
+                    placeholder="frontend, urgent, polish"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={systemPromptId}
+                    className="mb-2 block text-sm font-medium text-zinc-200"
+                  >
+                    System Prompt
+                  </label>
+                  <textarea
+                    id={systemPromptId}
+                    value={systemPrompt}
+                    onChange={(event) => setSystemPrompt(event.target.value)}
+                    rows={4}
+                    placeholder="Optional"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </section>
 
           {localError || storeError ? (
             <div className="rounded-xl border border-red-950 bg-red-950/30 px-4 py-3 text-sm text-red-200">
