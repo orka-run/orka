@@ -653,6 +653,32 @@ async function consumeCodexOutput(
           if (mapped) {
             emitCodexEvent(events, mapped, span);
           }
+
+          // In app-server mode, codex stays alive after completing work.
+          // Once we see session.exited (thread/closed), break the loop and
+          // proceed to process cleanup.
+          if (meta.sawSessionExit) {
+            span.addEvent("session_exit_detected");
+            break;
+          }
+
+          // Codex app-server goes idle after a turn completes but doesn't
+          // send thread/closed on its own. When the thread is idle with no
+          // pending turn, send thread/unsubscribe to trigger a clean
+          // thread/closed notification, which the next iteration will handle.
+          if (
+            mapped?.type === "session.state.changed" &&
+            mapped.payload.state === "ready" &&
+            !meta.activeTurnId &&
+            meta.providerThreadId
+          ) {
+            span.addEvent("idle_detected_unsubscribing");
+            try {
+              await meta.sendRequest("thread/unsubscribe", { threadId: meta.providerThreadId });
+            } catch {
+              // Best-effort; if it fails, stopSession will clean up.
+            }
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown stream failure";
