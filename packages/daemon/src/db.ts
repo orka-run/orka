@@ -274,15 +274,20 @@ export function setSessionKept(id: string, kept: boolean): void {
   });
 }
 
-export function saveSessionDiff(sessionId: string, diff: string, status: string): void {
+export function saveSessionDiff(
+  sessionId: string,
+  diff: string,
+  status: string,
+  extra?: { commitLog?: string; commitDiff?: string },
+): void {
   withSpanSync("orka.db.saveSessionDiff", { "orka.session.id": sessionId }, () => {
     getDb()
       .prepare("UPDATE sessions SET last_diff = ? WHERE id = ?")
-      .run(JSON.stringify({ status, diff }), sessionId);
+      .run(JSON.stringify({ status, diff, ...extra }), sessionId);
   });
 }
 
-export function getSessionDiff(sessionId: string): { status: string; diff: string } | null {
+export function getSessionDiff(sessionId: string): { status: string; diff: string; commitLog?: string; commitDiff?: string } | null {
   const row = getDb()
     .prepare("SELECT last_diff FROM sessions WHERE id = ?")
     .get(sessionId) as { last_diff: string | null } | undefined;

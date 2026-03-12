@@ -708,11 +708,21 @@ const diffCmd = command({
     }
 
     try {
-      const { status, diff } = await svc.getDiff(session.id);
-      console.log(status);
-      if (diff) {
+      const result = await svc.getDiff(session.id);
+      console.log(result.status);
+      if (result.diff) {
         console.log("");
-        console.log(diff);
+        console.log(result.diff);
+      }
+      if (result.commitLog) {
+        console.log("");
+        console.log("\x1b[1mCommits on branch:\x1b[0m");
+        console.log(result.commitLog);
+      }
+      if (result.commitDiff) {
+        console.log("");
+        console.log("\x1b[1mCommitted changes vs parent:\x1b[0m");
+        console.log(result.commitDiff);
       }
     } catch (e: any) {
       fail(`error: ${e.message}`);

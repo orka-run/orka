@@ -64,6 +64,10 @@ export interface PruneResult {
 export interface DiffResult {
   status: string;
   diff: string;
+  /** git log of commits on the session branch vs parent (empty if no worktree branch) */
+  commitLog?: string;
+  /** git diff of all committed changes vs parent branch */
+  commitDiff?: string;
 }
 
 export interface MergeResult {

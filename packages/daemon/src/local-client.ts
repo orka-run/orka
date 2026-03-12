@@ -241,7 +241,8 @@ class LocalClient implements OrkaService {
     try {
       const status = (await $`git -C ${session.workingDir} status`.text()).trim();
       const diff = (await $`git -C ${session.workingDir} diff`.text()).trim();
-      return { status, diff };
+      const branchDiff = await captureBranchDiff(session.workingDir, session.projectPath);
+      return { status, diff, ...branchDiff };
     } catch {
       const saved = getSessionDiff(sessionId);
       if (saved) return saved;
@@ -600,4 +601,29 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
 
   entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   return entries;
+}
+
+/** Capture committed changes on the session branch vs the parent branch. */
+async function captureBranchDiff(
+  workingDir: string,
+  projectPath: string,
+): Promise<{ commitLog?: string; commitDiff?: string }> {
+  try {
+    // Determine the branch of this worktree
+    const branch = (await $`git -C ${workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+    if (!branch || branch === "HEAD") return {};
+
+    // Find the merge-base with the main repo's HEAD
+    const mainHead = (await $`git -C ${projectPath} rev-parse HEAD`.quiet().text()).trim();
+    const mergeBase = (await $`git -C ${workingDir} merge-base ${mainHead} HEAD`.quiet().text()).trim();
+    if (!mergeBase) return {};
+
+    const commitLog = (await $`git -C ${workingDir} log --oneline ${mergeBase}..HEAD`.quiet().text()).trim();
+    if (!commitLog) return {};
+
+    const commitDiff = (await $`git -C ${workingDir} diff ${mergeBase}..HEAD`.quiet().text()).trim();
+    return { commitLog, commitDiff };
+  } catch {
+    return {};
+  }
 }

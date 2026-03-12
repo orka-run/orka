@@ -260,7 +260,8 @@ export async function reapSessions(): Promise<number> {
         try {
           const statusText = (await $`git -C ${s.workingDir} status`.text()).trim();
           const diffText = (await $`git -C ${s.workingDir} diff`.text()).trim();
-          saveSessionDiff(s.id, diffText, statusText);
+          const extra = await captureBranchDiffForSession(s.workingDir, s.projectPath);
+          saveSessionDiff(s.id, diffText, statusText, extra);
         } catch {
           // Worktree may already be gone and diff persistence is best-effort.
         }
@@ -323,7 +324,8 @@ export async function stopSession(sessionId: string): Promise<void> {
     try {
       const statusText = (await $`git -C ${session.workingDir} status`.text()).trim();
       const diffText = (await $`git -C ${session.workingDir} diff`.text()).trim();
-      saveSessionDiff(sessionId, diffText, statusText);
+      const extra = await captureBranchDiffForSession(session.workingDir, session.projectPath);
+      saveSessionDiff(sessionId, diffText, statusText, extra);
     } catch {
       // Worktree may already be gone and diff persistence is best-effort.
     }
@@ -435,4 +437,27 @@ export async function cleanupOrphanedWorktrees(): Promise<number> {
     span.setAttribute("orka.worktree.orphans_cleaned", cleaned);
     return cleaned;
   });
+}
+
+/** Capture committed changes on session branch vs parent. Best-effort. */
+async function captureBranchDiffForSession(
+  workingDir: string,
+  projectPath: string,
+): Promise<{ commitLog?: string; commitDiff?: string }> {
+  try {
+    const branch = (await $`git -C ${workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+    if (!branch || branch === "HEAD") return {};
+
+    const mainHead = (await $`git -C ${projectPath} rev-parse HEAD`.quiet().text()).trim();
+    const mergeBase = (await $`git -C ${workingDir} merge-base ${mainHead} HEAD`.quiet().text()).trim();
+    if (!mergeBase) return {};
+
+    const log = (await $`git -C ${workingDir} log --oneline ${mergeBase}..HEAD`.quiet().text()).trim();
+    if (!log) return {};
+
+    const diff = (await $`git -C ${workingDir} diff ${mergeBase}..HEAD`.quiet().text()).trim();
+    return { commitLog: log, commitDiff: diff };
+  } catch {
+    return {};
+  }
 }

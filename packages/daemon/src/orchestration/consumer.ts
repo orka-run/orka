@@ -22,7 +22,7 @@ export interface ProviderEventConsumerCallbacks {
     status: SessionStatus,
     extra?: { startedAt?: string; finishedAt?: string; exitCode?: number },
   ) => void;
-  saveSessionDiff: (sessionId: string, diff: string, status: string) => void;
+  saveSessionDiff: (sessionId: string, diff: string, status: string, extra?: { commitLog?: string; commitDiff?: string }) => void;
   insertUsageRecord: (record: UsageRecord) => void;
   approvalManager: ApprovalManager;
   logFile?: string;
@@ -205,7 +205,30 @@ async function captureSessionDiff(
       try {
         const statusText = (await $`git -C ${callbacks.workingDir} status`.text()).trim();
         const diffText = (await $`git -C ${callbacks.workingDir} diff`.text()).trim();
-        callbacks.saveSessionDiff(sessionId, diffText, statusText);
+
+        // Capture committed changes vs parent branch
+        let commitLog: string | undefined;
+        let commitDiff: string | undefined;
+        if (callbacks.projectPath) {
+          try {
+            const branch = (await $`git -C ${callbacks.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+            if (branch && branch !== "HEAD") {
+              const mainHead = (await $`git -C ${callbacks.projectPath} rev-parse HEAD`.quiet().text()).trim();
+              const mergeBase = (await $`git -C ${callbacks.workingDir} merge-base ${mainHead} HEAD`.quiet().text()).trim();
+              if (mergeBase) {
+                const log = (await $`git -C ${callbacks.workingDir} log --oneline ${mergeBase}..HEAD`.quiet().text()).trim();
+                if (log) {
+                  commitLog = log;
+                  commitDiff = (await $`git -C ${callbacks.workingDir} diff ${mergeBase}..HEAD`.quiet().text()).trim();
+                }
+              }
+            }
+          } catch {
+            // Branch diff is best-effort
+          }
+        }
+
+        callbacks.saveSessionDiff(sessionId, diffText, statusText, { commitLog, commitDiff });
       } catch {
         span.addEvent("orka.orchestration.capture_diff_skipped");
       }
