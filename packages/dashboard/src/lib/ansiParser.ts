@@ -1,3 +1,4 @@
+/* eslint-disable no-control-regex */
 import type { CSSProperties } from "react";
 
 export interface AnsiSpan {
@@ -132,6 +133,72 @@ export function parseAnsi(input: string): AnsiSpan[] {
   }
 
   // Remaining text after last escape
+  if (lastIndex < cleaned.length) {
+    const text = cleaned.slice(lastIndex);
+    if (text) {
+      spans.push({ text, style: stateToStyle(state) });
+    }
+  }
+
+  return spans;
+}
+
+export interface AnsiParseContext {
+  state: AnsiState;
+  /** Trailing bytes that look like an incomplete ANSI escape */
+  partial: string;
+}
+
+export function createAnsiContext(): AnsiParseContext {
+  return { state: defaultState(), partial: "" };
+}
+
+/**
+ * Parse ANSI input incrementally, resuming from a previous context.
+ * The context is mutated in place to track state across calls.
+ */
+export function parseAnsiIncremental(
+  input: string,
+  ctx: AnsiParseContext,
+): AnsiSpan[] {
+  const fullInput = ctx.partial + input;
+  ctx.partial = "";
+
+  // Check for trailing incomplete escape sequence
+  const trailingEsc = fullInput.match(/\x1b(\[[0-9;]*)?$/);
+  let toParse: string;
+  if (trailingEsc && trailingEsc.index !== undefined) {
+    toParse = fullInput.slice(0, trailingEsc.index);
+    ctx.partial = trailingEsc[0];
+  } else {
+    toParse = fullInput;
+  }
+
+  const spans: AnsiSpan[] = [];
+  const state = ctx.state;
+
+  const cleaned = toParse.replace(/\x1b\[[0-9;]*[A-HJKSTfhlnr]/g, "");
+
+  ANSI_REGEX.lastIndex = 0;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = ANSI_REGEX.exec(cleaned)) !== null) {
+    if (match.index > lastIndex) {
+      const text = cleaned.slice(lastIndex, match.index);
+      if (text) {
+        spans.push({ text, style: stateToStyle(state) });
+      }
+    }
+
+    const codes = match[1] ? match[1].split(";").map(Number) : [0];
+    for (const code of codes) {
+      applyCode(state, code);
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
   if (lastIndex < cleaned.length) {
     const text = cleaned.slice(lastIndex);
     if (text) {

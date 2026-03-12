@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LoaderCircle, ArrowDown } from "lucide-react";
 import type { SessionLogLineData } from "@orka/core";
 import type { WsTransport } from "../lib/wsTransport";
-import { parseAnsi } from "../lib/ansiParser";
+import { parseAnsiIncremental, createAnsiContext } from "../lib/ansiParser";
+import type { AnsiSpan } from "../lib/ansiParser";
 import { useSessionStore } from "../stores/sessionStore";
+
+const encoder = new TextEncoder();
 
 interface LogPanelProps {
   sessionId: string;
@@ -13,14 +16,67 @@ interface LogPanelProps {
 
 export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPanelProps) {
   const session = useSessionStore((state) => state.sessions.find((s) => s.id === sessionId) ?? null);
-  const [logContent, setLogContent] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [renderTick, setRenderTick] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const offsetRef = useRef(0);
+  const lineCountRef = useRef(0);
   const isRunning = session?.status === "running" || session?.status === "preparing" || session?.status === "queued";
+
+  // Incremental ANSI parsing state
+  const ansiCtxRef = useRef(createAnsiContext());
+  const spansRef = useRef<AnsiSpan[]>([]);
+
+  // rAF batching
+  const pendingRef = useRef("");
+  const rafRef = useRef(0);
+
+  const flushPending = useCallback(() => {
+    const pending = pendingRef.current;
+    pendingRef.current = "";
+    rafRef.current = 0;
+    if (!pending) return;
+
+    for (let i = 0; i < pending.length; i++) {
+      if (pending[i] === "\n") lineCountRef.current++;
+    }
+
+    const newSpans = parseAnsiIncremental(pending, ansiCtxRef.current);
+    if (newSpans.length > 0) {
+      for (const span of newSpans) {
+        spansRef.current.push(span);
+      }
+      setRenderTick((t) => t + 1);
+    }
+  }, []);
+
+  const appendDelta = useCallback(
+    (delta: string) => {
+      offsetRef.current += encoder.encode(delta).byteLength;
+      pendingRef.current += delta;
+      if (!rafRef.current) {
+        rafRef.current = requestAnimationFrame(flushPending);
+      }
+    },
+    [flushPending],
+  );
+
+  const resetContent = useCallback((text: string) => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    pendingRef.current = "";
+
+    offsetRef.current = encoder.encode(text).byteLength;
+    lineCountRef.current = text ? text.split("\n").length : 0;
+
+    ansiCtxRef.current = createAnsiContext();
+    spansRef.current = parseAnsiIncremental(text, ansiCtxRef.current);
+    setRenderTick((t) => t + 1);
+  }, []);
 
   // Fetch initial log content
   useEffect(() => {
@@ -34,9 +90,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
         const content = await transport.request<string | null>("getLogContent", { sessionId });
         if (cancelled) return;
 
-        const text = content ?? "";
-        setLogContent(text);
-        offsetRef.current = new TextEncoder().encode(text).byteLength;
+        resetContent(content ?? "");
         onInitialLoadSettled?.("ok");
       } catch (e) {
         if (cancelled) return;
@@ -52,7 +106,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
     return () => {
       cancelled = true;
     };
-  }, [onInitialLoadSettled, sessionId, transport]);
+  }, [onInitialLoadSettled, sessionId, transport, resetContent]);
 
   // Subscribe to real-time log updates
   useEffect(() => {
@@ -62,8 +116,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
 
       const directLine = logLine.line ?? (logLine.offset === undefined ? logLine.content : undefined);
       if (directLine !== undefined) {
-        setLogContent((prev) => prev + directLine);
-        offsetRef.current += new TextEncoder().encode(directLine).byteLength;
+        appendDelta(directLine);
         return;
       }
 
@@ -71,32 +124,37 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
         return;
       }
 
+      const content = logLine.content;
       const expectedOffset = offsetRef.current;
 
       if (logLine.offset === expectedOffset) {
-        // Contiguous — append directly
-        setLogContent((prev) => prev + logLine.content);
-        offsetRef.current = expectedOffset + new TextEncoder().encode(logLine.content).byteLength;
+        appendDelta(content);
       } else if (logLine.offset > expectedOffset) {
-        // Gap — refetch full content
-        void transport.request<string | null>("getLogContent", { sessionId }).then((content) => {
-          const text = content ?? "";
-          setLogContent(text);
-          offsetRef.current = new TextEncoder().encode(text).byteLength;
+        void transport.request<string | null>("getLogContent", { sessionId }).then((fullContent) => {
+          resetContent(fullContent ?? "");
         });
       }
-      // If logLine.offset < expectedOffset, we already have this data — skip
     });
 
     return unsubscribe;
-  }, [sessionId, transport]);
+  }, [sessionId, transport, appendDelta, resetContent]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll after batched render
   useEffect(() => {
-    if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ block: "end" });
+    if (autoScroll && scrollRef.current) {
+      const el = scrollRef.current;
+      el.scrollTop = el.scrollHeight;
     }
-  }, [logContent, autoScroll]);
+  }, [renderTick, autoScroll]);
+
+  // Cleanup rAF on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
 
   // Detect manual scroll up to pause auto-scroll
   const handleScroll = useCallback(() => {
@@ -109,10 +167,12 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
 
   const scrollToBottom = useCallback(() => {
     setAutoScroll(true);
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
   }, []);
 
-  const parsedSpans = useMemo(() => parseAnsi(logContent), [logContent]);
+  const spans = spansRef.current;
 
   if (isLoading) {
     return (
@@ -143,7 +203,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
             <p className="mt-1 text-sm text-zinc-400">Streaming live output…</p>
           ) : (
             <p className="mt-1 text-sm text-zinc-400">
-              {logContent ? `${logContent.split("\n").length} lines` : "No log output"}
+              {spans.length > 0 ? `${String(lineCountRef.current)} lines` : "No log output"}
             </p>
           )}
         </div>
@@ -164,15 +224,16 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
           className="h-full overflow-y-auto bg-zinc-950 p-4"
         >
           <pre className="font-mono text-xs leading-5 text-zinc-300">
-            {parsedSpans.length > 0 ? (
-              parsedSpans.map((span, i) => (
-                <span key={i} style={span.style}>{span.text}</span>
+            {spans.length > 0 ? (
+              spans.map((span, i) => (
+                <span key={i} style={span.style}>
+                  {span.text}
+                </span>
               ))
             ) : (
               <span className="text-zinc-500">No log output yet.</span>
             )}
           </pre>
-          <div ref={bottomRef} />
         </div>
 
         {!autoScroll ? (
