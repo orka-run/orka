@@ -395,8 +395,13 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
   const bottomRef = useRef<HTMLDivElement | null>(null);
   // Mutable refs for the push handler to accumulate deltas without re-subscribing
   const eventsRef = useRef<OrchestrationEvent[]>([]);
+  // Stable refs for values used in effects without triggering re-runs
+  const initialPromptRef = useRef(initialPrompt);
+  initialPromptRef.current = initialPrompt;
+  const onSelectionLoadSettledRef = useRef(onSelectionLoadSettled);
+  onSelectionLoadSettledRef.current = onSelectionLoadSettled;
 
-  // Fetch initial timeline
+  // Fetch initial timeline — only re-runs when sessionId changes
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
@@ -416,12 +421,12 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
         const filtered = timeline.filter((e) => e.sessionId === sessionId);
         eventsRef.current = filtered;
         setEvents(filtered);
-        setEntries(eventsToEntries(filtered, initialPrompt));
-        onSelectionLoadSettled?.("ok");
+        setEntries(eventsToEntries(filtered, initialPromptRef.current));
+        onSelectionLoadSettledRef.current?.("ok");
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Failed to load chat timeline");
-        onSelectionLoadSettled?.("error", e);
+        onSelectionLoadSettledRef.current?.("error", e);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -429,7 +434,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
 
     void load();
     return () => { cancelled = true; };
-  }, [initialPrompt, sessionId, transport, onSelectionLoadSettled]);
+  }, [sessionId, transport]);
 
   // Subscribe to real-time orchestration events
   useEffect(() => {
@@ -439,11 +444,11 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
 
       eventsRef.current = [...eventsRef.current, event];
       setEvents(eventsRef.current);
-      setEntries(eventsToEntries(eventsRef.current, initialPrompt));
+      setEntries(eventsToEntries(eventsRef.current, initialPromptRef.current));
     });
 
     return unsubscribe;
-  }, [initialPrompt, sessionId, transport]);
+  }, [sessionId, transport]);
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
@@ -626,7 +631,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
           inputState={inputState}
           onSend={handleSend}
           sendError={sendError}
-          onClearError={() => setSendError(null)}
+          onClearError={() => { setSendError(null); }}
         />
       </div>
     </div>

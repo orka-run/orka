@@ -19,7 +19,7 @@ import { getTracer, initDashboardTracing } from "./lib/tracing";
 import { TransportContext } from "./lib/transportContext";
 import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
-import { useSessionStore } from "./stores/sessionStore";
+import { SELECTED_SESSION_KEY, useSessionStore } from "./stores/sessionStore";
 
 initDashboardTracing();
 
@@ -35,7 +35,7 @@ function now(): number {
 
 function getDaemonUrl(): string {
   // Explicit override via env (dev mode)
-  if (import.meta.env["VITE_DAEMON_URL"]) return import.meta.env["VITE_DAEMON_URL"] as string;
+  if (import.meta.env["VITE_DAEMON_URL"]) return import.meta.env["VITE_DAEMON_URL"];
   // Both dev (vite proxy) and prod (nginx) use /ws on same origin
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}/ws`;
@@ -43,12 +43,18 @@ function getDaemonUrl(): string {
 
 const DEFAULT_DAEMON_URL = getDaemonUrl();
 
+function parseHashSessionId(): string | null {
+  const match = window.location.hash.match(/^#session=(.+)$/);
+  return match?.[1] ?? null;
+}
+
 interface AppShellProps {
   transport: WsTransport;
 }
 
 function AppShell({ transport }: AppShellProps) {
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
+  const hasRestoredRef = useRef(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
@@ -122,6 +128,38 @@ function AppShell({ transport }: AppShellProps) {
     setAdvancedDefaults(null);
   };
 
+  // Restore selection from URL hash or localStorage after initial session load
+  useEffect(() => {
+    if (hasRestoredRef.current || sessions.length === 0) return;
+    hasRestoredRef.current = true;
+
+    // Try URL hash first
+    const hashId = parseHashSessionId();
+    if (hashId && sessions.some((s) => s.id === hashId)) {
+      handleSelectSession(hashId);
+      return;
+    }
+
+    // Fallback to localStorage
+    try {
+      const stored = localStorage.getItem(SELECTED_SESSION_KEY);
+      if (stored && sessions.some((s) => s.id === stored)) {
+        handleSelectSession(stored);
+      }
+    } catch {
+      // localStorage unavailable
+    }
+  }, [sessions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync selectedId to URL hash
+  useEffect(() => {
+    if (selectedId) {
+      history.replaceState(null, "", `#session=${selectedId}`);
+    } else {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, [selectedId]);
+
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent) => {
       if (event.key === "n" && (event.metaKey || event.ctrlKey)) {
@@ -131,7 +169,7 @@ function AppShell({ transport }: AppShellProps) {
     };
 
     window.addEventListener("keydown", handleGlobalKeyDown);
-    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+    return () => { window.removeEventListener("keydown", handleGlobalKeyDown); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

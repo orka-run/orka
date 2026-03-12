@@ -132,7 +132,7 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
             <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
               <button
                 type="button"
-                onClick={() => setActiveTab("overview")}
+                onClick={() => { setActiveTab("overview"); }}
                 className={`rounded-md px-3 py-1.5 text-sm ${
                   activeTab === "overview"
                     ? "bg-zinc-800 text-zinc-100"
@@ -143,7 +143,7 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab("chat")}
+                onClick={() => { setActiveTab("chat"); }}
                 className={`rounded-md px-3 py-1.5 text-sm ${
                   activeTab === "chat"
                     ? "bg-zinc-800 text-zinc-100"
@@ -154,7 +154,7 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab("logs")}
+                onClick={() => { setActiveTab("logs"); }}
                 className={`rounded-md px-3 py-1.5 text-sm ${
                   activeTab === "logs"
                     ? "bg-zinc-800 text-zinc-100"
@@ -165,7 +165,7 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab("diff")}
+                onClick={() => { setActiveTab("diff"); }}
                 className={`rounded-md px-3 py-1.5 text-sm ${
                   activeTab === "diff"
                     ? "bg-zinc-800 text-zinc-100"
@@ -181,27 +181,32 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
           <p className="mt-3 text-sm text-red-300">{stopError}</p>
         ) : null}
       </header>
-      <div className={`flex-1 p-6 ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
-        {activeTab === "logs" ? (
-          <LogPanel
-            sessionId={sessionId}
-            transport={transport}
-            onInitialLoadSettled={reportSelectionLoad}
-          />
-        ) : activeTab === "overview" ? (
-          <OverviewTab
-            session={session}
-            transport={transport}
-            onSelectionLoadSettled={reportSelectionLoad}
-          />
-        ) : activeTab === "chat" ? (
+      <div className="flex-1 overflow-hidden">
+        <div className={`h-full p-6 ${activeTab === "chat" ? "" : "hidden"}`}>
           <ChatView
             sessionId={sessionId}
             {...(activeSession.prompt ? { initialPrompt: activeSession.prompt } : {})}
             onSelectionLoadSettled={reportSelectionLoad}
           />
-        ) : (
-          <DiffPanel sessionId={sessionId} onSelectionLoadSettled={reportSelectionLoad} />
+        </div>
+        {activeTab !== "chat" && (
+          <div className={`h-full p-6 ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
+            {activeTab === "logs" ? (
+              <LogPanel
+                sessionId={sessionId}
+                transport={transport}
+                onInitialLoadSettled={reportSelectionLoad}
+              />
+            ) : activeTab === "overview" ? (
+              <OverviewTab
+                session={session}
+                transport={transport}
+                onSelectionLoadSettled={reportSelectionLoad}
+              />
+            ) : (
+              <DiffPanel sessionId={sessionId} onSelectionLoadSettled={reportSelectionLoad} />
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -318,7 +323,7 @@ function OverviewTab({
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
           <button
             type="button"
-            onClick={() => setPromptExpanded(!promptExpanded)}
+            onClick={() => { setPromptExpanded(!promptExpanded); }}
             className="flex w-full items-center gap-2 text-left"
           >
             {promptExpanded ? (

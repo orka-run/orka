@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { WsTransport } from "../lib/wsTransport";
 
 const FALLBACK_TITLE_LENGTH = 80;
+const SELECTED_SESSION_KEY = "orka:selectedSession";
 
 export interface SessionSummary {
   id: string;
@@ -112,13 +113,32 @@ function fallbackTitleFromRequest(request: SpawnRequest): string | undefined {
   return prompt.slice(0, FALLBACK_TITLE_LENGTH);
 }
 
+function clearSelectedStorage(): void {
+  try {
+    localStorage.removeItem(SELECTED_SESSION_KEY);
+  } catch {
+    // localStorage unavailable
+  }
+}
+
 function createSessionState(set: (partial: Partial<SessionState> | ((state: SessionState) => Partial<SessionState>)) => void): SessionState {
   return {
     sessions: [],
     selectedId: null,
     isLoading: false,
     error: null,
-    selectSession: (id) => set({ selectedId: id }),
+    selectSession: (id) => {
+      set({ selectedId: id });
+      try {
+        if (id != null) {
+          localStorage.setItem(SELECTED_SESSION_KEY, id);
+        } else {
+          localStorage.removeItem(SELECTED_SESSION_KEY);
+        }
+      } catch {
+        // localStorage unavailable
+      }
+    },
     fetchSessions: async (transport) => {
       set({ isLoading: true, error: null });
 
@@ -171,7 +191,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       set({ error: null });
 
       try {
-        await transport.request<void>("stop", { sessionId });
+        await transport.request("stop", { sessionId });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to stop session";
         set({ error: message });
@@ -182,12 +202,16 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       set({ error: null });
 
       try {
-        await transport.request<void>("deleteSessions", { ids: [sessionId] });
-        set((state) => ({
-          sessions: state.sessions.filter((session) => session.id !== sessionId),
-          selectedId: state.selectedId === sessionId ? null : state.selectedId,
-          error: null,
-        }));
+        await transport.request("deleteSessions", { ids: [sessionId] });
+        set((state) => {
+          const wasSelected = state.selectedId === sessionId;
+          if (wasSelected) clearSelectedStorage();
+          return {
+            sessions: state.sessions.filter((session) => session.id !== sessionId),
+            selectedId: wasSelected ? null : state.selectedId,
+            error: null,
+          };
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to delete session";
         set({ error: message });
@@ -207,14 +231,19 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       }));
     },
     handleSessionDeleted: (data) => {
-      set((state) => ({
-        sessions: state.sessions.filter((session) => session.id !== data.sessionId),
-        selectedId: state.selectedId === data.sessionId ? null : state.selectedId,
-      }));
+      set((state) => {
+        const wasSelected = state.selectedId === data.sessionId;
+        if (wasSelected) clearSelectedStorage();
+        return {
+          sessions: state.sessions.filter((session) => session.id !== data.sessionId),
+          selectedId: wasSelected ? null : state.selectedId,
+        };
+      });
     },
   };
 }
 
+export { SELECTED_SESSION_KEY };
 export const createSessionStore = () => create<SessionState>((set) => createSessionState(set));
 
 export const useSessionStore = createSessionStore();
