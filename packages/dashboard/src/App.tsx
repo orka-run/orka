@@ -9,6 +9,7 @@ import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { DevOverlay } from "./components/DevOverlay";
+import { DraftChatView, type DraftSettings } from "./components/DraftChatView";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -48,7 +49,9 @@ interface AppShellProps {
 
 function AppShell({ transport }: AppShellProps) {
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
+  const [isDraftActive, setIsDraftActive] = useState(false);
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
+  const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
   const selectedId = useSessionStore((state) => state.selectedId);
@@ -104,17 +107,32 @@ function AppShell({ transport }: AppShellProps) {
     selectionSpanRef.current = null;
   });
 
+  const activateDraft = () => {
+    setIsDraftActive(true);
+    selectSession(null);
+  };
+
+  const handleOpenAdvanced = (settings: DraftSettings) => {
+    setAdvancedDefaults(settings);
+    setIsNewSessionOpen(true);
+  };
+
+  const handleDraftSpawned = () => {
+    setIsDraftActive(false);
+    setAdvancedDefaults(null);
+  };
+
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent) => {
       if (event.key === "n" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        setIsNewSessionOpen(true);
+        activateDraft();
       }
     };
 
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const unsubscribeState = transport.onStateChange((connection) => {
@@ -179,8 +197,13 @@ function AppShell({ transport }: AppShellProps) {
           <Sidebar
             sessions={sessions}
             selectedId={selectedId}
-            onSelect={handleSelectSession}
-            onNewSession={() => setIsNewSessionOpen(true)}
+            isDraftActive={isDraftActive}
+            onSelect={(id) => {
+              handleSelectSession(id);
+              // Keep draft in sidebar but show the selected session
+            }}
+            onSelectDraft={activateDraft}
+            onNewSession={activateDraft}
           />
           <main className="flex-1 overflow-hidden">
             {selectedId ? (
@@ -189,9 +212,19 @@ function AppShell({ transport }: AppShellProps) {
                 transport={transport}
                 onSelectionLoadSettled={handleSelectionLoadSettled}
               />
+            ) : isDraftActive ? (
+              <DraftChatView
+                defaultProjectPath={defaultProjectPath}
+                onSpawned={handleDraftSpawned}
+                onOpenAdvanced={handleOpenAdvanced}
+              />
             ) : (
               <div className="flex h-full items-center justify-center text-zinc-500">
-                Select a session or spawn a new one
+                Select a session or press{" "}
+                <kbd className="mx-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
+                  Ctrl+N
+                </kbd>{" "}
+                to start a new chat
               </div>
             )}
           </main>
@@ -200,7 +233,12 @@ function AppShell({ transport }: AppShellProps) {
           open={isNewSessionOpen}
           transport={transport}
           defaultProjectPath={defaultProjectPath}
-          onClose={() => setIsNewSessionOpen(false)}
+          onClose={() => {
+            setIsNewSessionOpen(false);
+            setAdvancedDefaults(null);
+          }}
+          onSpawned={handleDraftSpawned}
+          {...(advancedDefaults ? { initialValues: advancedDefaults } : {})}
         />
         <StatusBar sessionCount={sessions.length} serverSessionCount={serverSessionCount} />
       </div>

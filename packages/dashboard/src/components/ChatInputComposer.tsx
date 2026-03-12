@@ -8,6 +8,8 @@ interface ChatInputComposerProps {
   onSend: (text: string) => Promise<void>;
   sendError?: string | null;
   onClearError?: () => void;
+  placeholder?: string;
+  autoFocus?: boolean;
 }
 
 const MAX_TEXTAREA_HEIGHT = 200;
@@ -25,7 +27,7 @@ const STATE_MESSAGES: Record<Exclude<InputState, "waiting">, string> = {
   not_started: "Session is starting...",
 };
 
-export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError }: ChatInputComposerProps) {
+export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus }: ChatInputComposerProps) {
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -60,6 +62,12 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
     }
   }, [inputState, isSending]);
 
+  useEffect(() => {
+    if (autoFocus) {
+      textareaRef.current?.focus();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function submit() {
     const nextText = text.trim();
     if (!isEditable || nextText.length === 0) {
@@ -91,7 +99,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
             value={text}
             rows={1}
             disabled={!isEditable}
-            placeholder={STATE_PLACEHOLDERS[inputState]}
+            placeholder={placeholder ?? STATE_PLACEHOLDERS[inputState]}
             aria-label="Chat message"
             aria-busy={isSending}
             onChange={(event) => {

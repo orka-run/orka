@@ -1,14 +1,16 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useId, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { MessageSquarePlus, Plus, Search } from "lucide-react";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime, getSessionGroup } from "../lib/sessionUi";
 
 interface SidebarProps {
   sessions: SessionSummary[];
   selectedId: string | null;
+  isDraftActive?: boolean;
   onSelect: (id: string) => void;
   onNewSession: () => void;
+  onSelectDraft?: () => void;
 }
 
 interface SessionGroup {
@@ -24,7 +26,7 @@ const GROUP_LABELS: Record<SessionGroup["key"], string> = {
   failed: "Failed",
 };
 
-export function Sidebar({ sessions, selectedId, onSelect, onNewSession }: SidebarProps) {
+export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSession, onSelectDraft }: SidebarProps) {
   const searchId = useId();
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
@@ -72,6 +74,16 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewSession }: Sideba
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-4">
+        {isDraftActive ? (
+          <button
+            type="button"
+            onClick={() => onSelectDraft?.()}
+            className="mb-4 flex w-full items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 text-left transition"
+          >
+            <MessageSquarePlus className="h-4 w-4 shrink-0 text-sky-400" />
+            <span className="text-sm font-medium text-sky-200">New chat</span>
+          </button>
+        ) : null}
         {groups.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/60 px-4 py-8 text-center">
             <p className="text-sm font-medium text-zinc-200">

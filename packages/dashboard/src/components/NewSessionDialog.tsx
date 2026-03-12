@@ -12,6 +12,12 @@ interface NewSessionDialogProps {
   transport: WsTransport;
   defaultProjectPath: string;
   onClose: () => void;
+  onSpawned?: () => void;
+  initialValues?: {
+    backend?: BackendKind;
+    model?: string;
+    mode?: SessionMode;
+  };
 }
 
 export function NewSessionDialog({
@@ -19,6 +25,8 @@ export function NewSessionDialog({
   transport,
   defaultProjectPath,
   onClose,
+  onSpawned,
+  initialValues,
 }: NewSessionDialogProps) {
   const promptId = useId();
   const titleId = useId();
@@ -48,7 +56,12 @@ export function NewSessionDialog({
     }
 
     setProjectPath((current) => current || defaultProjectPath);
-  }, [defaultProjectPath, open]);
+    if (initialValues) {
+      if (initialValues.backend) setBackend(initialValues.backend);
+      if (initialValues.model !== undefined) setModel(initialValues.model);
+      if (initialValues.mode) setMode(initialValues.mode);
+    }
+  }, [defaultProjectPath, initialValues, open]);
 
   useEffect(() => {
     if (!open) {
@@ -148,6 +161,7 @@ export function NewSessionDialog({
       setAutoMerge(false);
       setSystemPrompt("");
       setShowAdvanced(false);
+      onSpawned?.();
       onClose();
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Failed to spawn session.");
