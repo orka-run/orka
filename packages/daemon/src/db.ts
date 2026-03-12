@@ -111,6 +111,8 @@ const MIGRATIONS = [
   { version: 14, sql: `ALTER TABLE sessions ADD COLUMN system_prompt TEXT` },
   { version: 15, sql: `ALTER TABLE sessions ADD COLUMN allowed_tools TEXT` },
   { version: 16, sql: `ALTER TABLE sessions ADD COLUMN env_json TEXT` },
+  { version: 17, sql: `CREATE TABLE IF NOT EXISTS client_errors (id INTEGER PRIMARY KEY AUTOINCREMENT, error TEXT NOT NULL, stack TEXT, url TEXT NOT NULL, timestamp TEXT NOT NULL, received_at TEXT NOT NULL)` },
+  { version: 18, sql: `CREATE INDEX IF NOT EXISTS idx_client_errors_timestamp ON client_errors(timestamp DESC)` },
 ];
 
 function migrate(db: Database): void {
@@ -573,6 +575,44 @@ export function listSessionsByTag(tag: string): Session[] {
       )
       .all(tag) as any[];
     return rows.map(rowToSession);
+  });
+}
+
+// --- Client errors ---
+
+export interface ClientError {
+  id: number;
+  error: string;
+  stack: string | null;
+  url: string;
+  timestamp: string;
+  receivedAt: string;
+}
+
+export function insertClientError(report: { error: string; stack?: string; url: string; timestamp: string }): void {
+  withSpanSync("orka.db.insertClientError", {}, () => {
+    getDb()
+      .prepare(
+        `INSERT INTO client_errors (error, stack, url, timestamp, received_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(report.error, report.stack ?? null, report.url, report.timestamp, new Date().toISOString());
+  });
+}
+
+export function listClientErrors(limit = 50): ClientError[] {
+  return withSpanSync("orka.db.listClientErrors", {}, () => {
+    const rows = getDb()
+      .prepare("SELECT id, error, stack, url, timestamp, received_at FROM client_errors ORDER BY id DESC LIMIT ?")
+      .all(limit) as Array<{ id: number; error: string; stack: string | null; url: string; timestamp: string; received_at: string }>;
+    return rows.map((row) => ({
+      id: row.id,
+      error: row.error,
+      stack: row.stack,
+      url: row.url,
+      timestamp: row.timestamp,
+      receivedAt: row.received_at,
+    }));
   });
 }
 

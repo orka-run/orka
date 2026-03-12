@@ -1,6 +1,8 @@
 import type { ErrorInfo, PropsWithChildren, ReactNode } from "react";
 import { Component } from "react";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { AlertTriangle, RefreshCcw, RotateCw } from "lucide-react";
+import { getTracer } from "../lib/tracing";
 
 const AUTO_DISMISS_MS = 10_000;
 const IS_DEV = import.meta.env.DEV;
@@ -66,6 +68,24 @@ function createReport(error: Error, details?: string | null): ClientErrorReport 
   };
 }
 
+function recordErrorSpan(error: Error, source: string, details?: string | null): void {
+  try {
+    const span = getTracer().startSpan("orka.dashboard.client_error", {
+      attributes: {
+        "orka.error.source": source,
+        "orka.error.message": error.message || error.name,
+        "orka.error.url": window.location.href,
+        ...(details ? { "orka.error.details": details } : {}),
+      },
+    });
+    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+    span.recordException(error);
+    span.end();
+  } catch {
+    // Best-effort — tracing failure must never break the error boundary.
+  }
+}
+
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = {
     banner: null,
@@ -95,6 +115,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     const errorDetails = getErrorDetails(error, errorInfo.componentStack);
     this.setState({ errorDetails });
+    recordErrorSpan(error, "react.error_boundary", errorDetails);
     this.reportError(createReport(error, errorDetails));
   }
 
@@ -194,6 +215,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     event.preventDefault();
     const error = getErrorObject(event.reason);
     const message = getErrorMessage(event.reason) || "An async action failed unexpectedly.";
+    recordErrorSpan(error, "unhandled_rejection");
 
     this.setState({
       banner: {

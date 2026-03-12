@@ -6,9 +6,9 @@ describe("GracefulShutdown", () => {
     const shutdown = new GracefulShutdown();
     const order: number[] = [];
 
-    shutdown.onShutdown(async () => { order.push(1); });
-    shutdown.onShutdown(async () => { order.push(2); });
-    shutdown.onShutdown(async () => { order.push(3); });
+    shutdown.onShutdown("first", async () => { order.push(1); });
+    shutdown.onShutdown("second", async () => { order.push(2); });
+    shutdown.onShutdown("third", async () => { order.push(3); });
 
     await shutdown.shutdown();
 
@@ -19,7 +19,7 @@ describe("GracefulShutdown", () => {
     const shutdown = new GracefulShutdown();
     let completed = false;
 
-    shutdown.onShutdown(async () => {
+    shutdown.onShutdown("slow-task", async () => {
       await new Promise(r => setTimeout(r, 50));
       completed = true;
     });
@@ -33,7 +33,7 @@ describe("GracefulShutdown", () => {
     const shutdown = new GracefulShutdown();
     let callCount = 0;
 
-    shutdown.onShutdown(async () => { callCount++; });
+    shutdown.onShutdown("counter", async () => { callCount++; });
 
     const p1 = shutdown.shutdown();
     const p2 = shutdown.shutdown();
@@ -61,7 +61,7 @@ describe("GracefulShutdown", () => {
     const origError = console.error;
     console.error = (...args: unknown[]) => { errors.push(String(args[1] ?? args[0])); };
 
-    shutdown.onShutdown(async () => {
+    shutdown.onShutdown("hang", async () => {
       await new Promise(r => setTimeout(r, 5000));
     });
 
@@ -77,9 +77,9 @@ describe("GracefulShutdown", () => {
     const origError = console.error;
     console.error = () => {};
 
-    shutdown.onShutdown(async () => { executed.push("first"); });
-    shutdown.onShutdown(async () => { throw new Error("boom"); });
-    shutdown.onShutdown(async () => { executed.push("third"); });
+    shutdown.onShutdown("first", async () => { executed.push("first"); });
+    shutdown.onShutdown("boom", async () => { throw new Error("boom"); });
+    shutdown.onShutdown("third", async () => { executed.push("third"); });
 
     await shutdown.shutdown();
 

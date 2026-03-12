@@ -182,18 +182,18 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
     logTailer.start();
 
     // Register cleanup tasks for graceful shutdown
-    gracefulShutdown.onShutdown(async () => logTailer.stop());
-    gracefulShutdown.onShutdown(async () => {
+    gracefulShutdown.onShutdown("log-tailer", async () => logTailer.stop());
+    gracefulShutdown.onShutdown("notify-clients", async () => {
       pushHub.broadcast("server.shutdown", {});
     });
-    gracefulShutdown.onShutdown(async () => {
+    gracefulShutdown.onShutdown("http-server", async () => {
       server.stop();
     });
 
     // Handle signals for graceful shutdown
     const onSignal = () => {
       console.log("Received shutdown signal, shutting down gracefully...");
-      gracefulShutdown.shutdown().then(() => process.exit(0));
+      gracefulShutdown.shutdown({ timeout: 5_000 }).then(() => process.exit(0));
     };
     process.on("SIGTERM", onSignal);
     process.on("SIGINT", onSignal);

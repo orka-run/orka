@@ -20,7 +20,7 @@ import {
 import { ExportResultCode, W3CTraceContextPropagator, type ExportResult } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { getOrkaHome } from "./db";
 
@@ -67,10 +67,91 @@ export interface TraceLogEntry {
   }>;
 }
 
-function getTraceLogPath(): string {
+export function getTraceLogPath(): string {
   const dir = getOrkaHome();
   mkdirSync(dir, { recursive: true });
   return join(dir, "traces.jsonl");
+}
+
+export interface TraceQuery {
+  /** Filter by service name (e.g. "orka-dashboard") */
+  service?: string;
+  /** Only return error spans (status.code === 2) */
+  errorsOnly?: boolean;
+  /** Filter by span name pattern (substring match) */
+  namePattern?: string;
+  /** Maximum number of results (default 50) */
+  limit?: number;
+  /** Only spans after this ISO timestamp */
+  since?: string;
+}
+
+export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
+  const logPath = getTraceLogPath();
+  const limit = query.limit ?? 50;
+  const sinceMs = query.since ? new Date(query.since).getTime() : 0;
+  const results: TraceLogEntry[] = [];
+
+  let fd: number;
+  let fileSize: number;
+  try {
+    fd = openSync(logPath, "r");
+    fileSize = fstatSync(fd).size;
+    if (fileSize === 0) { closeSync(fd); return []; }
+
+    // Read from end in 256KB chunks
+    const CHUNK_SIZE = 256 * 1024;
+    let tail = "";
+    let offset = fileSize;
+
+    while (offset > 0 && results.length < limit) {
+      const readStart = Math.max(0, offset - CHUNK_SIZE);
+      const readLen = offset - readStart;
+      const buf = Buffer.alloc(readLen);
+      readSync(fd, buf, 0, readLen, readStart);
+      const combined = buf.toString("utf8") + tail;
+      const lines = combined.split("\n");
+
+      // First element may be partial — carry to next chunk
+      tail = lines[0];
+
+      for (let i = lines.length - 1; i >= 1 && results.length < limit; i--) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        let entry: TraceLogEntry;
+        try { entry = JSON.parse(line); } catch { continue; }
+
+        if (sinceMs && entry.startTime < sinceMs) continue;
+        if (query.errorsOnly && entry.status.code !== 2) continue;
+        if (query.namePattern && !entry.name.includes(query.namePattern)) continue;
+        if (query.service && entry.resourceAttributes?.["service.name"] !== query.service) continue;
+
+        results.push(entry);
+      }
+
+      offset = readStart;
+    }
+
+    // Process remaining tail (first line of file)
+    if (results.length < limit && tail.trim()) {
+      try {
+        const entry: TraceLogEntry = JSON.parse(tail.trim());
+        const ok =
+          (!sinceMs || entry.startTime >= sinceMs) &&
+          (!query.errorsOnly || entry.status.code === 2) &&
+          (!query.namePattern || entry.name.includes(query.namePattern)) &&
+          (!query.service || entry.resourceAttributes?.["service.name"] === query.service);
+        if (ok) results.push(entry);
+      } catch { /* skip */ }
+    }
+
+    closeSync(fd);
+  } catch {
+    return results;
+  }
+
+  return results;
 }
 
 function appendTraceLogEntries(entries: TraceLogEntry[]): void {

@@ -1,11 +1,16 @@
+interface CleanupTask {
+  name: string;
+  fn: () => Promise<void>;
+}
+
 export class GracefulShutdown {
   private isShuttingDown = false;
   private shutdownPromise: Promise<void> | null = null;
-  private cleanupTasks: Array<() => Promise<void>> = [];
+  private cleanupTasks: CleanupTask[] = [];
 
-  /** Register a cleanup task to run on shutdown */
-  onShutdown(task: () => Promise<void>): void {
-    this.cleanupTasks.push(task);
+  /** Register a named cleanup task to run on shutdown */
+  onShutdown(name: string, task: () => Promise<void>): void {
+    this.cleanupTasks.push({ name, fn: task });
   }
 
   /** Check if shutdown is in progress */
@@ -34,10 +39,15 @@ export class GracefulShutdown {
 
   private async runCleanup(): Promise<void> {
     for (const task of this.cleanupTasks) {
+      const start = Date.now();
       try {
-        await task();
+        await task.fn();
       } catch (err) {
-        console.error("Cleanup task failed:", err);
+        console.error(`Shutdown task "${task.name}" failed:`, err);
+      }
+      const elapsed = Date.now() - start;
+      if (elapsed > 500) {
+        console.warn(`Shutdown task "${task.name}" took ${elapsed}ms`);
       }
     }
   }

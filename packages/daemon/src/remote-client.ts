@@ -33,6 +33,7 @@ export interface RemoteClientOptions {
 interface PendingRequest {
   resolve: (value: any) => void;
   reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 class RemoteClient implements OrkaService {
@@ -91,6 +92,7 @@ class RemoteClient implements OrkaService {
           this.connectPromise = null;
           // Reject all pending requests
           for (const [id, p] of this.pending) {
+            clearTimeout(p.timer);
             p.reject(new Error("Connection closed"));
             this.pending.delete(id);
           }
@@ -123,6 +125,7 @@ class RemoteClient implements OrkaService {
         const p = this.pending.get(pendingId);
         if (p) {
           this.pending.delete(pendingId);
+          clearTimeout(p.timer);
           p.reject(new Error("E2E decryption failed"));
         }
         return;
@@ -136,6 +139,7 @@ class RemoteClient implements OrkaService {
     const p = this.pending.get(resp["id"]);
     if (!p) return;
     this.pending.delete(resp["id"]);
+    clearTimeout(p.timer);
 
     const error = isRecord(resp["error"]) ? resp["error"] : undefined;
     if (error) {
@@ -153,7 +157,15 @@ class RemoteClient implements OrkaService {
       const id = String(this.nextId++);
 
       return new Promise((resolve, reject) => {
-        this.pending.set(id, { resolve, reject });
+        const timer = setTimeout(() => {
+          if (this.pending.has(id)) {
+            this.pending.delete(id);
+            reject(new Error(`Request timeout: ${method}`));
+          }
+        }, 30_000);
+        timer.unref();
+
+        this.pending.set(id, { resolve, reject, timer });
 
         let req: any = {
           jsonrpc: "2.0",
@@ -173,13 +185,6 @@ class RemoteClient implements OrkaService {
         }
 
         this.ws!.send(JSON.stringify(req));
-
-        setTimeout(() => {
-          if (this.pending.has(id)) {
-            this.pending.delete(id);
-            reject(new Error(`Request timeout: ${method}`));
-          }
-        }, 30_000);
       });
     });
   }
