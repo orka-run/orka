@@ -37,7 +37,7 @@ export function ConnectionBanner() {
 
   if (showSuccess) {
     return (
-      <div className="fixed inset-x-0 top-0 z-50 flex h-10 items-center justify-center gap-2 bg-emerald-900/90 text-sm text-emerald-200 backdrop-blur-sm">
+      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-emerald-900/90 text-sm text-emerald-200 backdrop-blur-sm">
         <Wifi size={16} />
         <span>Connected</span>
       </div>
@@ -48,7 +48,7 @@ export function ConnectionBanner() {
 
   if (isError) {
     return (
-      <div className="fixed inset-x-0 top-0 z-50 flex h-10 items-center justify-center gap-2 bg-red-900/90 text-sm text-red-200 backdrop-blur-sm">
+      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-red-900/90 text-sm text-red-200 backdrop-blur-sm">
         <WifiOff size={16} />
         <span>Unable to connect to daemon</span>
         <button
@@ -64,7 +64,7 @@ export function ConnectionBanner() {
   }
 
   return (
-    <div className="fixed inset-x-0 top-0 z-50 flex h-10 items-center justify-center gap-2 bg-amber-900/90 text-sm text-amber-200 backdrop-blur-sm">
+    <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-amber-900/90 text-sm text-amber-200 backdrop-blur-sm">
       <RefreshCw size={16} className="animate-spin" />
       <span>Connection lost. Reconnecting...</span>
     </div>

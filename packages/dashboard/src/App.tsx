@@ -193,6 +193,7 @@ function AppShell({ transport }: AppShellProps) {
   return (
     <TransportContext.Provider value={transport}>
       <div className="flex h-screen flex-col">
+        <ConnectionBanner />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar
             sessions={sessions}
@@ -256,7 +257,6 @@ export function App() {
 
   return (
     <ErrorBoundary reportError={reportError}>
-      <ConnectionBanner />
       <AppShell transport={transport} />
       <DevOverlay />
     </ErrorBoundary>
