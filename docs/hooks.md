@@ -2,44 +2,28 @@
 
 Hooks are shell commands Orka runs at specific points in a session lifecycle.
 
-In the current implementation, hooks run on the host with `bash -c "<command>"`. The working directory is set to the session worktree, so relative paths resolve inside that worktree.
+Commands run on the host with `bash -c "<command>"`. The working directory is the session worktree, so relative paths resolve inside it.
 
-## What Are Hooks
+## `post_worktree_create`
 
-Use hooks to prepare a fresh worktree automatically, for example:
+Runs after the git worktree is created and before the agent starts. Use it to prepare a fresh worktree:
 
 - install dependencies
 - copy local env files
 - run a repo-specific setup script
 
-`post_worktree_create` runs whenever Orka creates a git worktree for a session. That includes background sessions and sessions started with an explicit branch.
+## Configuration
 
-## Available Hooks
+Hooks live in `~/.orka/config.toml` under `[hooks]`.
 
-### `post_worktree_create`
-
-Status: implemented
-
-Runs after the git worktree is created and before work starts in that worktree.
-
-### `pre_merge`
-
-Status: designed, not implemented in this tree
-
-The internal design doc includes a `pre_merge` hook for `orka merge`, but the current config parser and merge path do not execute it yet.
-
-## Config Format
-
-Hooks live in `~/.orka/config.toml`.
-
-### Single string
+### Single command
 
 ```toml
 [hooks]
 post_worktree_create = "bun install"
 ```
 
-### Array of strings
+### Multiple commands
 
 ```toml
 [hooks]
@@ -48,7 +32,7 @@ post_worktree_create = ["bun install", "cp -f .env.example .env"]
 
 Commands run in order.
 
-### Array of tables
+### Table format
 
 ```toml
 [[hooks.post_worktree_create]]
@@ -58,34 +42,6 @@ run = "bun install"
 run = "cp -f .env.example .env"
 ```
 
-This is useful when you want one TOML block per command.
-
-## Environment And Working Directory
-
-Hooks inherit the daemon process environment.
-
-In the current implementation, Orka does not add hook-specific variables such as `ORKA_SESSION_ID`, `ORKA_WORKTREE_DIR`, or `ORKA_PROJECT_PATH`.
-
-What Orka does set today:
-
-- working directory: the session worktree path
-- shell: `bash -c`
-- stdout/stderr: inherited by the daemon process
-
-Because the working directory is already the worktree, these usually work:
-
-```toml
-[hooks]
-post_worktree_create = "bun install"
-```
-
-```toml
-[hooks]
-post_worktree_create = "cp -f .env.example .env"
-```
-
-If you need files from outside the worktree, use an absolute path or a wrapper script.
-
 ## Error Handling
 
 `post_worktree_create` is best-effort:
@@ -93,18 +49,18 @@ If you need files from outside the worktree, use an absolute path or a wrapper s
 - empty commands are ignored
 - commands run in order
 - if one command exits non-zero, Orka prints a warning
-- session creation continues
-- later hook commands still run
+- session creation continues regardless
+- subsequent hook commands still run
 
-A failing hook does not block worktree creation.
+A failing hook does not block the session.
 
-## `--no-hooks`
+## Environment
 
-The internal design doc mentions a `--no-hooks` flag, but the current CLI does not implement it.
+Hooks inherit the daemon process environment. The working directory is set to the session worktree path, so commands like `bun install` work without extra configuration.
 
-If you need to skip hooks today, remove or comment out the hook config before starting the session.
+If you need files from outside the worktree, use absolute paths or a wrapper script.
 
-## Practical Examples
+## Examples
 
 ### Install dependencies
 
@@ -115,14 +71,10 @@ post_worktree_create = "bun install"
 
 ### Copy env files
 
-If the source file is committed in the repo, keep it simple:
-
 ```toml
 [hooks]
 post_worktree_create = "cp -f .env.example .env"
 ```
-
-If you need to copy from the main project checkout, use a wrapper script or an absolute path. The design doc shows `$ORKA_PROJECT_PATH`, but that variable is not currently injected.
 
 ### Run a setup script
 
@@ -131,7 +83,7 @@ If you need to copy from the main project checkout, use a wrapper script or an a
 post_worktree_create = "./scripts/setup-worktree.sh"
 ```
 
-### Full setup with multiple hooks
+### Full setup
 
 ```toml
 [hooks]

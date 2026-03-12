@@ -76,7 +76,7 @@ orka spawn -m background --auto-merge "Update the release notes and commit the c
 | `attach` | Stream live output from a running session | `orka attach sess-abc123` |
 | `logs` | Show logs once or follow them | `orka logs -f sess-abc123` |
 | `stop` | Stop a running or preparing session | `orka stop sess-abc123` |
-| `diff` | Show Git status and diff for a session worktree | `orka diff sess-abc123` |
+| `diff` | Show uncommitted and committed changes in a session worktree | `orka diff sess-abc123` |
 | `show` | Show session metadata, prompt, tags, and paths | `orka show sess-abc123` |
 | `merge` | Merge a session branch into the current branch | `orka merge sess-abc123` |
 | `retry` | Re-run a finished session with the same prompt and options | `orka retry sess-abc123` |
@@ -89,7 +89,7 @@ orka spawn -m background --auto-merge "Update the release notes and commit the c
 | `workdir` | Print the session working directory | `cd "$(orka workdir sess-abc123)"` |
 | `project` | Add/list/remove project aliases | `orka project add myapp ~/src/myapp` |
 | `serve` | Run the daemon server | `orka serve --port 7394` |
-| `relay` | Run the relay router or manage relay account features | `orka relay --port 7390 --token mysecret` |
+| `relay` | Run the relay router for multi-machine setups | `orka relay --port 7390 --token mysecret` |
 | `keygen` | Manage E2E encryption keys | `orka keygen client` |
 
 Useful `spawn` options:
@@ -178,30 +178,32 @@ post_worktree_create = [
 
 ## Dashboard
 
-Run the daemon first:
+### Dev mode
+
+Run the daemon, then start the dashboard dev server:
 
 ```bash
 orka serve
+cd packages/dashboard && bun run dev
 ```
 
-Then start the dashboard:
+Open `http://localhost:3773`. Vite proxies `/ws` to `ws://localhost:7394`.
+
+### Docker
 
 ```bash
-cd packages/dashboard
-bun run dev
+docker compose up
 ```
 
-Open `http://localhost:3773`.
+This starts both daemon and dashboard. The dashboard is available at `http://localhost:3773`.
 
-What it shows:
+### What it shows
 
-- session sidebar grouped by running, completed, and failed
-- live session selection and stop controls
-- overview panel with metadata, timing, usage, and result data
-- chat, logs, and diff tabs for the selected session
-- new-session dialog for launching sessions from the browser
-
-The dashboard connects to `/ws` on the same origin. In dev, Vite proxies `/ws` to `ws://localhost:7394`.
+- Session sidebar grouped by running, completed, and failed
+- Live session selection and stop controls
+- Overview panel with metadata, timing, usage, and result data
+- Chat, logs, and diff tabs for the selected session
+- New-session dialog for launching sessions from the browser
 
 ## Multi-Machine Mode
 

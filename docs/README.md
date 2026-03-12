@@ -56,9 +56,13 @@ The daemon is the source of truth for orchestration, SQLite state, worktree life
 
 `providers.use_runtime = true` is the default, so Orka normally uses the provider runtime instead of the legacy tmux path.
 
-## Next docs
+## Docs
 
-- [Getting Started](./getting-started.md) — install, spawn sessions, inspect logs, merge work
-- [Hooks Design](./hooks-design.md) — background and worktree hook context
-- [Provider Migration Plan](./provider-migration-plan.md) — runtime/provider architecture notes
-- [Codex Research](./codex-research.md) — backend integration notes
+- [Getting Started](./getting-started.md) — install, spawn sessions, inspect and merge work
+- [Hooks](./hooks.md) — worktree lifecycle hooks configuration
+
+### Internal
+
+- [Hooks Design](./hooks-design.md) — design rationale and future hook stages
+- [Provider Migration](./provider-migration-plan.md) — runtime architecture notes
+- [Codex Research](./codex-research.md) — backend integration research
