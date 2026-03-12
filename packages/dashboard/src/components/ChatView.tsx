@@ -66,6 +66,54 @@ function isRunning(status: SessionSummary["status"]): boolean {
   return status === "queued" || status === "preparing" || status === "running";
 }
 
+type ThinkingState = "thinking" | "tools" | "writing" | "idle";
+
+/**
+ * Derive the agent's current activity state from the event stream.
+ * Used to show an appropriate thinking/busy indicator.
+ */
+function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState {
+  // Walk backwards to find the last meaningful event
+  const completedItemIds = new Set<string>();
+  for (const e of events) {
+    if (e.type === "item.completed") completedItemIds.add(e.itemId);
+  }
+
+  // Check for in-progress tools (item.started without item.completed)
+  let hasInProgressTool = false;
+  for (const e of events) {
+    if (e.type === "item.started" && !completedItemIds.has(e.itemId)) {
+      hasInProgressTool = true;
+    }
+  }
+  if (hasInProgressTool) return "tools";
+
+  // Find last meaningful event by walking backwards
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    switch (e.type) {
+      case "content.delta":
+        return "writing";
+      case "turn.started":
+        return "thinking";
+      case "turn.completed":
+      case "turn.aborted":
+      case "session.completed":
+      case "session.failed":
+      case "session.cancelled":
+        return "idle";
+      case "item.completed":
+      case "item.updated":
+        // Just finished a tool, model is thinking about next step
+        return "thinking";
+      default:
+        continue;
+    }
+  }
+
+  return "idle";
+}
+
 /** Map an item type to an icon kind for tool entries. */
 function itemIcon(itemType: string): "command" | "file" {
   if (itemType === "file_change") return "file";
@@ -439,15 +487,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
                 <TimelineEntry key={entry.id} entry={entry} />
               ))
             )}
-            {isRunning(activeSession.status) ? (
-              <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
-                <LoaderCircle className="h-4 w-4 animate-spin text-sky-400" />
-                <div>
-                  <p className="font-medium text-zinc-100">Waiting for more output</p>
-                  <p className="text-zinc-500">This session is still running. New events will append here.</p>
-                </div>
-              </div>
-            ) : null}
+            {isRunning(activeSession.status) ? <ThinkingIndicator state={deriveThinkingState(events)} /> : null}
             <div ref={bottomRef} />
           </div>
         </div>
@@ -470,6 +510,38 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
       />
     </div>
   );
+}
+
+function ThinkingIndicator({ state }: { state: ThinkingState }) {
+  if (state === "thinking") {
+    return (
+      <div className="flex items-center gap-3 px-1 py-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
+          <Bot className="h-4 w-4" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
+          <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse [animation-delay:0.2s]" />
+          <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse [animation-delay:0.4s]" />
+        </div>
+      </div>
+    );
+  }
+
+  if (state === "tools") {
+    return (
+      <div className="flex items-center gap-3 px-1 py-2 text-sm text-zinc-400">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
+          <Bot className="h-4 w-4" />
+        </div>
+        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+        Running tools…
+      </div>
+    );
+  }
+
+  // "writing" and "idle" — no indicator needed
+  return null;
 }
 
 function TimelineEntry({ entry }: { entry: ChatEntry }) {
