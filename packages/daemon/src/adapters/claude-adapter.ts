@@ -152,8 +152,9 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
         try {
           if (input.prompt) {
-            await Promise.resolve(stdin.write(input.prompt + "\n"));
+            await Promise.resolve(stdin.write(input.prompt));
           }
+          await Promise.resolve(stdin.end());
         } catch (error) {
           emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error", span);
           closeEvents(meta);
@@ -167,23 +168,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     );
   }
 
-  async sendTurn(handle: ProviderSessionHandle, input: ProviderSendTurnInput): Promise<void> {
-    const meta = getClaudeHandleMeta(handle);
-    const stdin = meta.process.stdin;
-    if (!isWritableSink(stdin)) {
-      throw new Error("Claude Code stdin is not available");
-    }
-    const newTurnId = generateId("turn");
-    meta.turnId = newTurnId;
-    meta.events.push(
-      createEvent(
-        "turn.started",
-        handle.threadId,
-        { ...(input.model ? { model: input.model } : {}) },
-        { provider: "claude-code", turnId: newTurnId },
-      ),
-    );
-    await Promise.resolve(stdin.write((input.input ?? "") + "\n"));
+  async sendTurn(_handle: ProviderSessionHandle, _input: ProviderSendTurnInput): Promise<void> {
+    throw new Error("Claude Code -p mode does not support multi-turn. Start a new session.");
   }
 
   async interruptTurn(handle: ProviderSessionHandle): Promise<void> {
@@ -207,16 +193,6 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         emitSessionExited(handle.threadId, meta, "stopped", "graceful");
         closeEvents(meta);
 
-        // Close stdin to signal EOF before sending SIGINT
-        const stdin = meta.process.stdin;
-        if (isWritableSink(stdin)) {
-          try {
-            await Promise.resolve(stdin.end());
-          } catch {
-            // stdin may already be closed
-          }
-        }
-
         meta.process.kill("SIGINT");
         const exited = await waitForExit(meta.process, 250);
         if (!exited) {
@@ -232,7 +208,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     _requestId: string,
     _decision: ProviderApprovalDecision,
   ): Promise<void> {
-    throw new Error("Claude Code uses --permission-mode auto; approval requests are not supported");
+    throw new Error("Claude Code -p mode uses --permission-mode auto");
   }
 }
 
@@ -348,13 +324,13 @@ async function consumeClaudeOutput(
   meta: ClaudeHandleMeta,
   process: ClaudeProcess,
   model?: string,
-): Promise<void> {
-  await withSpan(
+): Promise<boolean> {
+  return withSpan(
     "orka.provider.claude_code.parse_output",
     { "orka.session.id": threadId, "orka.backend": "claude-code" },
     async (span) => {
-      let emittedSessionStarted = false;
-      let emittedFirstTurnStarted = false;
+      let sawSessionExit = false;
+      let emittedTurnStarted = false;
 
       try {
         for await (const line of readLines(stdout)) {
@@ -379,29 +355,27 @@ async function consumeClaudeOutput(
 
           const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
           if (primary) {
-            // Only emit session.started for the first system init event
-            if (primary.type === "session.started") {
-              if (!emittedSessionStarted) {
-                emitClaudeEvent(meta.events, primary, span);
-                emittedSessionStarted = true;
-              }
-              // Emit turn.started only for the initial turn; sendTurn() handles subsequent turns
-              if (!emittedFirstTurnStarted) {
-                emitClaudeEvent(
-                  meta.events,
-                  createEvent(
-                    "turn.started",
-                    threadId,
-                    { ...(model ? { model } : {}) },
-                    { provider: "claude-code", turnId: meta.turnId },
-                  ),
-                  span,
-                );
-                emittedFirstTurnStarted = true;
-              }
-            } else {
-              emitClaudeEvent(meta.events, primary, span);
+            emitClaudeEvent(meta.events, primary, span);
+            if (!emittedTurnStarted && primary.type === "session.started") {
+              emitClaudeEvent(
+                meta.events,
+                createEvent(
+                  "turn.started",
+                  threadId,
+                  { ...(model ? { model } : {}) },
+                  { provider: "claude-code", turnId: meta.turnId },
+                ),
+                span,
+              );
+              emittedTurnStarted = true;
             }
+          }
+
+          const exit = mapClaudeEvent(threadId, raw, { mode: "exit", turnId: meta.turnId });
+          if (exit) {
+            emitClaudeEvent(meta.events, exit, span);
+            meta.exitEmitted = true;
+            sawSessionExit = true;
           }
         }
       } catch (error) {
@@ -421,7 +395,7 @@ async function consumeClaudeOutput(
       const exitCode = await process.exited;
       span.addEvent("process.exited", { "orka.exit_code": exitCode });
 
-      if (!meta.exitEmitted) {
+      if (!sawSessionExit && !meta.exitEmitted) {
         emitSessionExited(
           threadId,
           meta,
@@ -432,6 +406,7 @@ async function consumeClaudeOutput(
       }
 
       closeEvents(meta);
+      return sawSessionExit;
     },
   );
 }
@@ -528,7 +503,7 @@ function emitClaudeEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: Pr
 }
 
 function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
-  const command = ["claude", "--verbose", "--output-format", "stream-json", "--permission-mode", "auto"];
+  const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--permission-mode", "auto"];
 
   if (input.model) {
     command.push("--model", input.model);
