@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, User, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, RotateCcw, Square, TerminalSquare, User, Wrench } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { withDashboardSpan } from "../lib/tracing";
@@ -112,6 +112,10 @@ function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState {
   }
 
   return "idle";
+}
+
+function isTerminal(status: SessionSummary["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 /** Map an item type to an icon kind for tool entries. */
@@ -430,6 +434,9 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
   const activeSession = session;
   const inputState = useInputState(events, activeSession.status, activeSession.backend);
 
+  const [stopping, setStopping] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+
   async function handleSend(text: string) {
     await withDashboardSpan(
       "orka.dashboard.chat.send_input",
@@ -443,6 +450,24 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
         await transport.request<void>("sendInput", { sessionId, text });
       },
     );
+  }
+
+  async function handleStop() {
+    setStopping(true);
+    try {
+      await transport.request("stopSession", { sessionId });
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  async function handleRetry() {
+    setRetrying(true);
+    try {
+      await transport.request("retrySession", { sessionId });
+    } finally {
+      setRetrying(false);
+    }
   }
 
   if (isLoading) {
@@ -503,11 +528,39 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
           </button>
         ) : null}
       </div>
-      <ChatInputComposer
-        sessionId={sessionId}
-        inputState={inputState}
-        onSend={handleSend}
-      />
+      <div className="border-t border-zinc-800">
+        {(isRunning(activeSession.status) || isTerminal(activeSession.status)) && (
+          <div className="flex items-center gap-2 px-4 py-2">
+            {isRunning(activeSession.status) && (
+              <button
+                type="button"
+                onClick={handleStop}
+                disabled={stopping}
+                className="flex items-center gap-1.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-950/50 disabled:opacity-50"
+              >
+                {stopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+                Stop
+              </button>
+            )}
+            {isTerminal(activeSession.status) && (
+              <button
+                type="button"
+                onClick={handleRetry}
+                disabled={retrying}
+                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 disabled:opacity-50"
+              >
+                {retrying ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+        <ChatInputComposer
+          sessionId={sessionId}
+          inputState={inputState}
+          onSend={handleSend}
+        />
+      </div>
     </div>
   );
 }
