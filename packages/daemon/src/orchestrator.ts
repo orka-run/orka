@@ -150,6 +150,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
         ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
         ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
         ...(req.env ? { env: req.env } : {}),
+        interactive: req.mode === "interactive",
       });
 
       updateSessionStatus(sessionId, "running", { startedAt });

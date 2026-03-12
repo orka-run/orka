@@ -167,7 +167,11 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
             }) + "\n";
             await Promise.resolve(stdin.write(msg));
           }
-          // Do NOT call stdin.end() — keep stdin open for multi-turn
+          // Close stdin for non-interactive (background) sessions so Claude Code exits after one turn.
+          // Keep open for interactive sessions to allow multi-turn via sendTurn().
+          if (!input.interactive) {
+            await Promise.resolve(stdin.end());
+          }
         } catch (error) {
           emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error", span);
           closeEvents(meta);

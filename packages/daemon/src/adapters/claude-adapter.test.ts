@@ -221,7 +221,8 @@ describe("ClaudeCodeAdapter", () => {
       message: { role: "user", content: "Inspect the project" },
       parent_tool_use_id: null,
     });
-    expect(stdin.ended).toBe(false);
+    // Non-interactive: stdin closed after initial prompt
+    expect(stdin.ended).toBe(true);
 
     expect(events.map((event) => event.type)).toEqual([
       "session.started",
@@ -294,6 +295,7 @@ describe("ClaudeCodeAdapter", () => {
       threadId: "thread-2",
       model: "claude-sonnet-4-6",
       prompt: "First task",
+      interactive: true,
     });
 
     // sendTurn writes a second JSON message to stdin

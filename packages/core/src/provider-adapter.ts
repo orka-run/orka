@@ -13,6 +13,8 @@ export interface ProviderSessionStartInput {
   systemPrompt?: string;
   allowedTools?: string[];
   env?: Record<string, string>;
+  /** When true, keep stdin open for multi-turn (interactive mode). */
+  interactive?: boolean;
 }
 
 export interface ProviderSendTurnInput {
