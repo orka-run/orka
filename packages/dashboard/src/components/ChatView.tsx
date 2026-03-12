@@ -133,6 +133,10 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
   for (const event of events) {
     if (event.type === "content.delta") {
       if (event.streamKind === "assistant_text" || event.streamKind === "reasoning_text") {
+        // If we have pending tools and now get text, flush the tool group first
+        if (pendingTools.length > 0) {
+          flushToolGroup();
+        }
         if (accumTurnId !== event.turnId) {
           flushAssistant();
           accumTurnId = event.turnId;
@@ -501,9 +505,38 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
 
   if (entry.type === "tool-group") {
     const hasInProgress = entry.tools.some((t) => t.inProgress);
+
+    // Single tool: compact card without outer collapsible wrapper
+    if (entry.tools.length === 1) {
+      const tool = entry.tools[0]!;
+      return (
+        <details className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70">
+          <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
+              {tool.inProgress ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              ) : tool.icon === "command" ? (
+                <TerminalSquare className="h-3.5 w-3.5" />
+              ) : (
+                <FileCode2 className="h-3.5 w-3.5" />
+              )}
+            </div>
+            <span className="min-w-0 truncate text-sm font-medium text-zinc-300">{tool.title}</span>
+            <span className="ml-auto shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
+          </summary>
+          {tool.details.length > 0 ? (
+            <div className="border-t border-zinc-800 px-4 py-2">
+              <ToolCallDetails title={tool.title} details={tool.details} />
+            </div>
+          ) : null}
+        </details>
+      );
+    }
+
+    // Multiple tools: collapsible group with "Used N tools" summary
     const label = hasInProgress
-      ? `Using ${entry.tools.length} tool${entry.tools.length > 1 ? "s" : ""}…`
-      : `Used ${entry.tools.length} tool${entry.tools.length > 1 ? "s" : ""}`;
+      ? `Using ${entry.tools.length} tools…`
+      : `Used ${entry.tools.length} tools`;
     return (
       <details
         open={hasInProgress}
