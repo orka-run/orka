@@ -235,48 +235,67 @@ type RpcLatencyAllSnapshot = {
   totalCount: number;
 };
 
+// Snapshot cache — rebuilt only when store emits (i.e. data actually changed).
+// useSyncExternalStore compares by reference, so returning the same object
+// between renders prevents infinite re-render loops.
+let snapshotVersion = 0;
+const snapshotCache = new Map<string, { version: number; value: RpcLatencyMethodSnapshot | RpcLatencyAllSnapshot }>();
+
+const SERVER_SNAPSHOT_ALL: RpcLatencyAllSnapshot = {
+  connectionRtt: null,
+  lastRtt: {},
+  stats: {},
+  recent: [],
+  totalCount: 0,
+};
+
+const SERVER_SNAPSHOT_METHOD: RpcLatencyMethodSnapshot = {
+  connectionRtt: null,
+  lastRtt: null,
+  stats: EMPTY_METHOD_STATS,
+  recent: [],
+  totalCount: 0,
+};
+
+// Bump version on every store change
+rpcLatencyStore.subscribe(() => { snapshotVersion++; });
+
+function getSnapshot(method?: string): RpcLatencyMethodSnapshot | RpcLatencyAllSnapshot {
+  const cacheKey = method ?? "__all__";
+  const cached = snapshotCache.get(cacheKey);
+  if (cached && cached.version === snapshotVersion) {
+    return cached.value;
+  }
+
+  let value: RpcLatencyMethodSnapshot | RpcLatencyAllSnapshot;
+  if (method) {
+    value = {
+      connectionRtt: rpcLatencyStore.getConnectionRtt(),
+      lastRtt: rpcLatencyStore.getLastRtt(method),
+      stats: rpcLatencyStore.getMethodStats(method),
+      recent: rpcLatencyStore.getRecentEntries().filter((entry) => entry.method === method),
+      totalCount: rpcLatencyStore.getTotalCount(),
+    };
+  } else {
+    value = {
+      connectionRtt: rpcLatencyStore.getConnectionRtt(),
+      lastRtt: rpcLatencyStore.getAllLastRtt(),
+      stats: rpcLatencyStore.getAllStats(),
+      recent: rpcLatencyStore.getRecentEntries(),
+      totalCount: rpcLatencyStore.getTotalCount(),
+    };
+  }
+
+  snapshotCache.set(cacheKey, { version: snapshotVersion, value });
+  return value;
+}
+
 export function useRpcLatency(method: string): RpcLatencyMethodSnapshot;
 export function useRpcLatency(): RpcLatencyAllSnapshot;
 export function useRpcLatency(method?: string): RpcLatencyMethodSnapshot | RpcLatencyAllSnapshot {
   return useSyncExternalStore(
     rpcLatencyStore.subscribe,
-    () => {
-      if (method) {
-        return {
-          connectionRtt: rpcLatencyStore.getConnectionRtt(),
-          lastRtt: rpcLatencyStore.getLastRtt(method),
-          stats: rpcLatencyStore.getMethodStats(method),
-          recent: rpcLatencyStore.getRecentEntries().filter((entry) => entry.method === method),
-          totalCount: rpcLatencyStore.getTotalCount(),
-        };
-      }
-
-      return {
-        connectionRtt: rpcLatencyStore.getConnectionRtt(),
-        lastRtt: rpcLatencyStore.getAllLastRtt(),
-        stats: rpcLatencyStore.getAllStats(),
-        recent: rpcLatencyStore.getRecentEntries(),
-        totalCount: rpcLatencyStore.getTotalCount(),
-      };
-    },
-    () => {
-      if (method) {
-        return {
-          connectionRtt: null,
-          lastRtt: null,
-          stats: EMPTY_METHOD_STATS,
-          recent: [],
-          totalCount: 0,
-        };
-      }
-
-      return {
-        connectionRtt: null,
-        lastRtt: {},
-        stats: {},
-        recent: [],
-        totalCount: 0,
-      };
-    },
+    () => getSnapshot(method),
+    () => method ? SERVER_SNAPSHOT_METHOD : SERVER_SNAPSHOT_ALL,
   );
 }
