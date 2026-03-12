@@ -675,7 +675,8 @@ const stopCmd = command({
     }
 
     if (session.status !== "running" && session.status !== "preparing") {
-      fail(`session ${session.id} is already ${session.status}`);
+      console.warn(`warning: session ${session.id} is already ${session.status}`);
+      return;
     }
 
     await svc.stop(session.id);
