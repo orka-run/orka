@@ -3,8 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, User, Wrench } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
+import { withDashboardSpan } from "../lib/tracing";
 import { MarkdownContent } from "./MarkdownContent";
 import { ToolCallDetails } from "./ToolCallDetails";
+import { ChatInputComposer } from "./ChatInputComposer";
+import { useInputState } from "../hooks/useInputState";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
@@ -262,6 +265,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const transport = useTransport();
 
+  const [events, setEvents] = useState<OrchestrationEvent[]>([]);
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -277,6 +281,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
     let cancelled = false;
     setIsLoading(true);
     setError(null);
+    setEvents([]);
     setEntries([]);
     eventsRef.current = [];
 
@@ -290,6 +295,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
 
         const filtered = timeline.filter((e) => e.sessionId === sessionId);
         eventsRef.current = filtered;
+        setEvents(filtered);
         setEntries(eventsToEntries(filtered, initialPrompt));
         onSelectionLoadSettled?.("ok");
       } catch (e) {
@@ -312,6 +318,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
       if (event.sessionId !== sessionId) return;
 
       eventsRef.current = [...eventsRef.current, event];
+      setEvents(eventsRef.current);
       setEntries(eventsToEntries(eventsRef.current, initialPrompt));
     });
 
@@ -346,6 +353,24 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
     );
   }
 
+  const activeSession = session;
+  const inputState = useInputState(events, activeSession.status, activeSession.backend);
+
+  async function handleSend(text: string) {
+    await withDashboardSpan(
+      "orka.dashboard.chat.send_input",
+      {
+        "orka.session.id": sessionId,
+        "orka.backend": activeSession.backend,
+        "orka.input.length": text.length,
+      },
+      async () => {
+        setAutoScroll(true);
+        await transport.request<void>("sendInput", { sessionId, text });
+      },
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/50">
@@ -371,7 +396,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
       <div className="border-b border-zinc-800 px-4 py-3">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Chat Timeline</p>
         <p className="mt-1 text-sm text-zinc-400">
-          {isRunning(session.status) ? "Streaming live events…" : `${entries.length} events`}
+          {isRunning(activeSession.status) ? "Streaming live events…" : `${entries.length} events`}
         </p>
       </div>
       <div className="relative flex-1 overflow-hidden">
@@ -388,7 +413,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
                 <TimelineEntry key={entry.id} entry={entry} />
               ))
             )}
-            {isRunning(session.status) ? (
+            {isRunning(activeSession.status) ? (
               <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
                 <LoaderCircle className="h-4 w-4 animate-spin text-sky-400" />
                 <div>
@@ -412,6 +437,11 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
           </button>
         ) : null}
       </div>
+      <ChatInputComposer
+        sessionId={sessionId}
+        inputState={inputState}
+        onSend={handleSend}
+      />
     </div>
   );
 }
