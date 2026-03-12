@@ -123,6 +123,9 @@ export interface OrkaService {
   resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   reportEventGap(channel: PushChannel, expectedSeq: number, gotSeq: number): Promise<void>;
 
+  // --- Metrics ---
+  getMetrics(): Promise<Record<string, unknown> | null>;
+
   // --- Terminal PTY ---
   terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }>;
   terminalWrite(termId: string, data: string): Promise<void>;

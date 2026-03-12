@@ -44,6 +44,7 @@ import {
   getWorktreeDir,
 } from "./worktree";
 import { approvalManager, isProviderRuntimeEnabled, providerService } from "./provider-runtime";
+import { queryMetricSnapshot } from "./tracing";
 
 class LocalClient implements OrkaService {
   private terminalManager: TerminalManager | null = null;
@@ -352,6 +353,10 @@ class LocalClient implements OrkaService {
         decision === "approve" || decision === "approve_session" ? "approve" : "deny",
       );
     }
+  }
+
+  async getMetrics(): Promise<Record<string, unknown> | null> {
+    return queryMetricSnapshot();
   }
 
   async reportEventGap(_channel: PushChannel, _expectedSeq: number, _gotSeq: number): Promise<void> {}

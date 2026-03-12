@@ -289,6 +289,10 @@ class RemoteClient implements OrkaService {
     return this.call("resolveApproval", { requestId, decision });
   }
 
+  async getMetrics(): Promise<Record<string, unknown> | null> {
+    return this.call("getMetrics", {});
+  }
+
   async reportEventGap(channel: PushChannel, expectedSeq: number, gotSeq: number): Promise<void> {
     return this.call("reportEventGap", { channel, expectedSeq, gotSeq });
   }

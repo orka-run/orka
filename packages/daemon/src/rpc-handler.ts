@@ -219,6 +219,8 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             return null;
           case "listClientErrors":
             return listClientErrors(params.limit ?? 50);
+          case "getMetrics":
+            return svc.getMetrics();
           case "queryTraces":
             return queryTraceLog({
               service: params.service,
