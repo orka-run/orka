@@ -1,44 +1,43 @@
 import { useSyncExternalStore } from "react";
 
-export interface MethodStats {
+export const DEFAULT_RPC_LATENCY_BUFFER_SIZE = 100;
+
+export type MethodStats = {
   avg: number;
   p95: number;
   p99: number;
   min: number;
   max: number;
   count: number;
-}
+};
 
-export interface RpcCompletion {
+export type RpcCompletion = {
   method: string;
   duration: number;
-  ok: boolean;
+  success: boolean;
   timestamp: number;
-}
+};
 
-export interface RpcLatencyStore {
-  getMethodStats: (method: string) => MethodStats;
-  getAllStats: () => Record<string, MethodStats>;
-  getLastRtt: (method: string) => number | null;
-  getAllLastRtt: () => Record<string, number | null>;
-  getConnectionRtt: () => number | null;
-  onRpcComplete: (completion: RpcCompletion) => void;
-  subscribe: (listener: () => void) => () => void;
-  reset: () => void;
-}
-
-type MethodBucket = {
+type MethodMeasurements = {
   values: number[];
   nextIndex: number;
   count: number;
   lastRtt: number | null;
-  lastTimestamp: number | null;
-  lastOk: boolean | null;
 };
 
-export const DEFAULT_RPC_LATENCY_BUFFER_SIZE = 100;
+type MethodLatencySnapshot = {
+  stats: MethodStats;
+  lastRtt: number | null;
+  connectionRtt: number | null;
+};
 
-const EMPTY_METHOD_STATS: MethodStats = {
+type AllLatencySnapshot = {
+  stats: Record<string, MethodStats>;
+  lastRttByMethod: Record<string, number | null>;
+  connectionRtt: number | null;
+};
+
+const EMPTY_STATS: MethodStats = {
   avg: 0,
   p95: 0,
   p99: 0,
@@ -47,183 +46,149 @@ const EMPTY_METHOD_STATS: MethodStats = {
   count: 0,
 };
 
-function createMethodBucket(maxEntries: number): MethodBucket {
-  return {
-    values: new Array<number>(maxEntries),
-    nextIndex: 0,
-    count: 0,
-    lastRtt: null,
-    lastTimestamp: null,
-    lastOk: null,
-  };
+function clampDuration(duration: number): number {
+  return Math.max(0, Number.isFinite(duration) ? duration : 0);
 }
 
-function percentile(sortedValues: number[], ratio: number): number {
+function getPercentile(sortedValues: number[], percentile: number): number {
   if (sortedValues.length === 0) {
     return 0;
   }
 
   const index = Math.min(
     sortedValues.length - 1,
-    Math.max(0, Math.ceil(sortedValues.length * ratio) - 1),
+    Math.max(0, Math.ceil((percentile / 100) * sortedValues.length) - 1),
   );
   return sortedValues[index] ?? 0;
 }
 
-function snapshotValues(bucket: MethodBucket): number[] {
-  if (bucket.count === 0) {
-    return [];
-  }
-
-  if (bucket.count < bucket.values.length) {
-    return bucket.values.slice(0, bucket.count);
-  }
-
-  return [
-    ...bucket.values.slice(bucket.nextIndex),
-    ...bucket.values.slice(0, bucket.nextIndex),
-  ];
-}
-
-function computeStats(bucket: MethodBucket): MethodStats {
-  const values = snapshotValues(bucket);
+function calculateStats(values: readonly number[]): MethodStats {
   if (values.length === 0) {
-    return EMPTY_METHOD_STATS;
+    return EMPTY_STATS;
   }
 
-  const sorted = [...values].sort((left, right) => left - right);
-  const sum = values.reduce((total, value) => total + value, 0);
+  const sortedValues = [...values].sort((left, right) => left - right);
+  const total = values.reduce((sum, value) => sum + value, 0);
 
   return {
-    avg: sum / values.length,
-    p95: percentile(sorted, 0.95),
-    p99: percentile(sorted, 0.99),
-    min: sorted[0] ?? 0,
-    max: sorted[sorted.length - 1] ?? 0,
+    avg: total / values.length,
+    p95: getPercentile(sortedValues, 95),
+    p99: getPercentile(sortedValues, 99),
+    min: sortedValues[0] ?? 0,
+    max: sortedValues.at(-1) ?? 0,
     count: values.length,
   };
 }
 
-export function createRpcLatencyStore(
-  maxEntries = DEFAULT_RPC_LATENCY_BUFFER_SIZE,
-): RpcLatencyStore {
-  const capacity = Math.max(1, Math.floor(maxEntries) || DEFAULT_RPC_LATENCY_BUFFER_SIZE);
-  const buckets = new Map<string, MethodBucket>();
-  const listeners = new Set<() => void>();
-  let connectionRtt: number | null = null;
+export class RpcLatencyStore {
+  private readonly methods = new Map<string, MethodMeasurements>();
+  private readonly listeners = new Set<() => void>();
+  private connectionRtt: number | null = null;
 
-  const getBucket = (method: string): MethodBucket => {
-    const existing = buckets.get(method);
-    if (existing) {
-      return existing;
+  constructor(private readonly bufferSize = DEFAULT_RPC_LATENCY_BUFFER_SIZE) {}
+
+  getMethodStats(method: string): MethodStats {
+    return calculateStats(this.getMethodValues(method));
+  }
+
+  getAllStats(): Record<string, MethodStats> {
+    const stats: Record<string, MethodStats> = {};
+    for (const method of this.methods.keys()) {
+      stats[method] = this.getMethodStats(method);
+    }
+    return stats;
+  }
+
+  getLastRtt(method: string): number | null {
+    return this.methods.get(method)?.lastRtt ?? null;
+  }
+
+  getConnectionRtt(): number | null {
+    return this.connectionRtt;
+  }
+
+  onRpcComplete = (entry: RpcCompletion): void => {
+    const duration = clampDuration(entry.duration);
+    const current = this.methods.get(entry.method) ?? {
+      values: [],
+      nextIndex: 0,
+      count: 0,
+      lastRtt: null,
+    };
+
+    if (current.values.length < this.bufferSize) {
+      current.values.push(duration);
+      current.count = current.values.length;
+    } else {
+      current.values[current.nextIndex] = duration;
+      current.nextIndex = (current.nextIndex + 1) % this.bufferSize;
+      current.count = this.bufferSize;
     }
 
-    const created = createMethodBucket(capacity);
-    buckets.set(method, created);
-    return created;
+    current.lastRtt = duration;
+    this.connectionRtt = duration;
+    this.methods.set(entry.method, current);
+    this.emit();
   };
 
-  const emit = (): void => {
-    for (const listener of listeners) {
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  getSnapshot(method?: string): MethodLatencySnapshot | AllLatencySnapshot {
+    if (method) {
+      return {
+        stats: this.getMethodStats(method),
+        lastRtt: this.getLastRtt(method),
+        connectionRtt: this.getConnectionRtt(),
+      };
+    }
+
+    const lastRttByMethod: Record<string, number | null> = {};
+    for (const [name, measurements] of this.methods) {
+      lastRttByMethod[name] = measurements.lastRtt;
+    }
+
+    return {
+      stats: this.getAllStats(),
+      lastRttByMethod,
+      connectionRtt: this.getConnectionRtt(),
+    };
+  }
+
+  reset(): void {
+    this.methods.clear();
+    this.connectionRtt = null;
+    this.emit();
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) {
       listener();
     }
-  };
+  }
 
-  return {
-    getMethodStats(method) {
-      const bucket = buckets.get(method);
-      return bucket ? computeStats(bucket) : EMPTY_METHOD_STATS;
-    },
-    getAllStats() {
-      return Object.fromEntries(
-        [...buckets.entries()].map(([method, bucket]) => [method, computeStats(bucket)]),
-      );
-    },
-    getLastRtt(method) {
-      return buckets.get(method)?.lastRtt ?? null;
-    },
-    getAllLastRtt() {
-      return Object.fromEntries(
-        [...buckets.entries()].map(([method, bucket]) => [method, bucket.lastRtt]),
-      );
-    },
-    getConnectionRtt() {
-      return connectionRtt;
-    },
-    onRpcComplete(completion) {
-      const duration = Math.max(0, completion.duration);
-      const bucket = getBucket(completion.method);
-      bucket.values[bucket.nextIndex] = duration;
-      bucket.nextIndex = (bucket.nextIndex + 1) % bucket.values.length;
-      bucket.count = Math.min(bucket.count + 1, bucket.values.length);
-      bucket.lastRtt = duration;
-      bucket.lastTimestamp = completion.timestamp;
-      bucket.lastOk = completion.ok;
-      connectionRtt = duration;
-      emit();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    reset() {
-      buckets.clear();
-      connectionRtt = null;
-      emit();
-    },
-  };
+  private getMethodValues(method: string): number[] {
+    const measurements = this.methods.get(method);
+    if (!measurements) {
+      return [];
+    }
+
+    return measurements.values.slice(0, measurements.count);
+  }
 }
 
-export const rpcLatencyStore = createRpcLatencyStore();
+export const rpcLatencyStore = new RpcLatencyStore();
 
-type RpcLatencyMethodSnapshot = {
-  connectionRtt: number | null;
-  lastRtt: number | null;
-  stats: MethodStats;
-};
-
-type RpcLatencyAllSnapshot = {
-  connectionRtt: number | null;
-  lastRtt: Record<string, number | null>;
-  stats: Record<string, MethodStats>;
-};
-
-export function useRpcLatency(method: string): RpcLatencyMethodSnapshot;
-export function useRpcLatency(): RpcLatencyAllSnapshot;
-export function useRpcLatency(method?: string): RpcLatencyMethodSnapshot | RpcLatencyAllSnapshot {
+export function useRpcLatency(method: string): MethodLatencySnapshot;
+export function useRpcLatency(): AllLatencySnapshot;
+export function useRpcLatency(method?: string): MethodLatencySnapshot | AllLatencySnapshot {
   return useSyncExternalStore(
-    rpcLatencyStore.subscribe,
-    () => {
-      if (method) {
-        return {
-          connectionRtt: rpcLatencyStore.getConnectionRtt(),
-          lastRtt: rpcLatencyStore.getLastRtt(method),
-          stats: rpcLatencyStore.getMethodStats(method),
-        };
-      }
-
-      return {
-        connectionRtt: rpcLatencyStore.getConnectionRtt(),
-        lastRtt: rpcLatencyStore.getAllLastRtt(),
-        stats: rpcLatencyStore.getAllStats(),
-      };
-    },
-    () => {
-      if (method) {
-        return {
-          connectionRtt: null,
-          lastRtt: null,
-          stats: EMPTY_METHOD_STATS,
-        };
-      }
-
-      return {
-        connectionRtt: null,
-        lastRtt: {},
-        stats: {},
-      };
-    },
+    (listener) => rpcLatencyStore.subscribe(listener),
+    () => rpcLatencyStore.getSnapshot(method),
+    () => rpcLatencyStore.getSnapshot(method),
   );
 }

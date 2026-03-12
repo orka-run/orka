@@ -71,14 +71,13 @@ let timerId = 0;
 let scheduledTimers: ScheduledTimer[] = [];
 let provider: WebTracerProvider;
 let exporter: InMemorySpanExporter;
-let nowMs = 0;
+let currentTime = 0;
 
 beforeEach(() => {
   MockWebSocket.instances = [];
   scheduledTimers = [];
   timerId = 0;
-  nowMs = 1_000;
-  Date.now = () => nowMs;
+  currentTime = 0;
   rpcLatencyStore.reset();
 
   globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
@@ -104,6 +103,7 @@ beforeEach(() => {
       timer.cleared = true;
     }
   }) as typeof clearTimeout;
+  Date.now = () => currentTime;
 
   exporter = new InMemorySpanExporter();
   provider = new WebTracerProvider({
@@ -181,7 +181,6 @@ describe("WsTransport", () => {
 
     const resultPromise = transport.request("listSessions");
     advanceTime(5);
-
     runTimer(5);
 
     await expect(resultPromise).rejects.toThrow("Request timeout: listSessions");
@@ -201,6 +200,44 @@ describe("WsTransport", () => {
       (span) => span.name === "orka.dashboard.rpc" && span.attributes["orka.method"] === "listSessions",
     );
     expect(rpcSpan?.attributes["orka.status"]).toBe("timeout");
+    expect(rpcLatencyStore.getMethodStats("listSessions")).toMatchObject({
+      avg: 5,
+      p95: 5,
+      p99: 5,
+      min: 5,
+      max: 5,
+      count: 1,
+    });
+    expect(rpcLatencyStore.getLastRtt("listSessions")).toBe(5);
+  });
+
+  test("records latency stats for error responses", async () => {
+    const transport = new WsTransport("ws://orka.test");
+    transport.connect();
+
+    const socket = latestSocket();
+    socket.open();
+
+    const resultPromise = transport.request("listSessions");
+
+    currentTime = 18;
+    socket.receive({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32603, message: "boom" },
+    });
+
+    await expect(resultPromise).rejects.toThrow("boom");
+    expect(rpcLatencyStore.getMethodStats("listSessions")).toMatchObject({
+      avg: 18,
+      p95: 18,
+      p99: 18,
+      min: 18,
+      max: 18,
+      count: 1,
+    });
+    expect(rpcLatencyStore.getLastRtt("listSessions")).toBe(18);
+    expect(rpcLatencyStore.getConnectionRtt()).toBe(18);
   });
 
   test("tracks per-method latency stats across successful and failed responses", async () => {
@@ -488,5 +525,5 @@ function runTimer(delay: number): void {
 }
 
 function advanceTime(deltaMs: number): void {
-  nowMs += deltaMs;
+  currentTime += deltaMs;
 }

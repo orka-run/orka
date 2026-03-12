@@ -132,6 +132,7 @@ export class WsTransport {
     const { span, startedAt } = startDashboardSpan("orka.dashboard.rpc", {
       "orka.method": method,
     });
+    const createdAt = Date.now();
     const traceCarrier: { traceparent?: string } = {};
     injectSpanContext(span, traceCarrier);
 
@@ -168,7 +169,7 @@ export class WsTransport {
         method,
         span,
         startedAt,
-        createdAt: Date.now(),
+        createdAt,
         sentAt: null,
       });
 
@@ -440,13 +441,13 @@ export class WsTransport {
   private recordRpcCompletion(
     pending: PendingRequest,
     duration: number,
-    ok: boolean,
+    success: boolean,
     timestamp = Date.now(),
   ): void {
     rpcLatencyStore.onRpcComplete({
       method: pending.method,
       duration: Math.max(0, duration),
-      ok,
+      success,
       timestamp,
     });
   }
