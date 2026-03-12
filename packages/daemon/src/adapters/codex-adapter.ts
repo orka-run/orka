@@ -131,6 +131,47 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
   }
 }
 
+export class CodexSessionProjection {
+  private hasActiveTurn: boolean;
+  private isSessionReady = false;
+  private hasProviderThread: boolean;
+  private isUnsubscribing = false;
+
+  constructor(initial: { hasActiveTurn?: boolean; hasProviderThread?: boolean } = {}) {
+    this.hasActiveTurn = initial.hasActiveTurn ?? false;
+    this.hasProviderThread = initial.hasProviderThread ?? false;
+  }
+
+  apply(event: ProviderRuntimeEvent): void {
+    switch (event.type) {
+      case "turn.started":
+        this.hasActiveTurn = true;
+        return;
+      case "turn.completed":
+      case "turn.aborted":
+        this.hasActiveTurn = false;
+        return;
+      case "session.state.changed":
+        this.isSessionReady = event.payload.state === "ready";
+        return;
+      default:
+        return;
+    }
+  }
+
+  setProviderThread(value: boolean): void {
+    this.hasProviderThread = value;
+  }
+
+  shouldUnsubscribe(): boolean {
+    return this.isSessionReady && !this.hasActiveTurn && this.hasProviderThread && !this.isUnsubscribing;
+  }
+
+  markUnsubscribing(): void {
+    this.isUnsubscribing = true;
+  }
+}
+
 export class CodexAdapter implements ProviderAdapter {
   readonly kind = "codex" as const;
 
@@ -627,6 +668,11 @@ async function consumeCodexOutput(
     "orka.provider.codex.parse_output",
     { "orka.session.id": threadId, "orka.backend": "codex" },
     async (span) => {
+      const projection = new CodexSessionProjection({
+        hasActiveTurn: Boolean(meta.activeTurnId),
+        hasProviderThread: Boolean(meta.providerThreadId),
+      });
+
       try {
         for await (const line of readLines(stdout)) {
           let raw: unknown;
@@ -656,6 +702,7 @@ async function consumeCodexOutput(
           const mapped = mapCodexEvent(threadId, raw, { meta });
           if (mapped) {
             emitCodexEvent(events, mapped, span);
+            projection.apply(mapped);
           }
 
           // In app-server mode, codex stays alive after completing work.
@@ -666,21 +713,16 @@ async function consumeCodexOutput(
             break;
           }
 
-          // Codex app-server goes idle after a turn completes but doesn't
-          // send thread/closed on its own. When the thread is idle with no
-          // pending turn, send thread/unsubscribe to trigger a clean
-          // thread/closed notification, which the next iteration will handle.
-          if (
-            mapped?.type === "session.state.changed" &&
-            mapped.payload.state === "ready" &&
-            !meta.activeTurnId &&
-            meta.providerThreadId
-          ) {
+          projection.setProviderThread(Boolean(meta.providerThreadId));
+
+          if (projection.shouldUnsubscribe()) {
+            projection.markUnsubscribing();
             span.addEvent("idle_detected_unsubscribing");
-            try {
-              await meta.sendRequest("thread/unsubscribe", { threadId: meta.providerThreadId });
-            } catch {
-              // Best-effort; if it fails, stopSession will clean up.
+            const providerThreadId = meta.providerThreadId;
+            if (providerThreadId) {
+              void meta.sendRequest("thread/unsubscribe", { threadId: providerThreadId }).catch(() => {
+                // Best-effort; if it fails, stopSession will clean up.
+              });
             }
           }
         }
@@ -1053,6 +1095,7 @@ async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
 async function waitForExit(process: CodexProcess, timeoutMs: number): Promise<boolean> {
   const timeout = new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), timeoutMs);
+    timer.unref?.();
     process.exited.finally(() => clearTimeout(timer));
   });
   const exited = process.exited.then(() => true);

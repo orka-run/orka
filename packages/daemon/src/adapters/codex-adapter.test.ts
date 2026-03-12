@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CodexAdapter, mapCodexEvent } from "./codex-adapter";
+import { createEvent } from "@orka/core";
+import { CodexAdapter, CodexSessionProjection, mapCodexEvent } from "./codex-adapter";
 import { initTracing } from "../tracing";
 
 const originalOrkaHome = process.env["ORKA_HOME"];
@@ -228,6 +229,37 @@ describe("mapCodexEvent", () => {
   });
 });
 
+describe("CodexSessionProjection", () => {
+  test("detects idle completion when ready arrives before turn.completed", () => {
+    const projection = new CodexSessionProjection({ hasActiveTurn: true, hasProviderThread: true });
+
+    projection.apply(createEvent("session.state.changed", "thread-1", { state: "ready" }, { provider: "codex" }));
+    expect(projection.shouldUnsubscribe()).toBe(false);
+
+    projection.apply(createEvent("turn.completed", "thread-1", { state: "completed" }, {
+      provider: "codex",
+      turnId: "turn-1",
+    }));
+    expect(projection.shouldUnsubscribe()).toBe(true);
+
+    projection.markUnsubscribing();
+    expect(projection.shouldUnsubscribe()).toBe(false);
+  });
+
+  test("detects idle completion when turn.completed arrives before ready", () => {
+    const projection = new CodexSessionProjection({ hasActiveTurn: true, hasProviderThread: true });
+
+    projection.apply(createEvent("turn.completed", "thread-1", { state: "completed" }, {
+      provider: "codex",
+      turnId: "turn-1",
+    }));
+    expect(projection.shouldUnsubscribe()).toBe(false);
+
+    projection.apply(createEvent("session.state.changed", "thread-1", { state: "ready" }, { provider: "codex" }));
+    expect(projection.shouldUnsubscribe()).toBe(true);
+  });
+});
+
 describe("CodexAdapter", () => {
   test("startSession records the codex start_session span", async () => {
     const spawnCalls: Array<{ command: string[]; options: Record<string, unknown> }> = [];
@@ -314,7 +346,116 @@ describe("CodexAdapter", () => {
       );
     })).toBe(true);
   });
+
+  test("startSession unsubscribes after ready then turn.completed", async () => {
+    const writes = await runIdleDetectionSession("ready-before-completed");
+
+    expect(writes.filter((message) => message.method === "thread/unsubscribe")).toHaveLength(1);
+  });
+
+  test("startSession unsubscribes after turn.completed then ready", async () => {
+    const writes = await runIdleDetectionSession("completed-before-ready");
+
+    expect(writes.filter((message) => message.method === "thread/unsubscribe")).toHaveLength(1);
+  });
 });
+
+async function runIdleDetectionSession(order: "ready-before-completed" | "completed-before-ready"): Promise<
+  Array<{ id?: string | number; method?: string; params?: any }>
+> {
+  const stdout = createControlledTextStream();
+  const writes: Array<{ id?: string | number; method?: string; params?: any }> = [];
+  const stdin = new MockWritableSink((value) => {
+    const message = JSON.parse(value) as { id?: string | number; method?: string; params?: any };
+    writes.push(message);
+
+    if (message.method === "initialize") {
+      stdout.pushJson({ id: message.id, result: { userAgent: "orka-test" } });
+      return;
+    }
+
+    if (message.method === "thread/start") {
+      stdout.pushJson({ id: message.id, result: { thread: { id: "provider-thread-1" } } });
+      return;
+    }
+
+    if (message.method === "turn/start") {
+      stdout.pushJson({ id: message.id, result: { turn: { id: "turn-1" } } });
+      stdout.pushJson({
+        method: "turn/started",
+        params: {
+          threadId: "provider-thread-1",
+          turn: { id: "turn-1" },
+        },
+      });
+
+      if (order === "ready-before-completed") {
+        pushReadyStatus(stdout);
+        pushTurnCompleted(stdout);
+      } else {
+        pushTurnCompleted(stdout);
+        pushReadyStatus(stdout);
+      }
+      return;
+    }
+
+    if (message.method === "thread/unsubscribe") {
+      stdout.pushJson({ id: message.id, result: {} });
+      stdout.pushJson({
+        method: "thread/closed",
+        params: { threadId: "provider-thread-1" },
+      });
+      stdout.close();
+    }
+  });
+
+  const adapter = new CodexAdapter(((_command, _options) => {
+    return {
+      stdout: stdout.stream,
+      stderr: createTextStream([]),
+      stdin,
+      exited: Promise.resolve(0),
+      kill() {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+  }) as typeof Bun.spawn);
+
+  const handle = await adapter.startSession({
+    threadId: "thread-1",
+    cwd: "/tmp/project",
+    prompt: "Fix the tests",
+  });
+
+  for await (const _event of handle.events) {
+    // Drain events until thread/closed ends the stream.
+  }
+
+  return writes;
+}
+
+function pushReadyStatus(stdout: ReturnType<typeof createControlledTextStream>): void {
+  stdout.pushJson({
+    method: "thread/status/changed",
+    params: {
+      threadId: "provider-thread-1",
+      status: { type: "idle" },
+    },
+  });
+}
+
+function pushTurnCompleted(stdout: ReturnType<typeof createControlledTextStream>): void {
+  stdout.pushJson({
+    method: "turn/completed",
+    params: {
+      threadId: "provider-thread-1",
+      turn: {
+        id: "turn-1",
+        status: "completed",
+        error: null,
+        items: [],
+      },
+    },
+  });
+}
 
 function createControlledTextStream(): {
   stream: ReadableStream<Uint8Array>;
