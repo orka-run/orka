@@ -59,6 +59,12 @@ export function NewSessionDialog({
       if (event.key === "Escape" && !isSubmitting) {
         onClose();
       }
+
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !isSubmitting) {
+        event.preventDefault();
+        const form = document.querySelector<HTMLFormElement>("[data-spawn-form]");
+        form?.requestSubmit();
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -151,7 +157,7 @@ export function NewSessionDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm">
       <div className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-zinc-800 px-6 py-5">
           <div>
@@ -169,7 +175,7 @@ export function NewSessionDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
+        <form onSubmit={handleSubmit} data-spawn-form className="space-y-5 px-6 py-5">
           <div>
             <label htmlFor={promptId} className="mb-2 block text-sm font-medium text-zinc-200">
               Prompt
@@ -349,7 +355,7 @@ export function NewSessionDialog({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded-xl bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSubmitting ? "Spawning..." : "Spawn Session"}
             </button>

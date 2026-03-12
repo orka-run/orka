@@ -104,6 +104,18 @@ function AppShell({ transport }: AppShellProps) {
   });
 
   useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "n" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        setIsNewSessionOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  useEffect(() => {
     const unsubscribeState = transport.onStateChange((connection) => {
       setConnectionStatus(connection.state, connection.reconnectAttempts);
     });
