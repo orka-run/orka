@@ -621,13 +621,15 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
 
   if (entry.type === "user") {
     return (
-      <div className="flex items-start gap-3">
-        <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
-          <User className="h-4 w-4" />
-        </div>
-        <div className="max-w-3xl rounded-2xl rounded-tl-md border border-indigo-900/50 bg-zinc-900 px-4 py-3">
-          <MarkdownContent content={entry.body} />
-          <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+      <div className="flex justify-end">
+        <div className="flex max-w-3xl items-start gap-3">
+          <div className="rounded-2xl rounded-tr-md border border-indigo-900/50 bg-zinc-900 px-4 py-3">
+            <MarkdownContent content={entry.body} />
+            <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+          </div>
+          <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
+            <User className="h-4 w-4" />
+          </div>
         </div>
       </div>
     );
