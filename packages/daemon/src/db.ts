@@ -505,7 +505,7 @@ export function getOrchestrationEvents(sessionId: string): OrchestrationEvent[] 
         `SELECT payload
          FROM orchestration_events
          WHERE session_id = ?
-         ORDER BY timestamp ASC, event_id ASC`,
+         ORDER BY rowid ASC`,
       )
       .all(sessionId) as unknown[];
     return rows.map(rowToOrchestrationEvent);

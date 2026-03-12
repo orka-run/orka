@@ -266,9 +266,16 @@ describe("usage_log helpers", () => {
 });
 
 describe("orchestration event helpers", () => {
-  test("stores orchestration events and returns them in timestamp order", () => {
+  test("stores orchestration events and returns them in insertion order", () => {
     seedSession("sess-1");
 
+    insertOrchestrationEvent({
+      eventId: "evt-1",
+      provider: "claude-code",
+      type: "session.started",
+      sessionId: "sess-1",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
     insertOrchestrationEvent({
       eventId: "evt-2",
       provider: "claude-code",
@@ -277,13 +284,6 @@ describe("orchestration event helpers", () => {
       turnId: "turn-1",
       state: "completed",
       timestamp: "2026-01-01T00:01:00.000Z",
-    });
-    insertOrchestrationEvent({
-      eventId: "evt-1",
-      provider: "claude-code",
-      type: "session.started",
-      sessionId: "sess-1",
-      timestamp: "2026-01-01T00:00:00.000Z",
     });
 
     expect(getOrchestrationEvents("sess-1")).toEqual([
