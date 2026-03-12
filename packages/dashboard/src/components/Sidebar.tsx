@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useId, useState } from "react";
-import { CheckCircle2, LoaderCircle, Plus, Search, XCircle } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime, getSessionGroup } from "../lib/sessionUi";
 
@@ -108,23 +108,20 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewSession }: Sideba
                               : "border-zinc-900 bg-zinc-950 hover:border-zinc-800 hover:bg-zinc-900/70"
                           }`}
                         >
-                          <div className="flex items-start gap-3">
-                            <StatusIcon status={session.status} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-3">
-                                <p className="truncate text-sm font-medium text-zinc-100">
-                                  {session.title || session.id}
-                                </p>
-                                <span className="shrink-0 text-xs text-zinc-500">
-                                  {formatRelativeTime(session.createdAt, now)}
-                                </span>
-                              </div>
-                              <div className="mt-2 flex items-center gap-2">
-                                <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-300">
-                                  {session.backend}
-                                </span>
-                                <span className="text-xs capitalize text-zinc-500">{session.status}</span>
-                              </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="truncate text-sm font-medium text-zinc-100">
+                                {session.title || session.id}
+                              </p>
+                              <span className="shrink-0 text-xs text-zinc-500">
+                                {formatRelativeTime(session.createdAt, now)}
+                              </span>
+                            </div>
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-300">
+                                {session.backend}
+                              </span>
+                              <StatusPill status={session.status} />
                             </div>
                           </div>
                         </button>
@@ -152,14 +149,26 @@ function matchesQuery(session: SessionSummary, query: string): boolean {
   return haystack.includes(query);
 }
 
-function StatusIcon({ status }: { status: SessionSummary["status"] }) {
-  if (status === "completed") {
-    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />;
-  }
+const STATUS_CONFIG: Record<
+  SessionSummary["status"],
+  { dotClass: string; label?: string }
+> = {
+  running: { dotClass: "bg-emerald-400 animate-pulse", label: "Running" },
+  queued: { dotClass: "bg-sky-400 animate-pulse", label: "Queued" },
+  preparing: { dotClass: "bg-sky-400 animate-pulse", label: "Preparing" },
+  completed: { dotClass: "bg-zinc-500" },
+  failed: { dotClass: "bg-red-400", label: "Failed" },
+  cancelled: { dotClass: "bg-amber-400" },
+};
 
-  if (status === "failed" || status === "cancelled") {
-    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />;
-  }
-
-  return <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-sky-400" />;
+function StatusPill({ status }: { status: SessionSummary["status"] }) {
+  const config = STATUS_CONFIG[status] ?? { dotClass: "bg-zinc-500" };
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${config.dotClass}`} />
+      {config.label && (
+        <span className="text-[11px] text-zinc-400">{config.label}</span>
+      )}
+    </span>
+  );
 }
