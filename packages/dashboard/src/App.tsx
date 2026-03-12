@@ -2,6 +2,7 @@
 import type { OrchestrationEvent, SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
@@ -34,10 +35,12 @@ function getDaemonUrl(): string {
 
 const DEFAULT_DAEMON_URL = getDaemonUrl();
 
-export function App() {
-  const transportRef = useRef<WsTransport | null>(null);
+interface AppShellProps {
+  transport: WsTransport;
+}
+
+function AppShell({ transport }: AppShellProps) {
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
-  const transport = transportRef.current ?? (transportRef.current = new WsTransport(DEFAULT_DAEMON_URL));
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const sessions = useSessionStore((state) => state.sessions);
   const selectedId = useSessionStore((state) => state.selectedId);
@@ -176,5 +179,20 @@ export function App() {
         <StatusBar sessionCount={sessions.length} />
       </div>
     </TransportContext.Provider>
+  );
+}
+
+export function App() {
+  const transportRef = useRef<WsTransport | null>(null);
+  const transport = transportRef.current ?? (transportRef.current = new WsTransport(DEFAULT_DAEMON_URL));
+
+  const reportError = (report: ClientErrorReport) => {
+    return transport.request("reportClientError", report).catch(() => undefined);
+  };
+
+  return (
+    <ErrorBoundary reportError={reportError}>
+      <AppShell transport={transport} />
+    </ErrorBoundary>
   );
 }
