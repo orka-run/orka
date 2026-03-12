@@ -203,13 +203,16 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
     if (event.type === "item.started") {
       if (completedItemIds.has(event.itemId)) continue;
       flushAssistant();
+      const title = event.title ?? event.itemType;
+      const detail = event.detail ?? "";
+      const summary = detail && detail !== title ? detail : "In progress…";
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
-        title: event.title ?? event.itemType,
-        summary: event.detail ?? "In progress…",
+        title,
+        summary,
         icon: itemIcon(event.itemType),
-        details: event.detail ? [event.detail] : [],
+        details: detail && detail !== title ? [detail] : [],
         inProgress: true,
       });
       continue;
@@ -218,13 +221,17 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
     // item.completed: add as tool entry (replaces started)
     if (event.type === "item.completed") {
       flushAssistant();
+      const title = event.title ?? event.itemType;
+      const detail = event.detail ?? "";
+      // Avoid repeating the same text in title and summary
+      const summary = detail && detail !== title ? detail : "Completed";
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
-        title: event.title ?? event.itemType,
-        summary: event.detail ?? "Completed",
+        title,
+        summary,
         icon: itemIcon(event.itemType),
-        details: event.detail ? [event.detail] : [],
+        details: detail && detail !== title ? [detail] : [],
       });
       continue;
     }
@@ -614,15 +621,13 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
 
   if (entry.type === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="flex max-w-3xl items-start gap-3">
-          <div className="rounded-2xl rounded-tr-md border border-sky-900 bg-zinc-900 px-4 py-3 text-right">
-            <MarkdownContent content={entry.body} />
-            <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
-          </div>
-          <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-indigo-300">
-            <User className="h-4 w-4" />
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
+          <User className="h-4 w-4" />
+        </div>
+        <div className="max-w-3xl rounded-2xl rounded-tl-md border border-indigo-900/50 bg-zinc-900 px-4 py-3">
+          <MarkdownContent content={entry.body} />
+          <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
         </div>
       </div>
     );
@@ -631,30 +636,22 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
   if (entry.type === "tool-group") {
     const hasInProgress = entry.tools.some((t) => t.inProgress);
 
-    // Single tool: compact card without outer collapsible wrapper
+    // Single tool: flat card, no collapsible wrapper
     if (entry.tools.length === 1) {
       const tool = entry.tools[0]!;
       return (
-        <details className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70">
-          <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
-              {tool.inProgress ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              ) : tool.icon === "command" ? (
-                <TerminalSquare className="h-3.5 w-3.5" />
-              ) : (
-                <FileCode2 className="h-3.5 w-3.5" />
-              )}
-            </div>
-            <span className="min-w-0 truncate text-sm font-medium text-zinc-300">{tool.title}</span>
-            <span className="ml-auto shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
-          </summary>
-          {tool.details.length > 0 ? (
-            <div className="border-t border-zinc-800 px-4 py-2">
-              <ToolCallDetails title={tool.title} details={tool.details} />
-            </div>
-          ) : null}
-        </details>
+        <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-2.5">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
+            {tool.inProgress ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : tool.icon === "command" ? (
+              <TerminalSquare className="h-3.5 w-3.5" />
+            ) : (
+              <FileCode2 className="h-3.5 w-3.5" />
+            )}
+          </div>
+          <span className="min-w-0 truncate text-sm text-zinc-300">{tool.title}</span>
+        </div>
       );
     }
 

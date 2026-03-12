@@ -50,7 +50,7 @@ function formatTokenCount(count: number): string {
 }
 
 export function SessionView({ sessionId, transport, onSelectionLoadSettled }: SessionViewProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "chat" | "logs" | "diff">("logs");
+  const [activeTab, setActiveTab] = useState<"overview" | "chat" | "logs" | "diff">("chat");
   const [isStopping, setIsStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const notifiedSessionRef = useRef<string | null>(null);
