@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, Wrench } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
+import { ToolCallDetails } from "./ToolCallDetails";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
@@ -423,13 +424,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
             <Wrench className="h-3.5 w-3.5" />
             Tool Activity
           </div>
-          <div className="space-y-2">
-            {entry.details.map((detail, index) => (
-              <div key={`${entry.id}-${index}`} className="rounded-lg bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-300">
-                {detail}
-              </div>
-            ))}
-          </div>
+          <ToolCallDetails title={entry.title} details={entry.details} />
         </div>
       </details>
     );
