@@ -125,7 +125,7 @@ export function DevOverlay() {
   const { recent, stats, totalCount } = useRpcLatency();
   const connectionState = useConnectionStore((state) => state.status);
   const [isEnabled, setIsEnabled] = useState(() =>
-    readStoredBoolean(OVERLAY_ENABLED_STORAGE_KEY, import.meta.env.DEV),
+    readStoredBoolean(OVERLAY_ENABLED_STORAGE_KEY, !!import.meta.env["DEV"]),
   );
   const [isCollapsed, setIsCollapsed] = useState(() =>
     readStoredBoolean(OVERLAY_COLLAPSED_STORAGE_KEY, false),

@@ -211,8 +211,8 @@ export function App() {
   const transportRef = useRef<WsTransport | null>(null);
   const transport = transportRef.current ?? (transportRef.current = new WsTransport(DEFAULT_DAEMON_URL));
 
-  const reportError = (report: ClientErrorReport) => {
-    return transport.request("reportClientError", report).catch(() => undefined);
+  const reportError = async (report: ClientErrorReport): Promise<void> => {
+    await transport.request("reportClientError", report).catch(() => undefined);
   };
 
   return (

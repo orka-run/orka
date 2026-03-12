@@ -98,7 +98,7 @@ export function MarkdownContent({ content }: MarkdownContentProps) {
               {children}
             </pre>
           ),
-          code: MarkdownCode,
+          code: MarkdownCode as never,
         }}
       >
         {content}

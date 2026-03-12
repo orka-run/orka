@@ -5,7 +5,7 @@ import { AlertTriangle, RefreshCcw, RotateCw } from "lucide-react";
 import { getTracer } from "../lib/tracing";
 
 const AUTO_DISMISS_MS = 10_000;
-const IS_DEV = import.meta.env.DEV;
+const IS_DEV = !!import.meta.env["DEV"];
 
 export interface ClientErrorReport {
   error: string;
@@ -60,12 +60,14 @@ function getErrorObject(error: unknown): Error {
 }
 
 function createReport(error: Error, details?: string | null): ClientErrorReport {
-  return {
+  const stack = details ?? error.stack;
+  const report: ClientErrorReport = {
     error: error.message || error.name,
-    stack: details ?? error.stack,
     url: window.location.href,
     timestamp: new Date().toISOString(),
   };
+  if (stack) report.stack = stack;
+  return report;
 }
 
 function recordErrorSpan(error: Error, source: string, details?: string | null): void {
@@ -87,13 +89,13 @@ function recordErrorSpan(error: Error, source: string, details?: string | null):
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
+  override state: ErrorBoundaryState = {
     banner: null,
     error: null,
     errorDetails: null,
   };
 
-  private bannerTimeout: ReturnType<typeof setTimeout> | null = null;
+  private bannerTimeout: number | null = null;
   private nextBannerId = 0;
 
   static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
@@ -103,23 +105,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     };
   }
 
-  componentDidMount(): void {
+  override componentDidMount(): void {
     window.addEventListener("unhandledrejection", this.handleUnhandledRejection);
   }
 
-  componentWillUnmount(): void {
+  override componentWillUnmount(): void {
     window.removeEventListener("unhandledrejection", this.handleUnhandledRejection);
     this.clearBannerTimeout();
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    const errorDetails = getErrorDetails(error, errorInfo.componentStack);
+  override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    const errorDetails = getErrorDetails(error, errorInfo.componentStack ?? undefined);
     this.setState({ errorDetails });
     recordErrorSpan(error, "react.error_boundary", errorDetails);
     this.reportError(createReport(error, errorDetails));
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     const { banner, error, errorDetails } = this.state;
 
     return (

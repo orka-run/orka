@@ -13,8 +13,5 @@
     "declarationMap": false
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts"],
-  "references": [
-    { "path": "../core" }
-  ]
+  "exclude": ["src/**/*.test.ts"]
 }
