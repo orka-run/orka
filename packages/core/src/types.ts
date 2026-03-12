@@ -89,6 +89,14 @@ export interface SessionProjection {
   totalActiveDurationMs: number | null;
 }
 
+// --- Chat Entries ---
+
+export type ChatEntry =
+  | { kind: "system"; timestamp: string; title: string; body?: string }
+  | { kind: "assistant"; timestamp: string; body: string }
+  | { kind: "tool"; timestamp: string; title: string; summary: string; icon: "command" | "file"; details?: string[] }
+  | { kind: "error"; timestamp: string; title: string; body: string };
+
 // --- Spawn Request ---
 
 export const ReasoningEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]);

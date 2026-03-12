@@ -1,4 +1,4 @@
-import type { Session, SessionStatus, SpawnRequest, Task } from "./types";
+import type { ChatEntry, Session, SessionStatus, SpawnRequest, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -99,6 +99,7 @@ export interface OrkaService {
   // --- Session output ---
   getResult(sessionId: string): Promise<SessionResult | null>;
   getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]>;
+  getChatMessages(sessionId: string): Promise<ChatEntry[]>;
   getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary>;
   captureOutput(sessionId: string): Promise<string>;
   getLogContent(sessionId: string): Promise<string | null>;

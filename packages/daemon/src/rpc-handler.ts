@@ -135,6 +135,8 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             return svc.getResult(params.sessionId);
           case "getSessionTimeline":
             return svc.getSessionTimeline(params.sessionId);
+          case "getChatMessages":
+            return svc.getChatMessages(params.sessionId);
           case "getUsage":
             return svc.getUsage(params);
           case "captureOutput":

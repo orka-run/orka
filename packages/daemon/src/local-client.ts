@@ -2,6 +2,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import type {
+  ChatEntry,
   OrchestrationEvent,
   OrkaService,
   SessionFilters,
@@ -118,6 +119,11 @@ class LocalClient implements OrkaService {
 
   async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
     return getOrchestrationEvents(sessionId);
+  }
+
+  async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
+    const events = getOrchestrationEvents(sessionId);
+    return eventsToChat(events);
   }
 
   async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {
@@ -455,4 +461,143 @@ function getProviderOutputForLastTurn(events: OrchestrationEvent[], turnId?: str
     )
     .map((event) => event.delta)
     .join("");
+}
+
+export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
+  const entries: ChatEntry[] = [];
+  const deltasByTurn = new Map<string, { deltas: string[]; timestamp: string }>();
+
+  for (const event of events) {
+    switch (event.type) {
+      case "session.created":
+        entries.push({
+          kind: "system",
+          timestamp: event.timestamp,
+          title: "Session created",
+          body: `Backend: ${event.backend}`,
+        });
+        break;
+
+      case "session.started":
+        entries.push({
+          kind: "system",
+          timestamp: event.timestamp,
+          title: "Session started",
+        });
+        break;
+
+      case "session.completed":
+        entries.push({
+          kind: "system",
+          timestamp: event.timestamp,
+          title: "Session completed",
+          body: event.exitCode != null ? `Exit code: ${String(event.exitCode)}` : undefined,
+        });
+        break;
+
+      case "session.failed":
+        entries.push({
+          kind: "error",
+          timestamp: event.timestamp,
+          title: "Session failed",
+          body: event.error,
+        });
+        break;
+
+      case "session.cancelled":
+        entries.push({
+          kind: "system",
+          timestamp: event.timestamp,
+          title: "Session cancelled",
+          body: event.reason,
+        });
+        break;
+
+      case "turn.started":
+        entries.push({
+          kind: "system",
+          timestamp: event.timestamp,
+          title: "Turn started",
+        });
+        break;
+
+      case "turn.completed": {
+        const parts: string[] = [];
+        if (event.tokens) {
+          parts.push(`Tokens: ${String(event.tokens.input)} in / ${String(event.tokens.output)} out`);
+        }
+        if (event.cost != null) {
+          parts.push(`Cost: $${event.cost.toFixed(4)}`);
+        }
+        entries.push({
+          kind: "system",
+          timestamp: event.timestamp,
+          title: "Turn completed",
+          body: parts.length > 0 ? parts.join(" · ") : undefined,
+        });
+        break;
+      }
+
+      case "content.delta": {
+        let bucket = deltasByTurn.get(event.turnId);
+        if (!bucket) {
+          bucket = { deltas: [], timestamp: event.timestamp };
+          deltasByTurn.set(event.turnId, bucket);
+        }
+        bucket.deltas.push(event.delta);
+        break;
+      }
+
+      case "item.started": {
+        const icon: ChatEntry extends infer T ? T extends { kind: "tool" } ? T["icon"] : never : never =
+          event.itemType === "file_change" ? "file" : "command";
+        entries.push({
+          kind: "tool",
+          timestamp: event.timestamp,
+          title: event.title ?? event.itemType,
+          summary: event.detail ?? "",
+          icon,
+          details: event.detail ? [event.detail] : undefined,
+        });
+        break;
+      }
+
+      case "item.completed": {
+        const icon2: "command" | "file" = event.itemType === "file_change" ? "file" : "command";
+        entries.push({
+          kind: "tool",
+          timestamp: event.timestamp,
+          title: event.title ?? `${event.itemType} completed`,
+          summary: event.status ?? "done",
+          icon: icon2,
+          details: event.detail ? [event.detail] : undefined,
+        });
+        break;
+      }
+
+      case "runtime.error":
+        entries.push({
+          kind: "error",
+          timestamp: event.timestamp,
+          title: event.class ?? "Runtime error",
+          body: event.error,
+        });
+        break;
+    }
+  }
+
+  // Flush accumulated content deltas as assistant entries
+  for (const [, bucket] of deltasByTurn) {
+    const body = bucket.deltas.join("");
+    if (body.trim()) {
+      entries.push({
+        kind: "assistant",
+        timestamp: bucket.timestamp,
+        body,
+      });
+    }
+  }
+
+  entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  return entries;
 }

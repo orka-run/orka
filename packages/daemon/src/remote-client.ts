@@ -1,4 +1,5 @@
 import type {
+  ChatEntry,
   OrchestrationEvent,
   OrkaService,
   Session,
@@ -224,6 +225,10 @@ class RemoteClient implements OrkaService {
 
   async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
     return this.call("getSessionTimeline", { sessionId });
+  }
+
+  async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
+    return this.call("getChatMessages", { sessionId });
   }
 
   async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {

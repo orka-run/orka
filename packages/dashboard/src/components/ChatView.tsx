@@ -1,41 +1,12 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useRef } from "react";
 import { AlertTriangle, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, Wrench } from "lucide-react";
+import type { ChatEntry } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
 
-type ChatEntry =
-  | {
-      id: string;
-      type: "system";
-      timestamp: string;
-      title: string;
-      body: string;
-    }
-  | {
-      id: string;
-      type: "assistant";
-      timestamp: string;
-      body: string;
-    }
-  | {
-      id: string;
-      type: "tool";
-      timestamp: string;
-      title: string;
-      summary: string;
-      icon: "command" | "file";
-      details: string[];
-      defaultOpen?: boolean;
-    }
-  | {
-      id: string;
-      type: "error";
-      timestamp: string;
-      title: string;
-      body: string;
-    };
+type UIChatEntry = ChatEntry & { id: string; defaultOpen?: boolean };
 
 interface ChatViewProps {
   sessionId: string;
@@ -92,8 +63,8 @@ export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
   );
 }
 
-function TimelineEntry({ entry }: { entry: ChatEntry }) {
-  if (entry.type === "assistant") {
+function TimelineEntry({ entry }: { entry: UIChatEntry }) {
+  if (entry.kind === "assistant") {
     return (
       <div className="flex items-start gap-3">
         <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
@@ -107,7 +78,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
     );
   }
 
-  if (entry.type === "tool") {
+  if (entry.kind === "tool") {
     return (
       <details
         open={entry.defaultOpen}
@@ -131,8 +102,8 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
             Tool Activity
           </div>
           <div className="space-y-2">
-            {entry.details.map((detail, index) => (
-              <div key={`${entry.id}-${index}`} className="rounded-lg bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-300">
+            {(entry.details ?? []).map((detail, index) => (
+              <div key={`${entry.id}-${String(index)}`} className="rounded-lg bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-300">
                 {detail}
               </div>
             ))}
@@ -142,7 +113,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
     );
   }
 
-  if (entry.type === "error") {
+  if (entry.kind === "error") {
     return (
       <div className="rounded-xl border border-red-950 bg-red-950/30 px-4 py-4">
         <div className="flex items-center gap-2 text-red-200">
@@ -155,12 +126,13 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
     );
   }
 
+  // system entry
   return (
     <div className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
       <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
       <div>
         <p className="text-sm font-medium text-zinc-100">{entry.title}</p>
-        <p className="mt-1 text-sm text-zinc-400">{entry.body}</p>
+        {entry.body ? <p className="mt-1 text-sm text-zinc-400">{entry.body}</p> : null}
         <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
       </div>
     </div>
@@ -169,7 +141,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
 
 function buildMockEntries(
   session: SessionSummary | null,
-): ChatEntry[] {
+): UIChatEntry[] {
   if (!session) {
     return [];
   }
@@ -177,23 +149,23 @@ function buildMockEntries(
   const firstTimestamp = session.startedAt ?? session.createdAt;
   const secondTimestamp = offsetTimestamp(firstTimestamp, 45);
   const thirdTimestamp = offsetTimestamp(firstTimestamp, 130);
-  const entries: ChatEntry[] = [
+  const entries: UIChatEntry[] = [
     {
       id: `${session.id}-started`,
-      type: "system",
+      kind: "system",
       timestamp: firstTimestamp,
       title: "Session started",
       body: `${session.backend} session booted in ${session.mode} mode for ${session.projectPath}.`,
     },
     {
       id: `${session.id}-assistant-1`,
-      type: "assistant",
+      kind: "assistant",
       timestamp: secondTimestamp,
       body: `Starting work on "${session.title}". I am collecting context, reviewing changed files, and outlining the next implementation step.`,
     },
     {
       id: `${session.id}-tool-command`,
-      type: "tool",
+      kind: "tool",
       timestamp: secondTimestamp,
       title: "Command execution",
       summary: "Repository inspection and dependency checks",
@@ -207,7 +179,7 @@ function buildMockEntries(
     },
     {
       id: `${session.id}-tool-file`,
-      type: "tool",
+      kind: "tool",
       timestamp: thirdTimestamp,
       title: "File changes",
       summary: "Updated dashboard layout, session navigation, and timeline placeholders",
@@ -223,7 +195,7 @@ function buildMockEntries(
   if (session.status === "failed" || session.status === "cancelled") {
     entries.push({
       id: `${session.id}-error`,
-      type: "error",
+      kind: "error",
       timestamp: session.finishedAt ?? offsetTimestamp(thirdTimestamp, 90),
       title: session.status === "cancelled" ? "Session cancelled" : "Session failed",
       body: "The runtime stopped before the task completed. Full provider event streaming will replace this placeholder once available.",
@@ -234,7 +206,7 @@ function buildMockEntries(
   if (session.status === "completed") {
     entries.push({
       id: `${session.id}-completed`,
-      type: "system",
+      kind: "system",
       timestamp: session.finishedAt ?? offsetTimestamp(thirdTimestamp, 90),
       title: "Session completed",
       body: "The agent finished cleanly. Diff output and final result are available in the adjacent tabs.",
