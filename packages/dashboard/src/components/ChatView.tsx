@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, Wrench } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
+import { MarkdownContent } from "./MarkdownContent";
 import { ToolCallDetails } from "./ToolCallDetails";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
@@ -394,7 +395,7 @@ function TimelineEntry({ entry }: { entry: ChatEntry }) {
           <Bot className="h-4 w-4" />
         </div>
         <div className="max-w-3xl rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-900 px-4 py-3">
-          <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-100">{entry.body}</p>
+          <MarkdownContent content={entry.body} />
           <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
         </div>
       </div>

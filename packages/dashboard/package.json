@@ -17,9 +17,13 @@
     "@orka/core": "workspace:*",
     "@tanstack/react-query": "^5.90.0",
     "@tanstack/react-router": "^1.160.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^0.500.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
