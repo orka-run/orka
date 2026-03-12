@@ -2,6 +2,7 @@ import { $ } from "bun";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { getOrkaHome } from "./db";
+import { getConfig } from "./config";
 import { withSpan } from "./tracing";
 
 export interface WorktreeInfo {
@@ -49,8 +50,39 @@ export async function worktreeCreate(
       await $`git -C ${repoPath} worktree add -b ${autoBranch} ${wtPath}`.quiet();
     }
 
+    await runPostCreateHook(wtPath, sessionSlug);
+
     return wtPath;
   });
+}
+
+async function runPostCreateHook(wtPath: string, sessionSlug: string): Promise<void> {
+  const hookCommand = getConfig().hooks.postWorktreeCreate.trim();
+  if (!hookCommand) {
+    return;
+  }
+
+  try {
+    await withSpan("orka.worktree.post_create_hook", {
+      "orka.session.id": sessionSlug,
+      "orka.command": hookCommand,
+      "orka.worktree.path": wtPath,
+    }, async (span) => {
+      const proc = Bun.spawn(["bash", "-c", hookCommand], {
+        cwd: wtPath,
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      const exitCode = await proc.exited;
+      span.setAttribute("orka.exit_code", exitCode);
+
+      if (exitCode !== 0) {
+        console.warn(`Post-worktree-create hook failed for ${sessionSlug} with exit code ${exitCode}: ${hookCommand}`);
+      }
+    });
+  } catch (error) {
+    console.warn(`Post-worktree-create hook errored for ${sessionSlug}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /** Remove a git worktree. */

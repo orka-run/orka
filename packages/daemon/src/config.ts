@@ -19,10 +19,15 @@ const ProvidersSchema = z.object({
   useRuntime: z.boolean().default(true),
 });
 
+const HooksSchema = z.object({
+  postWorktreeCreate: z.string().default(""),
+});
+
 export const ConfigSchema = z.object({
   defaults: DefaultsSchema.default(DefaultsSchema.parse({})),
   limits: LimitsSchema.default(LimitsSchema.parse({})),
   providers: ProvidersSchema.default(ProvidersSchema.parse({})),
+  hooks: HooksSchema.default(HooksSchema.parse({})),
 });
 
 export type OrkaConfig = z.infer<typeof ConfigSchema>;
@@ -51,6 +56,10 @@ export function getConfig(): OrkaConfig {
         providers:
           toml.providers?.use_runtime !== undefined
             ? { useRuntime: toml.providers.use_runtime === "true" || toml.providers.use_runtime === "1" }
+            : undefined,
+        hooks:
+          toml.hooks?.post_worktree_create !== undefined
+            ? { postWorktreeCreate: toml.hooks.post_worktree_create }
             : undefined,
       });
     } catch {
