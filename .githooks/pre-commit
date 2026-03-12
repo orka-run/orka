@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Typecheck the whole project (fast — incremental via tsc cache)
+echo "[pre-commit] Running typecheck..."
+bun run typecheck
+
+# Lint only staged .ts/.tsx files for speed
+STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' '*.tsx')
+if [ -n "$STAGED" ]; then
+  echo "[pre-commit] Linting staged files..."
+  # shellcheck disable=SC2086
+  bunx eslint $STAGED
+fi
