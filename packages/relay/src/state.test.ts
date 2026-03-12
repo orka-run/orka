@@ -246,8 +246,8 @@ describe("RelayState", () => {
 
       const nodes = state.getAccountNodes("acc-1");
       expect(nodes.length).toBe(2);
-      expect(nodes[0].id).toBe("node-1");
-      expect(nodes[0].activeRequests).toBe(0);
+      expect(nodes[0]?.id).toBe("node-1");
+      expect(nodes[0]?.activeRequests).toBe(0);
     });
 
     test("getAccountNodes returns empty for unknown account", () => {

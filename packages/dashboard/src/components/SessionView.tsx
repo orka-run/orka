@@ -29,7 +29,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
 const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
 
 function StatusBadge({ status }: { status: string }) {
-  const colors = STATUS_COLORS[status] ?? STATUS_COLORS.cancelled!;
+  const colors = STATUS_COLORS[status] ?? STATUS_COLORS["cancelled"]!;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${colors.bg} ${colors.text}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${colors.dot}`} />
@@ -79,7 +79,8 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
     );
   }
 
-  const isStoppable = ACTIVE_STATUSES.has(session.status);
+  const activeSession = session;
+  const isStoppable = ACTIVE_STATUSES.has(activeSession.status);
 
   async function handleStopSession() {
     if (!isStoppable || isStopping) {
@@ -93,11 +94,11 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
       await withDashboardSpan(
         "orka.dashboard.session.stop",
         {
-          "orka.session.id": session.id,
+          "orka.session.id": activeSession.id,
         },
         async (span) => {
           span.addEvent("session.stop_clicked");
-          await stopSession(transport, session.id);
+          await stopSession(transport, activeSession.id);
           span.addEvent("session.stop_confirmed");
         },
       );
@@ -113,7 +114,7 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
       <header className="border-b border-zinc-800 px-6 py-3">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-lg font-semibold text-zinc-100">{session.title}</p>
+            <p className="text-lg font-semibold text-zinc-100">{activeSession.title}</p>
             <p className="mt-1 text-sm font-mono text-zinc-500">{sessionId}</p>
           </div>
           <div className="flex items-center gap-3">

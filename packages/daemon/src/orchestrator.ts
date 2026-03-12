@@ -37,7 +37,8 @@ function parseExitCode(logFile: string): number | undefined {
   const tail = lines.slice(-20);
   for (const line of tail) {
     const match = line.match(/\[orka\] exit_code=(\d+)/);
-    if (match) return parseInt(match[1], 10);
+    const exitCode = match?.[1];
+    if (exitCode) return parseInt(exitCode, 10);
   }
   return undefined;
 }
@@ -143,8 +144,8 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       const handle = await providerService.startSession(req.backend, {
         threadId: sessionId,
         cwd: workingDir,
-        model: req.model,
-        reasoningEffort: req.reasoningEffort,
+        ...(req.model ? { model: req.model } : {}),
+        ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
         prompt: req.prompt,
         systemPrompt: req.systemPrompt,
         allowedTools: req.allowedTools,
@@ -186,8 +187,8 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, {
       logFile,
       sessionId,
-      model: req.model,
-      reasoningEffort: req.reasoningEffort,
+      ...(req.model ? { model: req.model } : {}),
+      ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
       projectPath,
       systemPrompt: req.systemPrompt,
       allowedTools: req.allowedTools,
@@ -198,7 +199,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     const scriptsDir = join(getOrkaHome(), "scripts");
     mkdirSync(scriptsDir, { recursive: true });
     const scriptPath = join(scriptsDir, `${sessionId}.sh`);
-    const daemonPort = process.env.ORKA_DAEMON_PORT ?? "7394";
+    const daemonPort = process.env["ORKA_DAEMON_PORT"] ?? "7394";
     writeFileSync(scriptPath, [
       `#!/usr/bin/env bash`,
       ...buildEnvExports(req.env),

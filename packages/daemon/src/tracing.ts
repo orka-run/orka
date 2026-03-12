@@ -90,7 +90,7 @@ export function serializeReadableSpan(span: ReadableSpan): TraceLogEntry {
   return {
     traceId: span.spanContext().traceId,
     spanId: span.spanContext().spanId,
-    parentSpanId: span.parentSpanContext?.spanId,
+    ...(span.parentSpanContext?.spanId ? { parentSpanId: span.parentSpanContext.spanId } : {}),
     name: span.name,
     kind: span.kind,
     startTime,
@@ -101,7 +101,7 @@ export function serializeReadableSpan(span: ReadableSpan): TraceLogEntry {
     resourceAttributes: attributesToJson(span.resource.attributes),
     instrumentationScope: {
       name: span.instrumentationScope.name,
-      version: span.instrumentationScope.version,
+      ...(span.instrumentationScope.version ? { version: span.instrumentationScope.version } : {}),
     },
     events: span.events.map((event) => ({
       name: event.name,
@@ -204,7 +204,7 @@ export function initTracing(options: TracingInitOptions = {}): void {
     processors.push(new SimpleSpanProcessor(fileExporter));
   }
 
-  if (process.env.ORKA_TRACE === "console") {
+  if (process.env["ORKA_TRACE"] === "console") {
     processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   }
 
@@ -336,10 +336,9 @@ function attributesToJson(attributes: Attributes | undefined): Record<string, un
     return {};
   }
 
+  const entries = Object.entries(attributes).filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined);
   return Object.fromEntries(
-    Object.entries(attributes)
-      .filter(([, value]) => value !== undefined)
-      .map(([key, value]) => [key, attributeValueToJson(value)]),
+    entries.map(([key, value]) => [key, attributeValueToJson(value)]),
   );
 }
 
@@ -349,7 +348,7 @@ function attributesToOtlp(attributes: Attributes | undefined): Array<Record<stri
   }
 
   return Object.entries(attributes)
-    .filter(([, value]) => value !== undefined)
+    .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined)
     .map(([key, value]) => ({
       key,
       value: attributeValueToOtlp(value),
@@ -358,7 +357,7 @@ function attributesToOtlp(attributes: Attributes | undefined): Array<Record<stri
 
 function attributeValueToJson(value: AttributeValue): unknown {
   if (Array.isArray(value)) {
-    return value.map(attributeValueToJson);
+    return value.filter((entry): entry is string | number | boolean => entry !== undefined && entry !== null);
   }
   return value;
 }
@@ -367,7 +366,9 @@ function attributeValueToOtlp(value: AttributeValue): Record<string, unknown> {
   if (Array.isArray(value)) {
     return {
       arrayValue: {
-        values: value.map(attributeValueToOtlp),
+        values: value
+          .filter((entry): entry is string | number | boolean => entry !== undefined && entry !== null)
+          .map(attributeArrayValueToOtlp),
       },
     };
   }
@@ -384,6 +385,19 @@ function attributeValueToOtlp(value: AttributeValue): Record<string, unknown> {
     return { doubleValue: value };
   }
   return { stringValue: String(value) };
+}
+
+function attributeArrayValueToOtlp(value: string | number | boolean): Record<string, unknown> {
+  if (typeof value === "string") {
+    return { stringValue: value };
+  }
+  if (typeof value === "boolean") {
+    return { boolValue: value };
+  }
+  if (Number.isInteger(value)) {
+    return { intValue: String(value) };
+  }
+  return { doubleValue: value };
 }
 
 function parseOtlpJsonTraceEntries(payload: unknown): TraceLogEntry[] {
@@ -433,38 +447,42 @@ function parseOtlpJsonTraceEntries(payload: unknown): TraceLogEntry[] {
         }
 
         const spanRecord = span as Record<string, unknown>;
-        const startTime = unixNanosToMs(spanRecord.startTimeUnixNano);
-        const endTime = unixNanosToMs(spanRecord.endTimeUnixNano);
-        const status = spanRecord.status && typeof spanRecord.status === "object"
-          ? spanRecord.status as Record<string, unknown>
+        const startTime = unixNanosToMs(spanRecord["startTimeUnixNano"]);
+        const endTime = unixNanosToMs(spanRecord["endTimeUnixNano"]);
+        const status = spanRecord["status"] && typeof spanRecord["status"] === "object"
+          ? spanRecord["status"] as Record<string, unknown>
           : {};
+        const scopeName = typeof scope?.name === "string" ? scope.name : undefined;
+        const scopeVersion = typeof scope?.version === "string" ? scope.version : undefined;
+
+        const statusCode = parseStatusCode(status["code"]);
 
         entries.push({
-          traceId: typeof spanRecord.traceId === "string" ? spanRecord.traceId : "",
-          spanId: typeof spanRecord.spanId === "string" ? spanRecord.spanId : "",
-          parentSpanId: typeof spanRecord.parentSpanId === "string" ? spanRecord.parentSpanId : undefined,
-          name: typeof spanRecord.name === "string" ? spanRecord.name : "unknown",
-          kind: typeof spanRecord.kind === "number" ? spanRecord.kind : 0,
+          traceId: typeof spanRecord["traceId"] === "string" ? spanRecord["traceId"] : "",
+          spanId: typeof spanRecord["spanId"] === "string" ? spanRecord["spanId"] : "",
+          ...(typeof spanRecord["parentSpanId"] === "string" ? { parentSpanId: spanRecord["parentSpanId"] } : {}),
+          name: typeof spanRecord["name"] === "string" ? spanRecord["name"] : "unknown",
+          kind: typeof spanRecord["kind"] === "number" ? spanRecord["kind"] : 0,
           startTime,
           endTime,
           durationMs: Math.max(0, endTime - startTime),
           status: {
-            code: parseStatusCode(status.code),
-            message: typeof status.message === "string" ? status.message : undefined,
+            ...(statusCode !== undefined ? { code: statusCode } : {}),
+            ...(typeof status["message"] === "string" ? { message: status["message"] } : {}),
           },
-          attributes: otlpAttributesToJson(spanRecord.attributes),
+          attributes: otlpAttributesToJson(spanRecord["attributes"]),
           resourceAttributes,
           instrumentationScope: {
-            name: typeof scope?.name === "string" ? scope.name : undefined,
-            version: typeof scope?.version === "string" ? scope.version : undefined,
+            ...(scopeName ? { name: scopeName } : {}),
+            ...(scopeVersion ? { version: scopeVersion } : {}),
           },
-          events: Array.isArray(spanRecord.events)
-            ? spanRecord.events
+          events: Array.isArray(spanRecord["events"])
+            ? spanRecord["events"]
                 .filter((event): event is Record<string, unknown> => !!event && typeof event === "object")
                 .map((event) => ({
-                  name: typeof event.name === "string" ? event.name : "event",
-                  time: unixNanosToMs(event.timeUnixNano),
-                  attributes: otlpAttributesToJson(event.attributes),
+                  name: typeof event["name"] === "string" ? event["name"] : "event",
+                  time: unixNanosToMs(event["timeUnixNano"]),
+                  attributes: otlpAttributesToJson(event["attributes"]),
                 }))
             : [],
         });
@@ -512,26 +530,30 @@ function otlpValueToJson(value: unknown): unknown {
 
   const record = value as Record<string, unknown>;
 
-  if (typeof record.stringValue === "string") {
-    return record.stringValue;
+  if (typeof record["stringValue"] === "string") {
+    return record["stringValue"];
   }
-  if (typeof record.boolValue === "boolean") {
-    return record.boolValue;
+  if (typeof record["boolValue"] === "boolean") {
+    return record["boolValue"];
   }
-  if (typeof record.doubleValue === "number") {
-    return record.doubleValue;
+  if (typeof record["doubleValue"] === "number") {
+    return record["doubleValue"];
   }
-  if (record.intValue !== undefined) {
-    const numeric = Number(record.intValue);
-    return Number.isFinite(numeric) ? numeric : record.intValue;
+  if (record["intValue"] !== undefined) {
+    const numeric = Number(record["intValue"]);
+    return Number.isFinite(numeric) ? numeric : record["intValue"];
   }
-  if (record.arrayValue && typeof record.arrayValue === "object" && Array.isArray((record.arrayValue as { values?: unknown }).values)) {
-    return ((record.arrayValue as { values: unknown[] }).values).map(otlpValueToJson);
+  if (
+    record["arrayValue"] &&
+    typeof record["arrayValue"] === "object" &&
+    Array.isArray((record["arrayValue"] as { values?: unknown }).values)
+  ) {
+    return ((record["arrayValue"] as { values: unknown[] }).values).map(otlpValueToJson);
   }
-  if (record.kvlistValue && typeof record.kvlistValue === "object") {
-    return otlpAttributesToJson((record.kvlistValue as { values?: unknown }).values);
+  if (record["kvlistValue"] && typeof record["kvlistValue"] === "object") {
+    return otlpAttributesToJson((record["kvlistValue"] as { values?: unknown }).values);
   }
-  return record.bytesValue ?? null;
+  return record["bytesValue"] ?? null;
 }
 
 function parseStatusCode(value: unknown): number | undefined {

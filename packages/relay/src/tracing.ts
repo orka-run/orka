@@ -67,7 +67,7 @@ class SimpleHistogram {
       count: sorted.length,
       sum,
       avg: sum / sorted.length,
-      p99: sorted[Math.floor(sorted.length * 0.99)],
+      p99: sorted[Math.floor(sorted.length * 0.99)] ?? sorted[sorted.length - 1] ?? 0,
     };
   }
 
@@ -191,7 +191,7 @@ export function initRelayTracing(opts?: { traceFile?: string }): void {
   processors.push(new SimpleSpanProcessor(new FileSpanExporter(opts?.traceFile) as any));
 
   // Console exporter when ORKA_TRACE=console
-  if (process.env.ORKA_TRACE === "console") {
+  if (process.env["ORKA_TRACE"] === "console") {
     processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   }
 

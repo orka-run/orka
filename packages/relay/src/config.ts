@@ -52,7 +52,7 @@ let _config: RelayConfig | null = null;
 export function getRelayConfig(): RelayConfig {
   if (_config) return _config;
 
-  const configPath = process.env.ORKA_RELAY_CONFIG ?? join(getRelayHome(), "config.toml");
+  const configPath = process.env["ORKA_RELAY_CONFIG"] ?? join(getRelayHome(), "config.toml");
   if (!existsSync(configPath)) {
     _config = RelayConfigSchema.parse({});
     return _config;
@@ -62,30 +62,30 @@ export function getRelayConfig(): RelayConfig {
     const raw = readFileSync(configPath, "utf-8");
     const toml = parseSimpleToml(raw);
     _config = RelayConfigSchema.parse({
-      server: parseSection(toml.server, {
+      server: parseSection(toml["server"], {
         port: "number",
         hostname: "string",
       }),
-      auth: parseSection(toml.auth, {
+      auth: parseSection(toml["auth"], {
         signup_enabled: { key: "signupEnabled", type: "boolean" },
         require_email_verification: { key: "requireEmailVerification", type: "boolean" },
         admin_token: { key: "adminToken", type: "string" },
         legacy_token: { key: "legacyToken", type: "string" },
       }),
-      rateLimits: parseSection(toml.rate_limits, {
+      rateLimits: parseSection(toml["rate_limits"], {
         default_requests_per_minute: { key: "defaultRequestsPerMinute", type: "number" },
         default_requests_per_hour: { key: "defaultRequestsPerHour", type: "number" },
         default_concurrent_connections: { key: "defaultConcurrentConnections", type: "number" },
         default_max_message_bytes: { key: "defaultMaxMessageBytes", type: "number" },
         global_requests_per_second: { key: "globalRequestsPerSecond", type: "number" },
       }),
-      abuse: parseSection(toml.abuse, {
+      abuse: parseSection(toml["abuse"], {
         max_nodes_per_account: { key: "maxNodesPerAccount", type: "number" },
         max_keys_per_account: { key: "maxKeysPerAccount", type: "number" },
         connection_rate_per_minute: { key: "connectionRatePerMinute", type: "number" },
         suspicious_pattern_window: { key: "suspiciousPatternWindow", type: "number" },
       }),
-      observability: parseSection(toml.observability, {
+      observability: parseSection(toml["observability"], {
         otlp_endpoint: { key: "otlpEndpoint", type: "string" },
         metrics_interval: { key: "metricsInterval", type: "number" },
         trace_file: { key: "traceFile", type: "string" },
@@ -110,10 +110,10 @@ type FieldSpec = "string" | "number" | "boolean" | { key: string; type: "string"
 function parseSection(
   section: Record<string, string> | undefined,
   fields: Record<string, FieldSpec>,
-): Record<string, any> | undefined {
+): Record<string, string | number | boolean> | undefined {
   if (!section) return undefined;
 
-  const result: Record<string, any> = {};
+  const result: Record<string, string | number | boolean> = {};
   for (const [tomlKey, spec] of Object.entries(fields)) {
     const value = section[tomlKey];
     if (value === undefined) continue;
@@ -146,14 +146,23 @@ function parseSimpleToml(raw: string): Record<string, Record<string, string>> {
 
     const sectionMatch = trimmed.match(/^\[(.+)]$/);
     if (sectionMatch) {
-      section = sectionMatch[1];
+      const matchedSection = sectionMatch[1];
+      if (!matchedSection) {
+        continue;
+      }
+      section = matchedSection;
       result[section] ??= {};
       continue;
     }
 
     const kvMatch = trimmed.match(/^(\w+)\s*=\s*"(.+)"$/);
     if (kvMatch && section) {
-      result[section]![kvMatch[1]] = kvMatch[2];
+      const key = kvMatch[1];
+      const value = kvMatch[2];
+      if (!key || value === undefined) {
+        continue;
+      }
+      result[section]![key] = value;
     }
   }
 

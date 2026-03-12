@@ -139,7 +139,8 @@ function findExportedAsyncClassMethods(sourceFile: ts.SourceFile): TraceTarget[]
 }
 
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
-  return node.modifiers?.some((modifier) => modifier.kind === kind) ?? false;
+  const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+  return modifiers?.some((modifier: ts.Modifier) => modifier.kind === kind) ?? false;
 }
 
 function isAsync(node: ts.Node): boolean {

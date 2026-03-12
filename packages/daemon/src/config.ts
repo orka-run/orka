@@ -47,15 +47,18 @@ export function getConfig(): OrkaConfig {
     try {
       const raw = readFileSync(configPath, "utf-8");
       const toml = parseSimpleToml(raw);
+      const defaults = toml["defaults"];
+      const limits = toml["limits"];
+      const providers = toml["providers"];
       _config = ConfigSchema.parse({
-        defaults: toml.defaults,
+        defaults,
         limits:
-          toml.limits?.max_concurrent !== undefined
-            ? { maxConcurrent: parseInt(toml.limits.max_concurrent, 10) || 0 }
+          limits?.["max_concurrent"] !== undefined
+            ? { maxConcurrent: parseInt(limits["max_concurrent"], 10) || 0 }
             : undefined,
         providers:
-          toml.providers?.use_runtime !== undefined
-            ? { useRuntime: toml.providers.use_runtime === "true" || toml.providers.use_runtime === "1" }
+          providers?.["use_runtime"] !== undefined
+            ? { useRuntime: providers["use_runtime"] === "true" || providers["use_runtime"] === "1" }
             : undefined,
         hooks:
           toml.hooks?.post_worktree_create !== undefined
@@ -85,14 +88,22 @@ function parseSimpleToml(raw: string): Record<string, Record<string, string>> {
 
     const sectionMatch = trimmed.match(/^\[(.+)]$/);
     if (sectionMatch) {
-      section = sectionMatch[1];
+      const matchedSection = sectionMatch[1];
+      if (!matchedSection) {
+        continue;
+      }
+      section = matchedSection;
       result[section] ??= {};
       continue;
     }
 
     const kvMatch = trimmed.match(/^(\w+)\s*=\s*(?:"([^"]*)"|(\S+))$/);
     if (kvMatch && section) {
-      result[section]![kvMatch[1]] = kvMatch[2] ?? kvMatch[3] ?? "";
+      const key = kvMatch[1];
+      if (!key) {
+        continue;
+      }
+      result[section]![key] = kvMatch[2] ?? kvMatch[3] ?? "";
     }
   }
 

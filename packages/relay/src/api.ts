@@ -1,6 +1,5 @@
 import { z } from "zod/v4";
 import {
-  type Account,
   getAccount,
   getAccountByEmail,
   listAccounts,
@@ -13,7 +12,7 @@ import {
   getAccountCount,
   getRateLimits,
 } from "./db";
-import { signup, generateApiKey, authenticate, extractApiKey, type AuthContext } from "./auth";
+import { signup, generateApiKey, authenticate, extractApiKey } from "./auth";
 import { insertApiKey } from "./db";
 import { getRelayConfig } from "./config";
 import type { RelayState } from "./state";
@@ -170,6 +169,9 @@ export async function handleApiRequest(
       const accountMatch = path.match(/^\/v1\/admin\/accounts\/([^/]+)$/);
       if (accountMatch && method === "PATCH") {
         const accountId = accountMatch[1];
+        if (!accountId) {
+          return error("Invalid account id", 400);
+        }
         let body: any;
         try { body = await req.json(); } catch { return error("Invalid JSON body", 400); }
 
@@ -178,7 +180,22 @@ export async function handleApiRequest(
 
         if (parsed.data.status) updateAccountStatus(accountId, parsed.data.status);
         if (parsed.data.tier) updateAccountTier(accountId, parsed.data.tier);
-        if (parsed.data.rateLimits) updateRateLimits(accountId, parsed.data.rateLimits);
+        if (parsed.data.rateLimits) {
+          updateRateLimits(accountId, {
+            ...(parsed.data.rateLimits.requestsPerMinute !== undefined
+              ? { requestsPerMinute: parsed.data.rateLimits.requestsPerMinute }
+              : {}),
+            ...(parsed.data.rateLimits.requestsPerHour !== undefined
+              ? { requestsPerHour: parsed.data.rateLimits.requestsPerHour }
+              : {}),
+            ...(parsed.data.rateLimits.concurrentConnections !== undefined
+              ? { concurrentConnections: parsed.data.rateLimits.concurrentConnections }
+              : {}),
+            ...(parsed.data.rateLimits.maxMessageBytes !== undefined
+              ? { maxMessageBytes: parsed.data.rateLimits.maxMessageBytes }
+              : {}),
+          });
+        }
 
         const updated = getAccount(accountId);
         return json({ account: updated });
@@ -257,8 +274,8 @@ export async function handleApiRequest(
       if (!parsed.success) return error("Validation error", 400);
 
       const { key: newKey, record } = generateApiKey(ctx.accountId, {
-        label: parsed.data?.label,
-        permissions: parsed.data?.permissions,
+        ...(parsed.data.label ? { label: parsed.data.label } : {}),
+        ...(parsed.data.permissions ? { permissions: parsed.data.permissions } : {}),
       });
       insertApiKey(record);
 
@@ -285,6 +302,7 @@ export async function handleApiRequest(
     const keyMatch = path.match(/^\/v1\/keys\/([^/]+)$/);
     if (keyMatch && method === "DELETE") {
       const keyId = keyMatch[1];
+      if (!keyId) return error("Invalid key id", 400);
       const revoked = revokeApiKey(keyId, ctx.accountId);
       if (!revoked) return error("Key not found", 404);
       return json({ revoked: true });

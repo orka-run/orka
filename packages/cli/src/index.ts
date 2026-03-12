@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { BackendKind, SessionMode, OrkaService } from "@orka/core";
+import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
 import { ensureKeyPair, loadKeyPair, loadPublicKey } from "@orka/core";
 import { startRelay } from "@orka/relay";
 import {
@@ -43,7 +43,7 @@ import {
 void bool;
 
 // Custom enum type that shows valid values in help text
-function enumType<T extends string>(values: readonly T[], typeName: string): Type<string, T> {
+function enumType<T extends string>(values: readonly T[]): Type<string, T> {
   return {
     ...oneOf(values),
     displayName: values.join("|"),
@@ -58,18 +58,18 @@ const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
 
 // Check for --remote and --token flags before command
 const remoteIdx = process.argv.indexOf("--remote");
-let remoteUrl = remoteIdx !== -1 ? process.argv[remoteIdx + 1] : process.env.ORKA_REMOTE;
+let remoteUrl = remoteIdx !== -1 ? process.argv[remoteIdx + 1] : process.env["ORKA_REMOTE"];
 if (remoteIdx !== -1) {
   process.argv.splice(remoteIdx, 2);
 }
 const tokenIdx = process.argv.indexOf("--token");
-let remoteToken = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : process.env.ORKA_TOKEN;
+let remoteToken = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : process.env["ORKA_TOKEN"];
 if (tokenIdx !== -1) {
   process.argv.splice(tokenIdx, 2);
 }
 // Auto-load API key: ORKA_API_KEY > ~/.orka/relay-key > --token/ORKA_TOKEN
 if (!remoteToken) {
-  remoteToken = process.env.ORKA_API_KEY ?? undefined;
+  remoteToken = process.env["ORKA_API_KEY"] ?? undefined;
   if (!remoteToken) {
     const savedKeyFile = join(getOrkaHome(), "relay-key");
     if (existsSync(savedKeyFile)) {
@@ -84,14 +84,14 @@ if (remoteUrl && remoteToken) {
 
 // E2E encryption for remote connections
 const encryptIdx = process.argv.indexOf("--encrypt");
-const useEncrypt = encryptIdx !== -1 || !!process.env.ORKA_ENCRYPT;
+const useEncrypt = encryptIdx !== -1 || !!process.env["ORKA_ENCRYPT"];
 if (encryptIdx !== -1) {
   process.argv.splice(encryptIdx, 1);
 }
 
 // Server public key for E2E (can be set via env or fetched from /health)
 const serverPubKeyIdx = process.argv.indexOf("--server-key");
-let serverPublicKey = serverPubKeyIdx !== -1 ? process.argv[serverPubKeyIdx + 1] : process.env.ORKA_SERVER_KEY;
+let serverPublicKey = serverPubKeyIdx !== -1 ? process.argv[serverPubKeyIdx + 1] : process.env["ORKA_SERVER_KEY"];
 if (serverPubKeyIdx !== -1) {
   process.argv.splice(serverPubKeyIdx, 2);
 }
@@ -116,11 +116,12 @@ function deriveTraceCollectorEndpoint(url: string): string | undefined {
 }
 
 const topLevelCommand = process.argv.slice(2).find((arg) => !arg.startsWith("-"));
+const traceCollectorEndpoint = remoteUrl ? deriveTraceCollectorEndpoint(remoteUrl) : DEFAULT_DAEMON_TRACES;
 initTracing(
   topLevelCommand === "serve"
     ? {}
     : {
-        otlpHttpEndpoint: remoteUrl ? deriveTraceCollectorEndpoint(remoteUrl) : DEFAULT_DAEMON_TRACES,
+        ...(traceCollectorEndpoint ? { otlpHttpEndpoint: traceCollectorEndpoint } : {}),
         otlpFallbackToFile: true,
       },
 );
@@ -338,10 +339,10 @@ const spawnCmd = command({
   ],
   args: {
     project: option({ type: optional(str), long: "project", short: "p", description: "Project directory or alias (default: current dir)" }),
-    backend: option({ type: optional(enumType(backendValues, "backend")), long: "backend", short: "b", description: "Agent backend (default: claude-code)" }),
+    backend: option({ type: optional(enumType(backendValues)), long: "backend", short: "b", description: "Agent backend (default: claude-code)" }),
     prompt: option({ type: optional(str), long: "prompt", description: "Task prompt (or use positional args / stdin)" }),
     promptFile: option({ type: optional(str), long: "prompt-file", description: "Read prompt from a file" }),
-    mode: option({ type: optional(enumType(modeValues, "mode")), long: "mode", short: "m", description: "Session mode (default: interactive)" }),
+    mode: option({ type: optional(enumType(modeValues)), long: "mode", short: "m", description: "Session mode (default: interactive)" }),
     model: option({ type: optional(str), long: "model", description: "Model for the backend (e.g. sonnet, opus, haiku)" }),
     branch: option({ type: optional(str), long: "branch", description: "Git branch name (creates worktree)" }),
     title: option({ type: optional(str), long: "title", description: "Session title for display in orka ps" }),
@@ -382,23 +383,24 @@ const spawnCmd = command({
 
     const allowedTools = parseAllowedTools(args.allowedTools);
     const env = parseEnvAssignments(args.env);
+    const spawnRequest: SpawnRequest = {
+      prompt,
+      projectPath: resolveProject(args.project ?? cfg.project),
+      backend: (args.backend ?? cfg.backend) as BackendKind,
+      mode: (args.mode ?? cfg.mode) as SessionMode,
+      ...(args.title ? { title: args.title } : {}),
+      ...(args.model || cfg.model ? { model: args.model || cfg.model } : {}),
+      ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort as ReasoningEffort } : {}),
+      ...(args.branch ? { branch: args.branch } : {}),
+      ...(args.autoMerge ? { autoMerge: true } : {}),
+      ...(args.tag.length > 0 ? { tags: args.tag } : {}),
+      ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
+      ...(allowedTools ? { allowedTools } : {}),
+      ...(env ? { env } : {}),
+    };
     let session;
     try {
-      session = await svc.spawn({
-        prompt,
-        title: args.title,
-        projectPath: resolveProject(args.project ?? cfg.project),
-        backend: (args.backend ?? cfg.backend) as BackendKind,
-        mode: (args.mode ?? cfg.mode) as SessionMode,
-        model: args.model || cfg.model || undefined,
-        reasoningEffort: args.reasoningEffort as any || undefined,
-        branch: args.branch,
-        autoMerge: args.autoMerge || false,
-        tags: args.tag.length > 0 ? args.tag : undefined,
-        systemPrompt: args.systemPrompt,
-        allowedTools,
-        env,
-      });
+      session = await svc.spawn(spawnRequest);
     } catch (e: any) {
       fail(`error: ${e.message}`);
     }
@@ -423,16 +425,16 @@ const psCmd = command({
     { description: "Filter by project and backend", command: "orka ps --project myapp --backend codex" },
   ],
   args: {
-    status: option({ type: optional(enumType(statusValues, "status")), long: "status", description: "Filter by session status" }),
-    backend: option({ type: optional(enumType(backendValues, "backend")), long: "backend", description: "Filter by agent backend" }),
+    status: option({ type: optional(enumType(statusValues)), long: "status", description: "Filter by session status" }),
+    backend: option({ type: optional(enumType(backendValues)), long: "backend", description: "Filter by agent backend" }),
     project: option({ type: optional(str), long: "project", description: "Filter by project name or path" }),
     tag: option({ type: optional(str), long: "tag", description: "Filter by tag" }),
     verbose: flag({ long: "verbose", short: "v", description: "Show cost, duration, tokens, and project" }),
   },
   handler: async (args) => runCliCommand("ps", async () => {
     let sessions = await svc.listSessions({
-      status: args.status as any,
-      tag: args.tag,
+      ...(args.status ? { status: args.status } : {}),
+      ...(args.tag ? { tag: args.tag } : {}),
     });
     if (args.backend) {
       sessions = sessions.filter((s) => s.backend === args.backend);
@@ -738,18 +740,19 @@ const retryCmd = command({
     }
 
     const oldTags = await svc.getTags(session.id);
-    const newSession = await svc.spawn({
+    const retryRequest: SpawnRequest = {
       prompt: task.prompt,
-      title: task.title,
       projectPath: session.projectPath || session.workingDir,
       backend: session.backend,
       mode: session.mode,
-      model: task.model || undefined,
-      tags: oldTags.length > 0 ? oldTags : undefined,
-      systemPrompt: session.systemPrompt,
-      allowedTools: session.allowedTools,
-      env: session.env,
-    });
+      ...(task.title ? { title: task.title } : {}),
+      ...(task.model ? { model: task.model } : {}),
+      ...(oldTags.length > 0 ? { tags: oldTags } : {}),
+      ...(session.systemPrompt ? { systemPrompt: session.systemPrompt } : {}),
+      ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
+      ...(session.env ? { env: session.env } : {}),
+    };
+    const newSession = await svc.spawn(retryRequest);
 
     console.log(`retried session ${session.id} → ${newSession.id}`);
     console.log(`  backend:  ${newSession.backend}`);
@@ -1017,7 +1020,7 @@ const usageCmd = command({
   args: {
     session: option({ type: optional(str), long: "session", description: "Session ID or prefix" }),
     since: option({ type: optional(str), long: "since", description: "Relative duration (24h, 7d, 30m) or ISO 8601 timestamp" }),
-    backend: option({ type: optional(enumType(backendValues, "backend")), long: "backend", description: "Filter by backend" }),
+    backend: option({ type: optional(enumType(backendValues)), long: "backend", description: "Filter by backend" }),
   },
   handler: async ({ session: sessionQuery, since, backend }) => runCliCommand("usage", async () => {
     const session = sessionQuery ? await findSession(sessionQuery) : null;
@@ -1027,9 +1030,9 @@ const usageCmd = command({
 
     const sinceIso = since ? parseSinceFilter(since) : undefined;
     const summary = await svc.getUsage({
-      sessionId: session?.id,
-      since: sinceIso,
-      backend: backend as BackendKind | undefined,
+      ...(session?.id ? { sessionId: session.id } : {}),
+      ...(sinceIso ? { since: sinceIso } : {}),
+      ...(backend ? { backend } : {}),
     });
 
     const scope: string[] = [];
@@ -1189,7 +1192,13 @@ const pruneCmd = command({
     const projectPath = project ? resolveProject(project) : undefined;
     const purgeLogs = purgeAll || purgeLogsFlag;
     const purgeDb = purgeAll || purgeDbFlag;
-    const result = await svc.pruneSessions({ maxAgeMs, projectPath, confirm, purgeLogs, purgeDb });
+    const result = await svc.pruneSessions({
+      maxAgeMs,
+      ...(projectPath ? { projectPath } : {}),
+      ...(confirm ? { confirm: true } : {}),
+      ...(purgeLogs ? { purgeLogs: true } : {}),
+      ...(purgeDb ? { purgeDb: true } : {}),
+    });
     const {
       pruned,
       orphansCleaned,
@@ -1233,23 +1242,25 @@ const serveCmd = command({
   handler: async (args) => {
     // serve is the daemon itself — uses LocalClient directly, no getSvc()
     await withSpan("orka.cli.serve", { "orka.command": "serve" }, async () => {
-    const port = parseInt(args.port ?? "7394", 10);
-    const hostname = args.host ?? "127.0.0.1";
-    const localSvc = createLocalClient();
-    const server = await startServer(localSvc, {
-      port,
-      hostname,
-      relayUrl: args.relay,
-      nodeId: args.nodeId,
-      relayToken: args.relayToken ?? process.env.ORKA_TOKEN,
-      encrypt: useEncrypt,
-    });
-    console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
-    if (args.relay) {
-      console.log(`  relay: ${args.relay}`);
-    }
+      const port = parseInt(args.port ?? "7394", 10);
+      const hostname = args.host ?? "127.0.0.1";
+      const localSvc = createLocalClient();
+      const relayToken = args.relayToken ?? process.env["ORKA_TOKEN"];
+      const serverOptions = {
+        port,
+        hostname,
+        ...(args.relay ? { relayUrl: args.relay } : {}),
+        ...(args.nodeId ? { nodeId: args.nodeId } : {}),
+        ...(relayToken ? { relayToken } : {}),
+        ...(useEncrypt ? { encrypt: true } : {}),
+      };
+      const server = await startServer(localSvc, serverOptions);
+      console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
+      if (args.relay) {
+        console.log(`  relay: ${args.relay}`);
+      }
 
-    await new Promise(() => {});
+      await new Promise(() => {});
     });
   },
 });
@@ -1370,8 +1381,11 @@ const relayServeCmd = command({
   },
   handler: async ({ port, token }) => runCliCommand("relay", async () => {
     const parsedPort = parseInt(port ?? "7390", 10);
-    const relayToken = token ?? process.env.ORKA_TOKEN;
-    const handle = startRelay({ port: parsedPort, token: relayToken });
+    const relayToken = token ?? process.env["ORKA_TOKEN"];
+    const handle = startRelay({
+      port: parsedPort,
+      ...(relayToken ? { token: relayToken } : {}),
+    });
     console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
     console.log("  nodes register at:  /register?node=<id>");
     console.log("  clients connect at: /ws");
@@ -1831,17 +1845,18 @@ function formatCost(usd: number | null): string {
 // --- Relay API helpers ---
 
 function getRelayHttpUrl(): string {
-  let base = remoteUrl ?? process.env.ORKA_RELAY_URL;
+  let base = remoteUrl ?? process.env["ORKA_RELAY_URL"];
   if (!base) {
     console.error("error: relay URL required (use --remote <url> or ORKA_RELAY_URL)");
     process.exit(1);
+    throw new Error("relay URL required");
   }
-  base = base.split("?")[0];
-  return base.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
+  const normalizedBase = base.split("?")[0] ?? base;
+  return normalizedBase.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
 }
 
 function getApiKey(): string | null {
-  if (process.env.ORKA_API_KEY) return process.env.ORKA_API_KEY;
+  if (process.env["ORKA_API_KEY"]) return process.env["ORKA_API_KEY"];
   const keyFile = join(getOrkaHome(), "relay-key");
   if (existsSync(keyFile)) return readFileSync(keyFile, "utf-8").trim();
   return remoteToken ?? null;
@@ -1860,7 +1875,7 @@ async function relayFetch(path: string, opts?: { method?: string; body?: any; au
 
   if (opts?.auth !== false) {
     const key = getApiKey();
-    if (key) headers.authorization = `Bearer ${key}`;
+    if (key) headers["authorization"] = `Bearer ${key}`;
   }
 
   const fetchOpts: RequestInit = { method: opts?.method ?? "GET", headers };
@@ -1883,9 +1898,17 @@ function parseAge(age: string): number {
   if (!match) {
     console.error("error: invalid --age format, use e.g. 24h, 7d, 30m");
     process.exit(1);
+    throw new Error("invalid age format");
   }
-  const value = parseInt(match[1], 10);
-  switch (match[2]) {
+  const amount = match[1];
+  const unit = match[2];
+  if (!amount || !unit) {
+    console.error("error: invalid --age format, use e.g. 24h, 7d, 30m");
+    process.exit(1);
+    throw new Error("invalid age format");
+  }
+  const value = parseInt(amount, 10);
+  switch (unit) {
     case "m": return value * 60 * 1000;
     case "h": return value * 60 * 60 * 1000;
     case "d": return value * 24 * 60 * 60 * 1000;
@@ -1918,7 +1941,7 @@ async function findSession(query: string) {
 
   const all = await svc.listSessions();
   const matches = all.filter((s) => s.id.includes(query));
-  if (matches.length === 1) return matches[0];
+  if (matches.length === 1) return matches[0] ?? null;
   if (matches.length > 1) {
     console.error(`ambiguous session id "${query}", matches:`);
     for (const m of matches) console.error(`  ${m.id}`);

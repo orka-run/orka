@@ -6,10 +6,10 @@ export type LogEvent =
   | { kind: "system"; text: string }
   | { kind: "info"; text: string };
 
-type JsonRecord = Record<string, any>;
+type JsonRecord = Record<string, unknown>;
 
 const EXIT_CODE_LINE = /^\[orka\] exit_code=(\d+)$/;
-const COLORS_ENABLED = process.env.NO_COLOR == null;
+const COLORS_ENABLED = process.env["NO_COLOR"] == null;
 
 /** Parse a single line from a log file and return a LogEvent, or null if the line should be skipped. */
 export function parseLine(line: string): LogEvent | null {
@@ -32,7 +32,7 @@ export function parseLine(line: string): LogEvent | null {
     return null;
   }
 
-  switch (parsed.type) {
+  switch (parsed["type"]) {
     case "item.completed":
       return parseCodexCompleted(parsed);
     case "item.started":
@@ -48,10 +48,10 @@ export function parseLine(line: string): LogEvent | null {
       return {
         kind: "tool_result",
         tool: "",
-        output: truncateText(extractText(parsed.content ?? parsed.result ?? parsed.output ?? parsed), 500),
+        output: truncateText(extractText(parsed["content"] ?? parsed["result"] ?? parsed["output"] ?? parsed), 500),
       };
     case "result":
-      return { kind: "message", text: `--- RESULT ---\n${parsed.result ?? ""}` };
+      return { kind: "message", text: `--- RESULT ---\n${parsed["result"] ?? ""}` };
     case "system":
       return parseClaudeSystem(parsed);
     default:
@@ -95,19 +95,20 @@ export function formatLog(content: string): string {
 }
 
 function parseCodexCompleted(parsed: JsonRecord): LogEvent | null {
-  const item = parsed.item;
-  if (!item || typeof item !== "object") return null;
+  const item = parsed["item"];
+  if (!isRecord(item)) return null;
 
-  if (item.type === "agent_message") {
-    return { kind: "message", text: item.text ?? "" };
+  if (item["type"] === "agent_message") {
+    return { kind: "message", text: typeof item["text"] === "string" ? item["text"] : "" };
   }
 
-  if (item.type === "command_execution") {
+  if (item["type"] === "command_execution") {
+    const exitCode = typeof item["exit_code"] === "number" ? item["exit_code"] : undefined;
     return {
       kind: "tool_result",
-      tool: item.command ?? "",
-      output: unescapeString(item.aggregated_output ?? ""),
-      exitCode: typeof item.exit_code === "number" ? item.exit_code : undefined,
+      tool: typeof item["command"] === "string" ? item["command"] : "",
+      output: unescapeString(typeof item["aggregated_output"] === "string" ? item["aggregated_output"] : ""),
+      ...(exitCode !== undefined ? { exitCode } : {}),
     };
   }
 
@@ -119,9 +120,9 @@ function parseCodexStarted(_parsed: JsonRecord): LogEvent | null {
 }
 
 function parseCodexTurnCompletion(parsed: JsonRecord): LogEvent {
-  const usage = parsed.usage ?? {};
-  const inputTokens = usage.input_tokens ?? usage.inputTokens ?? 0;
-  const outputTokens = usage.output_tokens ?? usage.outputTokens ?? 0;
+  const usage = isRecord(parsed["usage"]) ? parsed["usage"] : {};
+  const inputTokens = usage["input_tokens"] ?? usage["inputTokens"] ?? 0;
+  const outputTokens = usage["output_tokens"] ?? usage["outputTokens"] ?? 0;
   return {
     kind: "info",
     text: `turn complete (${inputTokens} input, ${outputTokens} output tokens)`,
@@ -129,23 +130,25 @@ function parseCodexTurnCompletion(parsed: JsonRecord): LogEvent {
 }
 
 function parseClaudeAssistant(parsed: JsonRecord): LogEvent | null {
-  const content: unknown[] = Array.isArray(parsed.message?.content) ? parsed.message.content : [];
+  const message = isRecord(parsed["message"]) ? parsed["message"] : undefined;
+  const content: unknown[] = Array.isArray(message?.["content"]) ? message["content"] : [];
   const first = content.find((item) => item && typeof item === "object");
   if (!first) return null;
 
-  if (isRecord(first) && first.type === "text") {
+  if (isRecord(first) && first["type"] === "text") {
     const text = content
-      .filter((item): item is JsonRecord => isRecord(item) && item.type === "text" && typeof item.text === "string")
-      .map((item) => item.text)
+      .filter((item): item is JsonRecord => isRecord(item) && item["type"] === "text" && typeof item["text"] === "string")
+      .map((item) => item["text"] as string)
       .join("\n");
     return { kind: "message", text };
   }
 
-  if (isRecord(first) && first.type === "tool_use") {
+  if (isRecord(first) && first["type"] === "tool_use") {
+    const toolName = typeof first["name"] === "string" ? first["name"] : "";
     return {
       kind: "tool_call",
-      tool: first.name ?? "",
-      input: formatClaudeToolInput(first.name ?? "", first.input),
+      tool: toolName,
+      input: formatClaudeToolInput(toolName, first["input"]),
     };
   }
 
@@ -153,10 +156,11 @@ function parseClaudeAssistant(parsed: JsonRecord): LogEvent | null {
 }
 
 function parseClaudeSystem(parsed: JsonRecord): LogEvent | null {
-  if (parsed.subtype !== "init") return null;
+  if (parsed["subtype"] !== "init") return null;
 
-  const model = parsed.model ?? parsed.session?.model ?? "unknown";
-  const mode = parsed.permissionMode ?? parsed.permission_mode ?? parsed.mode ?? "unknown";
+  const session = isRecord(parsed["session"]) ? parsed["session"] : undefined;
+  const model = parsed["model"] ?? session?.["model"] ?? "unknown";
+  const mode = parsed["permissionMode"] ?? parsed["permission_mode"] ?? parsed["mode"] ?? "unknown";
   return {
     kind: "system",
     text: `session started (model: ${model}, mode: ${mode})`,
@@ -165,12 +169,12 @@ function parseClaudeSystem(parsed: JsonRecord): LogEvent | null {
 
 function formatClaudeToolInput(tool: string, input: unknown): string {
   if (tool === "Bash" && isRecord(input)) {
-    return typeof input.command === "string" ? input.command : "";
+    return typeof input["command"] === "string" ? input["command"] : "";
   }
 
   if ((tool === "Write" || tool === "Edit" || tool === "Read") && isRecord(input)) {
-    if (typeof input.file_path === "string") return input.file_path;
-    if (typeof input.filePath === "string") return input.filePath;
+    if (typeof input["file_path"] === "string") return input["file_path"];
+    if (typeof input["filePath"] === "string") return input["filePath"];
     return "";
   }
 
@@ -186,8 +190,8 @@ function extractText(value: unknown): string {
     return value.map((entry) => extractText(entry)).filter(Boolean).join("\n");
   }
   if (isRecord(value)) {
-    if (typeof value.text === "string") return value.text;
-    if (typeof value.content === "string") return value.content;
+    if (typeof value["text"] === "string") return value["text"];
+    if (typeof value["content"] === "string") return value["content"];
     return JSON.stringify(value, null, 2);
   }
   return "";

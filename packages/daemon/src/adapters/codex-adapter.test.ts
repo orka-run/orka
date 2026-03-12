@@ -5,31 +5,29 @@ import { join } from "node:path";
 import { CodexAdapter, mapCodexEvent } from "./codex-adapter";
 import { initTracing } from "../tracing";
 
-const originalOrkaHome = process.env.ORKA_HOME;
+const originalOrkaHome = process.env["ORKA_HOME"];
+type CodexMeta = NonNullable<NonNullable<Parameters<typeof mapCodexEvent>[2]>["meta"]>;
 
 let testHome = "";
 
 beforeEach(() => {
   testHome = mkdtempSync(join(tmpdir(), "orka-codex-adapter-"));
-  process.env.ORKA_HOME = testHome;
+  process.env["ORKA_HOME"] = testHome;
   initTracing();
 });
 
 afterEach(() => {
   rmSync(testHome, { recursive: true, force: true });
   if (originalOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
+    delete process.env["ORKA_HOME"];
   } else {
-    process.env.ORKA_HOME = originalOrkaHome;
+    process.env["ORKA_HOME"] = originalOrkaHome;
   }
 });
 
-function createMeta() {
+function createMeta(): CodexMeta {
   return {
-    pendingServerRequests: new Map<
-      string,
-      { requestType: "command_execution_approval" | "tool_user_input" | "unknown"; decision?: "approve" | "deny" }
-    >(),
+    pendingServerRequests: new Map(),
     turnUsage: new Map<string, { inputTokens: number; outputTokens: number }>(),
     sawSessionExit: false,
   };
@@ -263,7 +261,7 @@ describe("CodexAdapter", () => {
         stdin,
         exited: Promise.resolve(0),
         kill() {},
-      } as ReturnType<typeof Bun.spawn>;
+      } as unknown as ReturnType<typeof Bun.spawn>;
     }) as typeof Bun.spawn);
 
     const handle = await adapter.startSession({
@@ -284,8 +282,13 @@ describe("CodexAdapter", () => {
       "--dangerously-bypass-approvals-and-sandbox",
       "app-server",
     ]);
-    expect(spawnCalls[0]?.options.cwd).toBe("/tmp/project");
-    expect(spawnCalls[0]?.options.env).toMatchObject({ OPENAI_API_KEY: "test-key" });
+    expect(spawnCalls[0]?.options["cwd"]).toBe("/tmp/project");
+    const spawnEnv = spawnCalls[0]?.options["env"];
+    expect(
+      typeof spawnEnv === "object" && spawnEnv !== null
+        ? (spawnEnv as Record<string, unknown>)["OPENAI_API_KEY"]
+        : undefined,
+    ).toBe("test-key");
 
     const turnStart = writes.find((message) => message.method === "turn/start");
     expect(turnStart?.params?.input).toEqual([

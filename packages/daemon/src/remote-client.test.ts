@@ -87,7 +87,7 @@ describe("RemoteClient", () => {
 
     expect(socket.sent).toHaveLength(1);
 
-    const request = JSON.parse(socket.sent[0]);
+    const request = JSON.parse(socket.sent[0] ?? "{}");
     expect(request).toMatchObject({
       jsonrpc: "2.0",
       id: "1",

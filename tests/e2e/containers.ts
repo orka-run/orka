@@ -18,7 +18,7 @@ function ensureImage(tag: string, dockerfile: string): void {
     cwd: PROJECT_ROOT,
     stdio: "pipe",
   });
-  const code = build.status ?? build.exitCode ?? 0;
+  const code = build.status ?? 0;
   if (code !== 0) {
     const stderr = build.stderr ? Buffer.from(build.stderr).toString() : "";
     throw new Error(`Failed to build ${tag}: ${stderr}`);
@@ -69,7 +69,9 @@ export async function startRelayContainer(opts?: {
     wsUrl: `ws://${host}:${port}`,
     httpUrl: `http://${host}:${port}`,
     port,
-    stop: () => started.stop(),
+    stop: async () => {
+      await started.stop();
+    },
   };
 }
 
@@ -106,7 +108,9 @@ export async function startDaemonContainer(opts: {
     container: started,
     httpUrl: `http://${host}:${port}`,
     port,
-    stop: () => started.stop(),
+    stop: async () => {
+      await started.stop();
+    },
   };
 }
 

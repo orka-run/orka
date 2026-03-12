@@ -64,7 +64,9 @@ function detectLogFormat(lines: string[]): "claude" | "codex" | null {
 /** Parse claude-code stream-json log. */
 function parseClaudeCodeResult(lines: string[]): SessionResult | null {
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
+    const rawLine = lines[i];
+    if (!rawLine) continue;
+    const line = rawLine.trim();
     if (!line) continue;
 
     let parsed: any;
@@ -160,8 +162,9 @@ function parseCodexResult(lines: string[]): SessionResult | null {
 
 function parseOrkaExitCode(line: string): number | null {
   const match = /^\[orka\]\s+exit_code=(\d+)$/.exec(line);
-  if (!match) {
+  const exitCode = match?.[1];
+  if (!exitCode) {
     return null;
   }
-  return Number.parseInt(match[1], 10);
+  return Number.parseInt(exitCode, 10);
 }

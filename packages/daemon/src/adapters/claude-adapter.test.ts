@@ -164,7 +164,7 @@ describe("ClaudeCodeAdapter", () => {
         stdin,
         exited: Promise.resolve(0),
         kill() {},
-      } as ReturnType<typeof Bun.spawn>;
+      } as unknown as ReturnType<typeof Bun.spawn>;
     }) as typeof Bun.spawn);
 
     const handle = await adapter.startSession({
@@ -200,9 +200,18 @@ describe("ClaudeCodeAdapter", () => {
       "--effort",
       "medium",
     ]);
-    expect(spawnCalls[0]?.options.cwd).toBe("/tmp/project");
-    expect(spawnCalls[0]?.options.env?.FOO).toBe("bar");
-    expect(spawnCalls[0]?.options.env?.CLAUDECODE).toBeUndefined();
+    expect(spawnCalls[0]?.options["cwd"]).toBe("/tmp/project");
+    const env = spawnCalls[0]?.options["env"];
+    expect(
+      typeof env === "object" && env !== null
+        ? (env as Record<string, unknown>)["FOO"]
+        : undefined,
+    ).toBe("bar");
+    expect(
+      typeof env === "object" && env !== null
+        ? (env as Record<string, unknown>)["CLAUDECODE"]
+        : undefined,
+    ).toBeUndefined();
     expect(stdin.writes).toEqual(["Inspect the project"]);
     expect(stdin.ended).toBe(true);
 

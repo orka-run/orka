@@ -118,7 +118,7 @@ export class CheckpointService {
   private getLastCheckpointForSession(sessionId: string): Checkpoint | null {
     for (let index = this.checkpoints.length - 1; index >= 0; index -= 1) {
       const checkpoint = this.checkpoints[index];
-      if (checkpoint.sessionId === sessionId) {
+      if (checkpoint && checkpoint.sessionId === sessionId) {
         return checkpoint;
       }
     }

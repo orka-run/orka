@@ -57,7 +57,7 @@ export function startDashboardSpan(
   parentContext: Context = context.active(),
 ): { span: Span; startedAt: number } {
   return {
-    span: getTracer().startSpan(name, { attributes }, parentContext),
+    span: getTracer().startSpan(name, attributes ? { attributes } : {}, parentContext),
     startedAt: getNow(),
   };
 }

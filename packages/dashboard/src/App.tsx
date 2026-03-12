@@ -26,7 +26,7 @@ function now(): number {
 
 function getDaemonUrl(): string {
   // Explicit override via env (dev mode)
-  if (import.meta.env.VITE_DAEMON_URL) return import.meta.env.VITE_DAEMON_URL as string;
+  if (import.meta.env["VITE_DAEMON_URL"]) return import.meta.env["VITE_DAEMON_URL"] as string;
   // Both dev (vite proxy) and prod (nginx) use /ws on same origin
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}/ws`;

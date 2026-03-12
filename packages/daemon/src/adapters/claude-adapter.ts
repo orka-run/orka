@@ -101,10 +101,10 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const command = buildClaudeCommand(input);
         // Remove CLAUDECODE env to prevent nested session detection
         const spawnEnv = { ...globalThis.process.env, ...input.env };
-        delete spawnEnv.CLAUDECODE;
+        delete spawnEnv["CLAUDECODE"];
 
         const process = this.spawnProcess(command, {
-          cwd: input.cwd,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
@@ -219,22 +219,22 @@ export function mapClaudeEvent(
 ): ProviderRuntimeEvent | null {
   const { mode, turnId } = normalizeClaudeMapOptions(modeOrOptions);
 
-  if (!isRecord(raw) || typeof raw.type !== "string") {
+  if (!isRecord(raw) || typeof raw["type"] !== "string") {
     return null;
   }
 
-  if (mode === "exit" && raw.type !== "result") {
+  if (mode === "exit" && raw["type"] !== "result") {
     return null;
   }
 
-  if (raw.type === "result") {
+  if (raw["type"] === "result") {
     if (mode === "exit") {
       return createEvent(
         "session.exited",
         threadId,
         {
-          reason: typeof raw.subtype === "string" ? `Claude Code result: ${raw.subtype}` : "Claude Code completed",
-          exitKind: raw.is_error === true ? "error" : "graceful",
+          reason: typeof raw["subtype"] === "string" ? `Claude Code result: ${raw["subtype"]}` : "Claude Code completed",
+          exitKind: raw["is_error"] === true ? "error" : "graceful",
         },
         { provider: "claude-code" },
       );
@@ -245,30 +245,31 @@ export function mapClaudeEvent(
       "turn.completed",
       threadId,
       {
-        state: raw.is_error === true ? "failed" : "completed",
-        ...(typeof raw.subtype === "string" ? { stopReason: raw.subtype } : {}),
-        ...(typeof raw.total_cost_usd === "number" ? { totalCostUsd: raw.total_cost_usd } : {}),
+        state: raw["is_error"] === true ? "failed" : "completed",
+        ...(typeof raw["subtype"] === "string" ? { stopReason: raw["subtype"] } : {}),
+        ...(typeof raw["total_cost_usd"] === "number" ? { totalCostUsd: raw["total_cost_usd"] } : {}),
         ...(usage ? { usage } : {}),
       },
-      { provider: "claude-code", turnId },
+      { provider: "claude-code", ...(turnId ? { turnId } : {}) },
     );
   }
 
-  switch (raw.type) {
+  switch (raw["type"]) {
     case "system":
-      if (raw.subtype !== "init") {
+      if (raw["subtype"] !== "init") {
         return null;
       }
 
       return createEvent(
         "session.started",
         threadId,
-        { ...(typeof raw.message === "string" ? { message: raw.message } : {}) },
+        { ...(typeof raw["message"] === "string" ? { message: raw["message"] } : {}) },
         { provider: "claude-code" },
       );
 
     case "assistant": {
-      const content = Array.isArray(raw.message?.content) ? raw.message.content : [];
+      const message = isRecord(raw["message"]) ? raw["message"] : undefined;
+      const content = Array.isArray(message?.["content"]) ? message["content"] : [];
       const toolUse = findClaudeToolUse(content);
       if (toolUse) {
         return createEvent(
@@ -280,7 +281,7 @@ export function mapClaudeEvent(
             title: formatClaudeToolTitle(toolUse.name, toolUse.input),
             detail: formatClaudeToolDetail(toolUse.name, toolUse.input),
           },
-          { provider: "claude-code", turnId, itemId: toolUse.id },
+          { provider: "claude-code", ...(turnId ? { turnId } : {}), itemId: toolUse.id },
         );
       }
 
@@ -293,12 +294,13 @@ export function mapClaudeEvent(
         "content.delta",
         threadId,
         { streamKind: "assistant_text", delta: text },
-        { provider: "claude-code", turnId },
+        { provider: "claude-code", ...(turnId ? { turnId } : {}) },
       );
     }
 
     case "tool": {
-      const detail = extractClaudeText(raw.content);
+      const detail = extractClaudeText(raw["content"]);
+      const itemId = typeof raw["tool_use_id"] === "string" ? raw["tool_use_id"] : undefined;
       return createEvent(
         "item.completed",
         threadId,
@@ -307,7 +309,7 @@ export function mapClaudeEvent(
           status: "completed",
           ...(detail ? { detail } : {}),
         },
-        { provider: "claude-code", turnId, itemId: typeof raw.tool_use_id === "string" ? raw.tool_use_id : undefined },
+        { provider: "claude-code", ...(turnId ? { turnId } : {}), ...(itemId ? { itemId } : {}) },
       );
     }
 
@@ -533,13 +535,13 @@ function closeEvents(meta: ClaudeHandleMeta): void {
 }
 
 function normalizeClaudeUsage(raw: Record<string, unknown>): ClaudeUsage | undefined {
-  const modelUsage = firstModelUsage(raw.modelUsage);
+  const modelUsage = firstModelUsage(raw["modelUsage"]);
   const modelUsageTokens = normalizeClaudeUsageValue(modelUsage);
   if (modelUsageTokens) {
     return modelUsageTokens;
   }
 
-  return normalizeClaudeUsageValue(raw.usage);
+  return normalizeClaudeUsageValue(raw["usage"]);
 }
 
 function firstModelUsage(value: unknown): unknown {
@@ -557,16 +559,16 @@ function normalizeClaudeUsageValue(value: unknown): ClaudeUsage | undefined {
   }
 
   const inputTokens =
-    typeof value.inputTokens === "number"
-      ? value.inputTokens
-      : typeof value.input_tokens === "number"
-        ? value.input_tokens
+    typeof value["inputTokens"] === "number"
+      ? value["inputTokens"]
+      : typeof value["input_tokens"] === "number"
+        ? value["input_tokens"]
         : undefined;
   const outputTokens =
-    typeof value.outputTokens === "number"
-      ? value.outputTokens
-      : typeof value.output_tokens === "number"
-        ? value.output_tokens
+    typeof value["outputTokens"] === "number"
+      ? value["outputTokens"]
+      : typeof value["output_tokens"] === "number"
+        ? value["output_tokens"]
         : undefined;
 
   if (inputTokens === undefined || outputTokens === undefined) {
@@ -578,8 +580,8 @@ function normalizeClaudeUsageValue(value: unknown): ClaudeUsage | undefined {
 
 function extractClaudeAssistantText(content: unknown[]): string | null {
   const text = content
-    .filter((item): item is Record<string, string> => isRecord(item) && item.type === "text" && typeof item.text === "string")
-    .map((item) => item.text)
+    .filter((item): item is Record<string, string> => isRecord(item) && item["type"] === "text" && typeof item["text"] === "string")
+    .map((item) => item["text"])
     .join("\n")
     .trim();
 
@@ -588,18 +590,18 @@ function extractClaudeAssistantText(content: unknown[]): string | null {
 
 function findClaudeToolUse(content: unknown[]): { id: string; name: string; input: unknown } | null {
   for (const item of content) {
-    if (!isRecord(item) || item.type !== "tool_use") {
+    if (!isRecord(item) || item["type"] !== "tool_use") {
       continue;
     }
 
-    if (typeof item.id !== "string" || typeof item.name !== "string") {
+    if (typeof item["id"] !== "string" || typeof item["name"] !== "string") {
       return null;
     }
 
     return {
-      id: item.id,
-      name: item.name,
-      input: item.input,
+      id: item["id"],
+      name: item["name"],
+      input: item["input"],
     };
   }
 
@@ -619,21 +621,21 @@ function mapClaudeToolItemType(name: string): "command_execution" | "file_change
 }
 
 function formatClaudeToolTitle(name: string, input: unknown): string {
-  if (name === "Bash" && isRecord(input) && typeof input.command === "string") {
-    return input.command;
+  if (name === "Bash" && isRecord(input) && typeof input["command"] === "string") {
+    return input["command"];
   }
 
   if (isRecord(input)) {
-    if (typeof input.file_path === "string") return input.file_path;
-    if (typeof input.filePath === "string") return input.filePath;
+    if (typeof input["file_path"] === "string") return input["file_path"];
+    if (typeof input["filePath"] === "string") return input["filePath"];
   }
 
   return name;
 }
 
 function formatClaudeToolDetail(name: string, input: unknown): string {
-  if (name === "Bash" && isRecord(input) && typeof input.command === "string") {
-    return input.command;
+  if (name === "Bash" && isRecord(input) && typeof input["command"] === "string") {
+    return input["command"];
   }
 
   if (typeof input === "string") {
@@ -641,8 +643,8 @@ function formatClaudeToolDetail(name: string, input: unknown): string {
   }
 
   if (isRecord(input)) {
-    if (typeof input.file_path === "string") return input.file_path;
-    if (typeof input.filePath === "string") return input.filePath;
+    if (typeof input["file_path"] === "string") return input["file_path"];
+    if (typeof input["filePath"] === "string") return input["filePath"];
   }
 
   if (input == null) {
@@ -661,8 +663,8 @@ function extractClaudeText(value: unknown): string {
   }
 
   if (isRecord(value)) {
-    if (typeof value.text === "string") return value.text;
-    if (typeof value.content === "string") return value.content;
+    if (typeof value["text"] === "string") return value["text"];
+    if (typeof value["content"] === "string") return value["content"];
     return JSON.stringify(value) ?? "";
   }
 
@@ -678,7 +680,7 @@ function getClaudeHandleMeta(handle: ProviderSessionHandle): ClaudeHandleMeta {
   return meta as ClaudeHandleMeta;
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
@@ -686,12 +688,12 @@ function normalizeClaudeMapOptions(
   modeOrOptions: ClaudeMapMode | ClaudeMapOptions,
 ): { mode: ClaudeMapMode; turnId?: string } {
   if (typeof modeOrOptions === "string") {
-    return { mode: modeOrOptions, turnId: undefined };
+    return { mode: modeOrOptions };
   }
 
   return {
     mode: modeOrOptions.mode ?? "primary",
-    turnId: modeOrOptions.turnId,
+    ...(modeOrOptions.turnId ? { turnId: modeOrOptions.turnId } : {}),
   };
 }
 

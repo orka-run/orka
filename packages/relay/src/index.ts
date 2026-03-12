@@ -58,7 +58,7 @@ export interface RelayHandle {
 
 export function startRelay(opts: RelayOptions): RelayHandle {
   const config = getRelayConfig();
-  initRelayTracing({ traceFile: config.observability.traceFile });
+  initRelayTracing(config.observability.traceFile ? { traceFile: config.observability.traceFile } : undefined);
   return withSpanSync("orka.relay.start", {
     "orka.port": opts.port,
     "orka.hostname": opts.hostname ?? config.server.hostname,
@@ -477,7 +477,7 @@ function handleClientMessage(
 }
 
 function handleNodeMessage(
-  ws: ServerWebSocket<SocketData>,
+  _ws: ServerWebSocket<SocketData>,
   raw: string,
   bytes: number,
   data: SocketData,

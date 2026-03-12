@@ -17,8 +17,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 // Isolated data dirs — must be set BEFORE importing daemon/relay
 const daemonHome = mkdtempSync(join(tmpdir(), "orka-e2e-routing-daemon-"));
 const relayHome = mkdtempSync(join(tmpdir(), "orka-e2e-routing-relay-"));
-process.env.ORKA_HOME = daemonHome;
-process.env.ORKA_RELAY_DATA = relayHome;
+process.env["ORKA_HOME"] = daemonHome;
+process.env["ORKA_RELAY_DATA"] = relayHome;
 
 import { createLocalClient, startServer } from "@orka/daemon";
 import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
@@ -85,7 +85,11 @@ describeE2E("Full-Stack Routing", () => {
 
     // 2. Start relay
     relay = startRelay({ port: 0, hostname: "127.0.0.1" });
-    relayPort = relay.server.port;
+    const assignedRelayPort = relay.server.port;
+    if (assignedRelayPort === undefined) {
+      throw new Error("Relay port was not assigned");
+    }
+    relayPort = assignedRelayPort;
 
     // 3. Sign up and get keys
     const signupRes = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {

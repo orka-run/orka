@@ -65,7 +65,7 @@ const ORKA_DIR = ".orka";
 const DB_FILE = "orka.db";
 
 export function getOrkaHome(): string {
-  return process.env.ORKA_HOME ?? join(process.env.HOME!, ORKA_DIR);
+  return process.env["ORKA_HOME"] ?? join(process.env["HOME"] ?? "", ORKA_DIR);
 }
 
 function getDbPath(): string {
@@ -247,15 +247,15 @@ export function updateSessionStatus(
 
     if (extra?.startedAt) {
       sets.push("started_at = $startedAt");
-      params.$startedAt = extra.startedAt;
+      params["$startedAt"] = extra.startedAt;
     }
     if (extra?.finishedAt) {
       sets.push("finished_at = $finishedAt");
-      params.$finishedAt = extra.finishedAt;
+      params["$finishedAt"] = extra.finishedAt;
     }
     if (extra?.exitCode !== undefined) {
       sets.push("exit_code = $exitCode");
-      params.$exitCode = extra.exitCode;
+      params["$exitCode"] = extra.exitCode;
     }
 
     getDb()

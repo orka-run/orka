@@ -270,7 +270,7 @@ export class ShellAdapter implements ProviderAdapter {
 }
 
 function getRuntime(handle: ProviderSessionHandle): ShellSessionRuntime {
-  const runtime = handle.meta.runtime;
+  const runtime = handle.meta["runtime"];
   if (!isShellSessionRuntime(runtime)) {
     throw new Error(`Invalid shell session handle for thread "${handle.threadId}"`);
   }

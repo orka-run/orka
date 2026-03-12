@@ -155,7 +155,7 @@ describeE2E("Relay E2E", () => {
     });
 
     // Should get an error because B has no nodes
-    expect(response.error).toBeTruthy();
+    expect(response["error"]).toBeTruthy();
 
     wsNode.close();
     wsB.close();

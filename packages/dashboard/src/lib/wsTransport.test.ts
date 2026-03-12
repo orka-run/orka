@@ -90,8 +90,8 @@ beforeEach(() => {
       cleared: false,
     };
     scheduledTimers.push(timer);
-    return timer.id as ReturnType<typeof setTimeout>;
-  }) as typeof setTimeout;
+    return timer.id as unknown as ReturnType<typeof setTimeout>;
+  }) as unknown as typeof setTimeout;
   globalThis.clearTimeout = ((timeoutId: ReturnType<typeof setTimeout>) => {
     const timer = scheduledTimers.find((entry) => entry.id === Number(timeoutId));
     if (timer) {
@@ -126,7 +126,7 @@ describe("WsTransport", () => {
     const resultPromise = transport.request<string>("listSessions", { filter: "all" });
 
     expect(socket.sent).toHaveLength(1);
-    const request = JSON.parse(socket.sent[0]);
+    const request = JSON.parse(socket.sent[0] ?? "{}");
     expect(request).toMatchObject({
       jsonrpc: "2.0",
       id: 1,
@@ -167,7 +167,7 @@ describe("WsTransport", () => {
     await expect(resultPromise).rejects.toThrow("Request timeout: listSessions");
     expect(socket.sent).toHaveLength(1);
 
-    const request = JSON.parse(socket.sent[0]);
+    const request = JSON.parse(socket.sent[0] ?? "{}");
     expect(request).toMatchObject({
       jsonrpc: "2.0",
       id: 1,
@@ -238,7 +238,7 @@ describe("WsTransport", () => {
     });
 
     expect(socket.sent).toHaveLength(2);
-    const gapReport = JSON.parse(socket.sent[1]);
+    const gapReport = JSON.parse(socket.sent[1] ?? "{}");
     expect(gapReport).toMatchObject({
       jsonrpc: "2.0",
       id: 1,
@@ -342,7 +342,7 @@ describe("WsTransport", () => {
     secondSocket.open();
 
     expect(secondSocket.sent).toHaveLength(1);
-    expect(JSON.parse(secondSocket.sent[0])).toMatchObject({
+    expect(JSON.parse(secondSocket.sent[0] ?? "{}")).toMatchObject({
       jsonrpc: "2.0",
       id: 1,
       method: "listSessions",

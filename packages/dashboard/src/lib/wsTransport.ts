@@ -476,7 +476,7 @@ export class WsTransport {
     return this.normalizeId(parsed.id);
   }
 
-  private normalizeId(id: number | string): number | null {
+  private normalizeId(id: number | string | null): number | null {
     if (typeof id === "number" && Number.isFinite(id)) {
       return id;
     }

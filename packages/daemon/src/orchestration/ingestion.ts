@@ -14,7 +14,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         type: "session.state.changed",
         sessionId,
         state: event.payload.state,
-        reason: event.payload.reason,
+        ...(event.payload.reason ? { reason: event.payload.reason } : {}),
         timestamp: event.createdAt,
       };
     case "turn.started":
@@ -42,14 +42,16 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         sessionId,
         turnId: getTurnId(event),
         state: event.payload.state,
-        stopReason: event.payload.stopReason,
-        cost: event.payload.totalCostUsd,
-        tokens: event.payload.usage
+        ...(event.payload.stopReason ? { stopReason: event.payload.stopReason } : {}),
+        ...(event.payload.totalCostUsd !== undefined ? { cost: event.payload.totalCostUsd } : {}),
+        ...(event.payload.usage
           ? {
-              input: event.payload.usage.inputTokens,
-              output: event.payload.usage.outputTokens,
+              tokens: {
+                input: event.payload.usage.inputTokens,
+                output: event.payload.usage.outputTokens,
+              },
             }
-          : undefined,
+          : {}),
         timestamp: event.createdAt,
       };
     case "item.started":
@@ -59,9 +61,9 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         turnId: getTurnId(event),
         itemId: getItemId(event),
         itemType: event.payload.itemType,
-        status: event.payload.status,
-        title: event.payload.title,
-        detail: event.payload.detail,
+        ...(event.payload.status ? { status: event.payload.status } : {}),
+        ...(event.payload.title ? { title: event.payload.title } : {}),
+        ...(event.payload.detail ? { detail: event.payload.detail } : {}),
         timestamp: event.createdAt,
       };
     case "item.updated":
@@ -71,9 +73,9 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         turnId: getTurnId(event),
         itemId: getItemId(event),
         itemType: event.payload.itemType,
-        status: event.payload.status,
-        title: event.payload.title,
-        detail: event.payload.detail,
+        ...(event.payload.status ? { status: event.payload.status } : {}),
+        ...(event.payload.title ? { title: event.payload.title } : {}),
+        ...(event.payload.detail ? { detail: event.payload.detail } : {}),
         timestamp: event.createdAt,
       };
     case "item.completed":
@@ -84,8 +86,8 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         itemId: getItemId(event),
         itemType: event.payload.itemType,
         status: event.payload.status ?? "completed",
-        title: event.payload.title,
-        detail: event.payload.detail,
+        ...(event.payload.title ? { title: event.payload.title } : {}),
+        ...(event.payload.detail ? { detail: event.payload.detail } : {}),
         timestamp: event.createdAt,
       };
     case "session.exited":
@@ -93,7 +95,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         return {
           type: "session.cancelled",
           sessionId,
-          reason: event.payload.reason,
+          ...(event.payload.reason ? { reason: event.payload.reason } : {}),
           timestamp: event.createdAt,
         };
       }
@@ -114,7 +116,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         sessionId,
         requestId: getRequestId(event),
         requestType: event.payload.requestType,
-        detail: event.payload.detail,
+        ...(event.payload.detail ? { detail: event.payload.detail } : {}),
         timestamp: event.createdAt,
       };
     case "request.resolved":
@@ -130,28 +132,28 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         type: "tool.progress",
         sessionId,
         turnId: getTurnId(event),
-        itemId: event.itemId,
-        toolName: event.payload.toolName,
-        summary: event.payload.summary,
-        elapsedSeconds: event.payload.elapsedSeconds,
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        ...(event.payload.toolName ? { toolName: event.payload.toolName } : {}),
+        ...(event.payload.summary ? { summary: event.payload.summary } : {}),
+        ...(event.payload.elapsedSeconds !== undefined ? { elapsedSeconds: event.payload.elapsedSeconds } : {}),
         timestamp: event.createdAt,
       };
     case "runtime.error":
       return {
         type: "runtime.error",
         sessionId,
-        turnId: event.turnId,
-        itemId: event.itemId,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        ...(event.itemId ? { itemId: event.itemId } : {}),
         error: event.payload.message,
-        class: event.payload.class,
+        ...(event.payload.class ? { class: event.payload.class } : {}),
         timestamp: event.createdAt,
       };
     case "runtime.warning":
       return {
         type: "runtime.warning",
         sessionId,
-        turnId: event.turnId,
-        itemId: event.itemId,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        ...(event.itemId ? { itemId: event.itemId } : {}),
         message: event.payload.message,
         timestamp: event.createdAt,
       };

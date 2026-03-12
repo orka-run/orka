@@ -1,26 +1,26 @@
 import { afterEach, beforeEach, describe, test, expect } from "bun:test";
-import { createEvent } from "@orka/core";
+import { createEvent, type OrchestrationEvent } from "@orka/core";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initTracing } from "../tracing";
 import { OrchestrationEngine } from "./engine";
 
-const previousOrkaHome = process.env.ORKA_HOME;
+const previousOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
 
 beforeEach(() => {
   testHome = mkdtempSync(join(tmpdir(), "orka-engine-home-"));
-  process.env.ORKA_HOME = testHome;
+  process.env["ORKA_HOME"] = testHome;
   initTracing();
 });
 
 afterEach(() => {
   rmSync(testHome, { recursive: true, force: true });
   if (previousOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
+    delete process.env["ORKA_HOME"];
   } else {
-    process.env.ORKA_HOME = previousOrkaHome;
+    process.env["ORKA_HOME"] = previousOrkaHome;
   }
 });
 
@@ -129,7 +129,7 @@ describe("OrchestrationEngine", () => {
   });
 
   test("loads persisted session timelines into the in-memory log", () => {
-    const timeline = [
+    const timeline: OrchestrationEvent[] = [
       {
         type: "session.started",
         sessionId: "session-1",
@@ -143,7 +143,7 @@ describe("OrchestrationEngine", () => {
         delta: "Hello",
         timestamp: "2026-03-11T00:00:01.000Z",
       },
-    ] as const;
+    ];
 
     const engine = new OrchestrationEngine({
       getSessionTimeline: (sessionId) => (sessionId === "session-1" ? [...timeline] : []),
@@ -259,7 +259,7 @@ describe("OrchestrationEngine", () => {
     const broadcasts: Array<{ channel: string; data: unknown }> = [];
     const engine = new OrchestrationEngine({
       pushHub: {
-        broadcast(channel, data) {
+        broadcast(channel: string, data: unknown) {
           broadcasts.push({ channel, data });
         },
       } as never,
@@ -395,7 +395,9 @@ describe("OrchestrationEngine", () => {
       totalActiveDurationMs: 10000,
     });
 
-    const lifecycleTimingSpan = readTraceEntries().findLast((entry) => entry.name === "orka.session.lifecycle_timing");
+    const lifecycleTimingSpan = [...readTraceEntries()]
+      .reverse()
+      .find((entry) => entry.name === "orka.session.lifecycle_timing");
     expect(lifecycleTimingSpan).toMatchObject({
       attributes: {
         "orka.session.id": "session-1",

@@ -66,7 +66,7 @@ export class TerminalManager {
       name: "xterm-256color",
       cols,
       rows,
-      cwd: opts.cwd,
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
     });
 
     const session: TerminalSession = {

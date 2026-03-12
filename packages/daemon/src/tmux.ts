@@ -55,6 +55,9 @@ export class TmuxRunner implements SessionRunner {
           .filter((line) => line.startsWith(ORKA_PREFIX))
           .map((line) => {
             const [name, created, attached, width, height] = line.split("\t");
+            if (!name || !created || !attached || !width || !height) {
+              return null;
+            }
             return {
               name,
               created: parseInt(created, 10),
@@ -62,7 +65,8 @@ export class TmuxRunner implements SessionRunner {
               width: parseInt(width, 10),
               height: parseInt(height, 10),
             };
-          });
+          })
+          .filter((session): session is RunnerSession => session !== null);
 
         span.setAttribute("orka.tmux.count", sessions.length);
         return sessions;

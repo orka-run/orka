@@ -12,8 +12,6 @@ import type {
   MergeResult,
   SessionResult,
   UsageSummary,
-  RpcRequest,
-  RpcResponse,
   KeyPair,
   ApprovalRequest,
   ApprovalDecision,
@@ -44,10 +42,9 @@ class RemoteClient implements OrkaService {
   private url: string;
   private connectPromise: Promise<void> | null = null;
   private encKey: Buffer | null = null;
-  private keyPair?: KeyPair;
-  private serverPublicKey?: string;
+  private keyPair: KeyPair | undefined;
+  private serverPublicKey: string | undefined;
   private backoff = new ReconnectStrategy();
-  private closed = false;
 
   constructor(opts: RemoteClientOptions) {
     this.url = opts.url;
@@ -108,7 +105,7 @@ class RemoteClient implements OrkaService {
   }
 
   private handleMessage(raw: string): void {
-    let resp: any;
+    let resp: unknown;
     try {
       resp = JSON.parse(raw);
     } catch {
@@ -116,28 +113,35 @@ class RemoteClient implements OrkaService {
     }
 
     // Decrypt response if encrypted
-    if (this.encKey && resp._enc) {
+    if (this.encKey && isRecord(resp) && resp["_enc"]) {
       try {
         resp = decryptResponse(this.encKey, resp);
       } catch {
         // Decryption failed — treat as error
-        const p = this.pending.get(resp.id);
+        const respId = isRecord(resp) ? resp["id"] : undefined;
+        const pendingId = typeof respId === "string" ? respId : "";
+        const p = this.pending.get(pendingId);
         if (p) {
-          this.pending.delete(resp.id);
+          this.pending.delete(pendingId);
           p.reject(new Error("E2E decryption failed"));
         }
         return;
       }
     }
 
-    const p = this.pending.get(resp.id);
-    if (!p) return;
-    this.pending.delete(resp.id);
+    if (!isRecord(resp) || typeof resp["id"] !== "string") {
+      return;
+    }
 
-    if (resp.error) {
-      p.reject(new Error(resp.error.message));
+    const p = this.pending.get(resp["id"]);
+    if (!p) return;
+    this.pending.delete(resp["id"]);
+
+    const error = isRecord(resp["error"]) ? resp["error"] : undefined;
+    if (error) {
+      p.reject(new Error(typeof error["message"] === "string" ? error["message"] : "RPC request failed"));
     } else {
-      p.resolve(resp.result);
+      p.resolve(resp["result"]);
     }
   }
 
@@ -181,7 +185,6 @@ class RemoteClient implements OrkaService {
   }
 
   close(): void {
-    this.closed = true;
     this.ws?.close();
   }
 
@@ -309,4 +312,8 @@ class RemoteClient implements OrkaService {
 export function createRemoteClient(urlOrOpts: string | RemoteClientOptions): RemoteClient {
   const opts = typeof urlOrOpts === "string" ? { url: urlOrOpts } : urlOrOpts;
   return new RemoteClient(opts);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

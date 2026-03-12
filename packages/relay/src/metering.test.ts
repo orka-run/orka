@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { describe, test, beforeEach, mock } from "bun:test";
 import { UsageMeter } from "./metering";
 
 // Mock the DB functions since we don't want actual SQLite in unit tests

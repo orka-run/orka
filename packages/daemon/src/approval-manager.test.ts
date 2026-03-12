@@ -54,7 +54,7 @@ describe("ApprovalManager", () => {
 
     const pending = mgr.getPending();
     expect(pending).toHaveLength(1);
-    expect(pending[0].id).toBe("req-2");
+    expect(pending[0]?.id).toBe("req-2");
   });
 
   test("getPendingForSession filters by sessionId", () => {
@@ -68,7 +68,7 @@ describe("ApprovalManager", () => {
 
     const forSess2 = mgr.getPendingForSession("sess-2");
     expect(forSess2).toHaveLength(1);
-    expect(forSess2[0].id).toBe("req-2");
+    expect(forSess2[0]?.id).toBe("req-2");
   });
 
   test("cleanup removes old resolved requests", () => {

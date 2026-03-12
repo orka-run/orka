@@ -157,5 +157,5 @@ async function nextEvent<T>(
 }
 
 function useTempOrkaHome(suffix: string): void {
-  process.env.ORKA_HOME = `/tmp/orka-shell-adapter-${suffix}-${Date.now()}`;
+  process.env["ORKA_HOME"] = `/tmp/orka-shell-adapter-${suffix}-${Date.now()}`;
 }

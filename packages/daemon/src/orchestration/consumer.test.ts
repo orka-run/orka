@@ -85,7 +85,20 @@ interface StatusUpdate {
   extra?: { startedAt?: string; finishedAt?: string; exitCode?: number };
 }
 
-const previousOrkaHome = process.env.ORKA_HOME;
+function recordStatusUpdate(
+  statuses: StatusUpdate[],
+  sessionId: string,
+  status: SessionStatus,
+  extra?: StatusUpdate["extra"],
+): void {
+  statuses.push({
+    sessionId,
+    status,
+    ...(extra ? { extra } : {}),
+  });
+}
+
+const previousOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
 let repoPaths: string[] = [];
 
@@ -94,7 +107,7 @@ beforeEach(() => {
   closeDb();
   testHome = mkdtempSync(join(tmpdir(), "orka-consumer-home-"));
   repoPaths = [];
-  process.env.ORKA_HOME = testHome;
+  process.env["ORKA_HOME"] = testHome;
 });
 
 afterEach(() => {
@@ -104,9 +117,9 @@ afterEach(() => {
     rmSync(repoPath, { recursive: true, force: true });
   }
   if (previousOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
+    delete process.env["ORKA_HOME"];
   } else {
-    process.env.ORKA_HOME = previousOrkaHome;
+    process.env["ORKA_HOME"] = previousOrkaHome;
   }
 });
 
@@ -132,7 +145,7 @@ describe("consumeProviderEvents", () => {
 
     const consumeTask = consumeProviderEvents("sess-1", handle, engine, {
       updateSessionStatus: (sessionId, status, extra) => {
-        statuses.push({ sessionId, status, extra });
+        recordStatusUpdate(statuses, sessionId, status, extra);
       },
       saveSessionDiff: (sessionId, diff, status) => {
         diffs.push({ sessionId, diff, status });
@@ -266,7 +279,7 @@ describe("consumeProviderEvents", () => {
 
     const consumeTask = consumeProviderEvents("sess-merge", handle, new OrchestrationEngine(), {
       updateSessionStatus: (sessionId, status, extra) => {
-        statuses.push({ sessionId, status, extra });
+        recordStatusUpdate(statuses, sessionId, status, extra);
       },
       saveSessionDiff: () => {},
       insertUsageRecord: () => {},
@@ -317,7 +330,7 @@ describe("consumeProviderEvents", () => {
       new OrchestrationEngine(),
       {
         updateSessionStatus: (sessionId, status, extra) => {
-          statuses.push({ sessionId, status, extra });
+          recordStatusUpdate(statuses, sessionId, status, extra);
         },
         saveSessionDiff: () => {},
         insertUsageRecord: () => {},
@@ -363,13 +376,13 @@ describe("consumeProviderEvents", () => {
       new OrchestrationEngine(),
       {
         updateSessionStatus: (sessionId, status, extra) => {
-          statuses.push({ sessionId, status, extra });
+          recordStatusUpdate(statuses, sessionId, status, extra);
         },
         saveSessionDiff: () => {},
         insertUsageRecord: () => {},
         approvalManager: new ApprovalManager(),
         pushHub: {
-          broadcast(channel, data) {
+          broadcast(channel: string, data: unknown) {
             broadcasts.push({ channel, data });
           },
         } as never,
@@ -414,7 +427,7 @@ describe("consumeProviderEvents", () => {
         insertUsageRecord: () => {},
         approvalManager: new ApprovalManager(),
         pushHub: {
-          broadcast(channel, data) {
+          broadcast(channel: string, data: unknown) {
             broadcasts.push({ channel, data });
           },
         } as never,

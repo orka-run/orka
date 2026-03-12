@@ -115,8 +115,8 @@ function toApprovalRequest(
     sessionId,
     threadId: handle.threadId,
     requestType: event.payload.requestType,
-    detail: event.payload.detail,
-    args: event.payload.args,
+    ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
+    ...(event.payload.args !== undefined ? { args: event.payload.args } : {}),
     status: "pending",
     createdAt: event.createdAt,
   };
@@ -138,7 +138,7 @@ function persistUsageRecord(
     inputTokens: event.payload.usage?.inputTokens ?? 0,
     outputTokens: event.payload.usage?.outputTokens ?? 0,
     cacheReadTokens: 0,
-    costUsd: event.payload.totalCostUsd,
+    costUsd: event.payload.totalCostUsd ?? null,
     model: callbacks.model ?? null,
     recordedAt: event.createdAt,
   });

@@ -359,9 +359,9 @@ class LocalClient implements OrkaService {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     const term = this.getTerminalManager().open(sessionId, {
-      cols: opts?.cols,
-      rows: opts?.rows,
       cwd: session.workingDir,
+      ...(opts?.cols !== undefined ? { cols: opts.cols } : {}),
+      ...(opts?.rows !== undefined ? { rows: opts.rows } : {}),
     });
     return { termId: term.id };
   }

@@ -104,7 +104,7 @@ export class PushHub {
       for (const ws of channelSubscribers) {
         const startedAt = now();
         this.send(ws, channel, data, sequence);
-        const bufferedAmount = typeof ws.bufferedAmount === "number" ? ws.bufferedAmount : 0;
+        const bufferedAmount = ws.getBufferedAmount();
         const eventAttributes: Record<string, string | number | boolean> = {
           "orka.channel": channel,
           "orka.sequence": sequence,

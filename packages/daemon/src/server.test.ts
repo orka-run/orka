@@ -6,14 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "./server";
 
-const originalOrkaHome = process.env.ORKA_HOME;
+const originalOrkaHome = process.env["ORKA_HOME"];
 
 let testHome = "";
-let server: Server | null = null;
+let server: Server<unknown> | null = null;
 
 beforeEach(() => {
   testHome = mkdtempSync(join(tmpdir(), "orka-server-test-"));
-  process.env.ORKA_HOME = testHome;
+  process.env["ORKA_HOME"] = testHome;
 });
 
 afterEach(() => {
@@ -21,9 +21,9 @@ afterEach(() => {
   server = null;
   rmSync(testHome, { recursive: true, force: true });
   if (originalOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
+    delete process.env["ORKA_HOME"];
   } else {
-    process.env.ORKA_HOME = originalOrkaHome;
+    process.env["ORKA_HOME"] = originalOrkaHome;
   }
 });
 
@@ -87,7 +87,7 @@ describe("startServer", () => {
 
     const lines = readFileSync(traceFile, "utf-8").trim().split("\n");
     expect(lines).toHaveLength(1);
-    expect(JSON.parse(lines[0])).toMatchObject({
+    expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
       traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
       spanId: "00f067aa0ba902b7",
       name: "orka.cli.ps",

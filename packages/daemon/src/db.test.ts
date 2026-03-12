@@ -15,22 +15,22 @@ import {
   insertUsageRecord,
 } from "./db";
 
-const prevOrkaHome = process.env.ORKA_HOME;
+const prevOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
 
 beforeEach(() => {
   closeDb();
   testHome = mkdtempSync(join(tmpdir(), "orka-db-test-"));
-  process.env.ORKA_HOME = testHome;
+  process.env["ORKA_HOME"] = testHome;
 });
 
 afterEach(() => {
   closeDb();
   rmSync(testHome, { recursive: true, force: true });
   if (prevOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
+    delete process.env["ORKA_HOME"];
   } else {
-    process.env.ORKA_HOME = prevOrkaHome;
+    process.env["ORKA_HOME"] = prevOrkaHome;
   }
 });
 

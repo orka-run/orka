@@ -10,7 +10,7 @@ import { resetConfigCache } from "./config";
 import { providerService } from "./provider-runtime";
 import type { SessionRunner } from "./runner";
 
-const originalOrkaHome = process.env.ORKA_HOME;
+const originalOrkaHome = process.env["ORKA_HOME"];
 
 let testHome = "";
 let originalRunner: SessionRunner;
@@ -22,7 +22,7 @@ beforeEach(() => {
   testHome = mkdtempSync(join(tmpdir(), "orka-local-client-test-"));
   mkdirSync(testHome, { recursive: true });
   writeFileSync(join(testHome, "config.toml"), "[providers]\nuse_runtime = true\n");
-  process.env.ORKA_HOME = testHome;
+  process.env["ORKA_HOME"] = testHome;
 });
 
 afterEach(() => {
@@ -34,9 +34,9 @@ afterEach(() => {
   resetConfigCache();
   rmSync(testHome, { recursive: true, force: true });
   if (originalOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
+    delete process.env["ORKA_HOME"];
   } else {
-    process.env.ORKA_HOME = originalOrkaHome;
+    process.env["ORKA_HOME"] = originalOrkaHome;
   }
 });
 

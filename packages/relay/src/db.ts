@@ -98,7 +98,7 @@ const RELAY_DIR = ".orka-relay";
 const DB_FILE = "relay.db";
 
 export function getRelayHome(): string {
-  return process.env.ORKA_RELAY_DATA ?? join(process.env.HOME!, RELAY_DIR);
+  return process.env["ORKA_RELAY_DATA"] ?? join(process.env["HOME"] ?? "", RELAY_DIR);
 }
 
 function getDbPath(): string {

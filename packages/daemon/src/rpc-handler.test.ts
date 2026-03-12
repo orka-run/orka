@@ -72,7 +72,7 @@ describe("handleRpcRequest", () => {
       async spawn() {
         return session;
       },
-    } as OrkaService;
+    } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
       svc,
@@ -101,15 +101,18 @@ describe("handleRpcRequest", () => {
       async getSession(sessionId: string) {
         return sessionId === session.id ? session : null;
       },
-    } as OrkaService;
+    } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
       svc,
       JSON.stringify({ jsonrpc: "2.0", id: 2, method: "stop", params: { sessionId: session.id } }),
     );
 
-    expect(stoppedSessionId).toBe(session.id);
-    expect(JSON.parse(response)).toEqual({
+    if (!stoppedSessionId) {
+      throw new Error("Expected stop to be called");
+    }
+    expect(stoppedSessionId === session.id).toBe(true);
+    expect(JSON.parse(response ?? "null")).toEqual({
       jsonrpc: "2.0",
       id: 2,
       result: null,
@@ -128,7 +131,7 @@ describe("handleRpcRequest", () => {
       async deleteSessions(ids: string[]) {
         deletedIds.push(ids);
       },
-    } as OrkaService;
+    } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
       svc,
@@ -166,7 +169,7 @@ describe("handleRpcRequest", () => {
         async reportEventGap(channel: string, expectedSeq: number, gotSeq: number) {
           reportedGaps.push({ channel, expectedSeq, gotSeq });
         },
-      } as OrkaService;
+      } as unknown as OrkaService;
 
       const response = await handleRpcRequest(
         svc,
@@ -211,7 +214,7 @@ describe("handleRpcRequest", () => {
         async reap() {
           return 1;
         },
-      } as OrkaService;
+      } as unknown as OrkaService;
 
       const tracer = trace.getTracer("rpc-handler-test");
       let traceparent = "";
@@ -254,7 +257,7 @@ describe("handleRpcRequest", () => {
         async reap() {
           return 7;
         },
-      } as OrkaService;
+      } as unknown as OrkaService;
 
       const response = await handleRpcRequest(
         svc,
@@ -287,7 +290,7 @@ describe("handleRpcRequest", () => {
           await Bun.sleep(1_050);
           return 9;
         },
-      } as OrkaService;
+      } as unknown as OrkaService;
 
       const response = await handleRpcRequest(
         svc,

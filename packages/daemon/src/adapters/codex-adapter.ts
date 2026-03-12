@@ -148,7 +148,7 @@ export class CodexAdapter implements ProviderAdapter {
         command.push("--dangerously-bypass-approvals-and-sandbox", "app-server");
 
         const process = this.spawnProcess(command, {
-          cwd: input.cwd,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
@@ -188,7 +188,7 @@ export class CodexAdapter implements ProviderAdapter {
           threadId: input.threadId,
           provider: this.kind,
           events,
-          meta,
+          meta: meta as unknown as Record<string, unknown>,
         };
 
         if (isReadableStream(process.stderr)) {
@@ -230,7 +230,7 @@ export class CodexAdapter implements ProviderAdapter {
           if (input.prompt) {
             await this.startTurn(handle, {
               input: prependSystemPrompt(input.prompt, input.systemPrompt),
-              model: input.model,
+              ...(input.model ? { model: input.model } : {}),
             });
           }
         } catch (error) {
@@ -334,7 +334,7 @@ export class CodexAdapter implements ProviderAdapter {
           text_elements: [],
         },
       ],
-      model: input.model,
+      ...(input.model ? { model: input.model } : {}),
     });
 
     const activeTurnId = turn.turn?.id;
@@ -434,8 +434,8 @@ export function mapCodexEvent(
       threadId,
       {
         requestType: pending.requestType,
-        detail: pending.detail,
-        args: pending.args,
+        ...(pending.detail !== undefined ? { detail: pending.detail } : {}),
+        ...(pending.args !== undefined ? { args: pending.args } : {}),
       },
       {
         provider: "codex",
@@ -462,7 +462,8 @@ export function mapCodexEvent(
     }
 
     case "thread/status/changed": {
-      const state = mapThreadState(getRecord(raw.params)?.status);
+      const params = getRecord(raw.params);
+      const state = mapThreadState(params?.["status"]);
       if (!state) {
         return null;
       }
@@ -480,19 +481,19 @@ export function mapCodexEvent(
     }
 
     case "turn/completed": {
-      const turnRecord = getRecord(raw.params)?.turn;
-      if (!isRecord(turnRecord) || typeof turnRecord.id !== "string") {
+      const turnRecord = getRecord(getRecord(raw.params)?.["turn"]);
+      if (!turnRecord || typeof turnRecord["id"] !== "string") {
         return null;
       }
 
-      const turnId = turnRecord.id;
-      const state = mapTurnState(turnRecord.status);
+      const turnId = turnRecord["id"];
+      const state = mapTurnState(turnRecord["status"]);
       if (!state) {
         return null;
       }
 
       if (meta?.activeTurnId === turnId) {
-        meta.activeTurnId = undefined;
+        delete meta.activeTurnId;
       }
 
       const usage = meta?.turnUsage.get(turnId);
@@ -501,7 +502,7 @@ export function mapCodexEvent(
         threadId,
         {
           state,
-          usage,
+          ...(usage ? { usage } : {}),
         },
         { provider: "codex", turnId },
       );
@@ -510,29 +511,26 @@ export function mapCodexEvent(
     case "item/started":
     case "item/completed": {
       const params = getRecord(raw.params);
-      const item = params?.item;
-      const turnId = typeof params?.turnId === "string" ? params.turnId : undefined;
+      const item = getRecord(params?.["item"]);
+      const turnId = typeof params?.["turnId"] === "string" ? params["turnId"] : undefined;
       if (!isRecord(item) || !turnId) {
         return null;
       }
 
-      const itemId = typeof item.id === "string" ? item.id : undefined;
+      const itemId = typeof item["id"] === "string" ? item["id"] : undefined;
+      const title = getItemTitle(item);
+      const detail = getItemDetail(item);
       const payload = {
         itemType: getCanonicalItemType(item),
         status: raw.method === "item/started" ? "in_progress" : getCanonicalItemStatus(item),
-        title: getItemTitle(item),
-        detail: getItemDetail(item),
-      } satisfies {
-        itemType: CanonicalItemType;
-        status?: RuntimeItemStatus;
-        title?: string;
-        detail?: string;
+        ...(title ? { title } : {}),
+        ...(detail ? { detail } : {}),
       };
 
       return createEvent(raw.method === "item/started" ? "item.started" : "item.completed", threadId, payload, {
         provider: "codex",
         turnId,
-        itemId,
+        ...(itemId ? { itemId } : {}),
       });
     }
 
@@ -551,39 +549,40 @@ export function mapCodexEvent(
 
     case "thread/tokenUsage/updated": {
       const params = getRecord(raw.params);
-      if (!params || typeof params.turnId !== "string") {
+      if (!params || typeof params["turnId"] !== "string") {
         return null;
       }
 
-      const usage = normalizeUsage(params.tokenUsage);
+      const usage = normalizeUsage(params["tokenUsage"]);
       if (usage) {
-        meta?.turnUsage.set(params.turnId, usage);
+        meta?.turnUsage.set(params["turnId"], usage);
       }
       return null;
     }
 
     case "error": {
       const params = getRecord(raw.params);
-      const error = getRecord(params?.error);
-      const message = typeof error?.message === "string" ? error.message : "Codex reported an error";
+      const error = getRecord(params?.["error"]);
+      const message = typeof error?.["message"] === "string" ? error["message"] : "Codex reported an error";
+      const turnId = typeof params?.["turnId"] === "string" ? params["turnId"] : undefined;
       return createEvent(
         "runtime.error",
         threadId,
         { message, class: "provider_error" },
         {
           provider: "codex",
-          turnId: typeof params?.turnId === "string" ? params.turnId : undefined,
+          ...(turnId ? { turnId } : {}),
         },
       );
     }
 
     case "serverRequest/resolved": {
       const params = getRecord(raw.params);
-      if (!params || (typeof params.requestId !== "string" && typeof params.requestId !== "number")) {
+      if (!params || (typeof params["requestId"] !== "string" && typeof params["requestId"] !== "number")) {
         return null;
       }
 
-      const requestId = String(params.requestId);
+      const requestId = String(params["requestId"]);
       const pending = meta?.pendingServerRequests.get(requestId);
       meta?.pendingServerRequests.delete(requestId);
       const turnId = getString(pending?.args, "turnId");
@@ -593,12 +592,12 @@ export function mapCodexEvent(
         threadId,
         {
           requestType: pending?.requestType ?? "unknown",
-          decision: pending?.decision,
+          ...(pending?.decision ? { decision: pending.decision } : {}),
         },
         {
           provider: "codex",
           requestId,
-          turnId,
+          ...(turnId ? { turnId } : {}),
         },
       );
     }
@@ -764,7 +763,7 @@ function createServerRequestResponse(
       return { decision: decision === "approve" ? "accept" : "decline" };
 
     case "item/permissions/requestApproval": {
-      const permissions = getRecord(pending.args)?.permissions;
+      const permissions = getRecord(pending.args)?.["permissions"];
       return decision === "approve"
         ? { permissions: isRecord(permissions) ? permissions : {}, scope: "turn" }
         : { permissions: {}, scope: "turn" };
@@ -782,14 +781,19 @@ function createServerRequestResponse(
 }
 
 function mapServerRequest(raw: JsonRpcServerRequest): CodexPendingServerRequest | null {
+  const detail = getRequestDetail(raw.params, ["command", "reason"]);
+  const fileChangeDetail = getRequestDetail(raw.params, ["reason", "grantRoot"]);
+  const permissionDetail = getRequestDetail(raw.params, ["reason"]);
+  const toolDetail = getToolRequestDetail(raw.params);
+
   switch (raw.method) {
     case "item/commandExecution/requestApproval":
       return {
         rawId: raw.id,
         method: raw.method,
         requestType: "command_execution_approval",
-        detail: getRequestDetail(raw.params, ["command", "reason"]),
-        args: raw.params,
+        ...(detail ? { detail } : {}),
+        ...(raw.params !== undefined ? { args: raw.params } : {}),
       };
 
     case "item/fileChange/requestApproval":
@@ -797,8 +801,8 @@ function mapServerRequest(raw: JsonRpcServerRequest): CodexPendingServerRequest 
         rawId: raw.id,
         method: raw.method,
         requestType: "file_change_approval",
-        detail: getRequestDetail(raw.params, ["reason", "grantRoot"]),
-        args: raw.params,
+        ...(fileChangeDetail ? { detail: fileChangeDetail } : {}),
+        ...(raw.params !== undefined ? { args: raw.params } : {}),
       };
 
     case "item/permissions/requestApproval":
@@ -806,8 +810,8 @@ function mapServerRequest(raw: JsonRpcServerRequest): CodexPendingServerRequest 
         rawId: raw.id,
         method: raw.method,
         requestType: "unknown",
-        detail: getRequestDetail(raw.params, ["reason"]),
-        args: raw.params,
+        ...(permissionDetail ? { detail: permissionDetail } : {}),
+        ...(raw.params !== undefined ? { args: raw.params } : {}),
       };
 
     case "item/tool/requestUserInput":
@@ -815,8 +819,8 @@ function mapServerRequest(raw: JsonRpcServerRequest): CodexPendingServerRequest 
         rawId: raw.id,
         method: raw.method,
         requestType: "tool_user_input",
-        detail: getToolRequestDetail(raw.params),
-        args: raw.params,
+        ...(toolDetail ? { detail: toolDetail } : {}),
+        ...(raw.params !== undefined ? { args: raw.params } : {}),
       };
 
     default:
@@ -830,37 +834,38 @@ function createContentDeltaEvent(
   streamKind: "assistant_text" | "command_output" | "file_change_output" | "reasoning_text",
 ): ProviderRuntimeEvent | null {
   const params = getRecord(rawParams);
-  if (!params || typeof params.turnId !== "string" || typeof params.delta !== "string") {
+  if (!params || typeof params["turnId"] !== "string" || typeof params["delta"] !== "string") {
     return null;
   }
 
+  const itemId = typeof params["itemId"] === "string" ? params["itemId"] : undefined;
   return createEvent(
     "content.delta",
     threadId,
-    { streamKind, delta: params.delta },
+    { streamKind, delta: params["delta"] },
     {
       provider: "codex",
-      turnId: params.turnId,
-      itemId: typeof params.itemId === "string" ? params.itemId : undefined,
+      turnId: params["turnId"],
+      ...(itemId ? { itemId } : {}),
     },
   );
 }
 
 function normalizeUsage(raw: unknown): CodexUsage | undefined {
   const usage = getRecord(raw);
-  const total = getRecord(usage?.total);
-  if (!total || typeof total.inputTokens !== "number" || typeof total.outputTokens !== "number") {
+  const total = getRecord(usage?.["total"]);
+  if (!total || typeof total["inputTokens"] !== "number" || typeof total["outputTokens"] !== "number") {
     return undefined;
   }
 
   return {
-    inputTokens: total.inputTokens,
-    outputTokens: total.outputTokens,
+    inputTokens: total["inputTokens"],
+    outputTokens: total["outputTokens"],
   };
 }
 
 function mapThreadState(raw: unknown): RuntimeSessionState | null {
-  const type = getRecord(raw)?.type;
+  const type = getRecord(raw)?.["type"];
   if (type === "idle") return "ready";
   if (type === "active") return "running";
   if (type === "notLoaded") return "stopped";
@@ -876,7 +881,7 @@ function mapTurnState(raw: unknown): RuntimeTurnState | null {
 }
 
 function getCanonicalItemType(item: Record<string, unknown>): CanonicalItemType {
-  switch (item.type) {
+  switch (item["type"]) {
     case "userMessage":
       return "user_message";
     case "agentMessage":
@@ -895,8 +900,8 @@ function getCanonicalItemType(item: Record<string, unknown>): CanonicalItemType 
 }
 
 function getCanonicalItemStatus(item: Record<string, unknown>): RuntimeItemStatus {
-  if (item.type === "commandExecution" || item.type === "fileChange") {
-    switch (item.status) {
+  if (item["type"] === "commandExecution" || item["type"] === "fileChange") {
+    switch (item["status"]) {
       case "failed":
         return "failed";
       case "declined":
@@ -910,9 +915,9 @@ function getCanonicalItemStatus(item: Record<string, unknown>): RuntimeItemStatu
 }
 
 function getItemTitle(item: Record<string, unknown>): string | undefined {
-  switch (item.type) {
+  switch (item["type"]) {
     case "commandExecution":
-      return typeof item.command === "string" ? item.command : undefined;
+      return typeof item["command"] === "string" ? item["command"] : undefined;
     case "fileChange":
       return "File change";
     case "reasoning":
@@ -922,8 +927,8 @@ function getItemTitle(item: Record<string, unknown>): string | undefined {
     case "userMessage":
       return "User message";
     case "mcpToolCall": {
-      const server = typeof item.server === "string" ? item.server : undefined;
-      const tool = typeof item.tool === "string" ? item.tool : undefined;
+      const server = typeof item["server"] === "string" ? item["server"] : undefined;
+      const tool = typeof item["tool"] === "string" ? item["tool"] : undefined;
       if (server && tool) {
         return `${server}/${tool}`;
       }
@@ -935,15 +940,15 @@ function getItemTitle(item: Record<string, unknown>): string | undefined {
 }
 
 function getItemDetail(item: Record<string, unknown>): string | undefined {
-  switch (item.type) {
+  switch (item["type"]) {
     case "commandExecution":
-      return typeof item.command === "string" ? item.command : undefined;
+      return typeof item["command"] === "string" ? item["command"] : undefined;
     case "agentMessage":
-      return typeof item.text === "string" && item.text.length > 0 ? item.text : undefined;
+      return typeof item["text"] === "string" && item["text"].length > 0 ? item["text"] : undefined;
     case "userMessage":
-      return getFirstUserMessageText(item.content);
+      return getFirstUserMessageText(item["content"]);
     case "fileChange": {
-      const changes = Array.isArray(item.changes) ? item.changes.length : 0;
+      const changes = Array.isArray(item["changes"]) ? item["changes"].length : 0;
       return changes > 0 ? `${changes} file change${changes === 1 ? "" : "s"}` : undefined;
     }
     default:
@@ -957,10 +962,10 @@ function getFirstUserMessageText(raw: unknown): string | undefined {
   }
 
   for (const entry of raw) {
-    if (!isRecord(entry) || entry.type !== "text" || typeof entry.text !== "string") {
+    if (!isRecord(entry) || entry["type"] !== "text" || typeof entry["text"] !== "string") {
       continue;
     }
-    return entry.text;
+    return entry["text"];
   }
 
   return undefined;
@@ -983,13 +988,13 @@ function getRequestDetail(raw: unknown, keys: string[]): string | undefined {
 }
 
 function getToolRequestDetail(raw: unknown): string | undefined {
-  const questions = getRecord(raw)?.questions;
+  const questions = getRecord(raw)?.["questions"];
   if (!Array.isArray(questions) || questions.length === 0) {
     return undefined;
   }
 
-  const first = questions.find((entry) => isRecord(entry) && typeof entry.question === "string");
-  return isRecord(first) && typeof first.question === "string" ? first.question : undefined;
+  const first = questions.find((entry) => isRecord(entry) && typeof entry["question"] === "string");
+  return isRecord(first) && typeof first["question"] === "string" ? first["question"] : undefined;
 }
 
 async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -1072,11 +1077,11 @@ function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
 }
 
 function isJsonRpcNotification(value: unknown): value is JsonRpcNotification {
-  return isRecord(value) && typeof value.method === "string" && !("id" in value);
+  return isRecord(value) && typeof value["method"] === "string" && !("id" in value);
 }
 
 function isJsonRpcServerRequest(value: unknown): value is JsonRpcServerRequest {
-  return isRecord(value) && typeof value.method === "string" && "id" in value;
+  return isRecord(value) && typeof value["method"] === "string" && "id" in value;
 }
 
 function getRecord(value: unknown): Record<string, unknown> | undefined {

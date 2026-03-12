@@ -115,7 +115,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
         }
 
         // Upgrade to WebSocket, pass encKey as data
-        if (server.upgrade(req, { data: { encKey } })) {
+        if (server.upgrade(req, { data: encKey ? { encKey } : {} })) {
           return undefined;
         }
         return new Response("WebSocket upgrade required", { status: 426 });

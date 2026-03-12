@@ -6,15 +6,15 @@ describe("SingleInstanceCluster", () => {
     const cluster = new SingleInstanceCluster();
     const instances = cluster.listInstances();
     expect(instances.length).toBe(1);
-    expect(instances[0].id).toBe("local");
-    expect(instances[0].healthy).toBe(true);
+    expect(instances[0]?.id).toBe("local");
+    expect(instances[0]?.healthy).toBe(true);
   });
 
   test("custom id and url", () => {
     const cluster = new SingleInstanceCluster({ id: "relay-1", url: "ws://relay.example.com:7390" });
     const instance = cluster.listInstances()[0];
-    expect(instance.id).toBe("relay-1");
-    expect(instance.url).toBe("ws://relay.example.com:7390");
+    expect(instance?.id).toBe("relay-1");
+    expect(instance?.url).toBe("ws://relay.example.com:7390");
   });
 
   test("isLocal always returns true", () => {
@@ -42,7 +42,7 @@ describe("SingleInstanceCluster", () => {
     const cluster = new SingleInstanceCluster();
     cluster.updateStats(10, 25);
     const instance = cluster.listInstances()[0];
-    expect(instance.activeAccounts).toBe(10);
-    expect(instance.connections).toBe(25);
+    expect(instance?.activeAccounts).toBe(10);
+    expect(instance?.connections).toBe(25);
   });
 });

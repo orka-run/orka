@@ -37,7 +37,7 @@ export class UsageMeter {
       eventType: "request",
       bytesIn,
       bytesOut: 0,
-      nodeId,
+      ...(nodeId ? { nodeId } : {}),
       requestMethod: method,
       timestamp: new Date().toISOString(),
     });
@@ -49,7 +49,7 @@ export class UsageMeter {
       eventType: "response",
       bytesIn: 0,
       bytesOut,
-      nodeId,
+      ...(nodeId ? { nodeId } : {}),
       timestamp: new Date().toISOString(),
     });
   }
@@ -60,7 +60,7 @@ export class UsageMeter {
       eventType,
       bytesIn: 0,
       bytesOut: 0,
-      nodeId,
+      ...(nodeId ? { nodeId } : {}),
       timestamp: new Date().toISOString(),
     });
   }

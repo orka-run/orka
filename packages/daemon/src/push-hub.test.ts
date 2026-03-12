@@ -6,6 +6,9 @@ function createMockWs(bufferedAmount = 0) {
   const sent: string[] = [];
   return {
     bufferedAmount,
+    getBufferedAmount() {
+      return bufferedAmount;
+    },
     send(data: string) {
       sent.push(data);
     },
@@ -27,7 +30,7 @@ describe("PushHub", () => {
     hub.broadcast("orchestration.event", { sessionId: "sess-1" });
 
     expect(subscribed.sent).toHaveLength(1);
-    expect(JSON.parse(subscribed.sent[0])).toEqual({
+    expect(JSON.parse(subscribed.sent[0] ?? "{}")).toEqual({
       type: "push",
       channel: "orchestration.event",
       sequence: 1,

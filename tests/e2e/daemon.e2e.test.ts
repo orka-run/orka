@@ -15,7 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
 // Isolated ORKA_HOME — must be set BEFORE importing daemon (lazy DB init)
 const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-daemon-"));
-process.env.ORKA_HOME = testHome;
+process.env["ORKA_HOME"] = testHome;
 
 import { createLocalClient } from "@orka/daemon";
 import type { OrkaService } from "@orka/core";
@@ -97,7 +97,10 @@ describeE2E("Daemon Session Lifecycle", () => {
 
   test("getSession returns the spawned session", async () => {
     const sessions = await client.listSessions();
-    const id = sessions[0].id;
+    const id = sessions[0]?.id;
+    if (!id) {
+      throw new Error("Expected at least one session");
+    }
     const session = await client.getSession(id);
 
     expect(session).not.toBeNull();
@@ -108,6 +111,9 @@ describeE2E("Daemon Session Lifecycle", () => {
   test("getTask returns the linked task", async () => {
     const sessions = await client.listSessions();
     const session = sessions[0];
+    if (!session) {
+      throw new Error("Expected at least one session");
+    }
     const task = await client.getTask(session.taskId);
 
     expect(task).not.toBeNull();
@@ -158,7 +164,7 @@ describeE2E("Daemon Session Lifecycle", () => {
   test("listSessions supports tag filter", async () => {
     const byTag = await client.listSessions({ tag: "e2e" });
     expect(byTag.length).toBeGreaterThanOrEqual(1);
-    expect(byTag[0].backend).toBe("shell");
+    expect(byTag[0]?.backend).toBe("shell");
   });
 
   // ---- Keep ----
@@ -166,6 +172,9 @@ describeE2E("Daemon Session Lifecycle", () => {
   test("setKept marks session as kept", async () => {
     const sessions = await client.listSessions();
     const session = sessions[0];
+    if (!session) {
+      throw new Error("Expected at least one session");
+    }
 
     await client.setKept(session.id, true);
     const updated = await client.getSession(session.id);
