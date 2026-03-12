@@ -445,20 +445,39 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
 
   const [stopping, setStopping] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   async function handleSend(text: string) {
-    await withDashboardSpan(
-      "orka.dashboard.chat.send_input",
-      {
-        "orka.session.id": sessionId,
-        "orka.backend": activeSession.backend,
-        "orka.input.length": text.length,
-      },
-      async () => {
-        setAutoScroll(true);
-        await transport.request<void>("sendTurn", { sessionId, text });
-      },
-    );
+    setSendError(null);
+
+    // Optimistically add user message entry
+    const optimisticEntry: ChatEntry = {
+      id: `user-optimistic-${Date.now()}`,
+      type: "user",
+      timestamp: new Date().toISOString(),
+      body: text,
+    };
+    setEntries((prev) => [...prev, optimisticEntry]);
+    setAutoScroll(true);
+
+    try {
+      await withDashboardSpan(
+        "orka.dashboard.chat.send_input",
+        {
+          "orka.session.id": sessionId,
+          "orka.backend": activeSession.backend,
+          "orka.input.length": text.length,
+        },
+        async () => {
+          await transport.request<void>("sendTurn", { sessionId, text });
+        },
+      );
+    } catch (err) {
+      // Remove the optimistic entry on failure
+      setEntries((prev) => prev.filter((e) => e.id !== optimisticEntry.id));
+      setSendError(err instanceof Error ? err.message : "Failed to send message");
+      throw err;
+    }
   }
 
   async function handleStop() {
@@ -568,6 +587,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
           sessionId={sessionId}
           inputState={inputState}
           onSend={handleSend}
+          sendError={sendError}
+          onClearError={() => setSendError(null)}
         />
       </div>
     </div>

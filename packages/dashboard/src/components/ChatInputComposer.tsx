@@ -6,6 +6,8 @@ interface ChatInputComposerProps {
   sessionId: string;
   inputState: InputState;
   onSend: (text: string) => Promise<void>;
+  sendError?: string | null;
+  onClearError?: () => void;
 }
 
 const MAX_TEXTAREA_HEIGHT = 200;
@@ -23,7 +25,7 @@ const STATE_MESSAGES: Record<Exclude<InputState, "waiting">, string> = {
   not_started: "Session is starting...",
 };
 
-export function ChatInputComposer({ sessionId, inputState, onSend }: ChatInputComposerProps) {
+export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError }: ChatInputComposerProps) {
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -72,6 +74,8 @@ export function ChatInputComposer({ sessionId, inputState, onSend }: ChatInputCo
       requestAnimationFrame(() => {
         resizeTextarea();
       });
+    } catch {
+      // Error display handled by parent via sendError prop
     } finally {
       setIsSending(false);
     }
@@ -92,6 +96,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend }: ChatInputCo
             aria-busy={isSending}
             onChange={(event) => {
               setText(event.target.value);
+              if (sendError) onClearError?.();
             }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
@@ -110,10 +115,16 @@ export function ChatInputComposer({ sessionId, inputState, onSend }: ChatInputCo
                 void submit();
               }
             }}
-            className="min-h-11 w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-sky-500/70 focus:ring-2 focus:ring-sky-500/20 disabled:cursor-not-allowed disabled:bg-zinc-900/70 disabled:text-zinc-500"
+            className={`min-h-11 w-full resize-none rounded-lg border bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:ring-2 disabled:cursor-not-allowed disabled:bg-zinc-900/70 disabled:text-zinc-500 ${
+              sendError
+                ? "border-red-500/70 focus:border-red-500/70 focus:ring-red-500/20"
+                : "border-zinc-800 focus:border-sky-500/70 focus:ring-sky-500/20"
+            }`}
             style={{ maxHeight: `${MAX_TEXTAREA_HEIGHT}px` }}
           />
-          {inputState !== "waiting" ? (
+          {sendError ? (
+            <p className="mt-2 text-xs text-red-400">{sendError}</p>
+          ) : inputState !== "waiting" ? (
             <p className={`mt-2 text-xs ${inputState === "busy" ? "animate-pulse text-sky-300" : "text-zinc-500"}`}>
               {STATE_MESSAGES[inputState]}
             </p>
