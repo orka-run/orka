@@ -6,6 +6,7 @@ import type { SessionSummary } from "../stores/sessionStore";
 import { withDashboardSpan } from "../lib/tracing";
 import { MarkdownContent } from "./MarkdownContent";
 import { ToolCallDetails } from "./ToolCallDetails";
+import { ApprovalCard, type ApprovalEntry } from "./ApprovalCard";
 import { ChatInputComposer } from "./ChatInputComposer";
 import { useInputState } from "../hooks/useInputState";
 import { useSessionStore } from "../stores/sessionStore";
@@ -54,7 +55,8 @@ type ChatEntry =
       timestamp: string;
       title: string;
       body: string;
-    };
+    }
+  | ApprovalEntry;
 
 interface ChatViewProps {
   sessionId: string;
@@ -90,7 +92,8 @@ function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState {
 
   // Find last meaningful event by walking backwards
   for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i]!;
+    const e = events[i];
+    if (!e) continue;
     switch (e.type) {
       case "content.delta":
         return "writing";
@@ -132,14 +135,14 @@ function buildToolGroupSummary(tools: ToolEntry[]): string {
 
   const parts: string[] = [];
   if (fileCount > 0 && cmdCount > 0) {
-    parts.push(`${fileCount} file ${fileCount === 1 ? "change" : "changes"}`);
-    parts.push(`${cmdCount} ${cmdCount === 1 ? "command" : "commands"}`);
+    parts.push(`${String(fileCount)} file ${fileCount === 1 ? "change" : "changes"}`);
+    parts.push(`${String(cmdCount)} ${cmdCount === 1 ? "command" : "commands"}`);
   } else {
-    parts.push(`${tools.length} tool ${tools.length === 1 ? "call" : "calls"}`);
+    parts.push(`${String(tools.length)} tool ${tools.length === 1 ? "call" : "calls"}`);
   }
 
   if (inProgressCount > 0) {
-    return parts.join(", ") + ` (${inProgressCount} in progress)`;
+    return parts.join(", ") + ` (${String(inProgressCount)} in progress)`;
   }
   return parts.join(", ");
 }
@@ -149,6 +152,7 @@ function buildToolGroupSummary(tools: ToolEntry[]): string {
  *
  * - Content deltas are accumulated into assistant message entries.
  * - item.started/item.completed are deduplicated (completed wins) and grouped into tool-group entries.
+ * - request.opened/request.resolved are mapped to approval entries.
  * - Noisy system events (session.created, session.started, turn.started) are hidden.
  */
 function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): ChatEntry[] {
@@ -156,6 +160,14 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
   const completedItemIds = new Set<string>();
   for (const event of events) {
     if (event.type === "item.completed") completedItemIds.add(event.itemId);
+  }
+
+  // First pass: collect request resolutions so we can update approval entries
+  const resolvedRequests = new Map<string, string>();
+  for (const event of events) {
+    if (event.type === "request.resolved") {
+      resolvedRequests.set(event.requestId, event.decision);
+    }
   }
 
   const entries: ChatEntry[] = [];
@@ -169,7 +181,7 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
   function flushAssistant() {
     if (accum && accumStart) {
       entries.push({
-        id: `assistant-${accumTurnId}-${accumStart}`,
+        id: `assistant-${accumTurnId ?? "unknown"}-${accumStart}`,
         type: "assistant",
         timestamp: accumStart,
         body: accum,
@@ -182,7 +194,8 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
 
   function flushToolGroup() {
     if (pendingTools.length === 0) return;
-    const first = pendingTools[0]!;
+    const first = pendingTools[0];
+    if (!first) return;
     entries.push({
       id: `tool-group-${first.id}`,
       type: "tool-group",
@@ -261,6 +274,31 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
     // item.updated: skip
     if (event.type === "item.updated") continue;
 
+    // request.opened: create approval entry
+    if (event.type === "request.opened") {
+      flushAssistant();
+      flushToolGroup();
+      const decision = resolvedRequests.get(event.requestId);
+      const status: ApprovalEntry["status"] = decision === "approve" || decision === "approve_session"
+        ? "approved"
+        : decision === "deny" || decision === "cancel"
+          ? "denied"
+          : "pending";
+      entries.push({
+        id: `approval-${event.requestId}`,
+        type: "approval",
+        timestamp: event.timestamp,
+        requestId: event.requestId,
+        requestType: event.requestType,
+        ...(event.detail !== undefined ? { detail: event.detail } : {}),
+        status,
+      });
+      continue;
+    }
+
+    // request.resolved: skip (already handled in first pass)
+    if (event.type === "request.resolved") continue;
+
     // Non-tool, non-delta event: flush both accumulators
     if (
       event.type === "turn.completed" ||
@@ -281,7 +319,7 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
       case "turn.completed": {
         const parts: string[] = [];
         if (event.cost != null) parts.push(`$${event.cost.toFixed(4)}`);
-        if (event.tokens) parts.push(`${event.tokens.input} in / ${event.tokens.output} out`);
+        if (event.tokens) parts.push(`${String(event.tokens.input)} in / ${String(event.tokens.output)} out`);
         if (parts.length > 0) {
           entries.push({
             id: `turn-completed-${event.turnId}`,
@@ -317,7 +355,7 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
           type: "system",
           timestamp: event.timestamp,
           title: "Session completed",
-          body: event.exitCode != null ? `Exited with code ${event.exitCode}.` : "The agent finished cleanly.",
+          body: event.exitCode != null ? `Exited with code ${String(event.exitCode)}.` : "The agent finished cleanly.",
         });
         break;
       case "session.failed":
@@ -465,6 +503,31 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, []);
 
+  const handleApprovalResolve = useCallback(async (requestId: string, decision: "approve" | "deny") => {
+    // Optimistically update the approval entry
+    setEntries((prev) =>
+      prev.map((e) =>
+        e.type === "approval" && e.requestId === requestId
+          ? { ...e, status: decision === "approve" ? "approved" as const : "denied" as const }
+          : e,
+      ),
+    );
+
+    try {
+      await transport.request("resolveApproval", { requestId, decision });
+    } catch (err) {
+      // Rollback on error
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.type === "approval" && e.requestId === requestId
+            ? { ...e, status: "pending" as const }
+            : e,
+        ),
+      );
+      throw err;
+    }
+  }, [transport]);
+
   if (!session) {
     return (
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4 text-sm text-zinc-400">
@@ -485,7 +548,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
 
     // Optimistically add user message entry
     const optimisticEntry: ChatEntry = {
-      id: `user-optimistic-${Date.now()}`,
+      id: `user-optimistic-${String(Date.now())}`,
       type: "user",
       timestamp: new Date().toISOString(),
       body: text,
@@ -502,7 +565,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
           "orka.input.length": text.length,
         },
         async () => {
-          await transport.request<void>("sendTurn", { sessionId, text });
+          await transport.request("sendTurn", { sessionId, text });
         },
       );
     } catch (err) {
@@ -556,7 +619,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
       <div className="border-b border-zinc-800 px-4 py-3">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Chat Timeline</p>
         <p className="mt-1 text-sm text-zinc-400">
-          {isRunning(activeSession.status) ? "Streaming live events…" : `${entries.length} events`}
+          {isRunning(activeSession.status) ? "Streaming live events…" : `${String(entries.length)} events`}
         </p>
       </div>
       <div className="relative flex-1 overflow-hidden">
@@ -575,6 +638,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
                   entry={entry}
                   isExpanded={expandedGroups.has(entry.id)}
                   onToggleExpand={handleToggleGroup}
+                  onApprovalResolve={handleApprovalResolve}
                 />
               ))
             )}
@@ -600,7 +664,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
             {isRunning(activeSession.status) && (
               <button
                 type="button"
-                onClick={handleStop}
+                onClick={() => { void handleStop(); }}
                 disabled={stopping}
                 className="flex items-center gap-1.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-950/50 disabled:opacity-50"
               >
@@ -611,7 +675,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
             {isTerminal(activeSession.status) && (
               <button
                 type="button"
-                onClick={handleRetry}
+                onClick={() => { void handleRetry(); }}
                 disabled={retrying}
                 className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 disabled:opacity-50"
               >
@@ -626,7 +690,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
           inputState={inputState}
           onSend={handleSend}
           sendError={sendError}
-          onClearError={() => setSendError(null)}
+          onClearError={() => { setSendError(null); }}
         />
       </div>
     </div>
@@ -669,11 +733,17 @@ function TimelineEntry({
   entry,
   isExpanded,
   onToggleExpand,
+  onApprovalResolve,
 }: {
   entry: ChatEntry;
   isExpanded?: boolean;
   onToggleExpand?: (groupId: string, isOpen: boolean) => void;
+  onApprovalResolve?: (requestId: string, decision: "approve" | "deny") => Promise<void>;
 }) {
+  if (entry.type === "approval" && onApprovalResolve) {
+    return <ApprovalCard entry={entry} onResolve={onApprovalResolve} />;
+  }
+
   if (entry.type === "assistant") {
     return (
       <div className="flex items-start gap-3">
@@ -709,7 +779,8 @@ function TimelineEntry({
 
     // Single tool: flat card, no collapsible wrapper
     if (entry.tools.length === 1) {
-      const tool = entry.tools[0]!;
+      const tool = entry.tools[0];
+      if (!tool) return null;
       return (
         <div className="flex min-w-0 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-2.5">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
@@ -788,8 +859,8 @@ function TimelineEntry({
 
     // 2 tools: always open, simple summary
     const label = hasInProgress
-      ? `Using ${entry.tools.length} tools…`
-      : `Used ${entry.tools.length} tools`;
+      ? `Using ${String(entry.tools.length)} tools…`
+      : `Used ${String(entry.tools.length)} tools`;
     return (
       <details
         open
