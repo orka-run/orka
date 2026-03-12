@@ -1,30 +1,311 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import { useEffect, useRef } from "react";
-import { AlertTriangle, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, Wrench } from "lucide-react";
-import type { ChatEntry } from "@orka/core";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, ArrowDown, Bot, Clock3, FileCode2, LoaderCircle, TerminalSquare, Wrench } from "lucide-react";
+import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { useTransport } from "../lib/transportContext";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
 
-type UIChatEntry = ChatEntry & { id: string; defaultOpen?: boolean };
+type ChatEntry =
+  | {
+      id: string;
+      type: "system";
+      timestamp: string;
+      title: string;
+      body: string;
+    }
+  | {
+      id: string;
+      type: "assistant";
+      timestamp: string;
+      body: string;
+    }
+  | {
+      id: string;
+      type: "tool";
+      timestamp: string;
+      title: string;
+      summary: string;
+      icon: "command" | "file";
+      details: string[];
+      defaultOpen?: boolean;
+    }
+  | {
+      id: string;
+      type: "error";
+      timestamp: string;
+      title: string;
+      body: string;
+    };
 
 interface ChatViewProps {
   sessionId: string;
   onSelectionLoadSettled?: (status: "ok" | "error", error?: unknown) => void;
 }
 
+function isRunning(status: SessionSummary["status"]): boolean {
+  return status === "queued" || status === "preparing" || status === "running";
+}
+
+/** Map an item type to an icon kind for tool entries. */
+function itemIcon(itemType: string): "command" | "file" {
+  if (itemType === "file_change") return "file";
+  return "command";
+}
+
+/** Build a ChatEntry from a single OrchestrationEvent, returning null for events we skip. */
+function eventToEntry(event: OrchestrationEvent, assistantAccum: string | null): ChatEntry | null {
+  switch (event.type) {
+    case "session.created":
+      return {
+        id: `${event.sessionId}-created-${event.timestamp}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: "Session created",
+        body: `${event.backend} session created.`,
+      };
+    case "session.started":
+      return {
+        id: `${event.sessionId}-started-${event.timestamp}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: "Session started",
+        body: "The agent session has started.",
+      };
+    case "turn.started":
+      return {
+        id: `turn-started-${event.turnId}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: "Turn started",
+        body: `Turn ${event.turnId} began.`,
+      };
+    case "turn.completed": {
+      const parts: string[] = [];
+      if (event.cost != null) parts.push(`Cost: $${event.cost.toFixed(4)}`);
+      if (event.tokens) parts.push(`Tokens: ${event.tokens.input} in / ${event.tokens.output} out`);
+      if (event.stopReason) parts.push(`Stop reason: ${event.stopReason}`);
+      return {
+        id: `turn-completed-${event.turnId}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: "Turn completed",
+        body: parts.length > 0 ? parts.join(" · ") : "Turn finished.",
+      };
+    }
+    case "turn.aborted":
+      return {
+        id: `turn-aborted-${event.turnId}`,
+        type: "error",
+        timestamp: event.timestamp,
+        title: "Turn aborted",
+        body: event.reason,
+      };
+    case "content.delta":
+      // Deltas are accumulated externally into assistant messages — skip individual entries.
+      return null;
+    case "item.started":
+      return {
+        id: `item-started-${event.itemId}`,
+        type: "tool",
+        timestamp: event.timestamp,
+        title: event.title ?? event.itemType,
+        summary: event.detail ?? "In progress…",
+        icon: itemIcon(event.itemType),
+        defaultOpen: true,
+        details: event.detail ? [event.detail] : [],
+      };
+    case "item.completed":
+      return {
+        id: `item-completed-${event.itemId}`,
+        type: "tool",
+        timestamp: event.timestamp,
+        title: event.title ?? event.itemType,
+        summary: event.detail ?? "Completed",
+        icon: itemIcon(event.itemType),
+        details: event.detail ? [event.detail] : [],
+      };
+    case "item.updated":
+      // Skip updates — we render started + completed.
+      return null;
+    case "session.completed":
+      return {
+        id: `${event.sessionId}-completed-${event.timestamp}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: "Session completed",
+        body: event.exitCode != null ? `Exited with code ${event.exitCode}.` : "The agent finished cleanly.",
+      };
+    case "session.failed":
+      return {
+        id: `${event.sessionId}-failed-${event.timestamp}`,
+        type: "error",
+        timestamp: event.timestamp,
+        title: "Session failed",
+        body: event.error,
+      };
+    case "session.cancelled":
+      return {
+        id: `${event.sessionId}-cancelled-${event.timestamp}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: "Session cancelled",
+        body: event.reason ?? "The session was cancelled.",
+      };
+    case "runtime.error":
+      return {
+        id: `runtime-error-${event.timestamp}-${event.turnId ?? ""}`,
+        type: "error",
+        timestamp: event.timestamp,
+        title: "Runtime error",
+        body: event.error,
+      };
+    case "runtime.warning":
+      return {
+        id: `runtime-warning-${event.timestamp}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: "Warning",
+        body: event.message,
+      };
+    default:
+      // session.state.changed, request.opened, request.resolved, tool.progress — skip
+      return null;
+  }
+}
+
+/**
+ * Process a full list of OrchestrationEvents into ChatEntries.
+ * Content deltas are accumulated into assistant message entries.
+ */
+function eventsToEntries(events: OrchestrationEvent[]): ChatEntry[] {
+  const entries: ChatEntry[] = [];
+  let accum = "";
+  let accumTurnId: string | null = null;
+  let accumStart: string | null = null;
+
+  function flushAssistant() {
+    if (accum && accumStart) {
+      entries.push({
+        id: `assistant-${accumTurnId}-${accumStart}`,
+        type: "assistant",
+        timestamp: accumStart,
+        body: accum,
+      });
+    }
+    accum = "";
+    accumTurnId = null;
+    accumStart = null;
+  }
+
+  for (const event of events) {
+    if (event.type === "content.delta") {
+      if (event.streamKind === "assistant_text" || event.streamKind === "reasoning_text") {
+        if (accumTurnId !== event.turnId) {
+          flushAssistant();
+          accumTurnId = event.turnId;
+          accumStart = event.timestamp;
+        }
+        accum += event.delta;
+      }
+      continue;
+    }
+
+    // A non-delta event: flush any accumulated assistant text first
+    if (event.type === "turn.completed" || event.type === "turn.aborted" || event.type === "item.started") {
+      flushAssistant();
+    }
+
+    const entry = eventToEntry(event, null);
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+
+  flushAssistant();
+  return entries;
+}
+
 export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
+  const transport = useTransport();
+
+  const [entries, setEntries] = useState<ChatEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const entries = buildMockEntries(session);
+  // Mutable refs for the push handler to accumulate deltas without re-subscribing
+  const eventsRef = useRef<OrchestrationEvent[]>([]);
 
+  // Fetch initial timeline
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [entries.length, session?.status]);
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    setEntries([]);
+    eventsRef.current = [];
 
+    async function load() {
+      try {
+        const timeline = await transport.request<OrchestrationEvent[]>(
+          "getSessionTimeline",
+          { sessionId },
+        );
+        if (cancelled) return;
+
+        const filtered = timeline.filter((e) => e.sessionId === sessionId);
+        eventsRef.current = filtered;
+        setEntries(eventsToEntries(filtered));
+        onSelectionLoadSettled?.("ok");
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load chat timeline");
+        onSelectionLoadSettled?.("error", e);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    void load();
+    return () => { cancelled = true; };
+  }, [sessionId, transport, onSelectionLoadSettled]);
+
+  // Subscribe to real-time orchestration events
   useEffect(() => {
-    onSelectionLoadSettled?.("ok");
-  }, [onSelectionLoadSettled, sessionId]);
+    const unsubscribe = transport.subscribe("orchestration.event", (data) => {
+      const event = data as OrchestrationEvent;
+      if (event.sessionId !== sessionId) return;
+
+      eventsRef.current = [...eventsRef.current, event];
+      setEntries(eventsToEntries(eventsRef.current));
+    });
+
+    return unsubscribe;
+  }, [sessionId, transport]);
+
+  // Auto-scroll to bottom when new entries arrive
+  useEffect(() => {
+    if (autoScroll) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
+  }, [entries.length, autoScroll]);
+
+  // Detect manual scroll to pause auto-scroll
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    setAutoScroll(isAtBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    setAutoScroll(true);
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, []);
 
   if (!session) {
     return (
@@ -34,37 +315,78 @@ export function ChatView({ sessionId, onSelectionLoadSettled }: ChatViewProps) {
     );
   }
 
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/50">
+        <div className="flex items-center gap-3 text-sm text-zinc-400">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+          Loading chat timeline…
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-950 bg-red-950/20 p-4 text-sm text-red-200">
+        <p className="font-medium">Unable to load chat timeline.</p>
+        <p className="mt-1 text-red-200/80">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/70">
       <div className="border-b border-zinc-800 px-4 py-3">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Chat Timeline</p>
         <p className="mt-1 text-sm text-zinc-400">
-          Placeholder events for {session.backend} sessions until runtime streaming lands.
+          {isRunning(session.status) ? "Streaming live events…" : `${entries.length} events`}
         </p>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="space-y-4">
-          {entries.map((entry) => (
-            <TimelineEntry key={entry.id} entry={entry} />
-          ))}
-          {isRunning(session.status) ? (
-            <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
-              <LoaderCircle className="h-4 w-4 animate-spin text-sky-400" />
-              <div>
-                <p className="font-medium text-zinc-100">Waiting for more output</p>
-                <p className="text-zinc-500">This session is still running. New stream events will append here.</p>
+      <div className="relative flex-1 overflow-hidden">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="h-full flex-1 overflow-y-auto px-4 py-4"
+        >
+          <div className="space-y-4">
+            {entries.length === 0 ? (
+              <div className="py-12 text-center text-sm text-zinc-500">No messages yet.</div>
+            ) : (
+              entries.map((entry) => (
+                <TimelineEntry key={entry.id} entry={entry} />
+              ))
+            )}
+            {isRunning(session.status) ? (
+              <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
+                <LoaderCircle className="h-4 w-4 animate-spin text-sky-400" />
+                <div>
+                  <p className="font-medium text-zinc-100">Waiting for more output</p>
+                  <p className="text-zinc-500">This session is still running. New events will append here.</p>
+                </div>
               </div>
-            </div>
-          ) : null}
-          <div ref={bottomRef} />
+            ) : null}
+            <div ref={bottomRef} />
+          </div>
         </div>
+
+        {!autoScroll ? (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className="absolute bottom-4 right-6 flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800/90 px-3 py-1.5 text-xs text-zinc-300 shadow-lg backdrop-blur transition hover:bg-zinc-700"
+          >
+            <ArrowDown className="h-3 w-3" />
+            Scroll to bottom
+          </button>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function TimelineEntry({ entry }: { entry: UIChatEntry }) {
-  if (entry.kind === "assistant") {
+function TimelineEntry({ entry }: { entry: ChatEntry }) {
+  if (entry.type === "assistant") {
     return (
       <div className="flex items-start gap-3">
         <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
@@ -78,7 +400,7 @@ function TimelineEntry({ entry }: { entry: UIChatEntry }) {
     );
   }
 
-  if (entry.kind === "tool") {
+  if (entry.type === "tool") {
     return (
       <details
         open={entry.defaultOpen}
@@ -102,8 +424,8 @@ function TimelineEntry({ entry }: { entry: UIChatEntry }) {
             Tool Activity
           </div>
           <div className="space-y-2">
-            {(entry.details ?? []).map((detail, index) => (
-              <div key={`${entry.id}-${String(index)}`} className="rounded-lg bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-300">
+            {entry.details.map((detail, index) => (
+              <div key={`${entry.id}-${index}`} className="rounded-lg bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-300">
                 {detail}
               </div>
             ))}
@@ -113,7 +435,7 @@ function TimelineEntry({ entry }: { entry: UIChatEntry }) {
     );
   }
 
-  if (entry.kind === "error") {
+  if (entry.type === "error") {
     return (
       <div className="rounded-xl border border-red-950 bg-red-950/30 px-4 py-4">
         <div className="flex items-center gap-2 text-red-200">
@@ -126,101 +448,14 @@ function TimelineEntry({ entry }: { entry: UIChatEntry }) {
     );
   }
 
-  // system entry
   return (
     <div className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
       <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
       <div>
         <p className="text-sm font-medium text-zinc-100">{entry.title}</p>
-        {entry.body ? <p className="mt-1 text-sm text-zinc-400">{entry.body}</p> : null}
+        <p className="mt-1 text-sm text-zinc-400">{entry.body}</p>
         <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
       </div>
     </div>
   );
-}
-
-function buildMockEntries(
-  session: SessionSummary | null,
-): UIChatEntry[] {
-  if (!session) {
-    return [];
-  }
-
-  const firstTimestamp = session.startedAt ?? session.createdAt;
-  const secondTimestamp = offsetTimestamp(firstTimestamp, 45);
-  const thirdTimestamp = offsetTimestamp(firstTimestamp, 130);
-  const entries: UIChatEntry[] = [
-    {
-      id: `${session.id}-started`,
-      kind: "system",
-      timestamp: firstTimestamp,
-      title: "Session started",
-      body: `${session.backend} session booted in ${session.mode} mode for ${session.projectPath}.`,
-    },
-    {
-      id: `${session.id}-assistant-1`,
-      kind: "assistant",
-      timestamp: secondTimestamp,
-      body: `Starting work on "${session.title}". I am collecting context, reviewing changed files, and outlining the next implementation step.`,
-    },
-    {
-      id: `${session.id}-tool-command`,
-      kind: "tool",
-      timestamp: secondTimestamp,
-      title: "Command execution",
-      summary: "Repository inspection and dependency checks",
-      icon: "command",
-      defaultOpen: true,
-      details: [
-        "rg --files packages/dashboard/src",
-        "sed -n '1,220p' packages/dashboard/src/App.tsx",
-        "bun install",
-      ],
-    },
-    {
-      id: `${session.id}-tool-file`,
-      kind: "tool",
-      timestamp: thirdTimestamp,
-      title: "File changes",
-      summary: "Updated dashboard layout, session navigation, and timeline placeholders",
-      icon: "file",
-      details: [
-        "packages/dashboard/src/components/Sidebar.tsx",
-        "packages/dashboard/src/components/SessionView.tsx",
-        "packages/dashboard/src/components/ChatView.tsx",
-      ],
-    },
-  ];
-
-  if (session.status === "failed" || session.status === "cancelled") {
-    entries.push({
-      id: `${session.id}-error`,
-      kind: "error",
-      timestamp: session.finishedAt ?? offsetTimestamp(thirdTimestamp, 90),
-      title: session.status === "cancelled" ? "Session cancelled" : "Session failed",
-      body: "The runtime stopped before the task completed. Full provider event streaming will replace this placeholder once available.",
-    });
-    return entries;
-  }
-
-  if (session.status === "completed") {
-    entries.push({
-      id: `${session.id}-completed`,
-      kind: "system",
-      timestamp: session.finishedAt ?? offsetTimestamp(thirdTimestamp, 90),
-      title: "Session completed",
-      body: "The agent finished cleanly. Diff output and final result are available in the adjacent tabs.",
-    });
-  }
-
-  return entries;
-}
-
-function offsetTimestamp(value: string, seconds: number): string {
-  const nextValue = new Date(value).getTime() + seconds * 1000;
-  return new Date(Math.min(nextValue, Date.now())).toISOString();
-}
-
-function isRunning(status: SessionSummary["status"]): boolean {
-  return status === "queued" || status === "preparing" || status === "running";
 }
