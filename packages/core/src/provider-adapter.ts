@@ -10,6 +10,9 @@ export interface ProviderSessionStartInput {
   model?: string;
   reasoningEffort?: ReasoningEffort;
   prompt?: string;
+  systemPrompt?: string;
+  allowedTools?: string[];
+  env?: Record<string, string>;
 }
 
 export interface ProviderSendTurnInput {

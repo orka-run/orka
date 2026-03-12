@@ -100,7 +100,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const turnId = generateId("turn");
         const command = buildClaudeCommand(input);
         // Remove CLAUDECODE env to prevent nested session detection
-        const spawnEnv = { ...globalThis.process.env };
+        const spawnEnv = { ...globalThis.process.env, ...input.env };
         delete spawnEnv.CLAUDECODE;
 
         const process = this.spawnProcess(command, {
@@ -507,7 +507,13 @@ function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
     command.push("--model", input.model);
   }
 
+  if (input.systemPrompt) {
+    command.push("--append-system-prompt", input.systemPrompt);
+  }
   command.push("--append-system-prompt", `[orka session: ${input.threadId}]`);
+  if (input.allowedTools && input.allowedTools.length > 0) {
+    command.push("--allowedTools", input.allowedTools.join(","));
+  }
 
   const effort = mapClaudeReasoningEffort(input.reasoningEffort);
   if (effort) {

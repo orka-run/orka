@@ -291,6 +291,42 @@ async function readPromptFromStdin(): Promise<string> {
   });
 }
 
+function parseAllowedTools(value?: string): string[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const tools = value
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter(Boolean);
+  return tools.length > 0 ? tools : undefined;
+}
+
+function parseEnvAssignments(values: string[]): Record<string, string> | undefined {
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  const env: Record<string, string> = {};
+  for (const assignment of values) {
+    const separator = assignment.indexOf("=");
+    if (separator <= 0) {
+      fail(`error: invalid --env value "${assignment}" (expected KEY=VALUE)`);
+    }
+
+    const key = assignment.slice(0, separator);
+    const value = assignment.slice(separator + 1);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      fail(`error: invalid environment variable name "${key}"`);
+    }
+
+    env[key] = value;
+  }
+
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
 const spawnCmd = command({
   name: "spawn",
   description: "Spawn an agent session",
@@ -309,6 +345,9 @@ const spawnCmd = command({
     model: option({ type: optional(str), long: "model", description: "Model for the backend (e.g. sonnet, opus, haiku)" }),
     branch: option({ type: optional(str), long: "branch", description: "Git branch name (creates worktree)" }),
     title: option({ type: optional(str), long: "title", description: "Session title for display in orka ps" }),
+    systemPrompt: option({ type: optional(str), long: "system-prompt", description: "Extra instructions prepended to the agent session" }),
+    allowedTools: option({ type: optional(str), long: "allowed-tools", description: "Comma-separated Claude Code allowed tools" }),
+    env: multioption({ type: array(str), long: "env", description: "Environment variable to pass through (repeatable KEY=VALUE)" }),
     reasoningEffort: option({ type: optional(str), long: "reasoning-effort", description: "Reasoning effort level (low, medium, high)" }),
     autoMerge: flag({ long: "auto-merge", description: "Auto-merge worktree on successful completion" }),
     tag: multioption({ type: array(str), long: "tag", description: "Tag the session (repeatable)" }),
@@ -341,6 +380,8 @@ const spawnCmd = command({
       fail("error: prompt is required (use --prompt, --prompt-file, positional args, or pipe stdin)");
     }
 
+    const allowedTools = parseAllowedTools(args.allowedTools);
+    const env = parseEnvAssignments(args.env);
     let session;
     try {
       session = await svc.spawn({
@@ -354,6 +395,9 @@ const spawnCmd = command({
         branch: args.branch,
         autoMerge: args.autoMerge || false,
         tags: args.tag.length > 0 ? args.tag : undefined,
+        systemPrompt: args.systemPrompt,
+        allowedTools,
+        env,
       });
     } catch (e: any) {
       fail(`error: ${e.message}`);
@@ -669,7 +713,7 @@ const diffCmd = command({
 
 const retryCmd = command({
   name: "retry",
-  description: "Re-run a session with the same prompt, model, and tags",
+  description: "Re-run a session with the same prompt and spawn options",
   args: {
     sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
     rest: restPositionals({ type: str, displayName: "args" }),
@@ -702,6 +746,9 @@ const retryCmd = command({
       mode: session.mode,
       model: task.model || undefined,
       tags: oldTags.length > 0 ? oldTags : undefined,
+      systemPrompt: session.systemPrompt,
+      allowedTools: session.allowedTools,
+      env: session.env,
     });
 
     console.log(`retried session ${session.id} → ${newSession.id}`);
@@ -746,6 +793,12 @@ const showCmd = command({
     console.log(`  exit code: ${session.exitCode ?? "(none)"}`);
     if (session.kept) console.log("  kept:      yes (worktree protected)");
     if (session.autoMerge) console.log("  auto-merge: yes");
+    if (session.allowedTools && session.allowedTools.length > 0) {
+      console.log(`  tools:     ${session.allowedTools.join(", ")}`);
+    }
+    if (session.env && Object.keys(session.env).length > 0) {
+      console.log(`  env:       ${Object.keys(session.env).join(", ")}`);
+    }
 
     const tags = await svc.getTags(session.id);
     if (tags.length > 0) console.log(`  tags:      ${tags.join(", ")}`);
@@ -754,6 +807,7 @@ const showCmd = command({
       console.log("");
       console.log(`  title:     ${task.title}`);
       console.log(`  prompt:    ${task.prompt}`);
+      if (session.systemPrompt) console.log(`  system:    ${session.systemPrompt}`);
     }
   }),
 });

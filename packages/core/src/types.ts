@@ -68,6 +68,9 @@ export interface Session {
   exitCode: number | null;
   kept: boolean;
   autoMerge: boolean;
+  systemPrompt?: string;
+  allowedTools?: string[];
+  env?: Record<string, string>;
 }
 
 export interface SessionProjection {
@@ -103,4 +106,7 @@ export interface SpawnRequest {
   reasoningEffort?: ReasoningEffort;
   autoMerge?: boolean;
   tags?: string[];
+  systemPrompt?: string;
+  allowedTools?: string[];
+  env?: Record<string, string>;
 }

@@ -13,6 +13,7 @@ import type {
 } from "@orka/core";
 import type { Span } from "@opentelemetry/api";
 import { createEvent } from "@orka/core";
+import { prependSystemPrompt } from "../backends";
 import { withSpan } from "../tracing";
 
 type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/interrupt" | "thread/unsubscribe";
@@ -151,6 +152,7 @@ export class CodexAdapter implements ProviderAdapter {
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
+          env: { ...globalThis.process.env, ...input.env },
         });
         span.addEvent("process.spawned", { "orka.command": command.join(" ") });
 
@@ -226,7 +228,10 @@ export class CodexAdapter implements ProviderAdapter {
           meta.providerThreadId = providerThreadId;
 
           if (input.prompt) {
-            await this.startTurn(handle, { input: input.prompt, model: input.model });
+            await this.startTurn(handle, {
+              input: prependSystemPrompt(input.prompt, input.systemPrompt),
+              model: input.model,
+            });
           }
         } catch (error) {
           process.kill();

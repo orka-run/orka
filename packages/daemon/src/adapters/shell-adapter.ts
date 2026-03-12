@@ -10,7 +10,7 @@ import type {
 } from "@orka/core";
 import type { Span } from "@opentelemetry/api";
 import { createEvent } from "@orka/core";
-import { buildBackendCommand } from "../backends";
+import { buildBackendCommand, buildEnvExports } from "../backends";
 import { getOrkaHome } from "../db";
 import type { SessionRunner } from "../runner";
 import { withSpan } from "../tracing";
@@ -106,7 +106,7 @@ export class ShellAdapter implements ProviderAdapter {
         const { command } = buildBackendCommand("shell", input.prompt ?? "", "interactive");
 
         await mkdir(scriptsDir, { recursive: true });
-        await writeFile(scriptPath, buildScript(command), "utf8");
+        await writeFile(scriptPath, buildScript(command, input.env), "utf8");
 
         await this.runner.spawn(sessionName, scriptPath, cwd);
         span.addEvent("process.spawned", { "orka.command": command });
@@ -295,8 +295,8 @@ function emitShellEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: Pro
   span?.addEvent("event.emitted", { "orka.event.type": event.type });
 }
 
-function buildScript(command: string): string {
-  const lines = ["#!/usr/bin/env bash", "unset CLAUDECODE"];
+function buildScript(command: string, env?: Record<string, string>): string {
+  const lines = ["#!/usr/bin/env bash", ...buildEnvExports(env), "unset CLAUDECODE"];
   if (command.trim().length > 0) {
     lines.push(command);
   }

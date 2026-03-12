@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   closeDb,
+  getSession,
   deleteSessions,
   getOrchestrationEvents,
   getUsageBySession,
@@ -65,6 +66,45 @@ function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
 }
 
 describe("usage_log helpers", () => {
+  test("persists session customization fields for retry", () => {
+    insertTask({
+      id: "task-sess-custom-2",
+      title: "Task custom",
+      prompt: "Fix issue",
+      backend: "claude-code",
+      mode: "background",
+      model: "claude-sonnet",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    insertSession({
+      id: "sess-custom-2",
+      taskId: "task-sess-custom-2",
+      workspaceId: "ws-sess-custom-2",
+      status: "completed",
+      backend: "claude-code",
+      mode: "background",
+      tmuxSessionName: "tmux-sess-custom-2",
+      projectPath: "/tmp/project",
+      workingDir: "/tmp/project",
+      logFile: "/tmp/project/sess-custom-2.log",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      startedAt: "2026-01-01T00:01:00.000Z",
+      finishedAt: "2026-01-01T00:02:00.000Z",
+      exitCode: 0,
+      kept: false,
+      autoMerge: false,
+      systemPrompt: "Stay concise.",
+      allowedTools: ["Bash", "Read"],
+      env: { FOO: "bar" },
+    });
+
+    const session = getSession("sess-custom-2");
+    expect(session?.systemPrompt).toBe("Stay concise.");
+    expect(session?.allowedTools).toEqual(["Bash", "Read"]);
+    expect(session?.env).toEqual({ FOO: "bar" });
+  });
+
   test("stores per-session usage and summarizes with filters", () => {
     insertTask({
       id: "task-1",

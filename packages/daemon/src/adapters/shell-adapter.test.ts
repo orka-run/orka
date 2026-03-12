@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { RunnerSession, SessionRunner } from "../runner";
 import { ShellAdapter } from "./shell-adapter";
 
@@ -65,6 +66,25 @@ describe("ShellAdapter", () => {
 
     await adapter.stopSession(handle);
     await iterator.next();
+  });
+
+  test("startSession writes env exports into the shell script", async () => {
+    useTempOrkaHome("env");
+    const runner = new MockSessionRunner();
+    const adapter = new ShellAdapter(runner);
+    const handle = await adapter.startSession({
+      threadId: "thread-env",
+      cwd: "/tmp/project",
+      prompt: "echo ready",
+      env: { FOO: "bar baz" },
+    });
+
+    expect(runner.spawnCalls).toHaveLength(1);
+    const script = readFileSync(runner.spawnCalls[0]!.scriptPath, "utf8");
+    expect(script).toContain("export FOO='bar baz'");
+    expect(script).toContain("unset CLAUDECODE");
+
+    await adapter.stopSession(handle);
   });
 
   test("stopSession emits session.exited", async () => {

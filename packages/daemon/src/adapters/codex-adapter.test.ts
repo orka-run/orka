@@ -234,8 +234,10 @@ describe("CodexAdapter", () => {
   test("startSession records the codex start_session span", async () => {
     const spawnCalls: Array<{ command: string[]; options: Record<string, unknown> }> = [];
     const stdout = createControlledTextStream();
+    const writes: Array<{ id?: string | number; method?: string; params?: any }> = [];
     const stdin = new MockWritableSink((value) => {
       const message = JSON.parse(value) as { id?: string; method?: string };
+      writes.push(message);
 
       if (message.method === "initialize") {
         stdout.pushJson({ id: message.id, result: { userAgent: "orka-test" } });
@@ -244,6 +246,11 @@ describe("CodexAdapter", () => {
 
       if (message.method === "thread/start") {
         stdout.pushJson({ id: message.id, result: { thread: { id: "provider-thread-1" } } });
+        return;
+      }
+
+      if (message.method === "turn/start") {
+        stdout.pushJson({ id: message.id, result: { turn: { id: "turn-1" } } });
         stdout.close();
       }
     });
@@ -263,6 +270,9 @@ describe("CodexAdapter", () => {
       threadId: "thread-1",
       cwd: "/tmp/project",
       model: "gpt-5",
+      prompt: "Fix the tests",
+      systemPrompt: "Focus on correctness.",
+      env: { OPENAI_API_KEY: "test-key" },
     });
 
     expect(handle.provider).toBe("codex");
@@ -275,6 +285,16 @@ describe("CodexAdapter", () => {
       "app-server",
     ]);
     expect(spawnCalls[0]?.options.cwd).toBe("/tmp/project");
+    expect(spawnCalls[0]?.options.env).toMatchObject({ OPENAI_API_KEY: "test-key" });
+
+    const turnStart = writes.find((message) => message.method === "turn/start");
+    expect(turnStart?.params?.input).toEqual([
+      {
+        type: "text",
+        text: "Focus on correctness.\n\nFix the tests",
+        text_elements: [],
+      },
+    ]);
 
     const startSpan = readTraceEntries().find((entry) => entry.name === "orka.provider.codex.start_session");
 

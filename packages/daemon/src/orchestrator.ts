@@ -12,7 +12,7 @@ import { defaultRunner } from "./tmux";
 import type { SessionRunner } from "./runner";
 import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, worktreeBranch, deleteBranch } from "./worktree";
-import { buildBackendCommand, assertBackendInstalled } from "./backends";
+import { buildBackendCommand, buildEnvExports, assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";
 import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerService } from "./provider-runtime";
 import { pushHub } from "./push";
@@ -126,6 +126,9 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       exitCode: null,
       kept: false,
       autoMerge: req.autoMerge ?? false,
+      systemPrompt: req.systemPrompt,
+      allowedTools: req.allowedTools,
+      env: req.env,
     };
     insertSession(session);
 
@@ -143,6 +146,9 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
         model: req.model,
         reasoningEffort: req.reasoningEffort,
         prompt: req.prompt,
+        systemPrompt: req.systemPrompt,
+        allowedTools: req.allowedTools,
+        env: req.env,
       });
 
       updateSessionStatus(sessionId, "running", { startedAt });
@@ -177,7 +183,15 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     }
 
     // 5. Build backend command (with log tee)
-    const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, { logFile, sessionId, model: req.model, reasoningEffort: req.reasoningEffort, projectPath });
+    const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, {
+      logFile,
+      sessionId,
+      model: req.model,
+      reasoningEffort: req.reasoningEffort,
+      projectPath,
+      systemPrompt: req.systemPrompt,
+      allowedTools: req.allowedTools,
+    });
 
     // 6. Write command to script file (avoids bash -c escaping hell)
     //    Unset CLAUDECODE so nested claude-code sessions don't detect parent and refuse to start.
@@ -187,6 +201,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     const daemonPort = process.env.ORKA_DAEMON_PORT ?? "7394";
     writeFileSync(scriptPath, [
       `#!/usr/bin/env bash`,
+      ...buildEnvExports(req.env),
       `unset CLAUDECODE`,
       command,
       `_ORKA_EXIT=$?`,

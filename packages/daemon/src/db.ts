@@ -41,6 +41,9 @@ const SessionRowSchema = z.object({
   exit_code: z.number().nullable(),
   kept: z.number().default(0),
   auto_merge: z.number().default(0),
+  system_prompt: z.string().nullable().default(null),
+  allowed_tools: z.string().nullable().default(null),
+  env_json: z.string().nullable().default(null),
 });
 
 const UsageLogRowSchema = z.object({
@@ -105,6 +108,9 @@ const MIGRATIONS = [
   { version: 11, sql: `CREATE TABLE IF NOT EXISTS orchestration_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, turn_id TEXT, item_id TEXT, request_id TEXT, provider TEXT NOT NULL, timestamp TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES sessions(id))` },
   { version: 12, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_session ON orchestration_events(session_id)` },
   { version: 13, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_type ON orchestration_events(type)` },
+  { version: 14, sql: `ALTER TABLE sessions ADD COLUMN system_prompt TEXT` },
+  { version: 15, sql: `ALTER TABLE sessions ADD COLUMN allowed_tools TEXT` },
+  { version: 16, sql: `ALTER TABLE sessions ADD COLUMN env_json TEXT` },
 ];
 
 function migrate(db: Database): void {
@@ -203,8 +209,8 @@ export function insertSession(session: Session): void {
   withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
     getDb()
       .prepare(
-        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge)
-         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge)`,
+        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json)
+         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson)`,
       )
       .run({
         $id: session.id,
@@ -223,6 +229,9 @@ export function insertSession(session: Session): void {
         $exitCode: session.exitCode,
         $kept: session.kept ? 1 : 0,
         $autoMerge: session.autoMerge ? 1 : 0,
+        $systemPrompt: session.systemPrompt ?? null,
+        $allowedTools: session.allowedTools ? JSON.stringify(session.allowedTools) : null,
+        $envJson: session.env ? JSON.stringify(session.env) : null,
       });
   });
 }
@@ -601,6 +610,9 @@ function rowToSession(row: unknown): Session {
     exitCode: data.exit_code,
     kept: data.kept === 1,
     autoMerge: data.auto_merge === 1,
+    ...(data.system_prompt ? { systemPrompt: data.system_prompt } : {}),
+    ...(data.allowed_tools ? { allowedTools: JSON.parse(data.allowed_tools) as string[] } : {}),
+    ...(data.env_json ? { env: JSON.parse(data.env_json) as Record<string, string> } : {}),
   };
 }
 

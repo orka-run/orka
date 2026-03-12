@@ -173,6 +173,9 @@ describe("ClaudeCodeAdapter", () => {
       model: "claude-sonnet-4-6",
       reasoningEffort: "medium",
       prompt: "Inspect the project",
+      systemPrompt: "Stay concise.",
+      allowedTools: ["Bash", "Read"],
+      env: { FOO: "bar", CLAUDECODE: "nested" },
     });
 
     const events = await collectEvents(handle.events);
@@ -189,11 +192,16 @@ describe("ClaudeCodeAdapter", () => {
       "--model",
       "claude-sonnet-4-6",
       "--append-system-prompt",
+      "Stay concise.",
+      "--append-system-prompt",
       "[orka session: thread-1]",
+      "--allowedTools",
+      "Bash,Read",
       "--effort",
       "medium",
     ]);
     expect(spawnCalls[0]?.options.cwd).toBe("/tmp/project");
+    expect(spawnCalls[0]?.options.env?.FOO).toBe("bar");
     expect(spawnCalls[0]?.options.env?.CLAUDECODE).toBeUndefined();
     expect(stdin.writes).toEqual(["Inspect the project"]);
     expect(stdin.ended).toBe(true);
