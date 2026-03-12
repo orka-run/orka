@@ -7,6 +7,7 @@ import type {
 } from "@orka/core";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { ConnectionBanner } from "./components/ConnectionBanner";
 import { DevOverlay } from "./components/DevOverlay";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { NewSessionDialog } from "./components/NewSessionDialog";
@@ -217,6 +218,7 @@ export function App() {
 
   return (
     <ErrorBoundary reportError={reportError}>
+      <ConnectionBanner />
       <AppShell transport={transport} />
       <DevOverlay />
     </ErrorBoundary>
