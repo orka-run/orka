@@ -113,6 +113,9 @@ const MIGRATIONS = [
   { version: 16, sql: `ALTER TABLE sessions ADD COLUMN env_json TEXT` },
   { version: 17, sql: `CREATE TABLE IF NOT EXISTS client_errors (id INTEGER PRIMARY KEY AUTOINCREMENT, error TEXT NOT NULL, stack TEXT, url TEXT NOT NULL, timestamp TEXT NOT NULL, received_at TEXT NOT NULL)` },
   { version: 18, sql: `CREATE INDEX IF NOT EXISTS idx_client_errors_timestamp ON client_errors(timestamp DESC)` },
+  { version: 19, sql: `ALTER TABLE orchestration_events ADD COLUMN seq INTEGER` },
+  { version: 20, sql: `UPDATE orchestration_events SET seq = (SELECT COUNT(*) FROM orchestration_events e2 WHERE e2.session_id = orchestration_events.session_id AND e2.rowid <= orchestration_events.rowid) WHERE seq IS NULL` },
+  { version: 21, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_session_seq ON orchestration_events(session_id, seq)` },
 ];
 
 function migrate(db: Database): void {
@@ -480,9 +483,11 @@ export function insertOrchestrationEvent(event: PersistedOrchestrationEvent): vo
            item_id,
            request_id,
            provider,
-           timestamp
+           timestamp,
+           seq
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+           (SELECT COALESCE(MAX(seq), 0) + 1 FROM orchestration_events WHERE session_id = ?))`,
       )
       .run(
         event.eventId,
@@ -494,6 +499,7 @@ export function insertOrchestrationEvent(event: PersistedOrchestrationEvent): vo
         getRequestId(payload),
         event.provider,
         event.timestamp,
+        event.sessionId,
       );
   });
 }
@@ -505,7 +511,7 @@ export function getOrchestrationEvents(sessionId: string): OrchestrationEvent[] 
         `SELECT payload
          FROM orchestration_events
          WHERE session_id = ?
-         ORDER BY rowid ASC`,
+         ORDER BY seq ASC`,
       )
       .all(sessionId) as unknown[];
     return rows.map(rowToOrchestrationEvent);

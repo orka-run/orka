@@ -302,6 +302,67 @@ describe("orchestration event helpers", () => {
     ]);
   });
 
+  test("assigns per-session monotonic seq numbers", () => {
+    seedSession("sess-1");
+    seedSession("sess-2");
+
+    // Insert 3 events for sess-1, 2 for sess-2
+    insertOrchestrationEvent({
+      eventId: "evt-a1",
+      provider: "claude-code",
+      type: "session.started",
+      sessionId: "sess-1",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    insertOrchestrationEvent({
+      eventId: "evt-b1",
+      provider: "claude-code",
+      type: "session.started",
+      sessionId: "sess-2",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    insertOrchestrationEvent({
+      eventId: "evt-a2",
+      provider: "claude-code",
+      type: "content.delta",
+      sessionId: "sess-1",
+      turnId: "turn-1",
+      streamKind: "assistant_text",
+      delta: "hello",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    insertOrchestrationEvent({
+      eventId: "evt-a3",
+      provider: "claude-code",
+      type: "content.delta",
+      sessionId: "sess-1",
+      turnId: "turn-1",
+      streamKind: "assistant_text",
+      delta: " world",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    insertOrchestrationEvent({
+      eventId: "evt-b2",
+      provider: "claude-code",
+      type: "content.delta",
+      sessionId: "sess-2",
+      turnId: "turn-1",
+      streamKind: "assistant_text",
+      delta: "hi",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+
+    // sess-1 should have 3 events in insertion order despite same timestamp
+    const s1 = getOrchestrationEvents("sess-1");
+    expect(s1).toHaveLength(3);
+    expect(s1.map((e) => e.type)).toEqual(["session.started", "content.delta", "content.delta"]);
+
+    // sess-2 should have independent seq, 2 events
+    const s2 = getOrchestrationEvents("sess-2");
+    expect(s2).toHaveLength(2);
+    expect(s2.map((e) => e.type)).toEqual(["session.started", "content.delta"]);
+  });
+
   test("deletes persisted orchestration events when sessions are deleted", () => {
     seedSession("sess-1");
 
