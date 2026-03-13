@@ -9,3 +9,13 @@ export {
   crockfordDecode,
   crc16ccitt,
 } from "./pairing-code";
+export {
+  createInitiator,
+  createResponder,
+  generateX25519KeyPair,
+  type NoiseInitiator,
+  type NoiseResponder,
+  type NoiseHandshakeResult,
+  type CipherState,
+  type X25519KeyPair,
+} from "./noise";
