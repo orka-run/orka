@@ -57,6 +57,15 @@ describeE2E("Auth & Rate Limiting E2E", () => {
     expect(res.status).toBe(401);
   });
 
+  test("duplicate signup returns 409", async () => {
+    const res = await fetch(`${relay.httpUrl}/v1/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "auth-shared@test.com", name: "Dup" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
   // --- Admin Auth ---
 
   test("non-admin cannot access admin endpoints", async () => {
