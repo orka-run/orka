@@ -20,7 +20,7 @@ import type {
   StartPairingResult,
 } from "@orka/core";
 import { context, propagation, trace } from "@opentelemetry/api";
-import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent } from "@orka/core";
+import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent, canonicalTransportOrigin } from "@orka/core";
 import { encryptRequest, decryptResponse, deriveSessionKey, type NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseClientTransport } from "@orka/core/transport/noise-transport";
 import { withSpan } from "./tracing";
@@ -68,7 +68,7 @@ class RemoteClient implements OrkaService {
     this.serverPublicKey = opts.serverPublicKey;
     this.noiseServerKey = opts.noiseServerKey;
     this.nodeId = opts.nodeId;
-    this.relayOrigin = opts.relayOrigin ?? "";
+    this.relayOrigin = canonicalTransportOrigin(opts.relayOrigin);
   }
 
   private get useNoise(): boolean {

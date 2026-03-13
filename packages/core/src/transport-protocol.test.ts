@@ -10,6 +10,7 @@ import {
   TransportMessageSchema,
   negotiateTransport,
   computeTransportPrologue,
+  canonicalTransportOrigin,
   NOISE_SUITE,
   APP_PROTOCOL,
   DEFAULT_MAX_FRAME,
@@ -566,5 +567,81 @@ describe("forward compatibility", () => {
     const parsed = TransportMessageSchema.parse(msg);
     expect(parsed.t).toBe("client_hello");
     expect((parsed as any).extensionV2).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 13. canonicalTransportOrigin — URL normalization for prologue binding
+// ---------------------------------------------------------------------------
+
+describe("canonicalTransportOrigin", () => {
+  test("returns empty string for empty input", () => {
+    expect(canonicalTransportOrigin("")).toBe("");
+    expect(canonicalTransportOrigin(undefined)).toBe("");
+  });
+
+  test("returns empty string for whitespace-only input", () => {
+    expect(canonicalTransportOrigin("   ")).toBe("");
+    expect(canonicalTransportOrigin("\t\n")).toBe("");
+  });
+
+  test("returns empty string for invalid URL", () => {
+    expect(canonicalTransportOrigin("not-a-url")).toBe("");
+  });
+
+  test("strips query parameters", () => {
+    expect(canonicalTransportOrigin("ws://relay:7390?token=secret")).toBe("ws://relay:7390");
+  });
+
+  test("strips hash fragment", () => {
+    expect(canonicalTransportOrigin("ws://relay:7390#section")).toBe("ws://relay:7390");
+  });
+
+  test("strips /ws client suffix", () => {
+    expect(canonicalTransportOrigin("ws://relay:7390/ws")).toBe("ws://relay:7390");
+  });
+
+  test("strips /ws/ client suffix with trailing slash", () => {
+    expect(canonicalTransportOrigin("ws://relay:7390/ws/")).toBe("ws://relay:7390");
+  });
+
+  test("strips trailing slashes", () => {
+    expect(canonicalTransportOrigin("ws://relay:7390/")).toBe("ws://relay:7390");
+    expect(canonicalTransportOrigin("ws://relay:7390///")).toBe("ws://relay:7390");
+  });
+
+  test("preserves port", () => {
+    expect(canonicalTransportOrigin("ws://relay:7390")).toBe("ws://relay:7390");
+    expect(canonicalTransportOrigin("wss://relay:8443")).toBe("wss://relay:8443");
+  });
+
+  test("default ports are stripped by URL constructor", () => {
+    // 443 is default for wss, 80 is default for ws — URL normalizes these away
+    expect(canonicalTransportOrigin("wss://relay:443")).toBe("wss://relay");
+  });
+
+  test("handles wss scheme", () => {
+    expect(canonicalTransportOrigin("wss://secure.relay.com:8443/ws?token=abc")).toBe("wss://secure.relay.com:8443");
+  });
+
+  test("client and server URLs produce same canonical origin", () => {
+    // Client typically has ws://relay:7390/ws, server has ws://relay:7390
+    const clientUrl = "ws://relay:7390/ws";
+    const serverUrl = "ws://relay:7390";
+    expect(canonicalTransportOrigin(clientUrl)).toBe(canonicalTransportOrigin(serverUrl));
+  });
+
+  test("client URL with query and server bare URL match", () => {
+    const clientUrl = "ws://relay:7390/ws?token=mysecret";
+    const serverUrl = "ws://relay:7390";
+    expect(canonicalTransportOrigin(clientUrl)).toBe(canonicalTransportOrigin(serverUrl));
+  });
+
+  test("direct connection: non-empty URL normalizes correctly", () => {
+    expect(canonicalTransportOrigin("ws://host:7394")).toBe("ws://host:7394");
+  });
+
+  test("preserves non-ws paths that are not /ws suffix", () => {
+    expect(canonicalTransportOrigin("ws://relay:7390/v1/pair/abc")).toBe("ws://relay:7390/v1/pair/abc");
   });
 });

@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
-import { isMethodNotFound } from "@orka/core";
+import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
 import {
   ensureKeyPair,
   ensureNoiseKeyPair,
@@ -196,17 +196,80 @@ async function stopDaemon(): Promise<boolean> {
   return false;
 }
 
+/**
+ * Node config as saved by `orka node add` in ~/.orka/nodes/<node_id>.json.
+ */
+interface PairedNodeConfig {
+  node_id: string;
+  node_name?: string;
+  noise_static_pubkey: string;   // base64url
+  noise_key_id: string;          // "sha256:..."
+  node_paths: string[];          // e.g. ["ws://host:7394"]
+  trust?: { mode?: string; paired_at?: string; pairing_export?: string };
+}
+
+/**
+ * Search ~/.orka/nodes/ for a paired node config whose node_paths include a
+ * URL matching the given target URL (compared via canonicalTransportOrigin).
+ * Returns the first match, or null if none found.
+ */
+function findPairedNodeConfig(targetUrl: string): PairedNodeConfig | null {
+  const orkaHome = getOrkaHome();
+  const nodesDir = join(orkaHome, "nodes");
+  if (!existsSync(nodesDir)) return null;
+
+  const canonicalTarget = canonicalTransportOrigin(targetUrl);
+  if (!canonicalTarget) return null;
+
+  let files: string[];
+  try {
+    files = Array.from(new Bun.Glob("*.json").scanSync(nodesDir));
+  } catch {
+    return null;
+  }
+
+  for (const file of files) {
+    try {
+      const content = JSON.parse(readFileSync(join(nodesDir, file), "utf-8")) as PairedNodeConfig;
+      if (!content.noise_static_pubkey || !content.node_id) continue;
+      const paths: string[] = content.node_paths ?? [];
+      for (const p of paths) {
+        if (canonicalTransportOrigin(p) === canonicalTarget) {
+          return content;
+        }
+      }
+    } catch {
+      // Skip invalid config files
+    }
+  }
+  return null;
+}
+
 function buildRemoteClient(url: string): OrkaService {
   if (useEncrypt) {
     const orkaHome = getOrkaHome();
 
-    // Try Noise transport first (new path)
+    // 1. Try matching a paired node config from ~/.orka/nodes/
+    const nodeConfig = findPairedNodeConfig(url);
+    if (nodeConfig) {
+      const publicKey = new Uint8Array(Buffer.from(nodeConfig.noise_static_pubkey, "base64url"));
+      const noiseServerKey = {
+        publicKey,
+        privateKey: new Uint8Array(0), // public-key-only
+        keyId: nodeConfig.noise_key_id,
+        publicKeyB64: nodeConfig.noise_static_pubkey,
+      };
+      return createRemoteClient({
+        url,
+        noiseServerKey,
+        nodeId: nodeConfig.node_id,
+        relayOrigin: remoteUrl ?? "",
+      });
+    }
+
+    // 2. Fall back to generic saved server key from ~/.orka/keys/server.noise.pub
     const noiseServerKey = loadNoisePublicKey(orkaHome, "server");
     if (noiseServerKey) {
-      // Fetch nodeId from server key or use provided server key
-      // The nodeId is needed for the Noise handshake, but we might not know it yet.
-      // We'll get it from the /health endpoint or use a default.
-      // For local daemon, nodeId is typically "127.0.0.1:7394"
       const nodeId = process.env["ORKA_NODE_ID"] ?? "";
       return createRemoteClient({
         url,
@@ -216,7 +279,7 @@ function buildRemoteClient(url: string): OrkaService {
       });
     }
 
-    // Fall back to legacy encryption
+    // 3. Fall back to legacy encryption
     const keyPair = ensureKeyPair(orkaHome, "client");
     let pubKey = serverPublicKey;
     if (!pubKey) {
