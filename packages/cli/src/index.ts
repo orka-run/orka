@@ -2311,13 +2311,17 @@ const nodeAddCmd = command({
         console.log(`  enroll id: ${enrollId}`);
 
         // Open WebSocket to relay pairing endpoint
-        const result = await new Promise<{
-          nodeId: string;
-          nodeName: string;
-          noiseStaticPubkey: Uint8Array;
-          noiseKeyId: string;
-          nodePaths: string[];
-          bootExport: Uint8Array;
+        // We keep the pairing WS open so we can send pair_done after verification
+        const { result, pairingWs } = await new Promise<{
+          result: {
+            nodeId: string;
+            nodeName: string;
+            noiseStaticPubkey: Uint8Array;
+            noiseKeyId: string;
+            nodePaths: string[];
+            bootExport: Uint8Array;
+          };
+          pairingWs: WebSocket;
         }>((resolve, reject) => {
           const ws = new WebSocket(pairUrl);
           let client: InstanceType<typeof PairingClient>;
@@ -2336,10 +2340,8 @@ const nodeAddCmd = command({
             try {
               const result = await client.handleMessage(data);
               if (result) {
-                // Send pair_done
-                ws.send(JSON.stringify({ t: "pair_done" }));
-                ws.close();
-                resolve(result);
+                // Do NOT send pair_done yet — verify node identity first
+                resolve({ result, pairingWs: ws });
               }
             } catch (e: any) {
               ws.close();
@@ -2365,6 +2367,101 @@ const nodeAddCmd = command({
           }, 120_000);
           timer.unref();
         });
+
+        // Verify node identity via Noise NK handshake before trusting the key
+        console.log("verifying node identity...");
+
+        const { NoiseClientTransport, computeKeyId } = await import("@orka/core/transport/noise-transport");
+
+        const verifyNodePath = result.nodePaths[0];
+        if (!verifyNodePath) {
+          pairingWs.close();
+          fail("error: no node paths in bootstrap data — cannot verify node identity");
+        }
+
+        const expectedKeyId = result.noiseKeyId || computeKeyId(result.noiseStaticPubkey);
+
+        try {
+          await withSpan("orka.cli.node.verify_identity", {
+            "orka.node_id": result.nodeId,
+            "orka.node_path": verifyNodePath,
+          }, async () => {
+            await new Promise<void>((resolve, reject) => {
+              const verifyWs = new WebSocket(verifyNodePath);
+
+              const transport = new NoiseClientTransport({
+                nodeId: result.nodeId,
+                expectedKeyId,
+                remoteStaticPubkey: result.noiseStaticPubkey,
+                relayOrigin: "",
+              });
+
+              const timeout = setTimeout(() => {
+                verifyWs.close();
+                reject(new Error("Node identity verification timed out (10s)"));
+              }, 10_000);
+              timeout.unref();
+
+              verifyWs.onopen = () => {
+                const clientHello = transport.getClientHello();
+                verifyWs.send(JSON.stringify(clientHello));
+              };
+
+              verifyWs.onmessage = (event) => {
+                const raw = typeof event.data === "string" ? event.data : "";
+                let parsed: unknown;
+                try {
+                  parsed = JSON.parse(raw);
+                } catch {
+                  return;
+                }
+
+                const msg = parsed as Record<string, unknown>;
+                if (!msg || typeof msg["t"] !== "string") {
+                  return;
+                }
+
+                try {
+                  const responses = transport.processMessage(parsed);
+                  for (const resp of responses) {
+                    verifyWs.send(JSON.stringify(resp));
+                  }
+
+                  if (transport.isSecure) {
+                    clearTimeout(timeout);
+                    verifyWs.close();
+                    resolve();
+                  }
+                } catch (err) {
+                  clearTimeout(timeout);
+                  verifyWs.close();
+                  reject(err instanceof Error ? err : new Error(String(err)));
+                }
+              };
+
+              verifyWs.onerror = () => {
+                clearTimeout(timeout);
+                reject(new Error(`Failed to connect to node at ${verifyNodePath}`));
+              };
+
+              verifyWs.onclose = () => {
+                if (!transport.isSecure) {
+                  clearTimeout(timeout);
+                  reject(new Error("Connection closed before identity verification completed"));
+                }
+              };
+            });
+          });
+        } catch (err: any) {
+          // Verification failed — do NOT save trust, do NOT send pair_done
+          pairingWs.close();
+          fail(`error: node identity verification failed: ${err.message}\nThe node could not prove ownership of the claimed key. Trust was NOT saved.`);
+        }
+
+        // Verification succeeded — send pair_done and close pairing WS
+        console.log("node identity verified");
+        pairingWs.send(JSON.stringify({ t: "pair_done" }));
+        pairingWs.close();
 
         // Save the node config to ~/.orka/nodes/<node_id>.json
         const orkaHome = getOrkaHome();
