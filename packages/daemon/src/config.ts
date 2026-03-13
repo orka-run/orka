@@ -7,7 +7,7 @@ import { withSpanSync } from "./tracing";
 
 const DefaultsSchema = z.object({
   backend: z.string().default("claude-code"),
-  mode: z.string().default("interactive"),
+  mode: z.string().default("background"),
   model: z.string().default(""),
   project: z.string().default("."),
 });

@@ -366,7 +366,7 @@ const spawnCmd = command({
     backend: option({ type: optional(enumType(backendValues)), long: "backend", short: "b", description: "Agent backend (default: claude-code)" }),
     prompt: option({ type: optional(str), long: "prompt", description: "Task prompt (or use positional args / stdin)" }),
     promptFile: option({ type: optional(str), long: "prompt-file", description: "Read prompt from a file" }),
-    mode: option({ type: optional(enumType(modeValues)), long: "mode", short: "m", description: "Session mode (default: interactive)" }),
+    mode: option({ type: optional(enumType(modeValues)), long: "mode", short: "m", description: "Session mode (default: background)" }),
     model: option({ type: optional(str), long: "model", description: "Model for the backend (e.g. sonnet, opus, haiku)" }),
     branch: option({ type: optional(str), long: "branch", description: "Git branch name (creates worktree)" }),
     title: option({ type: optional(str), long: "title", description: "Session title for display in orka ps" }),

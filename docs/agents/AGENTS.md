@@ -2,6 +2,18 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Spawning Agent Sessions
+
+The default session mode is **background** — the agent completes after one turn and exits. Only use `--mode interactive` when you explicitly need multi-turn conversations via `orka send`.
+
+```bash
+# Default (background) — agent completes on its own
+orka spawn --backend claude-code --branch orka/my-feature --title "do the thing" --prompt-file task.md
+
+# Interactive — only for multi-turn sessions (use orka send to follow up)
+orka spawn -m interactive --backend claude-code --title "chat session" "hello"
+```
+
 ## Backend Selection by Task Type
 
 - **Frontend / frontend-design tasks** (dashboard, UI components, styling): use **claude-code** with model **claude-opus-4-6**
