@@ -107,10 +107,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   override componentDidMount(): void {
     window.addEventListener("unhandledrejection", this.handleUnhandledRejection);
+    window.addEventListener("error", this.handleGlobalError);
   }
 
   override componentWillUnmount(): void {
     window.removeEventListener("unhandledrejection", this.handleUnhandledRejection);
+    window.removeEventListener("error", this.handleGlobalError);
     this.clearBannerTimeout();
   }
 
@@ -238,6 +240,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }, AUTO_DISMISS_MS);
 
     this.reportError(createReport(error));
+  };
+
+  private handleGlobalError = (event: ErrorEvent): void => {
+    const error = event.error instanceof Error ? event.error : new Error(event.message || "Unknown error");
+    const details = [
+      event.filename ? `at ${event.filename}:${event.lineno}:${event.colno}` : null,
+      error.stack,
+    ].filter(Boolean).join("\n");
+    recordErrorSpan(error, "window.onerror", details || undefined);
+    this.reportError(createReport(error, details || undefined));
   };
 
   private dismissBanner = (): void => {

@@ -120,12 +120,17 @@ export class WsTransport {
     };
 
     ws.onerror = () => {
-      this.connectionSpan?.addEvent("ws.error");
-      this.connectionSpan?.setStatus({
-        code: 2, /* SpanStatusCode.ERROR */
-        message: `WebSocket connection failed: ${this.url}`,
+      const readyState = ws.readyState;
+      const readyStateLabel = readyState === 0 ? "CONNECTING" : readyState === 1 ? "OPEN" : readyState === 2 ? "CLOSING" : "CLOSED";
+      const message = `WebSocket error (readyState=${readyStateLabel}, url=${this.url})`;
+      this.connectionSpan?.addEvent("ws.error", {
+        "ws.ready_state": readyState,
+        "ws.ready_state_label": readyStateLabel,
+        "ws.url": this.url,
+        "ws.reconnect_attempts": this.reconnectAttempts,
       });
-      this.connectionSpan?.recordException(new Error(`WebSocket connection failed: ${this.url}`));
+      this.connectionSpan?.setStatus({ code: 2 /* ERROR */, message });
+      this.connectionSpan?.recordException(new Error(message));
     };
   }
 
