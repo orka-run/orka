@@ -121,7 +121,11 @@ export class WsTransport {
 
     ws.onerror = () => {
       this.connectionSpan?.addEvent("ws.error");
-      // Browsers usually emit onclose after onerror for connection failures.
+      this.connectionSpan?.setStatus({
+        code: 2, /* SpanStatusCode.ERROR */
+        message: `WebSocket connection failed: ${this.url}`,
+      });
+      this.connectionSpan?.recordException(new Error(`WebSocket connection failed: ${this.url}`));
     };
   }
 
