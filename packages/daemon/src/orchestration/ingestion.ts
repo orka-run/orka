@@ -187,7 +187,14 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         ...(passthroughEvent.turnId ? { turnId: passthroughEvent.turnId } : {}),
         originalType: passthroughEvent.type,
         ...(passthroughEvent.provider ? { provider: passthroughEvent.provider } : {}),
-        rawPayload: passthroughEvent.payload,
+        rawPayload: {
+          payload: passthroughEvent.payload,
+          eventId: passthroughEvent.eventId,
+          threadId: passthroughEvent.threadId,
+          ...(passthroughEvent.itemId ? { itemId: passthroughEvent.itemId } : {}),
+          ...(passthroughEvent.requestId ? { requestId: passthroughEvent.requestId } : {}),
+          ...(passthroughEvent.v !== undefined ? { v: passthroughEvent.v } : {}),
+        },
         timestamp: passthroughEvent.createdAt,
       };
     }

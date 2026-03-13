@@ -1,6 +1,6 @@
 import { ROOT_CONTEXT, propagation, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
-import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR } from "@orka/core";
+import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR, RPC_INVALID_REQUEST } from "@orka/core";
 import { decryptRequest, encryptResponse } from "@orka/core/crypto";
 import { pushHub } from "./push";
 import { insertClientError, listClientErrors } from "./db";
@@ -28,6 +28,16 @@ export async function handleRpcRequest(
       jsonrpc: "2.0",
       id: null,
       error: { code: RPC_PARSE_ERROR, message: "Parse error" },
+    });
+  }
+
+  // Validate JSON-RPC 2.0 envelope before dispatch
+  if (req.jsonrpc !== "2.0" || typeof req.method !== "string") {
+    recordRpcMetrics("unknown", performance.now() - requestStartedAt, true);
+    return JSON.stringify({
+      jsonrpc: "2.0",
+      id: req.id ?? null,
+      error: { code: RPC_INVALID_REQUEST, message: "Invalid Request: missing jsonrpc 2.0 or method" },
     });
   }
 
@@ -184,10 +194,15 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             await svc.archiveSession(params.sessionId);
             pushHub.broadcast("orchestration.sessionUpdated", { sessionId: params.sessionId, status: "archived" });
             return null;
-          case "unarchiveSession":
+          case "unarchiveSession": {
             await svc.unarchiveSession(params.sessionId);
-            pushHub.broadcast("orchestration.sessionUpdated", { sessionId: params.sessionId });
+            const unarchivedSession = await svc.getSession(params.sessionId);
+            pushHub.broadcast("orchestration.sessionUpdated", {
+              sessionId: params.sessionId,
+              status: unarchivedSession?.status ?? "completed",
+            });
             return null;
+          }
           case "getPendingApprovals":
             return svc.getPendingApprovals(params.sessionId);
           case "resolveApproval":
