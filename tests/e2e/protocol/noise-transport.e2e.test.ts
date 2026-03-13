@@ -1,0 +1,411 @@
+/**
+ * E2E tests for the Noise NK transport protocol.
+ *
+ * Verifies:
+ *   - Daemon health exposes Noise key info
+ *   - Full Noise NK handshake lifecycle
+ *   - Encrypted RPC request/response
+ *   - Multiple sequential encrypted RPCs
+ *   - Spawn + query via encrypted channel
+ *   - Plain (unencrypted) JSON-RPC still works alongside Noise
+ *   - Legacy X25519+AES-GCM encryption backward compatibility
+ *   - Protocol auto-detection (three connection types on same daemon)
+ *   - Encrypted welcome push after handshake
+ *
+ * Run with: bun test tests/e2e/protocol/noise-transport.e2e.test.ts
+ */
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { $ } from "bun";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
+// Isolated ORKA_HOME — must be set BEFORE importing daemon modules
+const orkaHome = mkdtempSync(join(tmpdir(), "orka-e2e-noise-"));
+process.env["ORKA_HOME"] = orkaHome;
+
+import {
+  startDaemonWithNoise,
+  performNoiseHandshake,
+  encryptedRpc,
+  plainRpc,
+  waitForOpen,
+  NoiseClientTransport,
+  type DaemonWithNoise,
+} from "./protocol-helpers";
+import { canonicalTransportOrigin } from "@orka/core";
+
+describe("Noise NK Transport", () => {
+  let daemon: DaemonWithNoise;
+  let testRepo: string;
+
+  beforeAll(async () => {
+    // Create a temp git repo for spawn tests
+    testRepo = mkdtempSync(join(tmpdir(), "orka-e2e-noise-repo-"));
+    await $`git init ${testRepo}`.quiet();
+    await $`git -C ${testRepo} config user.email "test@orka.dev"`.quiet();
+    await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
+    await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
+
+    daemon = await startDaemonWithNoise({ nodeId: "noise-test-node" });
+  }, 30_000);
+
+  afterAll(() => {
+    daemon?.stop();
+    rmSync(orkaHome, { recursive: true, force: true });
+    rmSync(testRepo, { recursive: true, force: true });
+  });
+
+  // ---- 1. Health endpoint ----
+
+  test("daemon health exposes Noise key info", async () => {
+    const res = await fetch(`${daemon.httpUrl}/health`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+
+    expect(body.status).toBe("ok");
+    expect(typeof body.publicKey).toBe("string");
+    expect((body.publicKey as string).length).toBeGreaterThan(0);
+    expect(typeof body.keyId).toBe("string");
+    expect((body.keyId as string).startsWith("sha256:")).toBe(true);
+    expect(body.nodeId).toBe("noise-test-node");
+
+    const capabilities = body.capabilities as Record<string, unknown>;
+    expect(capabilities.encryption).toBe("noise-nk");
+  });
+
+  // ---- 2. Handshake completes ----
+
+  test("Noise NK handshake completes", async () => {
+    const { ws, transport } = await performNoiseHandshake(
+      daemon.wsUrl,
+      daemon.noiseKeyInfo,
+      daemon.nodeId,
+    );
+
+    expect(transport.state).toBe("SECURE");
+    expect(transport.isSecure).toBe(true);
+    expect(transport.sessionId).not.toBeNull();
+
+    ws.close();
+  });
+
+  // ---- 3. Encrypted RPC works ----
+
+  test("encrypted RPC works after handshake", async () => {
+    const { ws, transport } = await performNoiseHandshake(
+      daemon.wsUrl,
+      daemon.noiseKeyInfo,
+      daemon.nodeId,
+    );
+
+    const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
+
+    expect(resp.error).toBeUndefined();
+    expect(Array.isArray(resp.result)).toBe(true);
+
+    ws.close();
+  });
+
+  // ---- 4. Multiple encrypted RPCs on same connection ----
+
+  test("multiple encrypted RPCs on same connection", async () => {
+    const { ws, transport } = await performNoiseHandshake(
+      daemon.wsUrl,
+      daemon.noiseKeyInfo,
+      daemon.nodeId,
+    );
+
+    for (let i = 0; i < 5; i++) {
+      const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
+      expect(resp.error).toBeUndefined();
+      expect(Array.isArray(resp.result)).toBe(true);
+    }
+
+    ws.close();
+  });
+
+  // ---- 5. Spawn + query via encrypted channel ----
+
+  test("spawn + query via encrypted channel", async () => {
+    const { ws, transport } = await performNoiseHandshake(
+      daemon.wsUrl,
+      daemon.noiseKeyInfo,
+      daemon.nodeId,
+    );
+
+    // Spawn a shell session
+    const spawnResp = await encryptedRpc(transport, ws, "spawn", {
+      prompt: "echo noise-test-session",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+      title: "Noise E2E spawn test",
+    });
+
+    expect(spawnResp.error).toBeUndefined();
+    const session = spawnResp.result as Record<string, unknown>;
+    expect(typeof session.id).toBe("string");
+    expect((session.id as string).startsWith("sess-")).toBe(true);
+
+    // Query session back
+    const getResp = await encryptedRpc(transport, ws, "getSession", {
+      id: session.id,
+    });
+
+    expect(getResp.error).toBeUndefined();
+    const fetched = getResp.result as Record<string, unknown>;
+    expect(fetched.id).toBe(session.id);
+    expect(fetched.backend).toBe("shell");
+
+    ws.close();
+  }, 15_000);
+
+  // ---- 6. Plain JSON-RPC works when server has --encrypt ----
+
+  test("plain JSON-RPC works when server has --encrypt", async () => {
+    const ws = new WebSocket(daemon.wsUrl);
+    await waitForOpen(ws);
+
+    // Send an unencrypted JSON-RPC — no client_hello, just a standard request
+    const resp = await plainRpc(ws, "listSessions", { filters: {} });
+
+    expect(resp.error).toBeUndefined();
+    expect(Array.isArray(resp.result)).toBe(true);
+
+    ws.close();
+  });
+
+  // ---- 7. Legacy X25519+AES-GCM encryption works ----
+
+  test("legacy X25519+AES-GCM encryption works", async () => {
+    // Dynamic import to get legacy crypto functions
+    const {
+      generateKeyPair,
+      deriveSessionKey,
+      encryptRequest,
+      decryptResponse,
+    } = await import("../../../packages/core/src/crypto");
+
+    // Generate a client keypair (legacy DER-encoded)
+    const clientKp = generateKeyPair();
+
+    // Derive shared session key (same as daemon does)
+    const serverPubKey = daemon.legacyKeyPair.publicKey;
+    const salt = Buffer.from(clientKp.publicKey + serverPubKey)
+      .toString("base64")
+      .slice(0, 44);
+    const encKey = await deriveSessionKey(clientKp.privateKey, serverPubKey, salt);
+
+    // Connect with pubkey query param (like RemoteClient does)
+    const ws = new WebSocket(
+      `${daemon.wsUrl}?pubkey=${encodeURIComponent(clientKp.publicKey)}`,
+    );
+    await waitForOpen(ws);
+
+    // Encrypt a request using legacy format
+    const rpcRequest = {
+      jsonrpc: "2.0",
+      id: "legacy-test-1",
+      method: "listSessions",
+      params: { filters: {} },
+    };
+    const encryptedReq = encryptRequest(encKey, rpcRequest);
+
+    // Should have _enc field instead of params
+    expect(encryptedReq._enc).toBeDefined();
+    expect(encryptedReq.params).toBeUndefined();
+
+    // Send and wait for response
+    const resp = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Legacy RPC timeout")),
+        10_000,
+      );
+      timer.unref?.();
+
+      const handler = (event: MessageEvent) => {
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(String(event.data));
+        } catch {
+          return;
+        }
+
+        if (parsed.id === "legacy-test-1") {
+          clearTimeout(timer);
+          ws.removeEventListener("message", handler);
+          resolve(parsed);
+        }
+      };
+
+      ws.addEventListener("message", handler);
+      ws.send(JSON.stringify(encryptedReq));
+    });
+
+    // Response should have _enc field (encrypted result)
+    expect(resp._enc).toBeDefined();
+
+    // Decrypt the response
+    const decrypted = decryptResponse(encKey, resp);
+    expect(Array.isArray(decrypted.result)).toBe(true);
+
+    ws.close();
+  });
+
+  // ---- 8. Protocol auto-detection: three connection types ----
+
+  test("protocol auto-detection: three connection types", async () => {
+    // 1. Noise connection
+    const { ws: noiseWs, transport } = await performNoiseHandshake(
+      daemon.wsUrl,
+      daemon.noiseKeyInfo,
+      daemon.nodeId,
+    );
+    const noiseResp = await encryptedRpc(transport, noiseWs, "listSessions", {
+      filters: {},
+    });
+    expect(noiseResp.error).toBeUndefined();
+    expect(Array.isArray(noiseResp.result)).toBe(true);
+
+    // 2. Legacy encrypted connection
+    const {
+      generateKeyPair,
+      deriveSessionKey,
+      encryptRequest,
+      decryptResponse,
+    } = await import("../../../packages/core/src/crypto");
+    const clientKp = generateKeyPair();
+    const serverPubKey = daemon.legacyKeyPair.publicKey;
+    const salt = Buffer.from(clientKp.publicKey + serverPubKey)
+      .toString("base64")
+      .slice(0, 44);
+    const encKey = await deriveSessionKey(
+      clientKp.privateKey,
+      serverPubKey,
+      salt,
+    );
+    const legacyWs = new WebSocket(
+      `${daemon.wsUrl}?pubkey=${encodeURIComponent(clientKp.publicKey)}`,
+    );
+    await waitForOpen(legacyWs);
+    const legacyReq = encryptRequest(encKey, {
+      jsonrpc: "2.0",
+      id: "auto-detect-legacy",
+      method: "listSessions",
+      params: { filters: {} },
+    });
+    const legacyRespRaw = await new Promise<Record<string, unknown>>(
+      (resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("Legacy timeout")),
+          10_000,
+        );
+        timer.unref?.();
+        const handler = (event: MessageEvent) => {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(String(event.data));
+          } catch {
+            return;
+          }
+          if (parsed.id === "auto-detect-legacy") {
+            clearTimeout(timer);
+            legacyWs.removeEventListener("message", handler);
+            resolve(parsed);
+          }
+        };
+        legacyWs.addEventListener("message", handler);
+        legacyWs.send(JSON.stringify(legacyReq));
+      },
+    );
+    const legacyResp = decryptResponse(encKey, legacyRespRaw);
+    expect(Array.isArray(legacyResp.result)).toBe(true);
+
+    // 3. Plaintext connection
+    const plainWs = new WebSocket(daemon.wsUrl);
+    await waitForOpen(plainWs);
+    const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
+    expect(plainResp.error).toBeUndefined();
+    expect(Array.isArray(plainResp.result)).toBe(true);
+
+    noiseWs.close();
+    legacyWs.close();
+    plainWs.close();
+  });
+
+  // ---- 9. Encrypted welcome after Noise handshake ----
+
+  test("encrypted welcome after Noise handshake", async () => {
+    const ws = new WebSocket(daemon.wsUrl);
+    await waitForOpen(ws);
+
+    const transport = new NoiseClientTransport({
+      nodeId: daemon.nodeId,
+      expectedKeyId: daemon.noiseKeyInfo.keyId,
+      remoteStaticPubkey: daemon.noiseKeyInfo.publicKey,
+      relayOrigin: canonicalTransportOrigin(undefined),
+    });
+
+    // Send client_hello
+    const clientHello = transport.getClientHello();
+    ws.send(JSON.stringify(clientHello));
+
+    // Collect all messages until we get an encrypted welcome
+    const welcomeData = await new Promise<Record<string, unknown>>(
+      (resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("Welcome timeout")),
+          10_000,
+        );
+        timer.unref?.();
+
+        const handler = (event: MessageEvent) => {
+          const msg = JSON.parse(String(event.data));
+
+          // During handshake, process transport messages
+          if (!transport.isSecure) {
+            // Skip non-transport messages (e.g. plaintext welcome push)
+            if (!msg.t) return;
+
+            const responses = transport.processMessage(msg);
+            for (const resp of responses) {
+              ws.send(JSON.stringify(resp));
+            }
+            return;
+          }
+
+          // After SECURE: look for encrypted data frames
+          if (msg.t === "data" && typeof msg.ct === "string") {
+            let decrypted: Record<string, unknown>;
+            try {
+              decrypted = transport.decryptData(msg);
+            } catch {
+              return;
+            }
+
+            // Check if this is the welcome push
+            if (
+              decrypted.type === "push" &&
+              decrypted.channel === "server.welcome"
+            ) {
+              clearTimeout(timer);
+              ws.removeEventListener("message", handler);
+              resolve(decrypted.data as Record<string, unknown>);
+            }
+          }
+        };
+
+        ws.addEventListener("message", handler);
+      },
+    );
+
+    expect(typeof welcomeData.serverVersion).toBe("string");
+    expect(typeof welcomeData.sessionCount).toBe("number");
+    expect(typeof welcomeData.protocolVersion).toBe("number");
+    expect(welcomeData.capabilities).toBeDefined();
+
+    ws.close();
+  });
+});
