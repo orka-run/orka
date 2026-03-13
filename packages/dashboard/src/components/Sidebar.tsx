@@ -2,7 +2,7 @@
 import { useId, useState } from "react";
 import { MessageSquarePlus, Plus, Search } from "lucide-react";
 import type { SessionSummary } from "../stores/sessionStore";
-import { formatRelativeTime, getSessionGroup } from "../lib/sessionUi";
+import { formatRelativeTime } from "../lib/sessionUi";
 
 interface SidebarProps {
   sessions: SessionSummary[];
@@ -13,31 +13,13 @@ interface SidebarProps {
   onSelectDraft?: () => void;
 }
 
-interface SessionGroup {
-  key: "running" | "completed" | "failed";
-  label: string;
-  sessions: SessionSummary[];
-}
-
-const GROUP_ORDER: Array<SessionGroup["key"]> = ["running", "completed", "failed"];
-const GROUP_LABELS: Record<SessionGroup["key"], string> = {
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-};
-
 export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSession, onSelectDraft }: SidebarProps) {
   const searchId = useId();
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
   const now = Date.now();
-  const runningCount = sessions.filter((session) => getSessionGroup(session.status) === "running").length;
+  const runningCount = sessions.filter((session) => isActive(session.status)).length;
   const filteredSessions = sessions.filter((session) => matchesQuery(session, normalizedQuery));
-  const groups = GROUP_ORDER.map((key) => ({
-    key,
-    label: GROUP_LABELS[key],
-    sessions: filteredSessions.filter((session) => getSessionGroup(session.status) === key),
-  })).filter((group) => group.sessions.length > 0);
 
   return (
     <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
@@ -84,7 +66,7 @@ export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSe
             <span className="text-sm font-medium text-sky-200">New chat</span>
           </button>
         ) : null}
-        {groups.length === 0 ? (
+        {filteredSessions.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/60 px-4 py-8 text-center">
             <p className="text-sm font-medium text-zinc-200">
               {sessions.length === 0 ? "No sessions yet" : "No sessions match"}
@@ -96,58 +78,50 @@ export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSe
             </p>
           </div>
         ) : (
-          <div className="space-y-6">
-            {groups.map((group) => (
-              <section key={group.key}>
-                <div className="mb-2 flex items-center justify-between px-1">
-                  <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                    {group.label}
-                  </h2>
-                  <span className="text-xs text-zinc-600">{group.sessions.length}</span>
-                </div>
-                <ul className="space-y-2">
-                  {group.sessions.map((session) => {
-                    const isSelected = selectedId === session.id;
+          <ul className="space-y-2">
+            {filteredSessions.map((session) => {
+              const isSelected = selectedId === session.id;
 
-                    return (
-                      <li key={session.id}>
-                        <button
-                          type="button"
-                          onClick={() => onSelect(session.id)}
-                          className={`w-full rounded-xl border px-3 py-3 text-left transition ${
-                            isSelected
-                              ? "border-zinc-700 bg-zinc-900 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
-                              : "border-zinc-900 bg-zinc-950 hover:border-zinc-800 hover:bg-zinc-900/70"
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-3">
-                              <p className="truncate text-sm font-medium text-zinc-100">
-                                {session.title || session.id}
-                              </p>
-                              <span className="shrink-0 text-xs text-zinc-500">
-                                {formatRelativeTime(session.createdAt, now)}
-                              </span>
-                            </div>
-                            <div className="mt-2 flex items-center gap-2">
-                              <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-300">
-                                {session.backend}
-                              </span>
-                              <StatusPill status={session.status} />
-                            </div>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ))}
-          </div>
+              return (
+                <li key={session.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(session.id)}
+                    className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                      isSelected
+                        ? "border-zinc-700 bg-zinc-900 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+                        : "border-zinc-900 bg-zinc-950 hover:border-zinc-800 hover:bg-zinc-900/70"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="truncate text-sm font-medium text-zinc-100">
+                          {session.title || session.id}
+                        </p>
+                        <span className="shrink-0 text-xs text-zinc-500">
+                          {formatRelativeTime(session.createdAt, now)}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-300">
+                          {session.backend}
+                        </span>
+                        <StatusPill status={session.status} />
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
     </aside>
   );
+}
+
+function isActive(status: SessionSummary["status"]): boolean {
+  return status === "running" || status === "queued" || status === "preparing";
 }
 
 function matchesQuery(session: SessionSummary, query: string): boolean {
