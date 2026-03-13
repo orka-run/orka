@@ -35,6 +35,7 @@ const ALLOWED_METHODS = new Set([
   "spawn", "stop", "reap", "getSession", "listSessions", "getTask",
   "setKept", "getTags", "getResult", "captureOutput", "getLogContent",
   "isAlive", "sendTurn", "getDiff", "merge", "deleteSessions", "pruneSessions",
+  "archiveSession", "unarchiveSession",
 ]);
 
 // --- Relay Options ---

@@ -30,6 +30,8 @@ import {
   listSessionsByTag,
   getChildSessions as dbGetChildSessions,
   deleteSessions as dbDeleteSessions,
+  archiveSession as dbArchiveSession,
+  unarchiveSession as dbUnarchiveSession,
   getUsageBySession,
   getUsageSummary as dbGetUsageSummary,
   getOrkaHome,
@@ -79,14 +81,18 @@ class LocalClient implements OrkaService {
   }
 
   async listSessions(filters?: SessionFilters): Promise<Session[]> {
+    const includeArchived = filters?.includeArchived ?? false;
     if (filters?.tag) {
       let sessions = listSessionsByTag(filters.tag);
       if (filters.status) {
         sessions = sessions.filter((s) => s.status === filters.status);
       }
+      if (!includeArchived) {
+        sessions = sessions.filter((s) => !s.archivedAt);
+      }
       return sessions;
     }
-    return dbListSessions(filters?.status);
+    return dbListSessions(filters?.status, includeArchived);
   }
 
   async getChildSessions(sessionId: string): Promise<Session[]> {
@@ -300,6 +306,14 @@ class LocalClient implements OrkaService {
 
   async deleteSessions(ids: string[]): Promise<void> {
     dbDeleteSessions(ids);
+  }
+
+  async archiveSession(sessionId: string): Promise<void> {
+    dbArchiveSession(sessionId);
+  }
+
+  async unarchiveSession(sessionId: string): Promise<void> {
+    dbUnarchiveSession(sessionId);
   }
 
   async pruneSessions(opts: PruneOptions): Promise<PruneResult> {

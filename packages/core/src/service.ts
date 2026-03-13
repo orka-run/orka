@@ -43,6 +43,7 @@ export interface UsageSummary {
 export interface SessionFilters {
   status?: SessionStatus;
   tag?: string;
+  includeArchived?: boolean;
 }
 
 export interface PruneOptions {
@@ -118,6 +119,10 @@ export interface OrkaService {
   // --- Bulk operations ---
   deleteSessions(ids: string[]): Promise<void>;
   pruneSessions(opts: PruneOptions): Promise<PruneResult>;
+
+  // --- Archive ---
+  archiveSession(sessionId: string): Promise<void>;
+  unarchiveSession(sessionId: string): Promise<void>;
 
   // --- Approvals ---
   getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]>;

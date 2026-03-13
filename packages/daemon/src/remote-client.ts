@@ -275,6 +275,14 @@ class RemoteClient implements OrkaService {
     return this.call("deleteSessions", { ids });
   }
 
+  async archiveSession(sessionId: string): Promise<void> {
+    return this.call("archiveSession", { sessionId });
+  }
+
+  async unarchiveSession(sessionId: string): Promise<void> {
+    return this.call("unarchiveSession", { sessionId });
+  }
+
   async pruneSessions(opts: PruneOptions): Promise<PruneResult> {
     return this.call("pruneSessions", {
       maxAgeMs: opts.maxAgeMs,

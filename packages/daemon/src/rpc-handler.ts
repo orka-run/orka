@@ -180,6 +180,14 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
               purgeLogs: params.purgeLogs,
               purgeDb: params.purgeDb,
             });
+          case "archiveSession":
+            await svc.archiveSession(params.sessionId);
+            pushHub.broadcast("orchestration.sessionUpdated", { sessionId: params.sessionId, status: "archived" });
+            return null;
+          case "unarchiveSession":
+            await svc.unarchiveSession(params.sessionId);
+            pushHub.broadcast("orchestration.sessionUpdated", { sessionId: params.sessionId });
+            return null;
           case "getPendingApprovals":
             return svc.getPendingApprovals(params.sessionId);
           case "resolveApproval":

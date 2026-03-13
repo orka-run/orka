@@ -73,6 +73,7 @@ export interface Session {
   systemPrompt?: string;
   allowedTools?: string[];
   env?: Record<string, string>;
+  archivedAt?: string;
 }
 
 export interface SessionProjection {

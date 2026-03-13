@@ -46,6 +46,7 @@ const SessionRowSchema = z.object({
   env_json: z.string().nullable().default(null),
   raw_log_file: z.string().nullable().default(null),
   parent_session_id: z.string().nullable().default(null),
+  archived_at: z.string().nullable().default(null),
 });
 
 const UsageLogRowSchema = z.object({
@@ -121,6 +122,7 @@ const MIGRATIONS = [
   { version: 22, sql: `ALTER TABLE sessions ADD COLUMN raw_log_file TEXT` },
   { version: 23, sql: `ALTER TABLE sessions ADD COLUMN parent_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL` },
   { version: 24, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)` },
+  { version: 25, sql: `ALTER TABLE sessions ADD COLUMN archived_at TEXT` },
 ];
 
 function migrate(db: Database): void {
@@ -322,17 +324,47 @@ export function getSession(id: string): Session | null {
   });
 }
 
-export function listSessions(status?: SessionStatus): Session[] {
+export function listSessions(status?: SessionStatus, includeArchived = false): Session[] {
   return withSpanSync("orka.db.listSessions", {}, () => {
     const db = getDb();
+    const archiveFilter = includeArchived ? "" : " AND archived_at IS NULL";
     const rows = status
       ? (db
-          .prepare("SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC")
+          .prepare(`SELECT * FROM sessions WHERE status = ?${archiveFilter} ORDER BY created_at DESC`)
           .all(status) as any[])
       : (db
-          .prepare("SELECT * FROM sessions ORDER BY created_at DESC")
+          .prepare(`SELECT * FROM sessions WHERE 1=1${archiveFilter} ORDER BY created_at DESC`)
           .all() as any[]);
     return rows.map(rowToSession);
+  });
+}
+
+export function archiveSession(sessionId: string): void {
+  withSpanSync("orka.db.archiveSession", { "orka.session.id": sessionId }, () => {
+    getDb()
+      .prepare("UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
+      .run(new Date().toISOString(), sessionId);
+  });
+}
+
+export function unarchiveSession(sessionId: string): void {
+  withSpanSync("orka.db.unarchiveSession", { "orka.session.id": sessionId }, () => {
+    getDb()
+      .prepare("UPDATE sessions SET archived_at = NULL WHERE id = ?")
+      .run(sessionId);
+  });
+}
+
+export function archiveSessions(ids: string[]): number {
+  if (ids.length === 0) return 0;
+  return withSpanSync("orka.db.archiveSessions", { "orka.session.count": ids.length }, () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const placeholders = ids.map(() => "?").join(", ");
+    const result = db
+      .prepare(`UPDATE sessions SET archived_at = ? WHERE id IN (${placeholders}) AND archived_at IS NULL`)
+      .run(now, ...ids);
+    return result.changes;
   });
 }
 
@@ -692,6 +724,7 @@ function rowToSession(row: unknown): Session {
     ...(data.system_prompt ? { systemPrompt: data.system_prompt } : {}),
     ...(data.allowed_tools ? { allowedTools: JSON.parse(data.allowed_tools) as string[] } : {}),
     ...(data.env_json ? { env: JSON.parse(data.env_json) as Record<string, string> } : {}),
+    ...(data.archived_at ? { archivedAt: data.archived_at } : {}),
   };
 }
 

@@ -238,7 +238,8 @@ const TOP_LEVEL_COMMANDS = new Set([
   "unkeep",
   "merge",
   "project",
-  "prune",
+  "archive",
+  "unarchive",
   "restart",
   "serve",
   "relay",
@@ -456,6 +457,7 @@ const psCmd = command({
     project: option({ type: optional(str), long: "project", description: "Filter by project name or path" }),
     tag: option({ type: optional(str), long: "tag", description: "Filter by tag" }),
     children: option({ type: optional(str), long: "children", description: "List only children of a parent session" }),
+    archived: flag({ long: "archived", description: "Include archived sessions" }),
     verbose: flag({ long: "verbose", short: "v", description: "Show cost, duration, tokens, and project" }),
   },
   handler: async (args) => runCliCommand("ps", async () => {
@@ -469,6 +471,7 @@ const psCmd = command({
       sessions = await svc.listSessions({
         ...(args.status ? { status: args.status } : {}),
         ...(args.tag ? { tag: args.tag } : {}),
+        ...(args.archived ? { includeArchived: true } : {}),
       });
     }
     if (args.backend) {
@@ -1246,6 +1249,46 @@ const mergeCmd = command({
   }),
 });
 
+const archiveCmd = command({
+  name: "archive",
+  description: "Archive completed/failed sessions (hides from ps, preserves data)",
+  examples: [
+    { description: "Archive a single session", command: "orka archive sess-abc123" },
+    { description: "Archive multiple sessions", command: "orka archive sess-abc123 sess-def456" },
+  ],
+  args: {
+    ids: restPositionals({ type: str, displayName: "session-id" }),
+  },
+  handler: async ({ ids }) => runCliCommand("archive", async () => {
+    if (ids.length === 0) {
+      console.error("error: provide at least one session ID");
+      process.exit(1);
+    }
+    for (const id of ids) {
+      await svc.archiveSession(id);
+      console.log(`archived ${id}`);
+    }
+  }),
+});
+
+const unarchiveCmd = command({
+  name: "unarchive",
+  description: "Restore an archived session back to the session list",
+  args: {
+    ids: restPositionals({ type: str, displayName: "session-id" }),
+  },
+  handler: async ({ ids }) => runCliCommand("unarchive", async () => {
+    if (ids.length === 0) {
+      console.error("error: provide at least one session ID");
+      process.exit(1);
+    }
+    for (const id of ids) {
+      await svc.unarchiveSession(id);
+      console.log(`unarchived ${id}`);
+    }
+  }),
+});
+
 const pruneCmd = command({
   name: "prune",
   description: "Remove old completed/cancelled/failed sessions and orphaned worktrees",
@@ -1808,7 +1851,8 @@ const app = subcommands({
     unkeep: unkeepCmd,
     merge: mergeCmd,
     project: projectCmd,
-    prune: pruneCmd,
+    archive: archiveCmd,
+    unarchive: unarchiveCmd,
     restart: restartCmd,
     serve: serveCmd,
     relay: relayCmd,
@@ -1903,7 +1947,8 @@ function printUsage(): void {
   console.log("  merge    Merge worktree into current      orka merge <id>");
   console.log("  keep     Protect worktree from cleanup    orka keep <id>");
   console.log("  unkeep   Remove worktree protection       orka unkeep <id>");
-  console.log("  prune    Remove old sessions              orka prune --age 7d --confirm");
+  console.log("  archive  Hide sessions from list          orka archive <id> [<id>...]");
+  console.log("  unarchive Restore archived sessions       orka unarchive <id>");
   console.log("");
   console.log("infrastructure:");
   console.log("  project  Register/list/remove aliases     orka project add myapp /path/to/repo");
