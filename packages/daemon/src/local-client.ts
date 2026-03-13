@@ -73,6 +73,8 @@ export interface PairingConfig {
   relayPaths: string[];
   /** Relay WebSocket URL (e.g. "ws://relay:7390") — required for pairing WS connection. */
   relayUrl: string;
+  /** API key for authenticating pairing WebSocket connections to the relay. */
+  relayToken?: string;
 }
 
 class LocalClient implements OrkaService {
@@ -340,8 +342,9 @@ class LocalClient implements OrkaService {
 
       // Build the relay pairing URL: <relayUrl>/v1/pair/<enrollId>
       const relayUrl = config.relayUrl.replace(/\/$/, "");
-      // Convert ws:// to ws:// path (or wss:// to wss://)
-      const pairUrl = `${relayUrl}/v1/pair/${enrollId}`;
+      // Append auth token as query parameter if available
+      const tokenParam = config.relayToken ? `?token=${encodeURIComponent(config.relayToken)}` : "";
+      const pairUrl = `${relayUrl}/v1/pair/${enrollId}${tokenParam}`;
 
       const ws = new WebSocket(pairUrl);
 
