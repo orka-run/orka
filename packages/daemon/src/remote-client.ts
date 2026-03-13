@@ -322,6 +322,16 @@ class RemoteClient implements OrkaService {
     return this.call("getMetrics", {});
   }
 
+  async queryTraces(query?: {
+    service?: string;
+    errorsOnly?: boolean;
+    namePattern?: string;
+    limit?: number;
+    since?: string;
+  }): Promise<Array<Record<string, unknown>>> {
+    return this.call("queryTraces", query ?? {});
+  }
+
   async reportEventGap(channel: PushChannel, expectedSeq: number, gotSeq: number): Promise<void> {
     return this.call("reportEventGap", { channel, expectedSeq, gotSeq });
   }

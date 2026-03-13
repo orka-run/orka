@@ -52,7 +52,7 @@ import {
   getWorktreeDir,
 } from "./worktree";
 import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerAdapterRegistry, providerService } from "./provider-runtime";
-import { queryMetricSnapshot } from "./tracing";
+import { queryMetricSnapshot, queryTraceLog } from "./tracing";
 
 class LocalClient implements OrkaService {
   private terminalManager: TerminalManager | null = null;
@@ -424,6 +424,16 @@ class LocalClient implements OrkaService {
 
   async getMetrics(): Promise<Record<string, unknown> | null> {
     return (await queryMetricSnapshot()) as unknown as Record<string, unknown> | null;
+  }
+
+  async queryTraces(query?: {
+    service?: string;
+    errorsOnly?: boolean;
+    namePattern?: string;
+    limit?: number;
+    since?: string;
+  }): Promise<Array<Record<string, unknown>>> {
+    return queryTraceLog(query ?? {}) as unknown as Array<Record<string, unknown>>;
   }
 
   async reportEventGap(_channel: PushChannel, _expectedSeq: number, _gotSeq: number): Promise<void> {}

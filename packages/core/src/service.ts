@@ -132,8 +132,15 @@ export interface OrkaService {
   // --- Backfill ---
   backfillSession(sessionId: string): Promise<{ eventsReplayed: number }>;
 
-  // --- Metrics ---
+  // --- Metrics & Observability ---
   getMetrics(): Promise<Record<string, unknown> | null>;
+  queryTraces(query?: {
+    service?: string;
+    errorsOnly?: boolean;
+    namePattern?: string;
+    limit?: number;
+    since?: string;
+  }): Promise<Array<Record<string, unknown>>>;
 
   // --- Terminal PTY ---
   terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }>;

@@ -239,6 +239,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "unkeep",
   "merge",
   "project",
+  "traces",
   "archive",
   "unarchive",
   "restart",
@@ -1258,6 +1259,86 @@ const mergeCmd = command({
   }),
 });
 
+const tracesCmd = command({
+  name: "traces",
+  description: "Query and display OpenTelemetry traces from the daemon",
+  examples: [
+    { description: "Show recent traces", command: "orka traces" },
+    { description: "Show errors only", command: "orka traces --errors" },
+    { description: "Filter by span name", command: "orka traces --name rpc" },
+    { description: "Traces since 1 hour ago", command: "orka traces --since 1h" },
+    { description: "Show last 100 traces", command: "orka traces --limit 100" },
+  ],
+  args: {
+    errors: flag({ type: bool, long: "errors", short: "e", description: "Show only error spans" }),
+    name: option({ type: optional(str), long: "name", short: "n", description: "Filter by span name (substring match)" }),
+    service: option({ type: optional(str), long: "service", short: "s", description: "Filter by service name" }),
+    since: option({ type: optional(str), long: "since", description: "Only spans after this (e.g. '1h', '30m', ISO timestamp)" }),
+    limit: option({ type: optional(str), long: "limit", short: "l", description: "Max results (default: 30)" }),
+    json: flag({ type: bool, long: "json", description: "Output raw JSON" }),
+  },
+  handler: async (args) => runCliCommand("traces", async () => {
+    const limit = parseInt(args.limit ?? "30", 10);
+    let since: string | undefined;
+    if (args.since) {
+      const match = args.since.match(/^(\d+)(m|h|d)$/);
+      if (match) {
+        const [, num, unit] = match;
+        const ms = parseInt(num!, 10) * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000);
+        since = new Date(Date.now() - ms).toISOString();
+      } else {
+        since = args.since;
+      }
+    }
+
+    const svc = await getSvc();
+    const traces: any[] = await svc.queryTraces({
+      errorsOnly: args.errors || undefined,
+      namePattern: args.name,
+      service: args.service,
+      since,
+      limit,
+    });
+
+    if (traces.length === 0) {
+      console.log("no traces found");
+      return;
+    }
+
+    if (args.json) {
+      for (const t of traces) console.log(JSON.stringify(t));
+      return;
+    }
+
+    const noColor = process.env["NO_COLOR"] === "1";
+    const c = (code: string, text: string) => noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
+
+    for (const t of traces) {
+      const date = new Date(t.startTime).toLocaleTimeString();
+      const dur = `${Math.round(t.durationMs)}ms`;
+      const isErr = t.status?.code === 2;
+      const statusStr = isErr ? c("31", "ERR") : c("32", "OK ");
+      const name = isErr ? c("31", t.name) : t.name;
+      const method = t.attributes?.["orka.method"] ? c("36", ` ${t.attributes["orka.method"]}`) : "";
+      const errMsg = isErr && t.status?.message ? c("2", ` ${t.status.message}`) : "";
+
+      console.log(`${c("2", date)} ${statusStr} ${c("33", dur.padStart(7))} ${name}${method}${errMsg}`);
+
+      // Show events if error
+      if (isErr && t.events?.length) {
+        for (const ev of t.events) {
+          if (ev.name === "exception") {
+            const msg = ev.attributes?.["exception.message"] ?? ev.attributes?.message ?? "";
+            if (msg) console.log(`  ${c("2", "└")} ${c("31", String(msg))}`);
+          }
+        }
+      }
+    }
+
+    console.log(c("2", `\n${traces.length} span(s)`));
+  }),
+});
+
 const archiveCmd = command({
   name: "archive",
   description: "Archive completed/failed sessions (hides from ps, preserves data)",
@@ -1860,6 +1941,7 @@ const app = subcommands({
     unkeep: unkeepCmd,
     merge: mergeCmd,
     project: projectCmd,
+    traces: tracesCmd,
     archive: archiveCmd,
     unarchive: unarchiveCmd,
     restart: restartCmd,
