@@ -56,7 +56,9 @@ import {
   getWorktreeDir,
 } from "./worktree";
 import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerAdapterRegistry, providerService } from "./provider-runtime";
-import { queryMetricSnapshot, queryTraceLog } from "./tracing";
+import { queryMetricSnapshot, queryTraceLog, withSpan } from "./tracing";
+import { PairingServer } from "./pairing/pairing-server";
+import type { PairMessage } from "@orka/core";
 
 export interface PairingConfig {
   /** Node ID for pairing enrollment (e.g. "fra1-gpu-01"). */
@@ -69,6 +71,8 @@ export interface PairingConfig {
   transportKeyId: string;
   /** Relay paths the client can reach this node at. */
   relayPaths: string[];
+  /** Relay WebSocket URL (e.g. "ws://relay:7390") — required for pairing WS connection. */
+  relayUrl: string;
 }
 
 class LocalClient implements OrkaService {
@@ -307,11 +311,100 @@ class LocalClient implements OrkaService {
       ttlMs,
     });
 
+    // Connect to relay pairing endpoint in background
+    this.connectPairingRelay(enrollId, ttlMs);
+
     return {
       enrollId,
       pairingCode: code,
       expiresAt: Date.now() + ttlMs,
     };
+  }
+
+  /**
+   * Open a WebSocket to the relay's pairing route and drive PairingServer
+   * to complete the SPAKE2 handshake with the connecting client.
+   */
+  private connectPairingRelay(enrollId: string, ttlMs: number): void {
+    const config = this.pairingConfig!;
+    const store = this.enrollmentStore!;
+
+    void withSpan("orka.pairing.relay_connect", {
+      "orka.pairing.enroll_id": enrollId,
+    }, async (span) => {
+      const enrollment = store.get(enrollId);
+      if (!enrollment) {
+        span.addEvent("pairing.enrollment_not_found");
+        return;
+      }
+
+      // Build the relay pairing URL: <relayUrl>/v1/pair/<enrollId>
+      const relayUrl = config.relayUrl.replace(/\/$/, "");
+      // Convert ws:// to ws:// path (or wss:// to wss://)
+      const pairUrl = `${relayUrl}/v1/pair/${enrollId}`;
+
+      const ws = new WebSocket(pairUrl);
+
+      // Set up TTL timeout to clean up if pairing doesn't complete
+      const timeout = setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close(1000, "Pairing TTL expired");
+        }
+        store.remove(enrollId);
+      }, ttlMs);
+      timeout.unref();
+
+      const server = new PairingServer({
+        enrollment,
+        enrollmentStore: store,
+        secret: enrollment.secret,
+        relayOrigin: relayUrl,
+        noiseKeyId: config.transportKeyId,
+      });
+
+      ws.onopen = () => {
+        span.addEvent("pairing.relay_connected");
+      };
+
+      ws.onmessage = (event) => {
+        const raw = typeof event.data === "string" ? event.data : "";
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return;
+        }
+
+        const responses: PairMessage[] = server.processMessage(parsed);
+        for (const msg of responses) {
+          ws.send(JSON.stringify(msg));
+        }
+
+        if (server.isComplete) {
+          span.addEvent("pairing.complete");
+          clearTimeout(timeout);
+          // Close the WS gracefully — pairing is done
+          ws.close(1000, "Pairing complete");
+        } else if (server.isErrored) {
+          span.addEvent("pairing.errored");
+          clearTimeout(timeout);
+          ws.close(1000, "Pairing error");
+          store.remove(enrollId);
+        }
+      };
+
+      ws.onerror = () => {
+        span.addEvent("pairing.relay_error");
+      };
+
+      ws.onclose = () => {
+        clearTimeout(timeout);
+        if (!server.isComplete) {
+          span.addEvent("pairing.relay_closed_before_complete");
+          store.remove(enrollId);
+        }
+      };
+    });
   }
 
   /** Get the enrollment store (for use by pairing server handler). */

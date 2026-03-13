@@ -40,6 +40,7 @@ function makePairingConfig(): PairingConfig {
     transportPubkey,
     transportKeyId: "sha256:abc123",
     relayPaths: ["wss://relay.example.com/v1/node/test-node-01"],
+    relayUrl: "ws://localhost:17390",
   };
 }
 

@@ -15,6 +15,8 @@ import { blake3, blake3Truncated, concatBytes } from "@orka/core/crypto/protocol
 
 export interface PendingEnrollment {
   enrollId: string;
+  /** Raw SPAKE2 password. Cleared (zeroed) on consume/expiry. */
+  secret: Uint8Array;
   secretHash: Uint8Array;
   expiresAt: number;
   attemptsLeft: number;
@@ -84,8 +86,12 @@ export class EnrollmentStore {
     const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
     const maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 
+    // Copy the secret so the caller can't mutate our internal state
+    const secret = new Uint8Array(opts.secret);
+
     const enrollment: PendingEnrollment = {
       enrollId,
+      secret,
       secretHash,
       expiresAt: Date.now() + ttlMs,
       attemptsLeft: maxAttempts,
@@ -108,6 +114,7 @@ export class EnrollmentStore {
     const enrollment = this.enrollments.get(enrollId);
     if (!enrollment) return null;
     if (Date.now() >= enrollment.expiresAt) {
+      enrollment.secret.fill(0);
       this.enrollments.delete(enrollId);
       return null;
     }
@@ -124,6 +131,7 @@ export class EnrollmentStore {
 
     enrollment.attemptsLeft--;
     if (enrollment.attemptsLeft <= 0) {
+      enrollment.secret.fill(0);
       this.enrollments.delete(enrollId);
       return 0;
     }
@@ -137,6 +145,8 @@ export class EnrollmentStore {
     const enrollment = this.enrollments.get(enrollId);
     if (enrollment) {
       enrollment.used = true;
+      // Zero out the raw secret — no longer needed after successful pairing
+      enrollment.secret.fill(0);
     }
   }
 
@@ -144,7 +154,11 @@ export class EnrollmentStore {
    * Remove an enrollment.
    */
   remove(enrollId: string): void {
-    this.enrollments.delete(enrollId);
+    const enrollment = this.enrollments.get(enrollId);
+    if (enrollment) {
+      enrollment.secret.fill(0);
+      this.enrollments.delete(enrollId);
+    }
   }
 
   /**
@@ -168,6 +182,7 @@ export class EnrollmentStore {
     const now = Date.now();
     for (const [id, enrollment] of this.enrollments) {
       if (now >= enrollment.expiresAt) {
+        enrollment.secret.fill(0);
         this.enrollments.delete(id);
       }
     }
@@ -178,6 +193,9 @@ export class EnrollmentStore {
    */
   shutdown(): void {
     clearInterval(this.cleanupTimer);
+    for (const enrollment of this.enrollments.values()) {
+      enrollment.secret.fill(0);
+    }
     this.enrollments.clear();
   }
 }

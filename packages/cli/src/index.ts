@@ -31,6 +31,7 @@ import {
   formatLog,
   formatEvent,
   parseLine,
+  type PairingConfig,
 } from "@orka/daemon";
 import {
   command,
@@ -1506,13 +1507,30 @@ const serveCmd = command({
     await withSpan("orka.cli.serve", { "orka.command": "serve" }, async () => {
       const port = parseInt(args.port ?? "7394", 10);
       const hostname = args.host ?? "127.0.0.1";
-      const localSvc = createLocalClient();
+      const nodeId = args.nodeId ?? `${hostname}:${port}`;
+
+      // Build PairingConfig when encryption and relay are both available
+      let pairingConfig: PairingConfig | undefined;
+      if (useEncrypt && args.relay) {
+        const orkaHome = getOrkaHome();
+        const noiseKey = ensureNoiseKeyPair(orkaHome, "node");
+        pairingConfig = {
+          nodeId,
+          nodeName: nodeId,
+          transportPubkey: noiseKey.publicKey,
+          transportKeyId: noiseKey.keyId,
+          relayPaths: [`/ws?node=${encodeURIComponent(nodeId)}`],
+          relayUrl: args.relay,
+        };
+      }
+
+      const localSvc = createLocalClient(pairingConfig);
       const relayToken = args.relayToken ?? process.env["ORKA_TOKEN"];
       const serverOptions = {
         port,
         hostname,
+        nodeId,
         ...(args.relay ? { relayUrl: args.relay } : {}),
-        ...(args.nodeId ? { nodeId: args.nodeId } : {}),
         ...(relayToken ? { relayToken } : {}),
         ...(useEncrypt ? { encrypt: true } : {}),
       };

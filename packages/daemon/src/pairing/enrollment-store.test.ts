@@ -217,4 +217,84 @@ describe("EnrollmentStore", () => {
     expect(store.recordFailedAttempt(enrollId)).toBe(0);
     expect(store.get(enrollId)).toBeNull();
   });
+
+  test("raw secret: stored and accessible via get()", () => {
+    store = new EnrollmentStore();
+    const secret = makeSecret(42);
+    const enrollId = store.create(makeOpts({ secret }));
+
+    const enrollment = store.get(enrollId);
+    expect(enrollment).not.toBeNull();
+    // The stored secret should match the original value
+    expect(enrollment!.secret).toEqual(secret);
+  });
+
+  test("raw secret: defensive copy (not same reference as input)", () => {
+    store = new EnrollmentStore();
+    const secret = makeSecret(42);
+    const enrollId = store.create(makeOpts({ secret }));
+
+    const enrollment = store.get(enrollId);
+    expect(enrollment).not.toBeNull();
+    // Mutating the original should not affect the stored copy
+    const originalValue = secret[0];
+    secret[0] = 0xff;
+    expect(enrollment!.secret[0]).toBe(originalValue);
+  });
+
+  test("raw secret: zeroed on markUsed", () => {
+    store = new EnrollmentStore();
+    const secret = makeSecret(7);
+    const enrollId = store.create(makeOpts({ secret }));
+
+    const enrollment = store.get(enrollId)!;
+    // Secret should be non-zero before markUsed
+    expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
+
+    store.markUsed(enrollId);
+
+    // Secret should be zeroed after markUsed
+    expect(enrollment.secret.every((b) => b === 0)).toBe(true);
+  });
+
+  test("raw secret: zeroed on remove", () => {
+    store = new EnrollmentStore();
+    const secret = makeSecret(9);
+    const enrollId = store.create(makeOpts({ secret }));
+
+    const enrollment = store.get(enrollId)!;
+    expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
+
+    store.remove(enrollId);
+
+    expect(enrollment.secret.every((b) => b === 0)).toBe(true);
+  });
+
+  test("raw secret: zeroed on attempts exhausted", () => {
+    store = new EnrollmentStore();
+    const secret = makeSecret(11);
+    const enrollId = store.create(makeOpts({ secret, maxAttempts: 1 }));
+
+    const enrollment = store.get(enrollId)!;
+    expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
+
+    store.recordFailedAttempt(enrollId);
+
+    expect(enrollment.secret.every((b) => b === 0)).toBe(true);
+  });
+
+  test("raw secret: zeroed on TTL expiry via get()", async () => {
+    store = new EnrollmentStore();
+    const secret = makeSecret(13);
+    const enrollId = store.create(makeOpts({ secret, ttlMs: 50 }));
+
+    const enrollment = store.get(enrollId)!;
+    expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    // Accessing via get() should trigger expiry cleanup
+    expect(store.get(enrollId)).toBeNull();
+    expect(enrollment.secret.every((b) => b === 0)).toBe(true);
+  });
 });
