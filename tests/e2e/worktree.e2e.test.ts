@@ -139,19 +139,16 @@ describeE2E("Worktree Management", () => {
   });
 
   test("merge brings worktree commits into main repo", async () => {
-    // Spawn a session that creates and commits a file
+    // Spawn a session that sets git config THEN creates and commits a file.
+    // Git config must be set inside the prompt to avoid a race condition —
+    // the shell command runs immediately, so configuring after spawn is too late.
     const session = await client.spawn({
-      prompt: "echo 'merge-test-content' > merge-test.txt && git add merge-test.txt && git commit -m 'add merge-test'",
+      prompt: 'git config user.email "test@orka.dev" && git config user.name "Orka Test" && echo \'merge-test-content\' > merge-test.txt && git add merge-test.txt && git commit -m \'add merge-test\'',
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
     spawnedTmuxNames.push(session.tmuxSessionName);
-
-    // Git config for the worktree (needed for commit)
-    await Bun.sleep(200);
-    await $`git -C ${session.workingDir} config user.email "test@orka.dev"`.quiet();
-    await $`git -C ${session.workingDir} config user.name "Orka Test"`.quiet();
 
     // Wait for the session to finish
     await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 10_000 });
