@@ -8,6 +8,7 @@ import {
   PushChannelSchema,
   PushControlRequestSchema,
   ReconnectStrategy,
+  canonicalTransportOrigin,
 } from "@orka/core";
 import type { PushChannel, DataFrame } from "@orka/core";
 import { trace } from "@opentelemetry/api";
@@ -297,7 +298,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
                   publicKey: noiseKeyInfo.publicKey,
                   privateKey: noiseKeyInfo.privateKey,
                 },
-                relayOrigin: opts.relayUrl ?? "",
+                relayOrigin: canonicalTransportOrigin(opts.relayUrl),
               });
               ws.data.noiseTransport = transport;
 

@@ -277,3 +277,53 @@ export function computeTransportPrologue(
 
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// Canonical transport origin (§2.3 — prologue binding)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a relay/server URL into a canonical origin string for prologue
+ * binding.  Both client and server MUST use this function so the prologue
+ * bytes match even when the raw URLs differ cosmetically.
+ *
+ * Rules:
+ *   1. Empty / undefined / whitespace-only → `""`
+ *   2. Parse with `new URL()`
+ *   3. Strip query parameters and hash
+ *   4. Strip known client path suffixes (`/ws`, `/ws/`)
+ *   5. Strip trailing slashes
+ *   6. Return `scheme://host[:port]`  (port omitted for default ws/wss)
+ */
+export function canonicalTransportOrigin(url: string | undefined): string {
+  if (!url || !url.trim()) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "";
+  }
+
+  // Only keep scheme + host + port (strip path, query, hash)
+  // But first, handle the /ws suffix that clients append
+  let pathname = parsed.pathname;
+  // Strip trailing /ws or /ws/ suffix (client-side convention for relay)
+  pathname = pathname.replace(/\/ws\/?$/, "");
+  // Strip all trailing slashes
+  pathname = pathname.replace(/\/+$/, "");
+
+  // Reconstruct: scheme://host:port + remaining path (if any)
+  const scheme = parsed.protocol; // includes colon, e.g. "ws:"
+  const host = parsed.hostname;
+  const port = parsed.port;
+
+  let origin = `${scheme}//${host}`;
+  if (port) {
+    origin += `:${port}`;
+  }
+  if (pathname && pathname !== "/") {
+    origin += pathname;
+  }
+
+  return origin;
+}
