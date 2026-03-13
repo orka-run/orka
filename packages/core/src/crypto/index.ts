@@ -19,3 +19,9 @@ export {
   type CipherState,
   type X25519KeyPair,
 } from "./noise";
+export {
+  createSpake2A,
+  createSpake2B,
+  type Spake2Options,
+  type Spake2Result,
+} from "./spake2";
