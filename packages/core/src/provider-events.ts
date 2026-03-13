@@ -13,6 +13,10 @@ export const CanonicalItemTypeSchema = z.enum([
   "reasoning",
   "command_execution",
   "file_change",
+  "file_read",
+  "search",
+  "web",
+  "agent",
   "mcp_tool_call",
   "error",
   "unknown",
@@ -93,6 +97,8 @@ export interface ItemLifecyclePayload {
   status?: RuntimeItemStatus;
   title?: string;
   detail?: string;
+  /** Full tool input arguments (e.g. old_string/new_string for Edit, command for Bash). */
+  args?: unknown;
 }
 
 export interface ContentDeltaPayload {

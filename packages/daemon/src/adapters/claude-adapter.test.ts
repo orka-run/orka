@@ -59,16 +59,18 @@ describe("mapClaudeEvent", () => {
       status: "in_progress",
       title: "ls -la",
       detail: "ls -la",
+      args: { command: "ls -la" },
     });
 
     expect(fileEvent?.type).toBe("item.started");
     expect(fileEvent?.turnId).toBe("turn-1");
     expect(fileEvent?.itemId).toBe("tool-2");
     expect(fileEvent?.payload).toEqual({
-      itemType: "file_change",
+      itemType: "file_read",
       status: "in_progress",
-      title: "src/index.ts",
+      title: "Read src/index.ts",
       detail: "src/index.ts",
+      args: { file_path: "src/index.ts" },
     });
   });
 

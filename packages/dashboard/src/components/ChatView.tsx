@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, LoaderCircle, RotateCcw, Square, TerminalSquare, User, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, Globe, LoaderCircle, RotateCcw, Search, Square, TerminalSquare, User, Wrench, Eye } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { withDashboardSpan } from "../lib/tracing";
@@ -13,13 +13,16 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
 
+type ToolIcon = "command" | "file" | "read" | "search" | "web" | "agent";
+
 interface ToolEntry {
   id: string;
   timestamp: string;
   title: string;
   summary: string;
-  icon: "command" | "file";
+  icon: ToolIcon;
   details: string[];
+  args?: unknown;
   inProgress?: boolean;
 }
 
@@ -122,29 +125,67 @@ function isTerminal(status: SessionSummary["status"]): boolean {
 }
 
 /** Map an item type to an icon kind for tool entries. */
-function itemIcon(itemType: string): "command" | "file" {
-  if (itemType === "file_change") return "file";
-  return "command";
+function itemIcon(itemType: string): ToolIcon {
+  switch (itemType) {
+    case "file_change": return "file";
+    case "file_read": return "read";
+    case "search": return "search";
+    case "web": return "web";
+    case "agent": return "agent";
+    case "command_execution": return "command";
+    default: return "command";
+  }
+}
+
+/** Render the appropriate icon element for a tool type. */
+function toolIconEl(icon: ToolIcon, size: string): React.ReactElement {
+  switch (icon) {
+    case "command": return <TerminalSquare className={size} />;
+    case "file": return <FileCode2 className={size} />;
+    case "read": return <Eye className={size} />;
+    case "search": return <Search className={size} />;
+    case "web": return <Globe className={size} />;
+    case "agent": return <Bot className={size} />;
+  }
+}
+
+/** Shorten absolute paths by removing a workdir prefix. */
+function shortenPath(text: string, workDir?: string): string {
+  if (!workDir) return text;
+  // Replace absolute workdir paths with relative ones
+  const prefix = workDir.endsWith("/") ? workDir : workDir + "/";
+  return text.replaceAll(prefix, "");
 }
 
 /** Build a descriptive summary line for a collapsed tool group. */
 function buildToolGroupSummary(tools: ToolEntry[]): string {
-  const fileCount = tools.filter((t) => t.icon === "file").length;
-  const cmdCount = tools.filter((t) => t.icon === "command").length;
-  const inProgressCount = tools.filter((t) => t.inProgress).length;
+  const counts: Record<string, number> = {};
+  let inProgressCount = 0;
+  for (const t of tools) {
+    counts[t.icon] = (counts[t.icon] ?? 0) + 1;
+    if (t.inProgress) inProgressCount++;
+  }
+
+  const labels: Record<string, [string, string]> = {
+    file: ["edit", "edits"],
+    read: ["read", "reads"],
+    command: ["command", "commands"],
+    search: ["search", "searches"],
+    web: ["fetch", "fetches"],
+    agent: ["agent", "agents"],
+  };
 
   const parts: string[] = [];
-  if (fileCount > 0 && cmdCount > 0) {
-    parts.push(`${String(fileCount)} file ${fileCount === 1 ? "change" : "changes"}`);
-    parts.push(`${String(cmdCount)} ${cmdCount === 1 ? "command" : "commands"}`);
-  } else {
-    parts.push(`${String(tools.length)} tool ${tools.length === 1 ? "call" : "calls"}`);
+  for (const [icon, count] of Object.entries(counts)) {
+    const [singular, plural] = labels[icon] ?? ["call", "calls"];
+    parts.push(`${String(count)} ${count === 1 ? singular : plural}`);
   }
 
+  const text = parts.length > 0 ? parts.join(", ") : `${String(tools.length)} tool calls`;
   if (inProgressCount > 0) {
-    return parts.join(", ") + ` (${String(inProgressCount)} in progress)`;
+    return text + ` (${String(inProgressCount)} in progress)`;
   }
-  return parts.join(", ");
+  return text;
 }
 
 /**
@@ -155,11 +196,21 @@ function buildToolGroupSummary(tools: ToolEntry[]): string {
  * - request.opened/request.resolved are mapped to approval entries.
  * - Noisy system events (session.created, session.started, turn.started) are hidden.
  */
-function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): ChatEntry[] {
+function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, workDir?: string): ChatEntry[] {
   // First pass: collect items by itemId so we can deduplicate started/completed
   const completedItemIds = new Set<string>();
+  // Collect metadata from item.started for enriching item.completed (which often lacks title/detail)
+  const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
   for (const event of events) {
     if (event.type === "item.completed") completedItemIds.add(event.itemId);
+    if (event.type === "item.started") {
+      startedMeta.set(event.itemId, {
+        title: event.title,
+        detail: event.detail,
+        itemType: event.itemType,
+        args: event.args,
+      });
+    }
   }
 
   // First pass: collect request resolutions so we can update approval entries
@@ -236,8 +287,8 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
     if (event.type === "item.started") {
       if (completedItemIds.has(event.itemId)) continue;
       flushAssistant();
-      const title = event.title ?? event.itemType;
-      const detail = event.detail ?? "";
+      const title = shortenPath(event.title ?? event.itemType, workDir);
+      const detail = shortenPath(event.detail ?? "", workDir);
       // Item is in-progress only if no subsequent item.completed exists for it
       const isInProgress = !completedItemIds.has(event.itemId);
       const summary = detail && detail !== title ? detail : (isInProgress ? "In progress…" : "Completed");
@@ -248,25 +299,33 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string): 
         summary,
         icon: itemIcon(event.itemType),
         details: detail && detail !== title ? [detail] : [],
+        ...(event.args !== undefined ? { args: event.args } : {}),
         ...(isInProgress ? { inProgress: true } : {}),
       });
       continue;
     }
 
-    // item.completed: add as tool entry (replaces started)
+    // item.completed: add as tool entry (replaces started), enriched with started metadata
     if (event.type === "item.completed") {
       flushAssistant();
-      const title = event.title ?? event.itemType;
-      const detail = event.detail ?? "";
-      // Avoid repeating the same text in title and summary
-      const summary = detail && detail !== title ? detail : "Completed";
+      const meta = startedMeta.get(event.itemId);
+      const itemType = event.itemType !== "unknown" ? event.itemType : (meta?.itemType ?? event.itemType);
+      // Title/summary from started (human-readable), output content from completed
+      const title = shortenPath(event.title ?? meta?.title ?? itemType, workDir);
+      const startedDetail = meta?.detail ? shortenPath(meta.detail, workDir) : "";
+      const outputDetail = event.detail ? shortenPath(event.detail, workDir) : "";
+      const summary = startedDetail && startedDetail !== title ? startedDetail : "Completed";
+      // details[] contains the tool output for expandable view
+      const detailContent = outputDetail || (startedDetail !== title ? startedDetail : "");
+      const args = meta?.args ?? event.args;
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
         title,
         summary,
-        icon: itemIcon(event.itemType),
-        details: detail && detail !== title ? [detail] : [],
+        icon: itemIcon(itemType),
+        details: detailContent ? [detailContent] : [],
+        ...(args !== undefined ? { args } : {}),
       });
       continue;
     }
@@ -459,7 +518,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
         const filtered = timeline.filter((e) => e.sessionId === sessionId);
         eventsRef.current = filtered;
         setEvents(filtered);
-        setEntries(eventsToEntries(filtered, initialPromptRef.current));
+        setEntries(eventsToEntries(filtered, initialPromptRef.current, session?.workingDir));
         onSelectionLoadSettledRef.current?.("ok");
       } catch (e) {
         if (cancelled) return;
@@ -482,7 +541,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
 
       eventsRef.current = [...eventsRef.current, event];
       setEvents(eventsRef.current);
-      setEntries(eventsToEntries(eventsRef.current, initialPromptRef.current));
+      setEntries(eventsToEntries(eventsRef.current, initialPromptRef.current, session?.workingDir));
     });
 
     return unsubscribe;
@@ -789,13 +848,7 @@ function TimelineEntry({
       return (
         <div className="flex min-w-0 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-2.5">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
-            {tool.inProgress ? (
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-            ) : tool.icon === "command" ? (
-              <TerminalSquare className="h-3.5 w-3.5" />
-            ) : (
-              <FileCode2 className="h-3.5 w-3.5" />
-            )}
+            {tool.inProgress ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : toolIconEl(tool.icon, "h-3.5 w-3.5")}
           </div>
           <span className="min-w-0 truncate text-sm text-zinc-300">{tool.title}</span>
         </div>
@@ -806,23 +859,19 @@ function TimelineEntry({
     const toolsList = (
       <div className="border-t border-zinc-800">
         {entry.tools.map((tool) => (
-          <details key={tool.id} className="border-b border-zinc-800/50 last:border-b-0">
+          <details key={tool.id} className="overflow-hidden border-b border-zinc-800/50 last:border-b-0">
             <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2">
-              <div className="flex h-6 w-6 items-center justify-center rounded bg-zinc-800/80 text-zinc-400">
-                {tool.inProgress ? (
-                  <LoaderCircle className="h-3 w-3 animate-spin" />
-                ) : tool.icon === "command" ? (
-                  <TerminalSquare className="h-3 w-3" />
-                ) : (
-                  <FileCode2 className="h-3 w-3" />
-                )}
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-zinc-800/80 text-zinc-400">
+                {tool.inProgress ? <LoaderCircle className="h-3 w-3 animate-spin" /> : toolIconEl(tool.icon, "h-3 w-3")}
               </div>
               <span className="min-w-0 truncate text-xs font-medium text-zinc-300">{tool.title}</span>
-              <span className="ml-auto shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
+              {tool.summary !== tool.title ? (
+                <span className="ml-auto max-w-[40%] shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
+              ) : null}
             </summary>
             {tool.details.length > 0 ? (
               <div className="border-t border-zinc-800/30 px-4 py-2">
-                <ToolCallDetails title={tool.title} details={tool.details} />
+                <ToolCallDetails title={tool.title} details={tool.details} args={tool.args} />
               </div>
             ) : null}
           </details>

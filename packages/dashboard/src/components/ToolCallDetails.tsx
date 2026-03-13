@@ -1,6 +1,7 @@
 interface ToolCallDetailsProps {
   title: string;
   details: string[];
+  args?: unknown;
 }
 
 type ParsedDetail =
@@ -43,8 +44,9 @@ const SEARCH_RESULT_RE = /^(.+?):(\d+)(?::(\d+))?:(.*)$/;
 const COMMON_COMMAND_RE =
   /^(?:\$ |>|bun\b|npm\b|pnpm\b|yarn\b|node\b|python(?:3)?\b|bash\b|sh\b|git\b|rg\b|grep\b|find\b|ls\b|cat\b|sed\b|awk\b|make\b|cargo\b|go\b|uv\b|pytest\b|docker\b|kubectl\b|terraform\b)/i;
 
-export function ToolCallDetails({ title, details }: ToolCallDetailsProps) {
-  if (details.length === 0) {
+export function ToolCallDetails({ title, details, args }: ToolCallDetailsProps) {
+  const hasArgs = args != null && typeof args === "object" && Object.keys(args as Record<string, unknown>).length > 0;
+  if (details.length === 0 && !hasArgs) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 font-mono text-xs text-zinc-500">
         No tool details recorded.
@@ -56,16 +58,17 @@ export function ToolCallDetails({ title, details }: ToolCallDetailsProps) {
 
   return (
     <div className="space-y-2">
+      {hasArgs ? <ArgsDetail args={args as Record<string, unknown>} /> : null}
       {parsedDetails.map((detail, index) => (
         <details
           key={`${detail.kind}-${detail.label}-${String(index)}`}
-          open={index === 0}
+          open={index === 0 && !hasArgs}
           className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/80"
         >
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
             <span className="truncate font-mono text-xs text-zinc-300">{detail.label}</span>
             <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-              {detail.kind}
+              {detail.kind === "default" ? "output" : detail.kind}
             </span>
           </summary>
           <div className="border-t border-zinc-800">
@@ -155,6 +158,61 @@ function DefaultDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "defa
     <pre className="overflow-x-auto px-3 py-3 font-mono text-xs leading-6 text-zinc-300">
       <code>{detail.content}</code>
     </pre>
+  );
+}
+
+/** Render tool input args as key-value pairs with syntax-aware formatting. */
+function ArgsDetail({ args }: { args: Record<string, unknown> }) {
+  // Filter out very long values for summary, show them expandable
+  const entries = Object.entries(args).filter(([, v]) => v !== undefined && v !== null);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/80">
+      <div className="border-b border-zinc-800 px-3 py-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Input</span>
+      </div>
+      <div className="divide-y divide-zinc-800/50">
+        {entries.map(([key, value]) => (
+          <ArgEntry key={key} name={key} value={value} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ArgEntry({ name, value }: { name: string; value: unknown }) {
+  const str = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const isLong = str.length > 120 || str.includes("\n");
+  const isDiff = typeof value === "string" && (name === "old_string" || name === "new_string");
+
+  if (isLong) {
+    return (
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 [&::-webkit-details-marker]:hidden">
+          <span className="font-mono text-[11px] font-medium text-amber-400/80">{name}</span>
+          <span className="truncate font-mono text-xs text-zinc-500">{str.slice(0, 80)}…</span>
+        </summary>
+        <div className="border-t border-zinc-800/30">
+          {isDiff ? (
+            <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-5 text-zinc-300">
+              <code>{str}</code>
+            </pre>
+          ) : (
+            <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-5 text-zinc-300">
+              <code>{str}</code>
+            </pre>
+          )}
+        </div>
+      </details>
+    );
+  }
+
+  return (
+    <div className="flex items-baseline gap-2 px-3 py-1.5">
+      <span className="shrink-0 font-mono text-[11px] font-medium text-amber-400/80">{name}</span>
+      <span className="min-w-0 break-all font-mono text-xs text-zinc-300">{str}</span>
+    </div>
   );
 }
 

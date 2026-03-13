@@ -94,6 +94,7 @@ export type OrchestrationEvent =
       status?: RuntimeItemStatus;
       title?: string;
       detail?: string;
+      args?: unknown;
       timestamp: string;
     }
   | {
@@ -105,6 +106,7 @@ export type OrchestrationEvent =
       status?: RuntimeItemStatus;
       title?: string;
       detail?: string;
+      args?: unknown;
       timestamp: string;
     }
   | {
@@ -116,6 +118,7 @@ export type OrchestrationEvent =
       status?: RuntimeItemStatus;
       title?: string;
       detail?: string;
+      args?: unknown;
       timestamp: string;
     }
   | {

@@ -416,6 +416,7 @@ export function mapClaudeEvent(
             status: "in_progress",
             title: formatClaudeToolTitle(toolUse.name, toolUse.input),
             detail: formatClaudeToolDetail(toolUse.name, toolUse.input),
+            args: toolUse.input,
           },
           { provider: "claude-code", ...(turnId ? { turnId } : {}), itemId: toolUse.id },
         );
@@ -803,50 +804,101 @@ function findClaudeToolUse(content: unknown[]): { id: string; name: string; inpu
   return null;
 }
 
-function mapClaudeToolItemType(name: string): "command_execution" | "file_change" | "unknown" {
-  if (name === "Bash") {
-    return "command_execution";
+function mapClaudeToolItemType(name: string): CanonicalItemType {
+  switch (name) {
+    case "Bash":
+      return "command_execution";
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit":
+      return "file_change";
+    case "Read":
+      return "file_read";
+    case "Grep":
+    case "Glob":
+      return "search";
+    case "WebFetch":
+    case "WebSearch":
+      return "web";
+    case "Agent":
+      return "agent";
+    default:
+      return "unknown";
   }
+}
 
-  if (name === "Read" || name === "Write" || name === "Edit" || name === "MultiEdit") {
-    return "file_change";
+function getInputString(input: unknown, ...keys: string[]): string | undefined {
+  if (!isRecord(input)) return undefined;
+  for (const key of keys) {
+    if (typeof input[key] === "string") return input[key];
   }
-
-  return "unknown";
+  return undefined;
 }
 
 function formatClaudeToolTitle(name: string, input: unknown): string {
-  if (name === "Bash" && isRecord(input) && typeof input["command"] === "string") {
-    return input["command"];
-  }
+  const path = getInputString(input, "file_path", "filePath");
 
-  if (isRecord(input)) {
-    if (typeof input["file_path"] === "string") return input["file_path"];
-    if (typeof input["filePath"] === "string") return input["filePath"];
+  switch (name) {
+    case "Bash":
+      return getInputString(input, "command") ?? name;
+    case "Read":
+      return path ? `Read ${path}` : name;
+    case "Edit":
+    case "MultiEdit":
+      return path ? `Edit ${path}` : name;
+    case "Write":
+      return path ? `Write ${path}` : name;
+    case "Grep":
+      return `Grep ${getInputString(input, "pattern") ?? ""}`;
+    case "Glob":
+      return `Glob ${getInputString(input, "pattern") ?? ""}`;
+    case "WebFetch":
+      return `Fetch ${getInputString(input, "url") ?? ""}`;
+    case "WebSearch":
+      return `Search ${getInputString(input, "query") ?? ""}`;
+    case "Agent": {
+      const desc = getInputString(input, "description");
+      return desc ? `Agent: ${desc}` : name;
+    }
+    case "NotebookEdit":
+      return path ? `NotebookEdit ${path}` : name;
+    default:
+      return path ? `${name} ${path}` : name;
   }
-
-  return name;
 }
 
 function formatClaudeToolDetail(name: string, input: unknown): string {
-  if (name === "Bash" && isRecord(input) && typeof input["command"] === "string") {
-    return input["command"];
-  }
+  const path = getInputString(input, "file_path", "filePath");
 
-  if (typeof input === "string") {
-    return input;
+  switch (name) {
+    case "Bash":
+      return getInputString(input, "command") ?? name;
+    case "Read":
+    case "Edit":
+    case "MultiEdit":
+    case "Write":
+    case "NotebookEdit":
+      return path ?? name;
+    case "Grep": {
+      const pattern = getInputString(input, "pattern") ?? "";
+      const searchPath = getInputString(input, "path");
+      return searchPath ? `${pattern} in ${searchPath}` : pattern;
+    }
+    case "Glob": {
+      const pattern = getInputString(input, "pattern") ?? "";
+      const searchPath = getInputString(input, "path");
+      return searchPath ? `${pattern} in ${searchPath}` : pattern;
+    }
+    case "WebFetch":
+      return getInputString(input, "url") ?? name;
+    case "WebSearch":
+      return getInputString(input, "query") ?? name;
+    case "Agent":
+      return getInputString(input, "description", "prompt") ?? name;
+    default:
+      return path ?? (input == null ? name : (typeof input === "string" ? input : (JSON.stringify(input) ?? name)));
   }
-
-  if (isRecord(input)) {
-    if (typeof input["file_path"] === "string") return input["file_path"];
-    if (typeof input["filePath"] === "string") return input["filePath"];
-  }
-
-  if (input == null) {
-    return name;
-  }
-
-  return JSON.stringify(input) ?? name;
 }
 
 function extractClaudeText(value: unknown): string {

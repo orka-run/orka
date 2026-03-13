@@ -64,6 +64,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         ...(event.payload.status ? { status: event.payload.status } : {}),
         ...(event.payload.title ? { title: event.payload.title } : {}),
         ...(event.payload.detail ? { detail: event.payload.detail } : {}),
+        ...(event.payload.args !== undefined ? { args: event.payload.args } : {}),
         timestamp: event.createdAt,
       };
     case "item.updated":
@@ -76,6 +77,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         ...(event.payload.status ? { status: event.payload.status } : {}),
         ...(event.payload.title ? { title: event.payload.title } : {}),
         ...(event.payload.detail ? { detail: event.payload.detail } : {}),
+        ...(event.payload.args !== undefined ? { args: event.payload.args } : {}),
         timestamp: event.createdAt,
       };
     case "item.completed":
@@ -88,6 +90,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         status: event.payload.status ?? "completed",
         ...(event.payload.title ? { title: event.payload.title } : {}),
         ...(event.payload.detail ? { detail: event.payload.detail } : {}),
+        ...(event.payload.args !== undefined ? { args: event.payload.args } : {}),
         timestamp: event.createdAt,
       };
     case "session.exited":
