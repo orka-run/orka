@@ -26,6 +26,7 @@ export interface DaemonHandle {
   server: { port: number; stop(closeActiveConnections?: boolean): void };
   svc: OrkaService;
   noiseKeyInfo: NoiseKeyInfo;
+  legacyKeyPair: { publicKey: string; privateKey: string };
   nodeId: string;
   wsUrl: string;
   httpUrl: string;
@@ -64,6 +65,8 @@ export async function startDaemonWithNoise(opts?: {
   const svc = createLocalClient();
 
   const noiseKeyInfo = ensureNoiseKeyPair(getOrkaHome(), "node");
+  const { ensureKeyPair } = await import("../../../packages/core/src/crypto");
+  const legacyKeyPair = ensureKeyPair(getOrkaHome(), "node");
 
   const server = await startServer(svc, {
     port: 0,
@@ -77,6 +80,7 @@ export async function startDaemonWithNoise(opts?: {
     server,
     svc,
     noiseKeyInfo,
+    legacyKeyPair,
     nodeId,
     wsUrl: `ws://127.0.0.1:${port}`,
     httpUrl: `http://127.0.0.1:${port}`,
