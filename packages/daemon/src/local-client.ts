@@ -28,6 +28,7 @@ import {
   setSessionKept,
   getSessionTags,
   listSessionsByTag,
+  getChildSessions as dbGetChildSessions,
   deleteSessions as dbDeleteSessions,
   getUsageBySession,
   getUsageSummary as dbGetUsageSummary,
@@ -86,6 +87,10 @@ class LocalClient implements OrkaService {
       return sessions;
     }
     return dbListSessions(filters?.status);
+  }
+
+  async getChildSessions(sessionId: string): Promise<Session[]> {
+    return dbGetChildSessions(sessionId);
   }
 
   async getTask(id: string): Promise<Task | null> {

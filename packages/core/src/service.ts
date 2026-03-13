@@ -94,6 +94,7 @@ export interface OrkaService {
   // --- Queries ---
   getSession(id: string): Promise<Session | null>;
   listSessions(filters?: SessionFilters): Promise<Session[]>;
+  getChildSessions(sessionId: string): Promise<Session[]>;
   getTask(id: string): Promise<Task | null>;
 
   // --- Session properties ---

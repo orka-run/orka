@@ -376,6 +376,7 @@ const spawnCmd = command({
     reasoningEffort: option({ type: optional(str), long: "reasoning-effort", description: "Reasoning effort level (low, medium, high)" }),
     autoMerge: flag({ long: "auto-merge", description: "Auto-merge worktree on successful completion" }),
     tag: multioption({ type: array(str), long: "tag", description: "Tag the session (repeatable)" }),
+    parent: option({ type: optional(str), long: "parent", description: "Parent session ID (creates child session)" }),
     words: restPositionals({ type: str, displayName: "prompt" }),
   },
   handler: async (args) => runCliCommand("spawn", async () => {
@@ -418,6 +419,7 @@ const spawnCmd = command({
       ...(args.branch ? { branch: args.branch } : {}),
       ...(args.autoMerge ? { autoMerge: true } : {}),
       ...(args.tag.length > 0 ? { tags: args.tag } : {}),
+      ...(args.parent ? { parentSessionId: args.parent } : {}),
       ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
       ...(allowedTools ? { allowedTools } : {}),
       ...(env ? { env } : {}),
@@ -453,13 +455,22 @@ const psCmd = command({
     backend: option({ type: optional(enumType(backendValues)), long: "backend", description: "Filter by agent backend" }),
     project: option({ type: optional(str), long: "project", description: "Filter by project name or path" }),
     tag: option({ type: optional(str), long: "tag", description: "Filter by tag" }),
+    children: option({ type: optional(str), long: "children", description: "List only children of a parent session" }),
     verbose: flag({ long: "verbose", short: "v", description: "Show cost, duration, tokens, and project" }),
   },
   handler: async (args) => runCliCommand("ps", async () => {
-    let sessions = await svc.listSessions({
-      ...(args.status ? { status: args.status } : {}),
-      ...(args.tag ? { tag: args.tag } : {}),
-    });
+    let sessions: Awaited<ReturnType<typeof svc.listSessions>>;
+    if (args.children) {
+      sessions = await svc.getChildSessions(args.children);
+      if (args.status) {
+        sessions = sessions.filter((s) => s.status === args.status);
+      }
+    } else {
+      sessions = await svc.listSessions({
+        ...(args.status ? { status: args.status } : {}),
+        ...(args.tag ? { tag: args.tag } : {}),
+      });
+    }
     if (args.backend) {
       sessions = sessions.filter((s) => s.backend === args.backend);
     }
@@ -543,6 +554,9 @@ const psCmd = command({
 
       line += (task?.title ?? "").slice(0, verbose ? 40 : 50);
       console.log(line);
+      if (verbose && s.parentSessionId) {
+        console.log(`  parent: ${s.parentSessionId}`);
+      }
     }
   }),
 });
@@ -703,6 +717,13 @@ const stopCmd = command({
       return;
     }
 
+    // Check for running children and stop them first
+    const children = await svc.getChildSessions(session.id);
+    const runningChildren = children.filter((c) => c.status === "running");
+    for (const child of runningChildren) {
+      await svc.stop(child.id);
+      console.log(`stopped child session ${child.id}`);
+    }
     await svc.stop(session.id);
     console.log(`stopped session ${session.id}`);
   }),

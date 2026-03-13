@@ -215,6 +215,10 @@ class RemoteClient implements OrkaService {
     return this.call("listSessions", { filters });
   }
 
+  async getChildSessions(sessionId: string): Promise<Session[]> {
+    return this.call("getChildSessions", { sessionId });
+  }
+
   async getTask(id: string): Promise<Task | null> {
     return this.call("getTask", { id });
   }

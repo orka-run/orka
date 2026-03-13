@@ -7,7 +7,7 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, insertSessionTags, updateSessionStatus, updateSessionRawLogFile, getSession, getOrkaHome, listSessions, saveSessionDiff, insertUsageRecord } from "./db";
+import { insertTask, insertSession, insertSessionTags, updateSessionStatus, updateSessionRawLogFile, getSession, getOrkaHome, listSessions, saveSessionDiff, insertUsageRecord, getChildSessions } from "./db";
 import { defaultRunner } from "./tmux";
 import type { SessionRunner } from "./runner";
 import { consumeProviderEvents } from "./orchestration";
@@ -127,6 +127,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       exitCode: null,
       kept: false,
       autoMerge: req.autoMerge ?? false,
+      ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(req.env ? { env: req.env } : {}),
@@ -355,6 +356,16 @@ export async function stopSession(sessionId: string): Promise<void> {
 
     span.addEvent("session.cancelled");
     await tryCleanupWorktree(session);
+  });
+}
+
+
+/** Stop a session and all its running children (cascading stop). */
+export async function stopWithChildren(sessionId: string): Promise<void> {
+  return withSpan("orka.stopWithChildren", { "orka.session.id": sessionId }, async () => {
+    const children = getChildSessions(sessionId).filter(s => s.status === "running");
+    await Promise.all(children.map(c => stopSession(c.id)));
+    await stopSession(sessionId);
   });
 }
 

@@ -68,6 +68,7 @@ export interface Session {
   exitCode: number | null;
   kept: boolean;
   autoMerge: boolean;
+  parentSessionId?: string;
   rawLogFile?: string;
   systemPrompt?: string;
   allowedTools?: string[];
@@ -116,6 +117,7 @@ export interface SpawnRequest {
   reasoningEffort?: ReasoningEffort;
   autoMerge?: boolean;
   tags?: string[];
+  parentSessionId?: string;
   systemPrompt?: string;
   allowedTools?: string[];
   env?: Record<string, string>;

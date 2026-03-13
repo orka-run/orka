@@ -133,6 +133,8 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             return svc.getSession(params.id);
           case "listSessions":
             return svc.listSessions(params.filters);
+          case "getChildSessions":
+            return svc.getChildSessions(params.sessionId);
           case "getTask":
             return svc.getTask(params.id);
           case "setKept":
