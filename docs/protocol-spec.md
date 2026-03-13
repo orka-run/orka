@@ -110,20 +110,20 @@ Methods are grouped by domain. All parameters use named fields (not positional).
 
 | Method | Params | Returns | Notes |
 |--------|--------|---------|-------|
-| `spawn` | `SpawnParams` | `Session` | Start a new agent session |
+| `spawn` | `SpawnRequest` | `Session` | Start a new agent session |
 | `stop` | `{ sessionId }` | `void` | Graceful stop |
 | `reap` | — | `number` | Clean up zombie sessions, returns count |
 | `sendTurn` | `{ sessionId, text }` | `void` | Send input to interactive session |
-| `backfillSession` | `{ sessionId }` | `void` | Regenerate events from raw log |
+| `backfillSession` | `{ sessionId }` | `{ eventsReplayed: number }` | Regenerate events from raw log |
 
 #### Session Queries
 
 | Method | Params | Returns |
 |--------|--------|---------|
-| `getSession` | `{ sessionId }` | `Session` |
-| `listSessions` | `{ status?, backend?, tag?, project?, limit? }` | `Session[]` |
-| `getChildSessions` | `{ parentId }` | `Session[]` |
-| `getTask` | `{ taskId }` | `Task` |
+| `getSession` | `{ id }` | `Session \| null` |
+| `listSessions` | `{ filters?: SessionFilters }` | `Session[]` |
+| `getChildSessions` | `{ sessionId }` | `Session[]` |
+| `getTask` | `{ id }` | `Task \| null` |
 | `isAlive` | `{ sessionId }` | `boolean` |
 
 #### Session Data
@@ -131,11 +131,11 @@ Methods are grouped by domain. All parameters use named fields (not positional).
 | Method | Params | Returns |
 |--------|--------|---------|
 | `getSessionTimeline` | `{ sessionId }` | `OrchestrationEvent[]` |
-| `getResult` | `{ sessionId }` | `SessionResult` |
-| `getChatMessages` | `{ sessionId }` | `ChatMessage[]` |
-| `getUsage` | `{ filters? }` | `UsageSummary` |
+| `getResult` | `{ sessionId }` | `SessionResult \| null` |
+| `getChatMessages` | `{ sessionId }` | `ChatEntry[]` |
+| `getUsage` | `{ sessionId?, since?, backend? }` | `UsageSummary` |
 | `captureOutput` | `{ sessionId }` | `string` |
-| `getLogContent` | `{ sessionId, offset?, limit? }` | `LogContent` |
+| `getLogContent` | `{ sessionId }` | `string \| null` |
 | `getDiff` | `{ sessionId }` | `DiffResult` |
 | `getTags` | `{ sessionId }` | `string[]` |
 
@@ -144,9 +144,9 @@ Methods are grouped by domain. All parameters use named fields (not positional).
 | Method | Params | Returns |
 |--------|--------|---------|
 | `setKept` | `{ sessionId, kept }` | `void` |
-| `merge` | `{ sessionId }` | `MergeResult` |
-| `deleteSessions` | `{ sessionIds }` | `void` |
-| `pruneSessions` | `{ maxAge?, project? }` | `PruneResult` |
+| `merge` | `{ sessionId, cleanup? }` | `MergeResult` |
+| `deleteSessions` | `{ ids }` | `void` |
+| `pruneSessions` | `{ maxAgeMs, projectPath?, confirm?, purgeLogs?, purgeDb? }` | `PruneResult` |
 | `archiveSession` | `{ sessionId }` | `void` |
 | `unarchiveSession` | `{ sessionId }` | `void` |
 
@@ -161,21 +161,21 @@ Methods are grouped by domain. All parameters use named fields (not positional).
 
 | Method | Params | Returns |
 |--------|--------|---------|
-| `terminalOpen` | `{ sessionId, cols?, rows? }` | `TerminalHandle` |
-| `terminalWrite` | `{ terminalId, data }` | `void` |
-| `terminalResize` | `{ terminalId, cols, rows }` | `void` |
-| `terminalClose` | `{ terminalId }` | `void` |
-| `terminalList` | — | `TerminalInfo[]` |
+| `terminalOpen` | `{ sessionId, opts?: { cols?, rows? } }` | `{ termId: string }` |
+| `terminalWrite` | `{ termId, data }` | `void` |
+| `terminalResize` | `{ termId, cols, rows }` | `void` |
+| `terminalClose` | `{ termId }` | `void` |
+| `terminalList` | `{ sessionId }` | `Array<{ id, cols, rows }>` |
 
 #### Observability
 
 | Method | Params | Returns |
 |--------|--------|---------|
-| `getMetrics` | — | `Metrics` |
+| `getMetrics` | — | `Record<string, unknown> \| null` |
 | `reportClientError` | `{ error, stack?, url?, timestamp? }` | `void` |
 | `listClientErrors` | `{ limit? }` | `ClientError[]` |
-| `queryTraces` | `{ service?, errorsOnly?, namePattern?, limit?, since? }` | `Trace[]` |
-| `reportEventGap` | `{ channel, expectedSeq, receivedSeq }` | `void` |
+| `queryTraces` | `{ service?, errorsOnly?, namePattern?, limit?, since? }` | `Array<Record<string, unknown>>` |
+| `reportEventGap` | `{ channel, expectedSeq, gotSeq }` | `void` |
 
 ## 4. Push Protocol
 
@@ -235,7 +235,12 @@ interface WelcomeData {
 
 Clients MUST track the last received `sequence` per channel. If a gap is
 detected (received sequence > expected), clients SHOULD call `reportEventGap`.
-The server MAY respond by re-sending missed events.
+
+> **v1 status:** `reportEventGap` is observability-only in the current
+> implementation. The server records the gap as a tracing span
+> (`orka.push.delivery_gap`) but does NOT re-send missed events. The
+> `LocalClient` implementation is a no-op. Actual gap recovery (server-side
+> replay of missed push events) is planned for a future protocol version.
 
 On reconnect, clients SHOULD refetch full state (session list, timelines)
 rather than relying on gap recovery across disconnections.
@@ -402,6 +407,13 @@ Known values: `in_progress`, `completed`, `failed`, `declined`.
    the reader MUST apply a migration function to normalize it. The migration
    function MUST be pure (no side effects, no network calls).
 
+> **v1 status:** There are no event schema migrations in v1. The
+> implementation writes `v: 1` on all new events and normalizes missing `v`
+> to `1` on read, but no per-type migration registry exists yet. A formal
+> migration registry (keyed by `(type, fromVersion) -> normalizer`) will be
+> introduced when v2 event schemas require breaking changes to existing
+> event type shapes.
+
 ## 6. E2E Encryption
 
 ### 6.1. Key Exchange
@@ -456,6 +468,24 @@ The `c` field allows future algorithm upgrades (e.g., `"x25519-kyber768-aes256gc
 for post-quantum hybrid). Receivers MUST reject unknown cipher identifiers
 with an unencrypted error response.
 
+### 6.6. Security Properties (v1)
+
+The v1 E2E encryption provides **confidentiality** but **not forward secrecy**.
+
+- Both client and server use **persistent** (long-lived) X25519 keypairs.
+- The salt is deterministic: `sort([clientPubB64, serverPubB64]).join("")`.
+- The same client-server keypair pair always derives the **same symmetric key**
+  across all connections and reconnections.
+- There are no ephemeral keys or per-connection key rotation in v1.
+
+**Implications:**
+- Compromise of either party's private key allows decryption of **all past
+  and future** traffic between that keypair pair.
+- The design does not provide Perfect Forward Secrecy (PFS). PFS would
+  require ephemeral key exchange per connection, which is planned for v2.
+- Despite the `sessionKey` naming in the implementation, the derived key is
+  **identity-scoped**, not session-scoped.
+
 ## 7. Relay Routing
 
 ### 7.1. Envelope Transparency
@@ -507,7 +537,42 @@ connects directly to the daemon (not via relay) or to the aggregator.
 | New daemon, old aggregator | Aggregator receives unknown events | Aggregator persists as `event.passthrough` |
 | Old events in SQLite, new daemon | Events lack `v` field | Reader treats missing `v` as `1`, migrates |
 
-## 9. Versioning Changelog
+## 9. Known Limitations (v1)
+
+### 9.1. E2E Encryption Does Not Work Through Relay
+
+The client sends its public key as a `?pubkey=` query parameter on the
+WebSocket URL. When connecting via relay, this parameter reaches the relay,
+not the destination node. The relay does not forward client key material to
+nodes, so the node has no key to derive the shared secret. Encrypted
+requests sent through the relay arrive as opaque `_enc` data that the node
+cannot decrypt.
+
+**Workaround:** Connect directly to the daemon (not via relay) when E2E
+encryption is required.
+
+**Planned fix:** Introduce an explicit key-exchange handshake message that
+traverses the relay as a normal JSON-RPC request, delivering the client
+public key to the node.
+
+### 9.2. Push Protocol Does Not Traverse Relay
+
+The relay only handles JSON-RPC request/response envelopes (messages with
+`jsonrpc`, `id`, and `method` fields). Push control messages (`subscribe`,
+`unsubscribe`) and push envelopes (`type: "push"`) do not conform to the
+JSON-RPC shape and are not forwarded by the relay.
+
+This means:
+- `server.welcome` is not delivered to clients connected via relay.
+- Push subscriptions (orchestration events, log lines) do not work through
+  the relay.
+- Dashboard clients must connect directly to the daemon for live updates.
+
+**Planned fix:** Either extend the relay to recognize push control and push
+envelope message types, or encapsulate push subscriptions as JSON-RPC
+methods with server-streaming semantics.
+
+## 10. Versioning Changelog
 
 ### Protocol Version 1 (current)
 
