@@ -277,12 +277,11 @@ export function createInitiator(
 ): NoiseInitiator {
   const ss = createSymmetricState(PROTOCOL_NAME);
 
-  // Initialize: mix prologue
-  // Pre-message pattern: <- s (responder's static key)
-  // The initiator role is: initiator = true, so we process pre-messages for
-  // the responder first. For NK, the pre-message is "<- s".
-  ss.mixHash(remoteStaticPubkey); // Process pre-message: <- s
+  // Initialize per Noise spec Section 5.3:
+  // 1. Mix prologue first
   ss.mixHash(prologue);
+  // 2. Then process pre-message pattern: <- s (responder's static key)
+  ss.mixHash(remoteStaticPubkey);
 
   let ephemeral: X25519KeyPair | null = null;
 
@@ -362,9 +361,11 @@ export function createResponder(
 ): NoiseResponder {
   const ss = createSymmetricState(PROTOCOL_NAME);
 
-  // Pre-message: <- s (our own static key)
-  ss.mixHash(staticKeypair.publicKey);
+  // Initialize per Noise spec Section 5.3:
+  // 1. Mix prologue first
   ss.mixHash(prologue);
+  // 2. Then process pre-message pattern: <- s (our own static key)
+  ss.mixHash(staticKeypair.publicKey);
 
   let remoteEphemeral: Uint8Array | null = null;
   let ephemeral: X25519KeyPair | null = null;
