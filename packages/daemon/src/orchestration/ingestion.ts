@@ -162,6 +162,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         ...(event.itemId ? { itemId: event.itemId } : {}),
         error: event.payload.message,
         ...(event.payload.class ? { class: event.payload.class } : {}),
+        ...(event.payload.terminal ? { terminal: event.payload.terminal } : {}),
         timestamp: event.createdAt,
       };
     case "runtime.warning":
