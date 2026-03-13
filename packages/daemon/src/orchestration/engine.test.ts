@@ -49,6 +49,7 @@ describe("OrchestrationEngine", () => {
 
     expect(received).toEqual([
       versioned({
+        eventId: expect.any(String),
         type: "session.started",
         sessionId: "session-1",
         timestamp: "2026-03-11T00:00:00.000Z",
@@ -71,6 +72,7 @@ describe("OrchestrationEngine", () => {
 
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
+        eventId: expect.any(String),
         type: "content.delta",
         sessionId: "session-1",
         turnId: "turn-1",
@@ -144,6 +146,7 @@ describe("OrchestrationEngine", () => {
     expect(engine.getSessionEvents("session-1")).toEqual([
       {
         v: 1,
+        eventId: "evt-passthrough",
         type: "event.passthrough",
         sessionId: "session-1",
         originalType: "provider.future.event",
@@ -180,6 +183,7 @@ describe("OrchestrationEngine", () => {
 
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
+        eventId: expect.any(String),
         type: "session.started",
         sessionId: "session-1",
         timestamp: "2026-03-11T00:00:00.000Z",
@@ -268,6 +272,7 @@ describe("OrchestrationEngine", () => {
 
     expect(failedEngine.getSessionEvents("session-failed")).toEqual([
       versioned({
+        eventId: expect.any(String),
         type: "session.failed",
         sessionId: "session-failed",
         error: "provider crashed",
@@ -305,6 +310,7 @@ describe("OrchestrationEngine", () => {
 
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
+        eventId: expect.any(String),
         type: "session.cancelled",
         sessionId: "session-1",
         reason: "stopped",
@@ -339,6 +345,7 @@ describe("OrchestrationEngine", () => {
         channel: "orchestration.event",
         data: {
           v: 1,
+          eventId: expect.any(String),
           type: "session.completed",
           sessionId: "session-1",
           exitCode: null,
@@ -613,6 +620,7 @@ describe("OrchestrationEngine", () => {
 
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
+        eventId: "evt-missing-turn",
         type: "content.delta",
         sessionId: "session-1",
         turnId: "unknown-turn:evt-missing-turn",

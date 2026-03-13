@@ -8,10 +8,11 @@ const USER_STOP_REASONS = new Set(["stopped", "cancelled", "canceled"]);
 export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent): OrchestrationEvent {
   switch (event.type) {
     case "session.started":
-      return { v: 1, type: "session.started", sessionId, timestamp: event.createdAt };
+      return { v: 1, eventId: event.eventId, type: "session.started", sessionId, timestamp: event.createdAt };
     case "session.state.changed":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "session.state.changed",
         sessionId,
         state: event.payload.state,
@@ -19,10 +20,11 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         timestamp: event.createdAt,
       };
     case "turn.started":
-      return { v: 1, type: "turn.started", sessionId, turnId: getTurnId(event), timestamp: event.createdAt };
+      return { v: 1, eventId: event.eventId, type: "turn.started", sessionId, turnId: getTurnId(event), timestamp: event.createdAt };
     case "turn.aborted":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "turn.aborted",
         sessionId,
         turnId: getTurnId(event),
@@ -32,6 +34,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "content.delta":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "content.delta",
         sessionId,
         turnId: getTurnId(event),
@@ -42,6 +45,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "turn.completed":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "turn.completed",
         sessionId,
         turnId: getTurnId(event),
@@ -61,6 +65,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "item.started":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "item.started",
         sessionId,
         turnId: getTurnId(event),
@@ -75,6 +80,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "item.updated":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "item.updated",
         sessionId,
         turnId: getTurnId(event),
@@ -89,6 +95,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "item.completed":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "item.completed",
         sessionId,
         turnId: getTurnId(event),
@@ -104,6 +111,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
       if (isUserStop(event.payload.reason)) {
         return {
           v: 1,
+          eventId: event.eventId,
           type: "session.cancelled",
           sessionId,
           ...(event.payload.reason ? { reason: event.payload.reason } : {}),
@@ -114,6 +122,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
       if (event.payload.exitKind === "error") {
         return {
           v: 1,
+          eventId: event.eventId,
           type: "session.failed",
           sessionId,
           error: event.payload.reason ?? "Provider session exited with an error",
@@ -121,10 +130,11 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         };
       }
 
-      return { v: 1, type: "session.completed", sessionId, exitCode: null, timestamp: event.createdAt };
+      return { v: 1, eventId: event.eventId, type: "session.completed", sessionId, exitCode: null, timestamp: event.createdAt };
     case "request.opened":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "request.opened",
         sessionId,
         requestId: getRequestId(event),
@@ -135,6 +145,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "request.resolved":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "request.resolved",
         sessionId,
         requestId: getRequestId(event),
@@ -144,6 +155,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "tool.progress":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "tool.progress",
         sessionId,
         turnId: getTurnId(event),
@@ -156,6 +168,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "runtime.error":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "runtime.error",
         sessionId,
         ...(event.turnId ? { turnId: event.turnId } : {}),
@@ -167,6 +180,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
     case "runtime.warning":
       return {
         v: 1,
+        eventId: event.eventId,
         type: "runtime.warning",
         sessionId,
         ...(event.turnId ? { turnId: event.turnId } : {}),
@@ -181,6 +195,7 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
       };
 
       return {
+        eventId: passthroughEvent.eventId,
         type: "event.passthrough",
         sessionId,
         ...(passthroughEvent.turnId ? { turnId: passthroughEvent.turnId } : {}),
