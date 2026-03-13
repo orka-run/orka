@@ -9,6 +9,13 @@ import { OrchestrationEngine } from "./engine";
 const previousOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
 
+function versioned<T extends Record<string, unknown>>(event: T): T & { v: number } {
+  return {
+    ...event,
+    v: 1,
+  };
+}
+
 beforeEach(() => {
   testHome = mkdtempSync(join(tmpdir(), "orka-engine-home-"));
   process.env["ORKA_HOME"] = testHome;
@@ -41,11 +48,11 @@ describe("OrchestrationEngine", () => {
     unsubscribe();
 
     expect(received).toEqual([
-      {
+      versioned({
         type: "session.started",
         sessionId: "session-1",
         timestamp: "2026-03-11T00:00:00.000Z",
-      },
+      }),
     ]);
   });
 
@@ -63,14 +70,14 @@ describe("OrchestrationEngine", () => {
     );
 
     expect(engine.getSessionEvents("session-1")).toEqual([
-      {
+      versioned({
         type: "content.delta",
         sessionId: "session-1",
         turnId: "turn-1",
         streamKind: "assistant_text",
         delta: "Hello",
         timestamp: "2026-03-11T00:01:00.000Z",
-      },
+      }),
     ]);
   });
 
@@ -97,13 +104,13 @@ describe("OrchestrationEngine", () => {
     );
 
     expect(persisted).toEqual([
-      {
+      versioned({
         eventId: "evt-1",
         provider: "codex",
         type: "session.started",
         sessionId: "session-1",
         timestamp: "2026-03-11T00:00:00.000Z",
-      },
+      }),
     ]);
   });
 
@@ -120,11 +127,11 @@ describe("OrchestrationEngine", () => {
     );
 
     expect(engine.getSessionEvents("session-1")).toEqual([
-      {
+      versioned({
         type: "session.started",
         sessionId: "session-1",
         timestamp: "2026-03-11T00:00:00.000Z",
-      },
+      }),
     ]);
   });
 
@@ -208,12 +215,12 @@ describe("OrchestrationEngine", () => {
     );
 
     expect(failedEngine.getSessionEvents("session-failed")).toEqual([
-      {
+      versioned({
         type: "session.failed",
         sessionId: "session-failed",
         error: "provider crashed",
         timestamp: "2026-03-11T00:02:00.000Z",
-      },
+      }),
     ]);
     expect(failedEngine.getSessionState("session-failed").status).toBe("failed");
 
@@ -245,12 +252,12 @@ describe("OrchestrationEngine", () => {
     );
 
     expect(engine.getSessionEvents("session-1")).toEqual([
-      {
+      versioned({
         type: "session.cancelled",
         sessionId: "session-1",
         reason: "stopped",
         timestamp: "2026-03-11T00:02:00.000Z",
-      },
+      }),
     ]);
     expect(engine.getSessionState("session-1").status).toBe("cancelled");
   });
@@ -279,6 +286,7 @@ describe("OrchestrationEngine", () => {
       {
         channel: "orchestration.event",
         data: {
+          v: 1,
           type: "session.completed",
           sessionId: "session-1",
           exitCode: null,
@@ -552,14 +560,14 @@ describe("OrchestrationEngine", () => {
     );
 
     expect(engine.getSessionEvents("session-1")).toEqual([
-      {
+      versioned({
         type: "content.delta",
         sessionId: "session-1",
         turnId: "unknown-turn:evt-missing-turn",
         streamKind: "assistant_text",
         delta: "Hello",
         timestamp: "2026-03-11T00:04:00.000Z",
-      },
+      }),
     ]);
     expect(engine.getSessionState("session-1").currentTurnId).toBeNull();
   });

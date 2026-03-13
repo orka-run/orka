@@ -114,6 +114,7 @@ describe("LocalClient provider runtime support", () => {
       expect(sendTurnCalls).toEqual([{ sessionId: "sess-live", input: { input: "continue" } }]);
       expect(runner.sendTextCalls).toEqual([]);
       expect(getOrchestrationEvents("sess-live")).toContainEqual({
+        v: 1,
         type: "user.input",
         sessionId: "sess-live",
         text: "continue",
@@ -123,6 +124,7 @@ describe("LocalClient provider runtime support", () => {
       expect(broadcasts[0]).toMatchObject({
         channel: "orchestration.event",
         data: {
+          v: 1,
           type: "user.input",
           sessionId: "sess-live",
           text: "continue",

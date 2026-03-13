@@ -18,6 +18,13 @@ import {
 const prevOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
 
+function versioned<T extends Record<string, unknown>>(event: T): T & { v: number } {
+  return {
+    ...event,
+    v: 1,
+  };
+}
+
 beforeEach(() => {
   closeDb();
   testHome = mkdtempSync(join(tmpdir(), "orka-db-test-"));
@@ -287,18 +294,38 @@ describe("orchestration event helpers", () => {
     });
 
     expect(getOrchestrationEvents("sess-1")).toEqual([
-      {
+      versioned({
         type: "session.started",
         sessionId: "sess-1",
         timestamp: "2026-01-01T00:00:00.000Z",
-      },
-      {
+      }),
+      versioned({
         type: "turn.completed",
         sessionId: "sess-1",
         turnId: "turn-1",
         state: "completed",
         timestamp: "2026-01-01T00:01:00.000Z",
-      },
+      }),
+    ]);
+  });
+
+  test("migrates persisted orchestration events without a version to v1", () => {
+    seedSession("sess-legacy");
+
+    insertOrchestrationEvent({
+      eventId: "evt-legacy",
+      provider: "claude-code",
+      type: "session.started",
+      sessionId: "sess-legacy",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(getOrchestrationEvents("sess-legacy")).toEqual([
+      versioned({
+        type: "session.started",
+        sessionId: "sess-legacy",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      }),
     ]);
   });
 

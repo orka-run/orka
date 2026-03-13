@@ -81,6 +81,7 @@ export function isKnownRuntimeContentStreamKind(v: string): v is KnownRuntimeCon
 }
 
 export interface ProviderRuntimeEventBase {
+  v?: number;
   eventId: string;
   provider: BackendKind;
   threadId: string;
@@ -239,6 +240,7 @@ export function createEvent<TType extends ProviderRuntimeEventType>(
   opts: CreateProviderRuntimeEventOptions = {},
 ): ProviderRuntimeEventOf<TType> {
   return {
+    v: 1,
     eventId: opts.eventId ?? generateId("evt"),
     provider: opts.provider ?? DEFAULT_PROVIDER,
     threadId,
