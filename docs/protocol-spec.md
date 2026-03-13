@@ -260,8 +260,18 @@ interface OrchestrationEventBase {
   sessionId: string,
   timestamp: string,                      // ISO 8601
   v?: number,                             // Envelope version (default: 1)
+  eventId?: string,                       // Stable event identifier for deduplication
 }
 ```
+
+The `eventId` field:
+- Included on wire events for client-side deduplication and idempotent replay.
+- Originates from the provider runtime event that produced the orchestration event.
+- Clients and aggregators MAY use `eventId` to detect and discard duplicate
+  deliveries (e.g., after reconnect with timeline replay).
+- MUST be treated as opaque (no structure guarantees beyond uniqueness).
+- Optional for backward compatibility — older persisted events and
+  manually-constructed timeline entries may omit it.
 
 The `v` field:
 - MUST be written as `1` on all new events.

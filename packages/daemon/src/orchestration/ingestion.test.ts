@@ -23,6 +23,7 @@ describe("mapProviderEvent", () => {
     const mapped = mapProviderEvent("session-1", event);
 
     expect(mapped).toEqual({
+      eventId: "evt-unknown",
       type: "event.passthrough",
       sessionId: "session-1",
       turnId: "turn-1",

@@ -16,6 +16,7 @@ import type {
 
 interface OrchestrationEventBase {
   v?: number;
+  eventId?: string;
   sessionId: string;
   timestamp: string;
 }
@@ -176,6 +177,7 @@ const WireEventBaseSchema = z.object({
   sessionId: z.string(),
   timestamp: z.string(),
   v: z.number().optional(),
+  eventId: z.string().optional(),
 }).passthrough();
 
 /** Schema for individual wire event variants (used for type-specific field validation). */
