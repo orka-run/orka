@@ -349,6 +349,14 @@ export class NoiseServerTransport {
       throw new Error("NoiseServerTransport: transport is closed");
     }
 
+    // In SECURE state, unexpected processMessage calls should close
+    if (this._state === "SECURE") {
+      this._state = "CLOSED";
+      throw new Error(
+        "NoiseServerTransport: processMessage not valid in SECURE state — use encryptRpc/decryptData",
+      );
+    }
+
     const parsed = msg as Record<string, unknown>;
     const t = parsed?.t;
 
@@ -358,9 +366,9 @@ export class NoiseServerTransport {
       case "noise_1":
         return this.handleNoise1(parsed);
       default:
-        throw new Error(
-          `NoiseServerTransport: unexpected message type "${t}" in state ${this._state}`,
-        );
+        // Unexpected frame in cleartext phase → transport_error + close (spec §2.6)
+        this._state = "CLOSED";
+        return [{ t: "transport_error", code: "protocol_error" } as TransportError];
     }
   }
 
@@ -399,9 +407,8 @@ export class NoiseServerTransport {
     raw: Record<string, unknown>,
   ): TransportMessage[] {
     if (this._state !== "WS_OPEN") {
-      throw new Error(
-        `NoiseServerTransport: unexpected client_hello in state ${this._state}`,
-      );
+      this._state = "CLOSED";
+      return [{ t: "transport_error", code: "protocol_error" } as TransportError];
     }
 
     const clientHello = ClientHelloSchema.parse(raw);
@@ -429,9 +436,8 @@ export class NoiseServerTransport {
 
   private handleNoise1(raw: Record<string, unknown>): TransportMessage[] {
     if (this._state !== "HELLO_SENT") {
-      throw new Error(
-        `NoiseServerTransport: unexpected noise_1 in state ${this._state}`,
-      );
+      this._state = "CLOSED";
+      return [{ t: "transport_error", code: "protocol_error" } as TransportError];
     }
 
     const noise1 = Noise1Schema.parse(raw);

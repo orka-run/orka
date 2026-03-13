@@ -495,7 +495,7 @@ describe("NoiseTransport", () => {
       ).toThrow(/unexpected message type/);
     });
 
-    it("server: unexpected message type throws", () => {
+    it("server: unexpected message type returns transport_error", () => {
       const { keypair, keyId } = makeServerKeypairAndId();
       const server = new NoiseServerTransport({
         nodeId: NODE_ID,
@@ -504,12 +504,13 @@ describe("NoiseTransport", () => {
         relayOrigin: RELAY_ORIGIN,
       });
 
-      expect(() =>
-        server.processMessage({ t: "noise_2", msg: "AAAA" }),
-      ).toThrow(/unexpected message type/);
+      const result = server.processMessage({ t: "noise_2", msg: "AAAA" });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({ t: "transport_error", code: "protocol_error" });
+      expect(server.state).toBe("CLOSED");
     });
 
-    it("server: client_hello in wrong state throws", () => {
+    it("server: client_hello in wrong state returns transport_error", () => {
       const { keypair, keyId } = makeServerKeypairAndId();
       const server = new NoiseServerTransport({
         nodeId: NODE_ID,
@@ -530,10 +531,11 @@ describe("NoiseTransport", () => {
       };
       server.processMessage(hello);
 
-      // Send second client_hello — should fail
-      expect(() => server.processMessage(hello)).toThrow(
-        /unexpected client_hello/,
-      );
+      // Send second client_hello — should return transport_error
+      const result = server.processMessage(hello);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({ t: "transport_error", code: "protocol_error" });
+      expect(server.state).toBe("CLOSED");
     });
 
     it("client: noise_2 in wrong state throws", () => {
