@@ -10,6 +10,7 @@ import {
   ReconnectStrategy,
 } from "@orka/core";
 import type { PushChannel, DataFrame } from "@orka/core";
+import { trace } from "@opentelemetry/api";
 import { deriveSessionKey, ensureKeyPair, ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseServerTransport } from "@orka/core/transport/noise-transport";
 import daemonPackageJson from "../package.json";
@@ -20,7 +21,7 @@ import { pushHub } from "./push";
 import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
 import { getOrkaHome } from "./db";
-import { getDaemonMetrics, persistOtlpJsonTraces, withSpan } from "./tracing";
+import { getDaemonMetrics, getTracer, persistOtlpJsonTraces, withSpan } from "./tracing";
 
 export interface ServerOptions {
   port: number;
@@ -186,7 +187,19 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
               let rpc: Record<string, unknown>;
               try {
                 rpc = transport.decryptData(frame);
-              } catch {
+              } catch (err) {
+                const activeSpan = trace.getActiveSpan();
+                if (activeSpan) {
+                  activeSpan.addEvent("noise.decrypt_error", {
+                    "orka.transport.error_code": "decrypt_error",
+                  });
+                } else {
+                  const tracer = getTracer();
+                  const span = tracer.startSpan("orka.noise.transport_error", {
+                    attributes: { "orka.transport.error_code": "decrypt_error" },
+                  });
+                  span.end();
+                }
                 ws.send(JSON.stringify({
                   t: "transport_error",
                   code: "decrypt_error",
@@ -237,8 +250,13 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
               ws.send(JSON.stringify(resp));
             }
 
-            // If we just reached SECURE state, send the welcome message encrypted
+            // If we just reached SECURE state, record the event and send welcome encrypted
             if (transport.isSecure) {
+              const tracer = getTracer();
+              const hsSpan = tracer.startSpan("orka.noise.handshake_complete", {
+                attributes: { "orka.transport.side": "server" },
+              });
+              hsSpan.end();
               void withSpan("orka.push.welcome", {}, async () => {
                 const sessions = await svc.listSessions();
                 const welcome: ServerWelcomeData = {
@@ -267,6 +285,11 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             if (msg["t"] === "client_hello") {
               // New Noise transport path
               ws.data.firstMessageReceived = true;
+              const tracer = getTracer();
+              const helloSpan = tracer.startSpan("orka.noise.client_hello_received", {
+                attributes: { "orka.transport.side": "server" },
+              });
+
               const transport = new NoiseServerTransport({
                 nodeId,
                 keyId: noiseKeyInfo.keyId,
@@ -282,6 +305,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
               for (const resp of responses) {
                 ws.send(JSON.stringify(resp));
               }
+              helloSpan.end();
               return;
             }
           }

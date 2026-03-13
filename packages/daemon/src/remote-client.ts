@@ -143,64 +143,71 @@ class RemoteClient implements OrkaService {
    * This sends client_hello and processes server responses until SECURE state.
    */
   private driveNoiseHandshake(ws: WebSocket): Promise<void> {
-    if (!this.noiseServerKey) {
-      return Promise.reject(new Error("Noise server key not configured"));
-    }
+    return withSpan("orka.rpc.noise_handshake", {
+      "orka.transport.side": "client",
+    }, async (span) => {
+      if (!this.noiseServerKey) {
+        throw new Error("Noise server key not configured");
+      }
 
-    const transport = new NoiseClientTransport({
-      nodeId: this.nodeId ?? "",
-      expectedKeyId: this.noiseServerKey.keyId,
-      remoteStaticPubkey: this.noiseServerKey.publicKey,
-      relayOrigin: this.relayOrigin,
-    });
-    this.noiseTransport = transport;
+      const transport = new NoiseClientTransport({
+        nodeId: this.nodeId ?? "",
+        expectedKeyId: this.noiseServerKey.keyId,
+        remoteStaticPubkey: this.noiseServerKey.publicKey,
+        relayOrigin: this.relayOrigin,
+      });
+      this.noiseTransport = transport;
 
-    return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Noise handshake timeout"));
-      }, 10_000);
-      timeout.unref();
+      span.addEvent("noise.client_hello_sent");
 
-      // Save original onmessage and replace with handshake handler
-      const originalOnMessage = ws.onmessage;
+      return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("Noise handshake timeout"));
+        }, 10_000);
+        timeout.unref();
 
-      ws.onmessage = (event) => {
-        const raw = typeof event.data === "string" ? event.data : "";
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          return;
-        }
+        // Save original onmessage and replace with handshake handler
+        const originalOnMessage = ws.onmessage;
 
-        // Skip non-handshake messages (e.g. push notifications like server.welcome)
-        // during the handshake phase. Handshake messages have a "t" field.
-        const msg = parsed as Record<string, unknown>;
-        if (!msg || typeof msg["t"] !== "string") {
-          return;
-        }
-
-        try {
-          const responses = transport.processMessage(parsed);
-          for (const resp of responses) {
-            ws.send(JSON.stringify(resp));
+        ws.onmessage = (event) => {
+          const raw = typeof event.data === "string" ? event.data : "";
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            return;
           }
 
-          if (transport.isSecure) {
+          // Skip non-handshake messages (e.g. push notifications like server.welcome)
+          // during the handshake phase. Handshake messages have a "t" field.
+          const msg = parsed as Record<string, unknown>;
+          if (!msg || typeof msg["t"] !== "string") {
+            return;
+          }
+
+          try {
+            const responses = transport.processMessage(parsed);
+            for (const resp of responses) {
+              ws.send(JSON.stringify(resp));
+            }
+
+            if (transport.isSecure) {
+              clearTimeout(timeout);
+              span.addEvent("noise.handshake_complete");
+              // Restore normal message handler
+              ws.onmessage = originalOnMessage;
+              resolve();
+            }
+          } catch (err) {
             clearTimeout(timeout);
-            // Restore normal message handler
-            ws.onmessage = originalOnMessage;
-            resolve();
+            reject(err instanceof Error ? err : new Error(String(err)));
           }
-        } catch (err) {
-          clearTimeout(timeout);
-          reject(err instanceof Error ? err : new Error(String(err)));
-        }
-      };
+        };
 
-      // Send client_hello
-      const clientHello = transport.getClientHello();
-      ws.send(JSON.stringify(clientHello));
+        // Send client_hello
+        const clientHello = transport.getClientHello();
+        ws.send(JSON.stringify(clientHello));
+      });
     });
   }
 
@@ -219,7 +226,13 @@ class RemoteClient implements OrkaService {
         try {
           resp = this.noiseTransport.decryptData(frame as DataFrame);
         } catch {
-          // Decryption failed — try to match to a pending request
+          // Decryption failed — record the error and drop the frame
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.addEvent("noise.decrypt_error", {
+              "orka.transport.side": "client",
+            });
+          }
           return;
         }
       } else {

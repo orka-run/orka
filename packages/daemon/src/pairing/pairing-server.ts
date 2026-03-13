@@ -32,7 +32,9 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 
+import { trace } from "@opentelemetry/api";
 import type { PendingEnrollment, EnrollmentStore } from "./enrollment-store";
+import { withSpanSync } from "../tracing";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,19 +150,33 @@ export class PairingServer {
    * Returns an array of outgoing messages to send to the client.
    */
   processMessage(msg: unknown): PairMessage[] {
-    switch (this.state) {
-      case State.AWAIT_CLIENT_HELLO:
-        return this.handleClientHello(msg);
-      case State.AWAIT_PAIR_INIT:
-        return this.handlePairInit(msg);
-      case State.AWAIT_PAIR_CONFIRM:
-        return this.handlePairConfirm(msg);
-      case State.AWAIT_PAIR_DONE:
-        return this.handlePairDone(msg);
-      case State.COMPLETE:
-      case State.ERRORED:
-        return this.protocolError();
-    }
+    return withSpanSync("orka.pairing.server.message", {
+      "orka.pairing.state": this.state,
+    }, (span) => {
+      let result: PairMessage[];
+      switch (this.state) {
+        case State.AWAIT_CLIENT_HELLO:
+          result = this.handleClientHello(msg);
+          break;
+        case State.AWAIT_PAIR_INIT:
+          result = this.handlePairInit(msg);
+          break;
+        case State.AWAIT_PAIR_CONFIRM:
+          result = this.handlePairConfirm(msg);
+          break;
+        case State.AWAIT_PAIR_DONE:
+          result = this.handlePairDone(msg);
+          break;
+        case State.COMPLETE:
+        case State.ERRORED:
+          result = this.protocolError();
+          break;
+      }
+      span.addEvent("pairing.state_transition", {
+        "orka.pairing.new_state": this.state,
+      });
+      return result;
+    });
   }
 
   // --- State handlers ---
@@ -195,6 +211,9 @@ export class PairingServer {
 
     // Check enrollment expiry
     if (Date.now() >= this.enrollment.expiresAt) {
+      trace.getActiveSpan()?.addEvent("pairing.enrollment_expired", {
+        "orka.pairing.enroll_id": this.enrollment.enrollId,
+      });
       return this.errorAndClose("expired");
     }
 
@@ -286,6 +305,10 @@ export class PairingServer {
       const remaining = this.enrollmentStore.recordFailedAttempt(
         this.enrollment.enrollId,
       );
+      trace.getActiveSpan()?.addEvent("pairing.mac_verification_failed", {
+        "orka.pairing.remaining_attempts": remaining,
+        "orka.pairing.enroll_id": this.enrollment.enrollId,
+      });
       if (remaining === 0) {
         return this.errorAndClose("attempts_exhausted");
       }
