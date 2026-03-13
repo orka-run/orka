@@ -18,7 +18,7 @@
  */
 
 import type { ServerWebSocket, Server } from "bun";
-import { RelayState, type SocketData } from "./state";
+import { RelayState, type SocketData, type AnySocketData } from "./state";
 import { authenticate, extractApiKey, flushAuthUpdates } from "./auth";
 import { handleApiRequest } from "./api";
 import { RateLimiter, GlobalRateLimiter } from "./rate-limiter";
@@ -28,6 +28,7 @@ import { getRelayConfig } from "./config";
 import { closeDb } from "./db";
 import { SingleInstanceCluster } from "./cluster";
 import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync } from "./tracing";
+import { PairingRouter } from "./pairing";
 
 // --- Allowed Methods (service enforcement) ---
 
@@ -71,7 +72,7 @@ export interface RelayOptions {
 }
 
 export interface RelayHandle {
-  server: Server<SocketData>;
+  server: Server<AnySocketData>;
   /** Graceful shutdown: stop accepting, drain in-flight, flush, close DB. */
   shutdown: (opts?: { drainTimeoutMs?: number }) => Promise<void>;
 }
@@ -90,6 +91,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
     const globalLimiter = new GlobalRateLimiter(config.rateLimits.globalRequestsPerSecond);
     const meter = new UsageMeter();
     const abuseDetector = new AbuseDetector();
+    const pairingRouter = new PairingRouter();
     const cluster = new SingleInstanceCluster({ url: `ws://${opts.hostname ?? config.server.hostname}:${opts.port}` });
     const startTime = Date.now();
     let draining = false;
@@ -99,7 +101,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
       config.auth.legacyToken = opts.token;
     }
 
-    const server = Bun.serve<SocketData>({
+    const server = Bun.serve<AnySocketData>({
       port: opts.port,
       hostname: opts.hostname ?? config.server.hostname,
 
@@ -142,6 +144,49 @@ export function startRelay(opts: RelayOptions): RelayHandle {
             status: 503,
             headers: { "content-type": "application/json", "retry-after": "5" },
           });
+        }
+
+        // --- Pairing WebSocket endpoint ---
+        const pairMatch = url.pathname.match(/^\/v1\/pair\/(.+)$/);
+        if (pairMatch) {
+          const enrollId = pairMatch[1]!;
+
+          const validationError = pairingRouter.validateEnrollId(enrollId);
+          if (validationError) {
+            return new Response(JSON.stringify({ error: validationError }), {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            });
+          }
+
+          const pairKey = extractApiKey(req);
+          if (!pairKey) {
+            return new Response(JSON.stringify({ error: "Missing API key" }), {
+              status: 401,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          const pairAuth = authenticate(pairKey);
+          if (!pairAuth.success || !pairAuth.ctx) {
+            return new Response(JSON.stringify({ error: pairAuth.error }), {
+              status: pairAuth.code ?? 401,
+              headers: { "content-type": "application/json" },
+            });
+          }
+
+          const side = pairingRouter.isPaired(enrollId) ? "joiner" : "registrant";
+
+          const socketData: AnySocketData = {
+            role: "pairing" as const,
+            enrollId,
+            side: side as "registrant" | "joiner",
+            accountId: pairAuth.ctx.accountId,
+          };
+
+          if (server.upgrade(req, { data: socketData })) {
+            return undefined;
+          }
+          return new Response("WebSocket upgrade failed", { status: 500 });
         }
 
         // --- API endpoints ---
@@ -250,18 +295,28 @@ export function startRelay(opts: RelayOptions): RelayHandle {
       websocket: {
         open(ws) {
           const data = ws.data;
+
+          // --- Pairing connections ---
+          if (data.role === "pairing") {
+            const result = pairingRouter.handleConnection(data.enrollId, ws);
+            if (!result.accepted) {
+              ws.close(1008, result.reason);
+            }
+            return;
+          }
+
           withSpanSync("orka.relay.connection.open", {
             "orka.account.id": data.accountId,
             "orka.role": data.role,
             "orka.node.id": data.nodeId ?? "",
           }, () => {
             if (data.role === "node") {
-              state.registerNode(data.accountId, data.nodeId!, ws);
+              state.registerNode(data.accountId, data.nodeId!, ws as ServerWebSocket<SocketData>);
               metrics.connectionsOpened.inc({ account_id: data.accountId, role: "node" });
               metrics.registeredNodes.inc({ account_id: data.accountId });
               meter.recordConnection(data.accountId, "node_connect", data.nodeId);
             } else {
-              state.addClient(data.accountId, ws);
+              state.addClient(data.accountId, ws as ServerWebSocket<SocketData>);
               metrics.connectionsOpened.inc({ account_id: data.accountId, role: "client" });
               meter.recordConnection(data.accountId, "ws_connect");
             }
@@ -270,22 +325,36 @@ export function startRelay(opts: RelayOptions): RelayHandle {
         },
 
         message(ws, message) {
-          const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
           const data = ws.data;
+
+          // --- Pairing connections: forward opaque data ---
+          if (data.role === "pairing") {
+            pairingRouter.handleMessage(ws, typeof message === "string" ? message : Buffer.from(message));
+            return;
+          }
+
+          const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
           const bytes = raw.length;
 
           data.messageCount++;
           data.bytesIn += bytes;
 
           if (data.role === "client") {
-            handleClientMessage(ws, raw, bytes, data, state, rateLimiter, globalLimiter, config, meter);
+            handleClientMessage(ws as ServerWebSocket<SocketData>, raw, bytes, data, state, rateLimiter, globalLimiter, config, meter);
           } else if (data.role === "node") {
-            handleNodeMessage(ws, raw, bytes, data, state, meter);
+            handleNodeMessage(ws as ServerWebSocket<SocketData>, raw, bytes, data, state, meter);
           }
         },
 
         close(ws) {
           const data = ws.data;
+
+          // --- Pairing connections ---
+          if (data.role === "pairing") {
+            pairingRouter.handleClose(ws);
+            return;
+          }
+
           withSpanSync("orka.relay.connection.close", {
             "orka.account.id": data.accountId,
             "orka.role": data.role,
@@ -308,8 +377,8 @@ export function startRelay(opts: RelayOptions): RelayHandle {
               metrics.registeredNodes.dec({ account_id: data.accountId });
               meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
             } else {
-              state.failRequestsForClient(ws);
-              state.removeClient(data.accountId, ws);
+              state.failRequestsForClient(ws as ServerWebSocket<SocketData>);
+              state.removeClient(data.accountId, ws as ServerWebSocket<SocketData>);
               metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
               meter.recordConnection(data.accountId, "ws_disconnect");
             }
@@ -340,6 +409,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 
         // Flush all subsystems
         flushAuthUpdates();
+        pairingRouter.shutdown();
         meter.shutdown();
         abuseDetector.shutdown();
         rateLimiter.shutdown();

@@ -14,6 +14,16 @@ export interface SocketData {
   bytesOut: number;
 }
 
+export interface PairingSocketData {
+  role: "pairing";
+  enrollId: string;
+  side: "registrant" | "joiner";
+  accountId: string;
+}
+
+/** Union type for all WebSocket data variants used by the relay server. */
+export type AnySocketData = SocketData | PairingSocketData;
+
 export interface NodeConnection {
   id: string;
   accountId: string;
