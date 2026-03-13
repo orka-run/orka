@@ -194,10 +194,15 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             await svc.archiveSession(params.sessionId);
             pushHub.broadcast("orchestration.sessionUpdated", { sessionId: params.sessionId, status: "archived" });
             return null;
-          case "unarchiveSession":
+          case "unarchiveSession": {
             await svc.unarchiveSession(params.sessionId);
-            pushHub.broadcast("orchestration.sessionUpdated", { sessionId: params.sessionId });
+            const unarchivedSession = await svc.getSession(params.sessionId);
+            pushHub.broadcast("orchestration.sessionUpdated", {
+              sessionId: params.sessionId,
+              status: unarchivedSession?.status ?? "completed",
+            });
             return null;
+          }
           case "getPendingApprovals":
             return svc.getPendingApprovals(params.sessionId);
           case "resolveApproval":

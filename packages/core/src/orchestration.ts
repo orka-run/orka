@@ -337,11 +337,22 @@ const WireEventVariants: Record<string, z.ZodType> = {
 export const WireOrchestrationEventSchema = WireEventBaseSchema.transform((raw) => {
   const variant = WireEventVariants[raw.type];
   if (variant) {
-    // Validate type-specific fields; on failure fall through to base shape
     const result = variant.safeParse(raw);
     if (result.success) return result.data;
+    // Known type but variant validation failed — wrap as event.passthrough
+    // so downstream consumers don't treat a malformed event as a valid known type.
+    const { type: originalType, sessionId, timestamp, v, turnId, ...rest } = raw;
+    return {
+      type: "event.passthrough",
+      sessionId,
+      timestamp,
+      ...(v !== undefined ? { v } : {}),
+      ...(turnId !== undefined ? { turnId } : {}),
+      originalType,
+      rawPayload: rest,
+    };
   }
-  // Unknown type or variant validation failure — return as-is (base-validated)
+  // Unknown type — return as-is (base-validated)
   return raw;
 });
 

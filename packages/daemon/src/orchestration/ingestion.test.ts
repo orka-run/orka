@@ -28,9 +28,13 @@ describe("mapProviderEvent", () => {
       turnId: "turn-1",
       originalType: "provider.future.event",
       provider: "claude-code",
-      rawPayload,
+      rawPayload: {
+        payload: rawPayload,
+        eventId: "evt-unknown",
+        threadId: "thread-1",
+      },
       timestamp: "2026-03-13T00:00:00.000Z",
     });
-    expect(mapped.rawPayload).toBe(rawPayload);
+    expect((mapped.rawPayload as any).payload).toBe(rawPayload);
   });
 });
