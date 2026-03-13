@@ -241,7 +241,14 @@ class RemoteClient implements OrkaService {
   }
 
   async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
-    return this.call("getSessionTimeline", { sessionId });
+    const raw: unknown[] = await this.call("getSessionTimeline", { sessionId });
+    if (!Array.isArray(raw)) return [];
+    const events: OrchestrationEvent[] = [];
+    for (const item of raw) {
+      const event = parseWireEvent(item);
+      if (event) events.push(event);
+    }
+    return events;
   }
 
   async getChatMessages(sessionId: string): Promise<ChatEntry[]> {

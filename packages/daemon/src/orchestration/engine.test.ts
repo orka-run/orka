@@ -143,6 +143,7 @@ describe("OrchestrationEngine", () => {
 
     expect(engine.getSessionEvents("session-1")).toEqual([
       {
+        v: 1,
         type: "event.passthrough",
         sessionId: "session-1",
         originalType: "provider.future.event",
@@ -153,6 +154,7 @@ describe("OrchestrationEngine", () => {
     ]);
     expect(persisted).toEqual([
       {
+        v: 1,
         eventId: "evt-passthrough",
         provider: "claude-code",
         type: "event.passthrough",

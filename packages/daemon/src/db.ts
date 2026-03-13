@@ -11,7 +11,7 @@ import type {
   UsageRecord,
   UsageSummary,
 } from "@orka/core";
-import { BackendKindSchema, SessionModeSchema, SessionStatusSchema } from "@orka/core";
+import { BackendKindSchema, SessionModeSchema, SessionStatusSchema, parseWireEvent } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
 const TaskRowSchema = z.object({
@@ -748,14 +748,13 @@ function rowToOrchestrationEvent(row: unknown): OrchestrationEvent {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new Error("Invalid orchestration event payload");
   }
-  return migrateEvent(payload as Record<string, unknown>) as OrchestrationEvent;
-}
 
-function migrateEvent(event: Record<string, unknown>): Record<string, unknown> {
-  if (typeof event["v"] !== "number") {
-    event["v"] = 1;
+  // Validate and normalize via wire schema — handles unknown types, version
+  // migration, and forward-compatible parsing.
+  const event = parseWireEvent(payload);
+  if (!event) {
+    throw new Error("Invalid orchestration event payload: failed wire schema validation");
   }
-
   return event;
 }
 
