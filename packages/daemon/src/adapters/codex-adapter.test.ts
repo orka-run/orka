@@ -258,6 +258,50 @@ describe("CodexSessionProjection", () => {
     projection.apply(createEvent("session.state.changed", "thread-1", { state: "ready" }, { provider: "codex" }));
     expect(projection.shouldUnsubscribe()).toBe(true);
   });
+
+  test("triggers unsubscribe on systemError after turn fails", () => {
+    const projection = new CodexSessionProjection({ hasActiveTurn: true, hasProviderThread: true });
+
+    // systemError arrives before turn/completed (matches real codex behavior)
+    projection.apply(createEvent("session.state.changed", "thread-1", { state: "error" }, { provider: "codex" }));
+    expect(projection.shouldUnsubscribe()).toBe(false); // turn still active
+    expect(projection.hasError()).toBe(true);
+
+    projection.apply(createEvent("turn.completed", "thread-1", { state: "failed" }, {
+      provider: "codex",
+      turnId: "turn-1",
+    }));
+    expect(projection.shouldUnsubscribe()).toBe(true);
+  });
+
+  test("triggers unsubscribe on systemError when no turn is active", () => {
+    const projection = new CodexSessionProjection({ hasActiveTurn: false, hasProviderThread: true });
+
+    projection.apply(createEvent("session.state.changed", "thread-1", { state: "error" }, { provider: "codex" }));
+    expect(projection.shouldUnsubscribe()).toBe(true);
+  });
+
+  test("does NOT auto-unsubscribe on idle in interactive mode", () => {
+    const projection = new CodexSessionProjection({ hasActiveTurn: true, hasProviderThread: true, interactive: true });
+
+    projection.apply(createEvent("turn.completed", "thread-1", { state: "completed" }, {
+      provider: "codex",
+      turnId: "turn-1",
+    }));
+    projection.apply(createEvent("session.state.changed", "thread-1", { state: "ready" }, { provider: "codex" }));
+    expect(projection.shouldUnsubscribe()).toBe(false);
+  });
+
+  test("triggers unsubscribe on systemError even in interactive mode", () => {
+    const projection = new CodexSessionProjection({ hasActiveTurn: true, hasProviderThread: true, interactive: true });
+
+    projection.apply(createEvent("session.state.changed", "thread-1", { state: "error" }, { provider: "codex" }));
+    projection.apply(createEvent("turn.completed", "thread-1", { state: "failed" }, {
+      provider: "codex",
+      turnId: "turn-1",
+    }));
+    expect(projection.shouldUnsubscribe()).toBe(true);
+  });
 });
 
 describe("CodexAdapter", () => {

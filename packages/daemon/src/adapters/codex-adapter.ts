@@ -136,12 +136,15 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
 export class CodexSessionProjection {
   private hasActiveTurn: boolean;
   private isSessionReady = false;
+  private hasTerminalError = false;
   private hasProviderThread: boolean;
   private isUnsubscribing = false;
+  private isInteractive: boolean;
 
-  constructor(initial: { hasActiveTurn?: boolean; hasProviderThread?: boolean } = {}) {
+  constructor(initial: { hasActiveTurn?: boolean; hasProviderThread?: boolean; interactive?: boolean } = {}) {
     this.hasActiveTurn = initial.hasActiveTurn ?? false;
     this.hasProviderThread = initial.hasProviderThread ?? false;
+    this.isInteractive = initial.interactive ?? false;
   }
 
   apply(event: ProviderRuntimeEvent): void {
@@ -155,6 +158,9 @@ export class CodexSessionProjection {
         return;
       case "session.state.changed":
         this.isSessionReady = event.payload.state === "ready";
+        if (event.payload.state === "error") {
+          this.hasTerminalError = true;
+        }
         return;
       default:
         return;
@@ -166,7 +172,14 @@ export class CodexSessionProjection {
   }
 
   shouldUnsubscribe(): boolean {
-    return this.isSessionReady && !this.hasActiveTurn && this.hasProviderThread && !this.isUnsubscribing;
+    // Terminal errors (systemError) always trigger unsubscribe regardless of mode.
+    // Normal idle completion only triggers unsubscribe for background (non-interactive) sessions.
+    const shouldExit = this.hasTerminalError || (this.isSessionReady && !this.isInteractive);
+    return shouldExit && !this.hasActiveTurn && this.hasProviderThread && !this.isUnsubscribing;
+  }
+
+  hasError(): boolean {
+    return this.hasTerminalError;
   }
 
   markUnsubscribing(): void {
@@ -240,7 +253,9 @@ export class CodexAdapter implements ProviderAdapter {
           void drainStream(process.stderr);
         }
 
-        void consumeCodexOutput(input.threadId, process.stdout, meta, events, process);
+        void consumeCodexOutput(input.threadId, process.stdout, meta, events, process, {
+          interactive: input.interactive,
+        });
 
         try {
           await meta.sendRequest<{ userAgent: string }>("initialize", {
@@ -697,6 +712,7 @@ async function consumeCodexOutput(
   meta: CodexHandleMeta,
   events: AsyncEventQueue<ProviderRuntimeEvent>,
   process: CodexProcess,
+  opts?: { interactive?: boolean },
 ): Promise<void> {
   await withSpan(
     "orka.provider.codex.parse_output",
@@ -704,6 +720,7 @@ async function consumeCodexOutput(
     async (span) => {
       const projection = new CodexSessionProjection({
         hasActiveTurn: Boolean(meta.activeTurnId),
+        interactive: opts?.interactive,
         hasProviderThread: Boolean(meta.providerThreadId),
       });
 
@@ -758,6 +775,16 @@ async function consumeCodexOutput(
               void meta.sendRequest("thread/unsubscribe", { threadId: providerThreadId }).catch(() => {
                 // Best-effort; if it fails, stopSession will clean up.
               });
+              // Safety net: if codex doesn't respond with thread/closed within 10s
+              // (e.g. stuck in systemError), force-kill the process.
+              if (projection.hasError()) {
+                setTimeout(() => {
+                  if (!meta.sawSessionExit) {
+                    span.addEvent("error_unsubscribe_timeout_killing");
+                    process.kill();
+                  }
+                }, 10_000).unref();
+              }
             }
           }
         }
