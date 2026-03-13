@@ -11,3 +11,5 @@ export type { KeyPair } from "./crypto";
 export * from "./reconnect";
 export * from "./push-protocol";
 export * from "./errors";
+export * from "./pairing-protocol";
+export * from "./transport-protocol";
