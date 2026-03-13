@@ -5,6 +5,7 @@ import type {
   SessionDeletedData,
   SessionUpdatedData,
 } from "@orka/core";
+import { parseWireEvent } from "@orka/core";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ConnectionBanner } from "./components/ConnectionBanner";
@@ -66,6 +67,7 @@ function AppShell({ transport }: AppShellProps) {
   const handleSessionUpdated = useSessionStore((state) => state.handleSessionUpdated);
   const handleSessionDeleted = useSessionStore((state) => state.handleSessionDeleted);
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
+  const setProtocolMismatch = useConnectionStore((state) => state.setProtocolMismatch);
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
   const defaultProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
 
@@ -176,6 +178,9 @@ function AppShell({ transport }: AppShellProps) {
     const unsubscribeState = transport.onStateChange((connection) => {
       setConnectionStatus(connection.state, connection.reconnectAttempts);
     });
+    const unsubscribeMismatch = transport.onProtocolMismatch((info) => {
+      setProtocolMismatch(info);
+    });
     const unsubscribeWelcome = transport.subscribe("server.welcome", (data) => {
       setServerSessionCount((data as ServerWelcomeData).sessionCount);
     });
@@ -223,10 +228,11 @@ function AppShell({ transport }: AppShellProps) {
       unsubscribeEvent();
       unsubscribeUpdated();
       unsubscribeWelcome();
+      unsubscribeMismatch();
       unsubscribeState();
       transport.disconnect();
     };
-  }, [transport, fetchSessions, handleSessionDeleted, handleSessionUpdated, setConnectionStatus]);
+  }, [transport, fetchSessions, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch]);
 
   return (
     <TransportContext.Provider value={transport}>
@@ -287,7 +293,14 @@ function AppShell({ transport }: AppShellProps) {
 
 export function App() {
   const transportRef = useRef<WsTransport | null>(null);
-  const transport = transportRef.current ?? (transportRef.current = new WsTransport(DEFAULT_DAEMON_URL));
+  if (!transportRef.current) {
+    const t = new WsTransport(DEFAULT_DAEMON_URL);
+    // Register boundary validation for orchestration event push channel.
+    // Normalizes wire events (unknown types become event.passthrough, version migration applied).
+    t.registerChannelTransform("orchestration.event", (data) => parseWireEvent(data));
+    transportRef.current = t;
+  }
+  const transport = transportRef.current;
 
   const reportError = async (report: ClientErrorReport): Promise<void> => {
     await transport.request("reportClientError", report).catch(() => undefined);

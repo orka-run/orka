@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
-import { ensureKeyPair, loadKeyPair, loadPublicKey } from "@orka/core";
+import { ensureKeyPair, loadKeyPair, loadPublicKey, isMethodNotFound } from "@orka/core";
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
@@ -1088,8 +1088,15 @@ const backfillCmd = command({
       fail(`session not found: ${sessionId}`);
     }
 
-    const result = await svc.backfillSession(session.id);
-    console.log(`backfilled ${result.eventsReplayed} events for session ${session.id}`);
+    try {
+      const result = await svc.backfillSession(session.id);
+      console.log(`backfilled ${result.eventsReplayed} events for session ${session.id}`);
+    } catch (err) {
+      if (isMethodNotFound(err)) {
+        fail("This feature is not supported by the connected daemon. Please upgrade the daemon.");
+      }
+      throw err;
+    }
   }),
 });
 

@@ -24,6 +24,29 @@ export interface PushEnvelope<T = unknown> {
 
 export const PROTOCOL_VERSION = 1;
 
+/**
+ * Range of protocol versions this client supports.
+ * min/max are inclusive. Dashboard embeds this to check against server's protocolVersion.
+ */
+export const PROTOCOL_VERSION_RANGE = { min: 1, max: 1 } as const;
+
+/**
+ * Check whether a server's protocol version is compatible with the given client range.
+ *
+ * Returns:
+ * - `"compatible"` if the server version falls within [min, max]
+ * - `"outdated_server"` if the server version is below min (hard mismatch)
+ * - `"outdated_client"` if the server version is above max (hard mismatch)
+ */
+export function isProtocolCompatible(
+  serverVersion: number,
+  range: { min: number; max: number } = PROTOCOL_VERSION_RANGE,
+): "compatible" | "outdated_server" | "outdated_client" {
+  if (serverVersion < range.min) return "outdated_server";
+  if (serverVersion > range.max) return "outdated_client";
+  return "compatible";
+}
+
 export const ServerCapabilitiesSchema = z.object({
   resume: z.boolean(),
   encryption: z.union([z.string(), z.literal(false)]),

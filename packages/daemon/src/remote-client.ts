@@ -18,7 +18,7 @@ import type {
   PushChannel,
 } from "@orka/core";
 import { context, propagation, trace } from "@opentelemetry/api";
-import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy } from "@orka/core";
+import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent } from "@orka/core";
 import { withSpan } from "./tracing";
 
 export interface RemoteClientOptions {
@@ -34,6 +34,7 @@ interface PendingRequest {
   resolve: (value: any) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  method: string;
 }
 
 class RemoteClient implements OrkaService {
@@ -143,7 +144,11 @@ class RemoteClient implements OrkaService {
 
     const error = isRecord(resp["error"]) ? resp["error"] : undefined;
     if (error) {
-      p.reject(new Error(typeof error["message"] === "string" ? error["message"] : "RPC request failed"));
+      if (error["code"] === RPC_METHOD_NOT_FOUND) {
+        p.reject(new MethodNotFoundError(p.method, typeof error["message"] === "string" ? error["message"] : undefined));
+      } else {
+        p.reject(new Error(typeof error["message"] === "string" ? error["message"] : "RPC request failed"));
+      }
     } else {
       p.resolve(resp["result"]);
     }
@@ -165,7 +170,7 @@ class RemoteClient implements OrkaService {
         }, 30_000);
         timer.unref();
 
-        this.pending.set(id, { resolve, reject, timer });
+        this.pending.set(id, { resolve, reject, timer, method });
 
         let req: any = {
           jsonrpc: "2.0",

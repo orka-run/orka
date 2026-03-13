@@ -1,5 +1,6 @@
 // Attribution: WsTransport design inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import type { PushEnvelope, RpcRequest, RpcResponse } from "@orka/core";
+import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData } from "@orka/core";
+import { isProtocolCompatible, MethodNotFoundError, PROTOCOL_VERSION_RANGE, RPC_METHOD_NOT_FOUND } from "@orka/core";
 import type { Span } from "@opentelemetry/api";
 import {
   finishDashboardSpan,
@@ -23,12 +24,21 @@ type PendingRequest = {
   sentAt: number | null;
 };
 
+export type PushDataTransform = (data: unknown) => unknown;
 export type PushHandler = (data: unknown, sequence: number) => void;
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
 export interface ConnectionStatusSnapshot {
   state: ConnectionState;
   reconnectAttempts: number;
 }
+
+export type ProtocolMismatchKind = "outdated_server" | "outdated_client";
+export interface ProtocolMismatchInfo {
+  kind: ProtocolMismatchKind;
+  serverVersion: number;
+  clientRange: { min: number; max: number };
+}
+export type ProtocolMismatchHandler = (info: ProtocolMismatchInfo) => void;
 
 function now(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -49,6 +59,9 @@ export class WsTransport {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 500;
   private stateListeners = new Set<(snapshot: ConnectionStatusSnapshot) => void>();
+  private protocolMismatchListeners = new Set<ProtocolMismatchHandler>();
+  private channelTransformers = new Map<string, PushDataTransform>();
+  private serverCapabilities: ServerCapabilities | null = null;
   private shouldReconnect = false;
   private connectionSpan: Span | null = null;
   private connectionStartedAt = 0;
@@ -235,11 +248,35 @@ export class WsTransport {
     };
   }
 
+  /**
+   * Register a transform function for a push channel.
+   * The transform runs on `data` before dispatching to handlers,
+   * enabling boundary validation (e.g., normalizing wire events).
+   * Returns an unsubscribe function.
+   */
+  registerChannelTransform(channel: string, transform: PushDataTransform): () => void {
+    this.channelTransformers.set(channel, transform);
+    return () => {
+      this.channelTransformers.delete(channel);
+    };
+  }
+
   onStateChange(listener: (snapshot: ConnectionStatusSnapshot) => void): () => void {
     this.stateListeners.add(listener);
     return () => {
       this.stateListeners.delete(listener);
     };
+  }
+
+  onProtocolMismatch(listener: ProtocolMismatchHandler): () => void {
+    this.protocolMismatchListeners.add(listener);
+    return () => {
+      this.protocolMismatchListeners.delete(listener);
+    };
+  }
+
+  getServerCapabilities(): ServerCapabilities | null {
+    return this.serverCapabilities;
   }
 
   get connectionState(): ConnectionState {
@@ -287,12 +324,21 @@ export class WsTransport {
         this.lastSequenceByChannel.set(parsed.channel, parsed.sequence);
       }
 
+      // Apply channel-specific transform (boundary validation/normalization)
+      const transform = this.channelTransformers.get(parsed.channel);
+      const transformedData = transform ? transform(parsed.data) : parsed.data;
+
       const current = this.latestPush.get(parsed.channel);
       if (!current || parsed.sequence >= current.sequence) {
         this.latestPush.set(parsed.channel, {
-          data: parsed.data,
+          data: transformedData,
           sequence: parsed.sequence,
         });
+      }
+
+      // Check protocol compatibility on server.welcome
+      if (parsed.channel === "server.welcome") {
+        this.checkProtocolVersion(parsed.data as ServerWelcomeData);
       }
 
       const handlers = this.pushHandlers.get(parsed.channel);
@@ -300,9 +346,14 @@ export class WsTransport {
         return;
       }
 
+      // Skip dispatch if transform returned null (invalid data)
+      if (transformedData === null || transformedData === undefined) {
+        return;
+      }
+
       try {
         for (const handler of handlers) {
-          handler(parsed.data, parsed.sequence);
+          handler(transformedData, parsed.sequence);
         }
       } catch (error) {
         if (error instanceof Error) {
@@ -340,7 +391,12 @@ export class WsTransport {
     const duration = Math.max(0, completedAt - (pending.sentAt ?? pending.createdAt));
 
     if (parsed.error) {
-      const error = new Error(parsed.error.message ?? `Request failed: ${pending.method}`);
+      let error: Error;
+      if (parsed.error.code === RPC_METHOD_NOT_FOUND) {
+        error = new MethodNotFoundError(pending.method, parsed.error.message ?? undefined);
+      } else {
+        error = new Error(parsed.error.message ?? `Request failed: ${pending.method}`);
+      }
       this.recordRpcCompletion(pending, duration, false, completedAt);
       finishDashboardSpan(pending.span, pending.startedAt, "error", error);
       pending.reject(error);
@@ -536,6 +592,36 @@ export class WsTransport {
     }
 
     return null;
+  }
+
+  private checkProtocolVersion(data: ServerWelcomeData): void {
+    const serverVersion = data.protocolVersion;
+    if (typeof serverVersion !== "number") return;
+
+    // Store server capabilities for later use
+    if (data.capabilities) {
+      this.serverCapabilities = data.capabilities as ServerCapabilities;
+    }
+
+    const compat = isProtocolCompatible(serverVersion, PROTOCOL_VERSION_RANGE);
+    if (compat === "compatible") return;
+
+    this.connectionSpan?.addEvent("protocol.mismatch", {
+      "orka.protocol.server_version": serverVersion,
+      "orka.protocol.client_min": PROTOCOL_VERSION_RANGE.min,
+      "orka.protocol.client_max": PROTOCOL_VERSION_RANGE.max,
+      "orka.protocol.mismatch_kind": compat,
+    });
+
+    const info: ProtocolMismatchInfo = {
+      kind: compat,
+      serverVersion,
+      clientRange: { min: PROTOCOL_VERSION_RANGE.min, max: PROTOCOL_VERSION_RANGE.max },
+    };
+
+    for (const listener of this.protocolMismatchListeners) {
+      listener(info);
+    }
   }
 
   private isPushEnvelope(value: unknown): value is PushEnvelope {
