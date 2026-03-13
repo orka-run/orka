@@ -245,6 +245,72 @@ function findPairedNodeConfig(targetUrl: string): PairedNodeConfig | null {
   return null;
 }
 
+// --- Dashboard lifecycle ---
+
+const DEFAULT_DASHBOARD_PORT = 3773;
+const DEFAULT_DASHBOARD_HEALTH = `http://127.0.0.1:${DEFAULT_DASHBOARD_PORT}/`;
+
+function getDashboardDir(): string {
+  // CLI entry: packages/cli/src/index.ts → repo root is ../../..
+  const cliDir = join(new URL(import.meta.url).pathname, "..");
+  return join(cliDir, "..", "..", "dashboard");
+}
+
+async function isDashboardRunning(): Promise<boolean> {
+  try {
+    const resp = await fetch(DEFAULT_DASHBOARD_HEALTH, { signal: AbortSignal.timeout(500) });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function startDashboardBackground(): Promise<void> {
+  const dashboardDir = getDashboardDir();
+  if (!existsSync(join(dashboardDir, "package.json"))) {
+    throw new Error(`Dashboard package not found at ${dashboardDir}`);
+  }
+  const logsDir = join(getOrkaHome(), "logs");
+  mkdirSync(logsDir, { recursive: true });
+  const logPath = join(logsDir, "dashboard.log");
+  const pidPath = join(getOrkaHome(), "dashboard.pid");
+
+  const proc = Bun.spawn(
+    ["setsid", "bun", "run", "dev"],
+    {
+      cwd: dashboardDir,
+      stdin: "ignore",
+      stdout: Bun.file(logPath),
+      stderr: Bun.file(logPath),
+      env: { ...process.env },
+    },
+  );
+  writeFileSync(pidPath, String(proc.pid));
+  proc.unref();
+
+  // Wait for dashboard to become healthy (up to 10s — vite takes longer)
+  for (let i = 0; i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (await isDashboardRunning()) return;
+  }
+  throw new Error("Failed to start dashboard — timed out waiting for health check. Check " + logPath);
+}
+
+async function stopDashboard(): Promise<boolean> {
+  const pidPath = join(getOrkaHome(), "dashboard.pid");
+  if (existsSync(pidPath)) {
+    const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+    if (pid) {
+      try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+    }
+  }
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (!(await isDashboardRunning())) return true;
+  }
+  return false;
+}
+
 function buildRemoteClient(url: string): OrkaService {
   if (useEncrypt) {
     const orkaHome = getOrkaHome();
@@ -337,6 +403,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "relay",
   "keygen",
   "node",
+  "dashboard",
 ]);
 
 const PROJECT_SUBCOMMANDS = new Set(["add", "remove", "rm", "list", "ls"]);
@@ -347,7 +414,7 @@ const KEYGEN_SUBCOMMANDS = new Set(["client", "node", "save-server", "show", "he
 let svc: OrkaService;
 
 // Commands that don't need the daemon (local-only operations)
-const LOCAL_ONLY_COMMANDS = new Set(["serve", "project", "keygen", "relay"]);
+const LOCAL_ONLY_COMMANDS = new Set(["serve", "project", "keygen", "relay", "dashboard"]);
 
 async function runCliCommand(name: string, fn: () => Promise<void>): Promise<void> {
   try {
@@ -1551,6 +1618,89 @@ const restartCmd = command({
   },
 });
 
+// --- Dashboard commands ---
+
+const dashboardStartCmd = command({
+  name: "start",
+  description: "Start the dashboard dev server",
+  args: {},
+  handler: async () => {
+    if (await isDashboardRunning()) {
+      console.log(`dashboard already running on port ${DEFAULT_DASHBOARD_PORT}`);
+      return;
+    }
+    process.stdout.write("starting dashboard... ");
+    await startDashboardBackground();
+    console.log(`done (port ${DEFAULT_DASHBOARD_PORT})`);
+  },
+});
+
+const dashboardStopCmd = command({
+  name: "stop",
+  description: "Stop the dashboard dev server",
+  args: {},
+  handler: async () => {
+    if (!(await isDashboardRunning())) {
+      console.log("dashboard not running");
+      return;
+    }
+    process.stdout.write("stopping dashboard... ");
+    const stopped = await stopDashboard();
+    if (!stopped) {
+      console.error("failed to stop dashboard");
+      process.exit(1);
+    }
+    console.log("done");
+  },
+});
+
+const dashboardRestartCmd = command({
+  name: "restart",
+  description: "Restart the dashboard dev server",
+  args: {},
+  handler: async () => {
+    if (await isDashboardRunning()) {
+      process.stdout.write("stopping dashboard... ");
+      const stopped = await stopDashboard();
+      if (!stopped) {
+        console.error("failed to stop dashboard");
+        process.exit(1);
+      }
+      console.log("done");
+    }
+    process.stdout.write("starting dashboard... ");
+    await startDashboardBackground();
+    console.log(`done (port ${DEFAULT_DASHBOARD_PORT})`);
+  },
+});
+
+const dashboardStatusCmd = command({
+  name: "status",
+  description: "Check if the dashboard is running",
+  args: {},
+  handler: async () => {
+    const running = await isDashboardRunning();
+    if (running) {
+      const pidPath = join(getOrkaHome(), "dashboard.pid");
+      const pid = existsSync(pidPath) ? readFileSync(pidPath, "utf-8").trim() : "?";
+      console.log(`dashboard running (pid ${pid}, port ${DEFAULT_DASHBOARD_PORT})`);
+    } else {
+      console.log("dashboard not running");
+    }
+  },
+});
+
+const dashboardCmd = subcommands({
+  name: "dashboard",
+  description: "Manage the dashboard dev server",
+  cmds: {
+    start: dashboardStartCmd,
+    stop: dashboardStopCmd,
+    restart: dashboardRestartCmd,
+    status: dashboardStatusCmd,
+  },
+});
+
 const serveCmd = command({
   name: "serve",
   description: "Start daemon WebSocket server for remote access",
@@ -2314,6 +2464,7 @@ const nodeCmd = subcommands({
 
 const NODE_SUBCOMMANDS = new Set(["pair", "add", "list"]);
 const NODE_PAIR_SUBCOMMANDS = new Set(["start"]);
+const DASHBOARD_SUBCOMMANDS = new Set(["start", "stop", "restart", "status"]);
 
 const app = subcommands({
   name: "orka",
@@ -2345,6 +2496,7 @@ const app = subcommands({
     relay: relayCmd,
     keygen: keygenCmd,
     node: nodeCmd,
+    dashboard: dashboardCmd,
   },
 });
 
@@ -2394,6 +2546,13 @@ function normalizeArgv(argv: string[]): string[] | null {
     const sub = normalized[1];
     if (!sub || !KEYGEN_SUBCOMMANDS.has(sub)) {
       normalized.splice(1, 0, "help");
+    }
+  }
+
+  if (top === "dashboard") {
+    const sub = normalized[1];
+    if (!sub || !DASHBOARD_SUBCOMMANDS.has(sub)) {
+      normalized.splice(1, 0, "status");
     }
   }
 
