@@ -6,53 +6,38 @@ import type {
   RuntimeTurnState,
 } from "./provider-events";
 
+interface OrchestrationEventBase {
+  v?: number;
+  sessionId: string;
+  timestamp: string;
+}
+
+type OrchestrationEventEnvelope<TType extends string, TPayload extends object = {}> =
+  OrchestrationEventBase & { type: TType } & TPayload;
+
 export type OrchestrationEvent =
-  | {
-      type: "session.created";
-      sessionId: string;
+  | OrchestrationEventEnvelope<"session.created", {
       threadId: string;
       backend: string;
-      timestamp: string;
-    }
-  | {
-      type: "session.started";
-      sessionId: string;
-      timestamp: string;
-    }
-  | {
-      type: "session.state.changed";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"session.started">
+  | OrchestrationEventEnvelope<"session.state.changed", {
       state: RuntimeSessionState;
       reason?: string;
-      timestamp: string;
-    }
-  | {
-      type: "session.completed";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"session.completed", {
       exitCode: number | null;
-      timestamp: string;
-    }
-  | {
-      type: "session.failed";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"session.failed", {
       error: string;
-      timestamp: string;
-    }
-  | {
-      type: "session.cancelled";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"session.cancelled", {
       reason?: string;
-      timestamp: string;
-    }
-  | {
-      type: "turn.started";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"turn.started", {
       turnId: string;
-      timestamp: string;
-    }
-  | {
-      type: "turn.completed";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"turn.completed", {
       turnId: string;
       state?: RuntimeTurnState;
       stopReason?: string;
@@ -61,33 +46,21 @@ export type OrchestrationEvent =
         input: number;
         output: number;
       };
-      timestamp: string;
-    }
-  | {
-      type: "turn.aborted";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"turn.aborted", {
       turnId: string;
       reason: string;
-      timestamp: string;
-    }
-  | {
-      type: "user.input";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"user.input", {
       turnId?: string;
       text: string;
-      timestamp: string;
-    }
-  | {
-      type: "content.delta";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"content.delta", {
       turnId: string;
       streamKind: RuntimeContentStreamKind;
       delta: string;
-      timestamp: string;
-    }
-  | {
-      type: "item.started";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"item.started", {
       turnId: string;
       itemId: string;
       itemType: CanonicalItemType;
@@ -95,11 +68,8 @@ export type OrchestrationEvent =
       title?: string;
       detail?: string;
       args?: unknown;
-      timestamp: string;
-    }
-  | {
-      type: "item.updated";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"item.updated", {
       turnId: string;
       itemId: string;
       itemType: CanonicalItemType;
@@ -107,11 +77,8 @@ export type OrchestrationEvent =
       title?: string;
       detail?: string;
       args?: unknown;
-      timestamp: string;
-    }
-  | {
-      type: "item.completed";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"item.completed", {
       turnId: string;
       itemId: string;
       itemType: CanonicalItemType;
@@ -119,51 +86,35 @@ export type OrchestrationEvent =
       title?: string;
       detail?: string;
       args?: unknown;
-      timestamp: string;
-    }
-  | {
-      type: "request.opened";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"request.opened", {
       requestId: string;
       requestType: string;
       detail?: string;
-      timestamp: string;
-    }
-  | {
-      type: "request.resolved";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"request.resolved", {
       requestId: string;
       decision: string;
-      timestamp: string;
-    }
-  | {
-      type: "tool.progress";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"tool.progress", {
       turnId: string;
       itemId?: string;
       toolName?: string;
       summary?: string;
       elapsedSeconds?: number;
-      timestamp: string;
-    }
-  | {
-      type: "runtime.error";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"runtime.error", {
       turnId?: string;
       itemId?: string;
       error: string;
       class?: "provider_error" | "transport_error" | "permission_error" | "validation_error" | "unknown";
       terminal?: boolean;
-      timestamp: string;
-    }
-  | {
-      type: "runtime.warning";
-      sessionId: string;
+    }>
+  | OrchestrationEventEnvelope<"runtime.warning", {
       turnId?: string;
       itemId?: string;
       message: string;
-      timestamp: string;
-    };
+    }>;
 
 export type PersistedOrchestrationEvent = OrchestrationEvent & {
   provider: string;

@@ -235,6 +235,7 @@ class LocalClient implements OrkaService {
       const handle = providerService.getHandle(sessionId);
       if (handle) {
         const event: OrchestrationEvent = {
+          v: 1,
           type: "user.input",
           sessionId,
           text,

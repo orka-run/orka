@@ -711,7 +711,19 @@ function rowToUsageRecord(row: unknown): UsageRecord {
 
 function rowToOrchestrationEvent(row: unknown): OrchestrationEvent {
   const data = OrchestrationEventRowSchema.parse(row);
-  return JSON.parse(data.payload) as OrchestrationEvent;
+  const payload = JSON.parse(data.payload) as unknown;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Invalid orchestration event payload");
+  }
+  return migrateEvent(payload as Record<string, unknown>) as OrchestrationEvent;
+}
+
+function migrateEvent(event: Record<string, unknown>): Record<string, unknown> {
+  if (typeof event["v"] !== "number") {
+    event["v"] = 1;
+  }
+
+  return event;
 }
 
 function stripPersistedEventFields(event: PersistedOrchestrationEvent): OrchestrationEvent {

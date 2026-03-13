@@ -51,6 +51,7 @@ export const RuntimeContentStreamKindSchema = z.enum([
 export type RuntimeContentStreamKind = z.infer<typeof RuntimeContentStreamKindSchema>;
 
 export interface ProviderRuntimeEventBase {
+  v?: number;
   eventId: string;
   provider: BackendKind;
   threadId: string;
@@ -209,6 +210,7 @@ export function createEvent<TType extends ProviderRuntimeEventType>(
   opts: CreateProviderRuntimeEventOptions = {},
 ): ProviderRuntimeEventOf<TType> {
   return {
+    v: 1,
     eventId: opts.eventId ?? generateId("evt"),
     provider: opts.provider ?? DEFAULT_PROVIDER,
     threadId,

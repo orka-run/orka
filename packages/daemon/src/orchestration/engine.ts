@@ -44,15 +44,20 @@ export class OrchestrationEngine {
           return;
         }
 
-        this.options.persistEvent?.({
+        const versionedEvent: OrchestrationEvent = {
           ...orchestrationEvent,
+          v: orchestrationEvent.v ?? 1,
+        };
+
+        this.options.persistEvent?.({
+          ...versionedEvent,
           provider: event.provider,
           eventId: event.eventId,
         });
-        this.log.push(orchestrationEvent);
+        this.log.push(versionedEvent);
 
         for (const listener of this.listeners) {
-          listener(orchestrationEvent);
+          listener(versionedEvent);
         }
 
         const derivedState = event.type === "session.exited" || this.options.pushHub
@@ -63,7 +68,7 @@ export class OrchestrationEngine {
           emitLifecycleTimingSpan(sessionId, derivedState);
         }
 
-        this.options.pushHub?.broadcast("orchestration.event", orchestrationEvent);
+        this.options.pushHub?.broadcast("orchestration.event", versionedEvent);
 
         // Only broadcast sessionUpdated when the derived status actually changes.
         // Previously this fired on every event, causing the dashboard to re-render
