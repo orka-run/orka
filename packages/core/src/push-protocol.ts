@@ -1,6 +1,4 @@
 import { z } from "zod/v4";
-import { BackendKindSchema } from "./types";
-
 // Attribution: Push channel protocol inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 // See: wsTransport push/subscribe model
 
@@ -51,7 +49,7 @@ export const ServerCapabilitiesSchema = z.object({
   resume: z.boolean(),
   encryption: z.union([z.string(), z.literal(false)]),
   multiTurn: z.boolean(),
-  adapters: z.array(BackendKindSchema),
+  adapters: z.array(z.string()),
   maxConcurrent: z.number().int().nonnegative(),
   terminal: z.boolean(),
 });
@@ -61,7 +59,7 @@ export type ServerCapabilities = z.infer<typeof ServerCapabilitiesSchema>;
 export const ServerWelcomeDataSchema = z.object({
   serverVersion: z.string(),
   sessionCount: z.number().int().nonnegative(),
-  protocolVersion: z.literal(PROTOCOL_VERSION),
+  protocolVersion: z.number(),
   capabilities: ServerCapabilitiesSchema,
 });
 
@@ -85,14 +83,14 @@ export interface SessionLogLineData {
 
 export const SubscribeRequestSchema = z.object({
   type: z.literal("subscribe"),
-  channels: z.array(PushChannelSchema),
+  channels: z.array(z.string()),
 });
 
 export type SubscribeRequest = z.infer<typeof SubscribeRequestSchema>;
 
 export const UnsubscribeRequestSchema = z.object({
   type: z.literal("unsubscribe"),
-  channels: z.array(PushChannelSchema),
+  channels: z.array(z.string()),
 });
 
 export type UnsubscribeRequest = z.infer<typeof UnsubscribeRequestSchema>;
