@@ -4,7 +4,15 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
 import { isMethodNotFound } from "@orka/core";
-import { ensureKeyPair, loadKeyPair, loadPublicKey } from "@orka/core/crypto";
+import {
+  ensureKeyPair,
+  ensureNoiseKeyPair,
+  loadKeyPair,
+  loadPublicKey,
+  loadNoiseKeyPair,
+  loadNoisePublicKey,
+  saveNoiseServerPublicKey,
+} from "@orka/core/crypto";
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
@@ -190,6 +198,24 @@ async function stopDaemon(): Promise<boolean> {
 function buildRemoteClient(url: string): OrkaService {
   if (useEncrypt) {
     const orkaHome = getOrkaHome();
+
+    // Try Noise transport first (new path)
+    const noiseServerKey = loadNoisePublicKey(orkaHome, "server");
+    if (noiseServerKey) {
+      // Fetch nodeId from server key or use provided server key
+      // The nodeId is needed for the Noise handshake, but we might not know it yet.
+      // We'll get it from the /health endpoint or use a default.
+      // For local daemon, nodeId is typically "127.0.0.1:7394"
+      const nodeId = process.env["ORKA_NODE_ID"] ?? "";
+      return createRemoteClient({
+        url,
+        noiseServerKey,
+        nodeId,
+        relayOrigin: remoteUrl ?? "",
+      });
+    }
+
+    // Fall back to legacy encryption
     const keyPair = ensureKeyPair(orkaHome, "client");
     let pubKey = serverPublicKey;
     if (!pubKey) {
@@ -1812,8 +1838,9 @@ const keygenClientCmd = command({
   },
   handler: async () => runCliCommand("keygen", async () => {
     const orkaHome = getOrkaHome();
+    // Legacy keypair (kept for backward compat)
     const kp = ensureKeyPair(orkaHome, "client");
-    console.log("client keypair:");
+    console.log("client keypair (legacy):");
     console.log(`  public:  ${kp.publicKey}`);
     console.log(`  stored:  ${orkaHome}/keys/client.pub, ${orkaHome}/keys/client.key`);
   }),
@@ -1821,14 +1848,21 @@ const keygenClientCmd = command({
 
 const keygenNodeCmd = command({
   name: "node",
-  description: "Generate/show node keypair",
+  description: "Generate/show node keypair (Noise transport)",
   args: {
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async () => runCliCommand("keygen", async () => {
     const orkaHome = getOrkaHome();
+    // Generate Noise keypair (used by daemon for Noise NK transport)
+    const noiseKey = ensureNoiseKeyPair(orkaHome, "node");
+    console.log("node keypair (Noise NK):");
+    console.log(`  public:  ${noiseKey.publicKeyB64}`);
+    console.log(`  key_id:  ${noiseKey.keyId}`);
+    console.log(`  stored:  ${orkaHome}/keys/node.noise.pub, ${orkaHome}/keys/node.noise.key`);
+    // Also ensure legacy keypair exists
     const kp = ensureKeyPair(orkaHome, "node");
-    console.log("node keypair:");
+    console.log("node keypair (legacy):");
     console.log(`  public:  ${kp.publicKey}`);
     console.log(`  stored:  ${orkaHome}/keys/node.pub, ${orkaHome}/keys/node.key`);
   }),
@@ -1850,8 +1884,12 @@ const keygenSaveServerCmd = command({
     const orkaHome = getOrkaHome();
     const keysDir = join(orkaHome, "keys");
     mkdirSync(keysDir, { recursive: true });
+    // Save as Noise public key (base64url raw 32-byte X25519)
+    saveNoiseServerPublicKey(orkaHome, pubkey);
+    console.log(`saved server Noise public key to ${keysDir}/server.noise.pub`);
+    // Also save in legacy format for backward compat
     writeFileSync(join(keysDir, "server.pub"), pubkey, { mode: 0o644 });
-    console.log(`saved server public key to ${keysDir}/server.pub`);
+    console.log(`saved server legacy public key to ${keysDir}/server.pub`);
   }),
 });
 
@@ -1863,10 +1901,32 @@ const keygenShowCmd = command({
   },
   handler: async () => runCliCommand("keygen", async () => {
     const orkaHome = getOrkaHome();
+
+    // Noise keys
+    const noiseNode = loadNoiseKeyPair(orkaHome, "node");
+    const noiseServer = loadNoisePublicKey(orkaHome, "server");
+
+    // Legacy keys
     const clientKp = loadKeyPair(orkaHome, "client");
     const nodeKp = loadKeyPair(orkaHome, "node");
     const serverPub = loadPublicKey(orkaHome, "server");
 
+    console.log("--- Noise NK transport keys ---");
+    if (noiseNode) {
+      console.log(`node public key:   ${noiseNode.publicKeyB64}`);
+      console.log(`  key_id:          ${noiseNode.keyId}`);
+    } else {
+      console.log("node keypair:      (not generated)");
+    }
+    if (noiseServer) {
+      console.log(`server public key: ${noiseServer.publicKeyB64}`);
+      console.log(`  key_id:          ${noiseServer.keyId}`);
+    } else {
+      console.log("server public key: (not saved)");
+    }
+
+    console.log("");
+    console.log("--- Legacy keys ---");
     if (clientKp) {
       console.log(`client public key: ${clientKp.publicKey}`);
     } else {
@@ -1892,18 +1952,21 @@ const keygenHelpCmd = command({
     rest: restPositionals({ type: str, displayName: "args" }),
   },
   handler: async () => runCliCommand("keygen", async () => {
-    console.log("orka keygen — manage E2E encryption keys");
+    console.log("orka keygen — manage E2E encryption keys (Noise NK transport)");
     console.log("");
     console.log("subcommands:");
-    console.log("  client         Generate/show client keypair (for CLI → daemon encryption)");
-    console.log("  node           Generate/show node keypair (for daemon server)");
-    console.log("  save-server    Save a remote server's public key");
+    console.log("  client         Generate/show client keypair (legacy, for backward compat)");
+    console.log("  node           Generate/show node keypair (Noise NK + legacy)");
+    console.log("  save-server    Save a remote server's public key (Noise + legacy)");
     console.log("  show           Show all stored keys");
     console.log("");
     console.log("usage:");
-    console.log("  orka keygen client                  # generate client keys");
+    console.log("  orka keygen node                    # generate node keys");
     console.log("  orka keygen save-server <pubkey>     # save server's public key");
     console.log("  orka --remote ws://host:7394 --encrypt spawn ...  # use encryption");
+    console.log("");
+    console.log("The server's public key can be obtained from:");
+    console.log("  curl <daemon-url>/health | jq -r .publicKey");
   }),
 });
 

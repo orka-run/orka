@@ -12,23 +12,30 @@ import type {
   MergeResult,
   SessionResult,
   UsageSummary,
-  KeyPair,
   ApprovalRequest,
   ApprovalDecision,
   PushChannel,
+  DataFrame,
 } from "@orka/core";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent } from "@orka/core";
-import { encryptRequest, decryptResponse, deriveSessionKey } from "@orka/core/crypto";
+import { encryptRequest, decryptResponse, deriveSessionKey, type NoiseKeyInfo } from "@orka/core/crypto";
+import { NoiseClientTransport } from "@orka/core/transport/noise-transport";
 import { withSpan } from "./tracing";
 
 export interface RemoteClientOptions {
   /** WebSocket URL of the daemon or relay */
   url: string;
-  /** Client keypair for E2E encryption. If provided with serverPublicKey, enables encryption. */
-  keyPair?: KeyPair;
-  /** Server/node public key (base64). Required for E2E encryption. */
+  /** Legacy client keypair for old E2E encryption. If provided with serverPublicKey, enables legacy encryption. */
+  keyPair?: { publicKey: string; privateKey: string };
+  /** Legacy server/node public key (base64). Required for legacy E2E encryption. */
   serverPublicKey?: string;
+  /** Noise transport key info for the server. If provided, uses Noise NK encryption. */
+  noiseServerKey?: NoiseKeyInfo;
+  /** Node ID for Noise transport. Required when using noiseServerKey. */
+  nodeId?: string;
+  /** Relay origin for Noise transport prologue binding. Defaults to "". */
+  relayOrigin?: string;
 }
 
 interface PendingRequest {
@@ -45,34 +52,48 @@ class RemoteClient implements OrkaService {
   private url: string;
   private connectPromise: Promise<void> | null = null;
   private encKey: Buffer | null = null;
-  private keyPair: KeyPair | undefined;
+  private keyPair: { publicKey: string; privateKey: string } | undefined;
   private serverPublicKey: string | undefined;
+  private noiseServerKey: NoiseKeyInfo | undefined;
+  private nodeId: string | undefined;
+  private relayOrigin: string;
+  private noiseTransport: NoiseClientTransport | null = null;
   private backoff = new ReconnectStrategy();
 
   constructor(opts: RemoteClientOptions) {
     this.url = opts.url;
     this.keyPair = opts.keyPair;
     this.serverPublicKey = opts.serverPublicKey;
+    this.noiseServerKey = opts.noiseServerKey;
+    this.nodeId = opts.nodeId;
+    this.relayOrigin = opts.relayOrigin ?? "";
+  }
+
+  private get useNoise(): boolean {
+    return !!this.noiseServerKey;
   }
 
   private async connect(): Promise<void> {
     return withSpan("orka.rpc.connect", {}, async () => {
-      if (this.ws?.readyState === WebSocket.OPEN) return;
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        // Already connected. If Noise, ensure handshake is done.
+        if (this.useNoise && this.noiseTransport?.isSecure) return;
+        if (!this.useNoise) return;
+      }
       if (this.connectPromise) return this.connectPromise;
 
-      // Derive encryption key if E2E is configured
-      if (this.keyPair && this.serverPublicKey && !this.encKey) {
+      // Legacy encryption: derive shared key
+      if (!this.useNoise && this.keyPair && this.serverPublicKey && !this.encKey) {
         this.encKey = await deriveSessionKey(
           this.keyPair.privateKey,
           this.serverPublicKey,
-          // Use a fixed salt derived from both public keys for deterministic key derivation
           Buffer.from(this.keyPair.publicKey + this.serverPublicKey).toString("base64").slice(0, 44),
         );
       }
 
-      // Append client public key to URL for server-side key derivation
+      // Legacy: append client public key to URL for server-side key derivation
       let connectUrl = this.url;
-      if (this.keyPair) {
+      if (!this.useNoise && this.keyPair) {
         const sep = connectUrl.includes("?") ? "&" : "?";
         connectUrl += `${sep}pubkey=${encodeURIComponent(this.keyPair.publicKey)}`;
       }
@@ -83,7 +104,13 @@ class RemoteClient implements OrkaService {
           this.ws = ws;
           this.connectPromise = null;
           this.backoff.reset();
-          resolve();
+
+          if (this.useNoise) {
+            // Start Noise handshake
+            this.driveNoiseHandshake(ws).then(resolve).catch(reject);
+          } else {
+            resolve();
+          }
         };
         ws.onerror = () => {
           this.connectPromise = null;
@@ -92,6 +119,7 @@ class RemoteClient implements OrkaService {
         ws.onclose = () => {
           this.ws = null;
           this.connectPromise = null;
+          this.noiseTransport = null;
           // Reject all pending requests
           for (const [id, p] of this.pending) {
             clearTimeout(p.timer);
@@ -108,6 +136,72 @@ class RemoteClient implements OrkaService {
     });
   }
 
+  /**
+   * Drive the Noise NK handshake to completion.
+   * This sends client_hello and processes server responses until SECURE state.
+   */
+  private driveNoiseHandshake(ws: WebSocket): Promise<void> {
+    if (!this.noiseServerKey) {
+      return Promise.reject(new Error("Noise server key not configured"));
+    }
+
+    const transport = new NoiseClientTransport({
+      nodeId: this.nodeId ?? "",
+      expectedKeyId: this.noiseServerKey.keyId,
+      remoteStaticPubkey: this.noiseServerKey.publicKey,
+      relayOrigin: this.relayOrigin,
+    });
+    this.noiseTransport = transport;
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Noise handshake timeout"));
+      }, 10_000);
+      timeout.unref();
+
+      // Save original onmessage and replace with handshake handler
+      const originalOnMessage = ws.onmessage;
+
+      ws.onmessage = (event) => {
+        const raw = typeof event.data === "string" ? event.data : "";
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return;
+        }
+
+        // Skip non-handshake messages (e.g. push notifications like server.welcome)
+        // during the handshake phase. Handshake messages have a "t" field.
+        const msg = parsed as Record<string, unknown>;
+        if (!msg || typeof msg["t"] !== "string") {
+          return;
+        }
+
+        try {
+          const responses = transport.processMessage(parsed);
+          for (const resp of responses) {
+            ws.send(JSON.stringify(resp));
+          }
+
+          if (transport.isSecure) {
+            clearTimeout(timeout);
+            // Restore normal message handler
+            ws.onmessage = originalOnMessage;
+            resolve();
+          }
+        } catch (err) {
+          clearTimeout(timeout);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      };
+
+      // Send client_hello
+      const clientHello = transport.getClientHello();
+      ws.send(JSON.stringify(clientHello));
+    });
+  }
+
   private handleMessage(raw: string): void {
     let resp: unknown;
     try {
@@ -116,12 +210,26 @@ class RemoteClient implements OrkaService {
       return;
     }
 
-    // Decrypt response if encrypted
-    if (this.encKey && isRecord(resp) && resp["_enc"]) {
+    // Noise transport: decrypt data frames
+    if (this.noiseTransport?.isSecure) {
+      const frame = resp as Record<string, unknown>;
+      if (frame["t"] === "data" && typeof frame["ct"] === "string") {
+        try {
+          resp = this.noiseTransport.decryptData(frame as DataFrame);
+        } catch {
+          // Decryption failed — try to match to a pending request
+          return;
+        }
+      } else {
+        // Not a data frame in Noise mode — ignore
+        return;
+      }
+    }
+    // Legacy encryption: decrypt _enc responses
+    else if (this.encKey && isRecord(resp) && resp["_enc"]) {
       try {
         resp = decryptResponse(this.encKey, resp);
       } catch {
-        // Decryption failed — treat as error
         const respId = isRecord(resp) ? resp["id"] : undefined;
         const pendingId = typeof respId === "string" ? respId : "";
         const p = this.pending.get(pendingId);
@@ -185,7 +293,14 @@ class RemoteClient implements OrkaService {
           req.traceparent = traceCarrier.traceparent;
         }
 
-        // Encrypt params if E2E is enabled
+        // Noise transport: encrypt entire RPC message
+        if (this.noiseTransport?.isSecure) {
+          const frame = this.noiseTransport.encryptRpc(req);
+          this.ws!.send(JSON.stringify(frame));
+          return;
+        }
+
+        // Legacy encryption: encrypt params only
         if (this.encKey && req.params) {
           req = encryptRequest(this.encKey, req);
         }
@@ -197,6 +312,7 @@ class RemoteClient implements OrkaService {
 
   close(): void {
     this.ws?.close();
+    this.noiseTransport = null;
   }
 
   // --- OrkaService ---

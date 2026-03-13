@@ -1,30 +1,23 @@
 /**
  * E2E encryption for orka CLI ↔ daemon communication.
  *
- * Design:
- *   - Static X25519 ECDH key exchange with deterministic salt derived from both public keys
- *   - AES-256-GCM for symmetric encryption of JSON-RPC params/result
- *   - Envelope fields (jsonrpc, id, method, node, traceparent) remain plaintext for relay routing
- *   - Only `params` (request) and `result`/`error.data` (response) are encrypted
- *   - User-owned keys — relay operator has zero access to payload content
+ * Current implementation uses Noise_NK transport protocol:
+ *   - Noise NK pattern with X25519 + ChaCha20-Poly1305 + SHA-256
+ *   - Full handshake establishes a secure channel with forward secrecy per session
+ *   - Entire JSON-RPC messages are encrypted (not just params/result)
+ *   - Keys stored at ~/.orka/keys/ as raw 32-byte X25519 keys (base64url)
  *
- * Security properties:
- *   - The same keypair pair always derives the same symmetric key for every connection,
- *     because the salt is deterministic (concatenation of both public keys).
- *   - Provides confidentiality against passive observers but NOT forward secrecy.
- *   - If a private key is compromised, all past sessions between that keypair pair
- *     can be decrypted.
+ * Legacy support:
+ *   - Old X25519 ECDH + AES-256-GCM encryption is still supported for backward
+ *     compatibility during the transition period. Old keys are DER-encoded.
+ *   - Server detects the protocol from the first WS message:
+ *     - {"t":"client_hello",...} → Noise NK path
+ *     - JSON-RPC with _enc field → legacy path
  *
  * Key management:
- *   - User generates a persistent identity keypair (stored in ~/.orka/keys/)
- *   - Daemon node has its own keypair
- *   - Public keys exchanged out-of-band (config) or via relay (relay sees only pubkeys)
- *   - Shared secret is derived once per keypair pair via static ECDH (not per-connection)
- *
- * Post-quantum readiness:
- *   - Current: X25519 + AES-256-GCM (standard, fast, well-supported)
- *   - Future: Hybrid X25519+Kyber768 when liboqs/mlkem bindings are stable in Bun
- *   - The encrypted envelope format includes a `cipher` field for algorithm negotiation
+ *   - Raw 32-byte X25519 keys (base64url) for Noise transport
+ *   - key_id = "sha256:" + hex(SHA-256(publicKey)) for server identity verification
+ *   - Server exposes publicKey and keyId via /health endpoint
  */
 
 import {
@@ -45,6 +38,10 @@ export interface KeyPair {
   privateKey: string;  // base64-encoded raw private key
 }
 
+/**
+ * Generate a legacy DER-encoded X25519 keypair.
+ * @deprecated Use generateNoiseKeyPair() for new Noise transport keys.
+ */
 export function generateKeyPair(): KeyPair {
   const { publicKey, privateKey } = generateKeyPairSync("x25519", {
     publicKeyEncoding: { type: "spki", format: "der" },
@@ -77,12 +74,7 @@ function deriveSharedSecret(myPrivateKeyB64: string, theirPublicKeyB64: string):
 
 /**
  * Derive an AES-256 encryption key from the ECDH shared secret using HKDF.
- *
- * NOTE: When called with a deterministic salt (as in current usage, where salt is
- * derived from both public keys), the same keypair pair always produces the same
- * symmetric key. The `sessionSalt` parameter accepts an optional explicit salt;
- * if omitted, a random salt is generated, but current callers always pass a
- * deterministic value.
+ * @deprecated Used by legacy encryption path only.
  */
 export function deriveSessionKey(
   myPrivateKey: string,
@@ -147,11 +139,12 @@ export function decrypt(key: Buffer, payload: EncryptedPayload): string {
   return decrypted.toString("utf-8");
 }
 
-// --- Encrypted Envelope ---
+// --- Encrypted Envelope (legacy) ---
 
 /**
  * Encrypt a JSON-RPC request's params field in-place.
  * The envelope (jsonrpc, id, method, node, traceparent) stays plaintext for relay routing.
+ * @deprecated Used by legacy encryption path only. Noise transport encrypts entire messages.
  */
 export function encryptRequest(key: Buffer, request: any): any {
   if (!request.params) return request;
@@ -165,6 +158,7 @@ export function encryptRequest(key: Buffer, request: any): any {
 
 /**
  * Decrypt a JSON-RPC request's params from _enc field.
+ * @deprecated Used by legacy encryption path only.
  */
 export function decryptRequest(key: Buffer, request: any): any {
   if (!request._enc) return request;
@@ -178,6 +172,7 @@ export function decryptRequest(key: Buffer, request: any): any {
 
 /**
  * Encrypt a JSON-RPC response's result (or error.data) field.
+ * @deprecated Used by legacy encryption path only.
  */
 export function encryptResponse(key: Buffer, response: any): any {
   if (response.result !== undefined) {
@@ -193,6 +188,7 @@ export function encryptResponse(key: Buffer, response: any): any {
 
 /**
  * Decrypt a JSON-RPC response's result from _enc field.
+ * @deprecated Used by legacy encryption path only.
  */
 export function decryptResponse(key: Buffer, response: any): any {
   if (!response._enc) return response;
@@ -244,6 +240,7 @@ export function loadPublicKey(orkaHome: string, name: string): string | null {
 /**
  * Ensure a keypair exists for the given identity name.
  * Generates one if it doesn't exist. Returns the keypair.
+ * @deprecated Use ensureNoiseKeyPair() for Noise transport keys.
  */
 export function ensureKeyPair(orkaHome: string, name: string): KeyPair {
   const existing = loadKeyPair(orkaHome, name);
@@ -251,4 +248,104 @@ export function ensureKeyPair(orkaHome: string, name: string): KeyPair {
   const kp = generateKeyPair();
   saveKeyPair(orkaHome, name, kp);
   return kp;
+}
+
+// --- Noise Transport Key Management ---
+// Raw 32-byte X25519 keys stored as base64url, compatible with @noble/curves.
+// Key files use ".noise.pub" and ".noise.key" suffixes to coexist with legacy keys.
+
+import { generateX25519KeyPair } from "./crypto/noise";
+import { computeKeyId } from "./transport/noise-transport";
+
+export interface NoiseKeyInfo {
+  /** Raw 32-byte public key as Uint8Array */
+  publicKey: Uint8Array;
+  /** Raw 32-byte private key as Uint8Array */
+  privateKey: Uint8Array;
+  /** key_id = "sha256:" + hex(SHA-256(publicKey)) */
+  keyId: string;
+  /** base64url-encoded public key (for storage/display) */
+  publicKeyB64: string;
+}
+
+/**
+ * Generate a new raw X25519 keypair for Noise transport.
+ */
+export function generateNoiseKeyPair(): NoiseKeyInfo {
+  const kp = generateX25519KeyPair();
+  return {
+    publicKey: kp.publicKey,
+    privateKey: kp.privateKey,
+    keyId: computeKeyId(kp.publicKey),
+    publicKeyB64: Buffer.from(kp.publicKey).toString("base64url"),
+  };
+}
+
+/**
+ * Save a Noise keypair to disk.
+ * Files: <name>.noise.pub (base64url public key) and <name>.noise.key (base64url private key).
+ */
+export function saveNoiseKeyPair(orkaHome: string, name: string, info: NoiseKeyInfo): void {
+  const dir = getKeysDir(orkaHome);
+  const pubB64 = Buffer.from(info.publicKey).toString("base64url");
+  const privB64 = Buffer.from(info.privateKey).toString("base64url");
+  writeFileSync(join(dir, `${name}.noise.pub`), pubB64, { mode: 0o644 });
+  writeFileSync(join(dir, `${name}.noise.key`), privB64, { mode: 0o600 });
+}
+
+/**
+ * Load a Noise keypair from disk.
+ */
+export function loadNoiseKeyPair(orkaHome: string, name: string): NoiseKeyInfo | null {
+  const dir = getKeysDir(orkaHome);
+  const pubPath = join(dir, `${name}.noise.pub`);
+  const keyPath = join(dir, `${name}.noise.key`);
+  if (!existsSync(pubPath) || !existsSync(keyPath)) return null;
+  const pubB64 = readFileSync(pubPath, "utf-8").trim();
+  const privB64 = readFileSync(keyPath, "utf-8").trim();
+  const publicKey = new Uint8Array(Buffer.from(pubB64, "base64url"));
+  const privateKey = new Uint8Array(Buffer.from(privB64, "base64url"));
+  return {
+    publicKey,
+    privateKey,
+    keyId: computeKeyId(publicKey),
+    publicKeyB64: pubB64,
+  };
+}
+
+/**
+ * Load just the Noise public key from disk (e.g. for saved server key).
+ */
+export function loadNoisePublicKey(orkaHome: string, name: string): NoiseKeyInfo | null {
+  const dir = getKeysDir(orkaHome);
+  const pubPath = join(dir, `${name}.noise.pub`);
+  if (!existsSync(pubPath)) return null;
+  const pubB64 = readFileSync(pubPath, "utf-8").trim();
+  const publicKey = new Uint8Array(Buffer.from(pubB64, "base64url"));
+  return {
+    publicKey,
+    privateKey: new Uint8Array(0), // not available for public-key-only loads
+    keyId: computeKeyId(publicKey),
+    publicKeyB64: pubB64,
+  };
+}
+
+/**
+ * Ensure a Noise keypair exists for the given identity name.
+ * Generates one if it doesn't exist. Returns the key info.
+ */
+export function ensureNoiseKeyPair(orkaHome: string, name: string): NoiseKeyInfo {
+  const existing = loadNoiseKeyPair(orkaHome, name);
+  if (existing) return existing;
+  const info = generateNoiseKeyPair();
+  saveNoiseKeyPair(orkaHome, name, info);
+  return info;
+}
+
+/**
+ * Save a remote server's Noise public key for later use.
+ */
+export function saveNoiseServerPublicKey(orkaHome: string, pubB64: string): void {
+  const dir = getKeysDir(orkaHome);
+  writeFileSync(join(dir, "server.noise.pub"), pubB64, { mode: 0o644 });
 }

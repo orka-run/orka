@@ -55,14 +55,19 @@ describe("startServer", () => {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {
         resume: false,
-        encryption: "x25519-aes256gcm",
+        encryption: "noise-nk",
         multiTurn: true,
         adapters: ["claude-code", "codex", "shell"],
         maxConcurrent: 4,
         terminal: true,
       },
     });
+    // Noise transport: publicKey is base64url raw X25519 public key
     expect(body.publicKey).toEqual(expect.any(String));
+    // key_id is "sha256:<hex>"
+    expect((body as any).keyId).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}$/));
+    // nodeId is exposed
+    expect((body as any).nodeId).toEqual(expect.any(String));
   });
 
   test("pushes protocol metadata and capabilities in server.welcome", async () => {

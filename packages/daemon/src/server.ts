@@ -1,6 +1,5 @@
 import type {
   OrkaService,
-  KeyPair,
   ServerCapabilities,
   ServerWelcomeData,
 } from "@orka/core";
@@ -10,8 +9,9 @@ import {
   PushControlRequestSchema,
   ReconnectStrategy,
 } from "@orka/core";
-import type { PushChannel } from "@orka/core";
-import { deriveSessionKey, ensureKeyPair } from "@orka/core/crypto";
+import type { PushChannel, DataFrame } from "@orka/core";
+import { deriveSessionKey, ensureKeyPair, ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
+import { NoiseServerTransport } from "@orka/core/transport/noise-transport";
 import daemonPackageJson from "../package.json";
 import { getConfig, type OrkaConfig } from "./config";
 import { GracefulShutdown } from "./graceful-shutdown";
@@ -36,7 +36,12 @@ export interface ServerOptions {
 }
 
 interface ServerWebSocketData {
+  /** Legacy AES-GCM encryption key (old path) */
   encKey?: Buffer;
+  /** Noise transport instance (new path) */
+  noiseTransport?: NoiseServerTransport;
+  /** Whether the first message has been received (for protocol detection) */
+  firstMessageReceived?: boolean;
 }
 
 export const gracefulShutdown = new GracefulShutdown();
@@ -44,7 +49,7 @@ export const gracefulShutdown = new GracefulShutdown();
 export function buildCapabilities(config: OrkaConfig, encrypt?: boolean): ServerCapabilities {
   return {
     resume: false,
-    encryption: encrypt ? "x25519-aes256gcm" : false,
+    encryption: encrypt ? "noise-nk" : false,
     multiTurn: true,
     adapters: providerAdapterRegistry.list(),
     maxConcurrent: config.limits.maxConcurrent,
@@ -61,13 +66,18 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
   return withSpan("orka.server.start", {}, async () => {
     void orchestrationEngine;
 
-    // Load or generate node keypair for E2E encryption
-    let nodeKeyPair: KeyPair | undefined;
+    // Load or generate Noise keypair for E2E encryption
+    let noiseKeyInfo: NoiseKeyInfo | undefined;
+    // Also keep legacy keypair for backward compatibility
+    let legacyKeyPair: { publicKey: string; privateKey: string } | undefined;
     if (opts.encrypt) {
-      nodeKeyPair = ensureKeyPair(getOrkaHome(), "node");
-      console.log(`E2E encryption enabled (node pubkey: ${nodeKeyPair.publicKey.slice(0, 20)}...)`);
+      noiseKeyInfo = ensureNoiseKeyPair(getOrkaHome(), "node");
+      // Also ensure legacy keypair exists for backward compat
+      legacyKeyPair = ensureKeyPair(getOrkaHome(), "node");
+      console.log(`E2E encryption enabled (noise key_id: ${noiseKeyInfo.keyId.slice(0, 30)}...)`);
     }
     const capabilities = buildCapabilities(getConfig(), opts.encrypt);
+    const nodeId = opts.nodeId ?? `${opts.hostname ?? "127.0.0.1"}:${opts.port}`;
 
     const server = Bun.serve<ServerWebSocketData>({
       port: opts.port,
@@ -76,7 +86,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
       async fetch(req, server) {
         const url = new URL(req.url);
 
-        // Health check endpoint — includes public key for client discovery
+        // Health check endpoint — includes public key and key_id for client discovery
         if (url.pathname === "/health") {
           const body: Record<string, unknown> = {
             status: "ok",
@@ -84,7 +94,15 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             protocolVersion: PROTOCOL_VERSION,
             capabilities,
           };
-          if (nodeKeyPair) body["publicKey"] = nodeKeyPair.publicKey;
+          if (noiseKeyInfo) {
+            body["publicKey"] = noiseKeyInfo.publicKeyB64;
+            body["keyId"] = noiseKeyInfo.keyId;
+            body["nodeId"] = nodeId;
+          }
+          // Also expose legacy public key for backward compat
+          if (legacyKeyPair) {
+            body["legacyPublicKey"] = legacyKeyPair.publicKey;
+          }
           return new Response(JSON.stringify(body), {
             headers: { "content-type": "application/json" },
           });
@@ -125,17 +143,17 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
           return new Response("ok");
         }
 
-        // Derive per-connection encryption key from client's public key
+        // Derive per-connection legacy encryption key from client's public key (backward compat)
         let encKey: Buffer | undefined;
-        if (nodeKeyPair) {
+        if (legacyKeyPair) {
           const clientPubKey = url.searchParams.get("pubkey");
           if (clientPubKey) {
-            const salt = Buffer.from(clientPubKey + nodeKeyPair.publicKey).toString("base64").slice(0, 44);
-            encKey = await deriveSessionKey(nodeKeyPair.privateKey, clientPubKey, salt);
+            const salt = Buffer.from(clientPubKey + legacyKeyPair.publicKey).toString("base64").slice(0, 44);
+            encKey = await deriveSessionKey(legacyKeyPair.privateKey, clientPubKey, salt);
           }
         }
 
-        // Upgrade to WebSocket, pass encKey as data
+        // Upgrade to WebSocket
         if (server.upgrade(req, { data: encKey ? { encKey } : {} })) {
           return undefined;
         }
@@ -152,6 +170,124 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             parsed = undefined;
           }
 
+          // --- Noise transport: handshake or encrypted data ---
+          if (ws.data.noiseTransport) {
+            const transport = ws.data.noiseTransport;
+
+            if (transport.isSecure) {
+              // SECURE state: decrypt incoming data frame, process RPC, encrypt response
+              const frame = parsed as DataFrame;
+              if (!frame || frame.t !== "data" || typeof frame.ct !== "string") {
+                // Not a data frame — could be a push control message sent in cleartext
+                // after the secure channel is established. Drop it.
+                return;
+              }
+
+              let rpc: Record<string, unknown>;
+              try {
+                rpc = transport.decryptData(frame);
+              } catch {
+                ws.send(JSON.stringify({
+                  t: "transport_error",
+                  code: "decrypt_error",
+                }));
+                return;
+              }
+
+              // Handle push control messages that were encrypted
+              const controlMessage = PushControlRequestSchema.safeParse(rpc);
+              if (controlMessage.success) {
+                const knownChannels = controlMessage.data.channels.filter(
+                  (ch): ch is PushChannel => PushChannelSchema.safeParse(ch).success,
+                );
+                if (controlMessage.data.type === "subscribe") {
+                  pushHub.subscribe(ws, knownChannels);
+                } else {
+                  pushHub.unsubscribe(ws, knownChannels);
+                }
+                return;
+              }
+
+              // Reject spawn requests during shutdown
+              if (gracefulShutdown.shuttingDown) {
+                const req = rpc as { id?: unknown; method?: string };
+                if (req?.method === "spawn") {
+                  const errResponse: Record<string, unknown> = {
+                    jsonrpc: "2.0",
+                    id: req.id ?? null,
+                    error: { code: -32000, message: "Server shutting down" },
+                  };
+                  const encFrame = transport.encryptRpc(errResponse);
+                  ws.send(JSON.stringify(encFrame));
+                  return;
+                }
+              }
+
+              // Process RPC (no encKey - Noise handles encryption at the transport layer)
+              const responseStr = await handleRpcRequest(svc, JSON.stringify(rpc));
+              const responseObj = JSON.parse(responseStr) as Record<string, unknown>;
+              const encFrame = transport.encryptRpc(responseObj);
+              ws.send(JSON.stringify(encFrame));
+              return;
+            }
+
+            // Not yet SECURE — still in handshake phase
+            const responses = transport.processMessage(parsed);
+            for (const resp of responses) {
+              ws.send(JSON.stringify(resp));
+            }
+
+            // If we just reached SECURE state, send the welcome message encrypted
+            if (transport.isSecure) {
+              void withSpan("orka.push.welcome", {}, async () => {
+                const sessions = await svc.listSessions();
+                const welcome: ServerWelcomeData = {
+                  serverVersion: daemonPackageJson.version,
+                  sessionCount: sessions.length,
+                  protocolVersion: PROTOCOL_VERSION,
+                  capabilities,
+                };
+                // Send welcome as an encrypted push frame
+                const pushEnvelope = {
+                  type: "push",
+                  channel: "server.welcome",
+                  sequence: 1,
+                  data: welcome,
+                };
+                const encWelcome = transport.encryptRpc(pushEnvelope);
+                ws.send(JSON.stringify(encWelcome));
+              });
+            }
+            return;
+          }
+
+          // --- First message: detect protocol ---
+          if (!ws.data.firstMessageReceived && noiseKeyInfo && parsed && typeof parsed === "object") {
+            const msg = parsed as Record<string, unknown>;
+            if (msg["t"] === "client_hello") {
+              // New Noise transport path
+              ws.data.firstMessageReceived = true;
+              const transport = new NoiseServerTransport({
+                nodeId,
+                keyId: noiseKeyInfo.keyId,
+                staticKeypair: {
+                  publicKey: noiseKeyInfo.publicKey,
+                  privateKey: noiseKeyInfo.privateKey,
+                },
+                relayOrigin: opts.relayUrl ?? "",
+              });
+              ws.data.noiseTransport = transport;
+
+              const responses = transport.processMessage(parsed);
+              for (const resp of responses) {
+                ws.send(JSON.stringify(resp));
+              }
+              return;
+            }
+          }
+          ws.data.firstMessageReceived = true;
+
+          // --- Legacy path (unencrypted or old AES-GCM encryption) ---
           const controlMessage = PushControlRequestSchema.safeParse(parsed);
           if (controlMessage.success) {
             const knownChannels = controlMessage.data.channels.filter(
@@ -186,6 +322,11 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
 
         open(ws) {
           getDaemonMetrics().wsConnections.add(1);
+          // Always send welcome immediately for all connections.
+          // Noise clients will ignore this during the handshake phase (they filter
+          // by "t" field and skip messages without it). After the Noise handshake
+          // completes, the server also sends an encrypted welcome through the secure
+          // channel, which the client can verify.
           void withSpan("orka.push.welcome", {}, async () => {
             const sessions = await svc.listSessions();
             const welcome: ServerWelcomeData = {
@@ -228,7 +369,6 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
 
     // Register with relay if configured
     if (opts.relayUrl) {
-      const nodeId = opts.nodeId ?? `${opts.hostname ?? "127.0.0.1"}:${server.port}`;
       registerWithRelay(svc, opts.relayUrl, nodeId, opts.relayToken);
     }
 
