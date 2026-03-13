@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { z } from "zod/v4";
 
 // --- IDs ---
@@ -8,7 +7,10 @@ export type TaskId = string;
 export type WorkspaceId = string;
 
 export function generateId(prefix: string): string {
-  return `${prefix}-${randomBytes(4).toString("hex")}`;
+  const bytes = new Uint8Array(4);
+  globalThis.crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${prefix}-${hex}`;
 }
 
 // --- Enums ---
