@@ -65,6 +65,9 @@ export class WsTransport {
   private shouldReconnect = false;
   private connectionSpan: Span | null = null;
   private connectionStartedAt = 0;
+  private messagesSent = 0;
+  private messagesReceived = 0;
+  private connectStartedAt = 0;
 
   constructor(
     private url: string,
@@ -91,6 +94,9 @@ export class WsTransport {
     }
 
     this.beginConnectionSpan();
+    this.messagesSent = 0;
+    this.messagesReceived = 0;
+    this.connectStartedAt = now();
     const ws = new WebSocket(this.url);
     this.ws = ws;
 
@@ -99,7 +105,11 @@ export class WsTransport {
         return;
       }
 
-      this.connectionSpan?.addEvent("ws.connected");
+      const connectDurationMs = Math.round(now() - this.connectStartedAt);
+      this.connectionSpan?.addEvent("ws.connected", {
+        "ws.connect_duration_ms": connectDurationMs,
+      });
+      this.connectionSpan?.setAttribute("ws.connect_duration_ms", connectDurationMs);
       this.reconnectDelay = 500;
       this.reconnectAttempts = 0;
       this.setState("connected");
@@ -108,14 +118,29 @@ export class WsTransport {
     };
 
     ws.onmessage = (event) => {
+      this.messagesReceived++;
       this.handleMessage(typeof event.data === "string" ? event.data : "");
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (this.ws === ws) {
         this.ws = null;
       }
-      this.connectionSpan?.addEvent("ws.closed");
+      const isAbnormal = event.code !== 1000 && event.code !== 1005;
+      this.connectionSpan?.addEvent("ws.closed", {
+        "ws.close_code": event.code,
+        "ws.close_reason": event.reason || "",
+        "ws.close_was_clean": event.wasClean,
+      });
+      this.connectionSpan?.setAttribute("ws.messages_sent", this.messagesSent);
+      this.connectionSpan?.setAttribute("ws.messages_received", this.messagesReceived);
+      this.connectionSpan?.setAttribute("ws.close_code", event.code);
+      if (isAbnormal) {
+        this.connectionSpan?.setStatus({
+          code: 2 /* ERROR */,
+          message: `WebSocket closed abnormally (code=${event.code}${event.reason ? `, reason=${event.reason}` : ""})`,
+        });
+      }
       this.handleClose();
     };
 
@@ -487,6 +512,7 @@ export class WsTransport {
       return;
     }
 
+    this.messagesSent++;
     this.ws.send(payload);
     const pending = this.pending.get(id);
     if (pending) {
@@ -500,6 +526,7 @@ export class WsTransport {
       return;
     }
 
+    this.messagesSent++;
     this.ws.send(JSON.stringify({ type, channels }));
   }
 
