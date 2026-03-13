@@ -6,8 +6,8 @@
   "types": "src/index.ts",
   "dependencies": {
     "@orka/core": "workspace:*",
-    "@noble/ciphers": "^1.0.0",
-    "@noble/hashes": "^1.0.0",
+    "@noble/ciphers": "^2.1.1",
+    "@noble/hashes": "^2.0.1",
     "@opentelemetry/sdk-metrics": "^2.6.0",
     "node-pty": "^1.1.0",
     "smol-toml": "^1.6.0"
