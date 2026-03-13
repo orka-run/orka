@@ -6,10 +6,12 @@ import type {
 } from "@orka/core";
 import {
   PROTOCOL_VERSION,
+  PushChannelSchema,
   PushControlRequestSchema,
   ReconnectStrategy,
 } from "@orka/core";
-import { deriveSessionKey, ensureKeyPair, loadKeyPair } from "@orka/core/crypto";
+import type { PushChannel } from "@orka/core";
+import { deriveSessionKey, ensureKeyPair } from "@orka/core/crypto";
 import daemonPackageJson from "../package.json";
 import { getConfig, type OrkaConfig } from "./config";
 import { GracefulShutdown } from "./graceful-shutdown";
@@ -39,10 +41,10 @@ interface ServerWebSocketData {
 
 export const gracefulShutdown = new GracefulShutdown();
 
-export function buildCapabilities(config: OrkaConfig): ServerCapabilities {
+export function buildCapabilities(config: OrkaConfig, encrypt?: boolean): ServerCapabilities {
   return {
     resume: false,
-    encryption: loadKeyPair(getOrkaHome(), "node") ? "x25519-aes256gcm" : false,
+    encryption: encrypt ? "x25519-aes256gcm" : false,
     multiTurn: true,
     adapters: providerAdapterRegistry.list(),
     maxConcurrent: config.limits.maxConcurrent,
@@ -65,7 +67,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
       nodeKeyPair = ensureKeyPair(getOrkaHome(), "node");
       console.log(`E2E encryption enabled (node pubkey: ${nodeKeyPair.publicKey.slice(0, 20)}...)`);
     }
-    const capabilities = buildCapabilities(getConfig());
+    const capabilities = buildCapabilities(getConfig(), opts.encrypt);
 
     const server = Bun.serve<ServerWebSocketData>({
       port: opts.port,
@@ -78,6 +80,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
         if (url.pathname === "/health") {
           const body: Record<string, unknown> = {
             status: "ok",
+            serverVersion: daemonPackageJson.version,
             protocolVersion: PROTOCOL_VERSION,
             capabilities,
           };
@@ -151,10 +154,13 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
 
           const controlMessage = PushControlRequestSchema.safeParse(parsed);
           if (controlMessage.success) {
+            const knownChannels = controlMessage.data.channels.filter(
+              (ch): ch is PushChannel => PushChannelSchema.safeParse(ch).success,
+            );
             if (controlMessage.data.type === "subscribe") {
-              pushHub.subscribe(ws, controlMessage.data.channels);
+              pushHub.subscribe(ws, knownChannels);
             } else {
-              pushHub.unsubscribe(ws, controlMessage.data.channels);
+              pushHub.unsubscribe(ws, knownChannels);
             }
             return;
           }
