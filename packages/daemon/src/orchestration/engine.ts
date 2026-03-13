@@ -6,6 +6,7 @@ import type {
   SessionProjection,
   SessionStatus,
 } from "@orka/core";
+import { isKnownRuntimeSessionState } from "@orka/core";
 import type { PushHub } from "../push-hub";
 import { withSpanSync } from "../tracing";
 import { mapProviderEvent } from "./ingestion";
@@ -282,6 +283,10 @@ function isTerminalStatus(status: SessionStatus): boolean {
 }
 
 function mapRuntimeState(state: RuntimeSessionState, currentStatus: SessionStatus): SessionStatus {
+  if (!isKnownRuntimeSessionState(state)) {
+    return currentStatus;
+  }
+
   switch (state) {
     case "starting":
     case "ready":
@@ -293,6 +298,8 @@ function mapRuntimeState(state: RuntimeSessionState, currentStatus: SessionStatu
       return currentStatus;
     case "error":
       return "failed";
+    default:
+      return currentStatus;
   }
 }
 

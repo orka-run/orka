@@ -7,7 +7,7 @@ import { BackendKindSchema, generateId, type BackendKind } from "./types";
 export const ProviderKindSchema = BackendKindSchema;
 export type ProviderKind = BackendKind;
 
-export const CanonicalItemTypeSchema = z.enum([
+export const KnownCanonicalItemTypeSchema = z.enum([
   "user_message",
   "assistant_message",
   "reasoning",
@@ -21,34 +21,64 @@ export const CanonicalItemTypeSchema = z.enum([
   "error",
   "unknown",
 ]);
+export type KnownCanonicalItemType = z.infer<typeof KnownCanonicalItemTypeSchema>;
+export const CanonicalItemTypeSchema = KnownCanonicalItemTypeSchema.or(z.string());
 export type CanonicalItemType = z.infer<typeof CanonicalItemTypeSchema>;
+export function isKnownCanonicalItemType(v: string): v is KnownCanonicalItemType {
+  return KnownCanonicalItemTypeSchema.safeParse(v).success;
+}
 
-export const CanonicalRequestTypeSchema = z.enum([
+export const KnownCanonicalRequestTypeSchema = z.enum([
   "command_execution_approval",
   "file_read_approval",
   "file_change_approval",
   "tool_user_input",
   "unknown",
 ]);
+export type KnownCanonicalRequestType = z.infer<typeof KnownCanonicalRequestTypeSchema>;
+export const CanonicalRequestTypeSchema = KnownCanonicalRequestTypeSchema.or(z.string());
 export type CanonicalRequestType = z.infer<typeof CanonicalRequestTypeSchema>;
+export function isKnownCanonicalRequestType(v: string): v is KnownCanonicalRequestType {
+  return KnownCanonicalRequestTypeSchema.safeParse(v).success;
+}
 
-export const RuntimeSessionStateSchema = z.enum(["starting", "ready", "running", "waiting", "stopped", "error"]);
+export const KnownRuntimeSessionStateSchema = z.enum(["starting", "ready", "running", "waiting", "stopped", "error"]);
+export type KnownRuntimeSessionState = z.infer<typeof KnownRuntimeSessionStateSchema>;
+export const RuntimeSessionStateSchema = KnownRuntimeSessionStateSchema.or(z.string());
 export type RuntimeSessionState = z.infer<typeof RuntimeSessionStateSchema>;
+export function isKnownRuntimeSessionState(v: string): v is KnownRuntimeSessionState {
+  return KnownRuntimeSessionStateSchema.safeParse(v).success;
+}
 
-export const RuntimeTurnStateSchema = z.enum(["completed", "failed", "interrupted", "cancelled"]);
+export const KnownRuntimeTurnStateSchema = z.enum(["completed", "failed", "interrupted", "cancelled"]);
+export type KnownRuntimeTurnState = z.infer<typeof KnownRuntimeTurnStateSchema>;
+export const RuntimeTurnStateSchema = KnownRuntimeTurnStateSchema.or(z.string());
 export type RuntimeTurnState = z.infer<typeof RuntimeTurnStateSchema>;
+export function isKnownRuntimeTurnState(v: string): v is KnownRuntimeTurnState {
+  return KnownRuntimeTurnStateSchema.safeParse(v).success;
+}
 
-export const RuntimeItemStatusSchema = z.enum(["in_progress", "completed", "failed", "declined"]);
+export const KnownRuntimeItemStatusSchema = z.enum(["in_progress", "completed", "failed", "declined"]);
+export type KnownRuntimeItemStatus = z.infer<typeof KnownRuntimeItemStatusSchema>;
+export const RuntimeItemStatusSchema = KnownRuntimeItemStatusSchema.or(z.string());
 export type RuntimeItemStatus = z.infer<typeof RuntimeItemStatusSchema>;
+export function isKnownRuntimeItemStatus(v: string): v is KnownRuntimeItemStatus {
+  return KnownRuntimeItemStatusSchema.safeParse(v).success;
+}
 
-export const RuntimeContentStreamKindSchema = z.enum([
+export const KnownRuntimeContentStreamKindSchema = z.enum([
   "assistant_text",
   "reasoning_text",
   "command_output",
   "file_change_output",
   "unknown",
 ]);
+export type KnownRuntimeContentStreamKind = z.infer<typeof KnownRuntimeContentStreamKindSchema>;
+export const RuntimeContentStreamKindSchema = KnownRuntimeContentStreamKindSchema.or(z.string());
 export type RuntimeContentStreamKind = z.infer<typeof RuntimeContentStreamKindSchema>;
+export function isKnownRuntimeContentStreamKind(v: string): v is KnownRuntimeContentStreamKind {
+  return KnownRuntimeContentStreamKindSchema.safeParse(v).success;
+}
 
 export interface ProviderRuntimeEventBase {
   eventId: string;
