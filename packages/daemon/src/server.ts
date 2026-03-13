@@ -1,17 +1,21 @@
 import type {
   OrkaService,
   KeyPair,
+  ServerCapabilities,
   ServerWelcomeData,
 } from "@orka/core";
 import {
   deriveSessionKey,
   ensureKeyPair,
+  loadKeyPair,
+  PROTOCOL_VERSION,
   PushControlRequestSchema,
   ReconnectStrategy,
 } from "@orka/core";
 import daemonPackageJson from "../package.json";
+import { getConfig, type OrkaConfig } from "./config";
 import { GracefulShutdown } from "./graceful-shutdown";
-import { orchestrationEngine } from "./provider-runtime";
+import { orchestrationEngine, providerAdapterRegistry } from "./provider-runtime";
 import { pushHub } from "./push";
 import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
@@ -37,6 +41,17 @@ interface ServerWebSocketData {
 
 export const gracefulShutdown = new GracefulShutdown();
 
+export function buildCapabilities(config: OrkaConfig): ServerCapabilities {
+  return {
+    resume: false,
+    encryption: loadKeyPair(getOrkaHome(), "node") ? "x25519-aes256gcm" : false,
+    multiTurn: true,
+    adapters: providerAdapterRegistry.list(),
+    maxConcurrent: config.limits.maxConcurrent,
+    terminal: true,
+  };
+}
+
 /**
  * Start the orka daemon WS server.
  * Accepts WebSocket connections, dispatches JSON-RPC to the OrkaService.
@@ -52,6 +67,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
       nodeKeyPair = ensureKeyPair(getOrkaHome(), "node");
       console.log(`E2E encryption enabled (node pubkey: ${nodeKeyPair.publicKey.slice(0, 20)}...)`);
     }
+    const capabilities = buildCapabilities(getConfig());
 
     const server = Bun.serve<ServerWebSocketData>({
       port: opts.port,
@@ -62,8 +78,12 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
 
         // Health check endpoint — includes public key for client discovery
         if (url.pathname === "/health") {
-          const body: any = { status: "ok" };
-          if (nodeKeyPair) body.publicKey = nodeKeyPair.publicKey;
+          const body: Record<string, unknown> = {
+            status: "ok",
+            protocolVersion: PROTOCOL_VERSION,
+            capabilities,
+          };
+          if (nodeKeyPair) body["publicKey"] = nodeKeyPair.publicKey;
           return new Response(JSON.stringify(body), {
             headers: { "content-type": "application/json" },
           });
@@ -167,6 +187,8 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             const welcome: ServerWelcomeData = {
               serverVersion: daemonPackageJson.version,
               sessionCount: sessions.length,
+              protocolVersion: PROTOCOL_VERSION,
+              capabilities,
             };
             pushHub.send(ws, "server.welcome", welcome);
           });

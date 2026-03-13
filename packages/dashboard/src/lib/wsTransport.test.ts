@@ -398,7 +398,19 @@ describe("WsTransport", () => {
       type: "push",
       channel: "server.welcome",
       sequence: 7,
-      data: { serverVersion: "0.0.1", sessionCount: 2 },
+      data: {
+        serverVersion: "0.0.1",
+        sessionCount: 2,
+        protocolVersion: 1,
+        capabilities: {
+          resume: false,
+          encryption: false,
+          multiTurn: true,
+          adapters: ["claude-code", "codex", "shell"],
+          maxConcurrent: 0,
+          terminal: true,
+        },
+      },
     });
 
     const received: Array<{ data: unknown; sequence: number }> = [];
@@ -408,7 +420,19 @@ describe("WsTransport", () => {
 
     expect(received).toEqual([
       {
-        data: { serverVersion: "0.0.1", sessionCount: 2 },
+        data: {
+          serverVersion: "0.0.1",
+          sessionCount: 2,
+          protocolVersion: 1,
+          capabilities: {
+            resume: false,
+            encryption: false,
+            multiTurn: true,
+            adapters: ["claude-code", "codex", "shell"],
+            maxConcurrent: 0,
+            terminal: true,
+          },
+        },
         sequence: 7,
       },
     ]);
