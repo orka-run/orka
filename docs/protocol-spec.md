@@ -112,7 +112,7 @@ Methods are grouped by domain. All parameters use named fields (not positional).
 |--------|--------|---------|-------|
 | `spawn` | `SpawnParams` | `Session` | Start a new agent session |
 | `stop` | `{ sessionId }` | `void` | Graceful stop |
-| `reap` | — | `void` | Clean up zombie sessions |
+| `reap` | — | `number` | Clean up zombie sessions, returns count |
 | `sendTurn` | `{ sessionId, text }` | `void` | Send input to interactive session |
 | `backfillSession` | `{ sessionId }` | `void` | Regenerate events from raw log |
 
@@ -146,7 +146,9 @@ Methods are grouped by domain. All parameters use named fields (not positional).
 | `setKept` | `{ sessionId, kept }` | `void` |
 | `merge` | `{ sessionId }` | `MergeResult` |
 | `deleteSessions` | `{ sessionIds }` | `void` |
-| `pruneSessions` | `{ maxAge?, project? }` | `number` |
+| `pruneSessions` | `{ maxAge?, project? }` | `PruneResult` |
+| `archiveSession` | `{ sessionId }` | `void` |
+| `unarchiveSession` | `{ sessionId }` | `void` |
 
 #### Approvals
 
@@ -467,6 +469,15 @@ The relay reads ONLY these fields from JSON-RPC envelopes:
 The relay MUST NOT read, parse, or validate `params`, `result`, or `_enc`.
 This ensures protocol changes never require relay updates.
 
+### 7.4. Method Allowlist
+
+The relay enforces a method allowlist as a service-level security boundary.
+Only methods in the allowlist are forwarded to nodes; unknown methods receive
+a `-32601` error from the relay itself. The allowlist MUST be updated when
+new RPC methods are added to the protocol. This is a deployment concern,
+not a wire protocol concern — the relay remains transparent at the
+payload level.
+
 ### 7.2. Node Selection
 
 If `node` is specified: route to that node (error if not connected).
@@ -503,7 +514,7 @@ connects directly to the daemon (not via relay) or to the aggregator.
 - Initial protocol definition.
 - JSON-RPC 2.0 over WebSocket.
 - Push protocol with sequence-based gap detection.
-- 16 orchestration event types + `event.passthrough`.
+- 20 orchestration event types + `event.passthrough`.
 - E2E encryption with X25519 + AES-256-GCM.
 - Capability advertisement in `/health` and `server.welcome`.
 
