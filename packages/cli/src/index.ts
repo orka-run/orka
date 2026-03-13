@@ -51,7 +51,7 @@ function enumType<T extends string>(values: readonly T[]): Type<string, T> {
   };
 }
 
-const statusValues = ["running", "completed", "failed", "cancelled", "queued", "preparing"] as const;
+const statusValues = ["running", "completed", "failed", "cancelled", "interrupted", "queued", "preparing"] as const;
 const backendValues = ["claude-code", "codex", "shell"] as const;
 const modeValues = ["interactive", "background"] as const;
 const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
@@ -500,6 +500,7 @@ const psCmd = command({
         case "completed": return c("2", status);
         case "failed": return c("31", status);
         case "cancelled": return c("33", status);
+        case "interrupted": return c("33", status);
         case "preparing": return c("34", status);
         case "queued": return c("34", status);
         default: return status;
@@ -914,7 +915,7 @@ const waitCmd = command({
       fail("usage: orka wait <session-id...> | --all [--project <name>]");
     }
 
-    const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
+    const terminalStatuses = new Set(["completed", "failed", "cancelled", "interrupted"]);
     let targets: string[];
 
     if (all) {

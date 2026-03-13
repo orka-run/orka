@@ -7,7 +7,7 @@ export function getSessionGroup(status: SessionSummary["status"]): SessionGroupK
     return "completed";
   }
 
-  if (status === "failed" || status === "cancelled") {
+  if (status === "failed" || status === "cancelled" || status === "interrupted") {
     return "failed";
   }
 

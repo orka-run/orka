@@ -145,6 +145,7 @@ const STATUS_CONFIG: Record<
   completed: { dotClass: "bg-zinc-500" },
   failed: { dotClass: "bg-red-400", label: "Failed" },
   cancelled: { dotClass: "bg-amber-400" },
+  interrupted: { dotClass: "bg-orange-400", label: "Interrupted" },
 };
 
 function StatusPill({ status }: { status: SessionSummary["status"] }) {

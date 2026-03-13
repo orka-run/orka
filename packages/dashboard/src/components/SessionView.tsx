@@ -24,6 +24,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
   completed: { bg: "bg-emerald-950/60", text: "text-emerald-300", dot: "bg-emerald-400" },
   failed: { bg: "bg-red-950/60", text: "text-red-300", dot: "bg-red-400" },
   cancelled: { bg: "bg-zinc-800/60", text: "text-zinc-400", dot: "bg-zinc-500" },
+  interrupted: { bg: "bg-orange-950/60", text: "text-orange-300", dot: "bg-orange-400" },
 };
 
 const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);

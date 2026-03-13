@@ -276,7 +276,11 @@ export async function reapSessions(): Promise<number> {
           // Worktree may already be gone and diff persistence is best-effort.
         }
         const finishedAt = new Date().toISOString();
-        const nextStatus = exitCode !== undefined && exitCode !== 0 ? "failed" : "completed";
+        const nextStatus = exitCode !== undefined && exitCode !== 0
+          ? "failed"
+          : exitCode === 0
+            ? "completed"
+            : "interrupted";
         updateSessionStatus(s.id, nextStatus, {
           finishedAt,
           ...(exitCode !== undefined ? { exitCode } : {}),
