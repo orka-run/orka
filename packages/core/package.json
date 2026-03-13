@@ -7,5 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./crypto": "./src/crypto.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1"
   }
 }
