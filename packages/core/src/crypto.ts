@@ -2,18 +2,24 @@
  * E2E encryption for orka CLI ↔ daemon communication.
  *
  * Design:
- *   - X25519 ECDH key exchange for shared secret derivation
+ *   - Static X25519 ECDH key exchange with deterministic salt derived from both public keys
  *   - AES-256-GCM for symmetric encryption of JSON-RPC params/result
  *   - Envelope fields (jsonrpc, id, method, node, traceparent) remain plaintext for relay routing
  *   - Only `params` (request) and `result`/`error.data` (response) are encrypted
- *   - Perfect forward secrecy via ephemeral session keys
  *   - User-owned keys — relay operator has zero access to payload content
+ *
+ * Security properties:
+ *   - The same keypair pair always derives the same symmetric key for every connection,
+ *     because the salt is deterministic (concatenation of both public keys).
+ *   - Provides confidentiality against passive observers but NOT forward secrecy.
+ *   - If a private key is compromised, all past sessions between that keypair pair
+ *     can be decrypted.
  *
  * Key management:
  *   - User generates a persistent identity keypair (stored in ~/.orka/keys/)
  *   - Daemon node has its own keypair
  *   - Public keys exchanged out-of-band (config) or via relay (relay sees only pubkeys)
- *   - Each WS session derives ephemeral shared secret from ECDH
+ *   - Shared secret is derived once per keypair pair via static ECDH (not per-connection)
  *
  * Post-quantum readiness:
  *   - Current: X25519 + AES-256-GCM (standard, fast, well-supported)
@@ -71,7 +77,12 @@ function deriveSharedSecret(myPrivateKeyB64: string, theirPublicKeyB64: string):
 
 /**
  * Derive an AES-256 encryption key from the ECDH shared secret using HKDF.
- * The salt ensures different sessions with the same keypairs produce different keys.
+ *
+ * NOTE: When called with a deterministic salt (as in current usage, where salt is
+ * derived from both public keys), the same keypair pair always produces the same
+ * symmetric key. The `sessionSalt` parameter accepts an optional explicit salt;
+ * if omitted, a random salt is generated, but current callers always pass a
+ * deterministic value.
  */
 export function deriveSessionKey(
   myPrivateKey: string,

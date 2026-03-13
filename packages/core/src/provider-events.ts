@@ -161,6 +161,7 @@ export interface RuntimeWarningPayload {
 export interface RuntimeErrorPayload {
   message: string;
   class?: "provider_error" | "transport_error" | "permission_error" | "validation_error" | "unknown";
+  terminal?: boolean;
 }
 
 interface ProviderRuntimeEventEnvelope<TType extends string, TPayload> extends ProviderRuntimeEventBase {
