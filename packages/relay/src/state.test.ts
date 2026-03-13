@@ -139,6 +139,7 @@ describe("RelayState", () => {
         nodeId: "node-1",
         accountId: "acc-1",
         method: "test",
+        requestId: "req-1",
         bytesIn: 100,
         startedAt: Date.now(),
       });
@@ -162,11 +163,11 @@ describe("RelayState", () => {
 
       state.trackRequest("acc-1", "req-1", {
         client: clientWs, nodeId: "node-1", accountId: "acc-1",
-        method: "a", bytesIn: 10, startedAt: Date.now(),
+        method: "a", requestId: "req-1", bytesIn: 10, startedAt: Date.now(),
       });
       state.trackRequest("acc-1", "req-2", {
         client: clientWs, nodeId: "node-1", accountId: "acc-1",
-        method: "b", bytesIn: 20, startedAt: Date.now(),
+        method: "b", requestId: "req-2", bytesIn: 20, startedAt: Date.now(),
       });
 
       const failed = state.failRequestsForNode("acc-1", "node-1");
@@ -183,11 +184,11 @@ describe("RelayState", () => {
 
       state.trackRequest("acc-1", "req-1", {
         client: ws1, nodeId: "node-1", accountId: "acc-1",
-        method: "a", bytesIn: 10, startedAt: Date.now(),
+        method: "a", requestId: "req-1", bytesIn: 10, startedAt: Date.now(),
       });
       state.trackRequest("acc-1", "req-2", {
         client: ws2, nodeId: "node-1", accountId: "acc-1",
-        method: "b", bytesIn: 20, startedAt: Date.now(),
+        method: "b", requestId: "req-2", bytesIn: 20, startedAt: Date.now(),
       });
 
       const removed = state.failRequestsForClient(ws1);
@@ -197,13 +198,49 @@ describe("RelayState", () => {
       expect(state.resolveRequest("acc-1", "req-2")).not.toBeNull();
     });
 
+    test("failRequestsForNode returns PendingRequests with original requestId", () => {
+      const clientWs = mockWs();
+      state.registerNode("acc-1", "node-1", mockWs());
+
+      state.trackRequest("acc-1", "req-1", {
+        client: clientWs, nodeId: "node-1", accountId: "acc-1",
+        method: "getSession", requestId: "req-1", bytesIn: 10, startedAt: Date.now(),
+      });
+      state.trackRequest("acc-1", "req-2", {
+        client: clientWs, nodeId: "node-1", accountId: "acc-1",
+        method: "listSessions", requestId: 42, bytesIn: 20, startedAt: Date.now(),
+      });
+
+      const failed = state.failRequestsForNode("acc-1", "node-1");
+      expect(failed.length).toBe(2);
+
+      const ids = failed.map(pr => pr.requestId).sort();
+      expect(ids).toContain("req-1");
+      expect(ids).toContain(42);
+    });
+
+    test("trackRequest with numeric requestId", () => {
+      const clientWs = mockWs();
+      state.registerNode("acc-1", "node-1", mockWs());
+
+      state.trackRequest("acc-1", "123", {
+        client: clientWs, nodeId: "node-1", accountId: "acc-1",
+        method: "getSession", requestId: 123, bytesIn: 50, startedAt: Date.now(),
+      });
+
+      const pr = state.resolveRequest("acc-1", "123");
+      expect(pr).not.toBeNull();
+      expect(pr!.requestId).toBe(123);
+      expect(pr!.method).toBe("getSession");
+    });
+
     test("failRequestsForClient decrements node activeRequests", () => {
       const ws = mockWs();
       state.registerNode("acc-1", "node-1", mockWs());
 
       state.trackRequest("acc-1", "req-1", {
         client: ws, nodeId: "node-1", accountId: "acc-1",
-        method: "a", bytesIn: 10, startedAt: Date.now(),
+        method: "a", requestId: "req-1", bytesIn: 10, startedAt: Date.now(),
       });
 
       const node = state.getNode("acc-1", "node-1")!;

@@ -32,10 +32,31 @@ import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync
 // --- Allowed Methods (service enforcement) ---
 
 const ALLOWED_METHODS = new Set([
-  "spawn", "stop", "reap", "getSession", "listSessions", "getTask",
-  "setKept", "getTags", "getResult", "captureOutput", "getLogContent",
-  "isAlive", "sendTurn", "getDiff", "merge", "deleteSessions", "pruneSessions",
+  // Session lifecycle
+  "spawn", "stop", "reap",
+  // Queries
+  "getSession", "listSessions", "getChildSessions", "getTask",
+  // Session properties
+  "setKept", "getTags",
+  // Session output
+  "getResult", "getSessionTimeline", "getChatMessages", "getUsage",
+  "captureOutput", "getLogContent", "isAlive", "sendTurn",
+  // Worktree
+  "getDiff", "merge",
+  // Bulk operations
+  "deleteSessions", "pruneSessions",
+  // Archive
   "archiveSession", "unarchiveSession",
+  // Approvals
+  "getPendingApprovals", "resolveApproval",
+  // Event gap / backfill
+  "reportEventGap", "backfillSession",
+  // Metrics & observability
+  "getMetrics", "queryTraces",
+  // Terminal PTY
+  "terminalOpen", "terminalWrite", "terminalResize", "terminalClose", "terminalList",
+  // Client error reporting
+  "reportClientError", "listClientErrors",
 ]);
 
 // --- Relay Options ---
@@ -277,7 +298,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
                 try {
                   pr.client.send(JSON.stringify({
                     jsonrpc: "2.0",
-                    id: pr.method,
+                    id: pr.requestId,
                     error: { code: 503, message: `Node ${data.nodeId} disconnected` },
                   }));
                 } catch { /* client gone */ }
@@ -349,15 +370,15 @@ function handleClientMessage(
   meter: UsageMeter,
 ): void {
   // Parse envelope (plaintext fields only)
-  let requestId: string | undefined;
+  let requestId: string | number | undefined;
   let requestedNode: string | undefined;
   let method: string | undefined;
 
   try {
     const envelope = JSON.parse(raw);
 
-    // Validate JSON-RPC structure
-    if (envelope.jsonrpc !== "2.0" || typeof envelope.id !== "string") {
+    // Validate JSON-RPC structure — accept string or number IDs per JSON-RPC spec
+    if (envelope.jsonrpc !== "2.0" || (typeof envelope.id !== "string" && typeof envelope.id !== "number")) {
       ws.send(JSON.stringify({
         jsonrpc: "2.0",
         id: envelope.id ?? null,
@@ -381,7 +402,7 @@ function handleClientMessage(
   withSpanSync("orka.relay.client_message", {
     "orka.account.id": data.accountId,
     "orka.method": method ?? "",
-    "orka.request.id": requestId ?? "",
+    "orka.request.id": requestId !== undefined ? String(requestId) : "",
     "orka.bytes.in": bytes,
   }, (span) => {
     // Service enforcement: method must be in allowed set
@@ -453,13 +474,14 @@ function handleClientMessage(
       return;
     }
 
-    // Track request
-    if (requestId) {
-      state.trackRequest(data.accountId, requestId, {
+    // Track request — convert ID to string for map keying (supports string | number IDs)
+    if (requestId !== undefined) {
+      state.trackRequest(data.accountId, String(requestId), {
         client: ws,
         nodeId: node.id,
         accountId: data.accountId,
         method: method ?? "unknown",
+        requestId,
         bytesIn: bytes,
         startedAt: Date.now(),
       });
@@ -485,8 +507,8 @@ function handleNodeMessage(
   state: RelayState,
   meter: UsageMeter,
 ): void {
-  // Parse response ID
-  let responseId: string | undefined;
+  // Parse response ID — accept string or number per JSON-RPC spec
+  let responseId: string | number | undefined;
   try {
     const envelope = JSON.parse(raw);
     responseId = envelope.id;
@@ -494,15 +516,15 @@ function handleNodeMessage(
     return; // Can't route unparseable response
   }
 
-  if (!responseId) return;
+  if (responseId === undefined || responseId === null) return;
 
   withSpanSync("orka.relay.node_message", {
     "orka.account.id": data.accountId,
     "orka.node.id": data.nodeId ?? "",
-    "orka.request.id": responseId,
+    "orka.request.id": String(responseId),
     "orka.bytes.out": bytes,
   }, () => {
-    const pr = state.resolveRequest(data.accountId, responseId!);
+    const pr = state.resolveRequest(data.accountId, String(responseId!));
     if (!pr) return;
 
     // Compute latency

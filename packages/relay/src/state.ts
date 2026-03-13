@@ -28,6 +28,7 @@ export interface PendingRequest {
   nodeId: string;
   accountId: string;
   method: string;
+  requestId: string | number;
   bytesIn: number;
   startedAt: number;
 }
