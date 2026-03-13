@@ -314,4 +314,32 @@ describe("handleRpcRequest", () => {
       expect(Number(dispatchSpan?.attributes["orka.rpc.duration_ms"])).toBeGreaterThan(1_000);
     });
   });
+
+  test("dispatches startPairing to svc.startPairing", async () => {
+    const svc = {
+      async startPairing(params: { ttlSec?: number }) {
+        return {
+          enrollId: "abc123def4567890",
+          pairingCode: "ABCD-EFGH-JKLM-NPQR-STVWX",
+          expiresAt: Date.now() + (params.ttlSec ?? 600) * 1000,
+        };
+      },
+    } as unknown as OrkaService;
+
+    const response = await handleRpcRequest(
+      svc,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 7,
+        method: "startPairing",
+        params: { ttlSec: 300 },
+      }),
+    );
+
+    const parsed = JSON.parse(response);
+    expect(parsed.id).toBe(7);
+    expect(parsed.result.enrollId).toBe("abc123def4567890");
+    expect(parsed.result.pairingCode).toBe("ABCD-EFGH-JKLM-NPQR-STVWX");
+    expect(parsed.result.expiresAt).toBeGreaterThan(Date.now());
+  });
 });

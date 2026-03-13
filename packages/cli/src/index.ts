@@ -272,6 +272,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "serve",
   "relay",
   "keygen",
+  "node",
 ]);
 
 const PROJECT_SUBCOMMANDS = new Set(["add", "remove", "rm", "list", "ls"]);
@@ -1982,6 +1983,257 @@ const keygenCmd = subcommands({
   },
 });
 
+// --- Node pairing commands ---
+
+const nodePairStartCmd = command({
+  name: "start",
+  description: "Start a pairing session on this node (generates pairing code for client)",
+  args: {
+    ttl: option({ type: optional(str), long: "ttl", description: "TTL in seconds (default: 600)" }),
+    nodeName: option({ type: optional(str), long: "name", description: "Node display name for the client" }),
+  },
+  handler: async (args) => runCliCommand("node", async () => {
+    const ttlSec = args.ttl ? parseInt(args.ttl, 10) : undefined;
+    if (ttlSec !== undefined && (isNaN(ttlSec) || ttlSec <= 0)) {
+      fail("error: --ttl must be a positive integer (seconds)");
+    }
+
+    let result;
+    try {
+      result = await svc.startPairing({
+        ...(ttlSec !== undefined ? { ttlSec } : {}),
+        ...(args.nodeName ? { nodeName: args.nodeName } : {}),
+      });
+    } catch (e: any) {
+      if (isMethodNotFound(e)) {
+        fail("error: pairing not supported by this daemon (upgrade daemon or configure pairing)");
+      }
+      fail(`error: ${e.message}`);
+    }
+
+    const expiresIn = Math.max(0, Math.floor((result.expiresAt - Date.now()) / 1000));
+    console.log("pairing code generated");
+    console.log("");
+    console.log(`  code:       ${result.pairingCode}`);
+    console.log(`  enroll id:  ${result.enrollId}`);
+    console.log(`  expires in: ${expiresIn}s`);
+    console.log("");
+    console.log("give this code to the client operator:");
+    console.log(`  orka node add ${result.pairingCode}`);
+  }),
+});
+
+const nodePairCmd = subcommands({
+  name: "pair",
+  description: "Pairing management",
+  cmds: {
+    start: nodePairStartCmd,
+  },
+});
+
+const nodeAddCmd = command({
+  name: "add",
+  description: "Pair with a remote node using a pairing code",
+  args: {
+    code: positional({ type: optional(str), displayName: "pairing-code", description: "Pairing code from the node operator (e.g. XXXX-XXXX-XXXX-XXXX-XXXXX)" }),
+    relay: option({ type: optional(str), long: "relay", description: "Relay URL to connect through (default: from --remote or ORKA_REMOTE)" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ code, relay }) => {
+    // node add is a local command — it connects directly to the relay WebSocket, not via daemon RPC
+    try {
+      await withSpan("orka.cli.node.add", { "orka.command": "node.add" }, async () => {
+        if (!code) {
+          fail("usage: orka node add <pairing-code>");
+        }
+
+        // Import pairing modules (lazy to avoid loading crypto unless needed)
+        const { parsePairingCode, blake3Truncated, concatBytes } = await import("@orka/core/crypto/protocol");
+        const { PairingClient } = await import("@orka/core/pairing");
+
+        // Parse and validate the pairing code
+        let parsed;
+        try {
+          parsed = parsePairingCode(code);
+        } catch (e: any) {
+          fail(`error: invalid pairing code: ${e.message}`);
+        }
+
+        // Derive enroll_id from the secret
+        const encoder = new TextEncoder();
+        const prefix = encoder.encode("orka/pair/v1/enroll-id");
+        const input = concatBytes(prefix, parsed.secret);
+        const enrollIdBytes = blake3Truncated(input, 8);
+        const enrollId = Buffer.from(enrollIdBytes).toString("hex");
+
+        // Determine relay URL
+        const relayUrl = relay ?? remoteUrl ?? process.env["ORKA_REMOTE"];
+        if (!relayUrl) {
+          fail("error: relay URL required (use --relay, --remote, or ORKA_REMOTE)");
+        }
+
+        // Convert relay URL to base WS URL for pairing
+        const relayBase = relayUrl.split("?")[0]?.replace(/\/ws\/?$/, "") ?? relayUrl;
+        const pairUrl = `${relayBase}/v1/pair/${enrollId}`;
+
+        console.log(`connecting to relay for pairing...`);
+        console.log(`  enroll id: ${enrollId}`);
+
+        // Open WebSocket to relay pairing endpoint
+        const result = await new Promise<{
+          nodeId: string;
+          nodeName: string;
+          noiseStaticPubkey: Uint8Array;
+          noiseKeyId: string;
+          nodePaths: string[];
+          bootExport: Uint8Array;
+        }>((resolve, reject) => {
+          const ws = new WebSocket(pairUrl);
+          let client: InstanceType<typeof PairingClient>;
+
+          ws.onopen = () => {
+            client = new PairingClient({
+              secret: parsed.secret,
+              relayOrigin: relayBase,
+              onSend: (msg) => ws.send(JSON.stringify(msg)),
+            });
+            client.start();
+          };
+
+          ws.onmessage = async (event) => {
+            const data = typeof event.data === "string" ? event.data : "";
+            try {
+              const result = await client.handleMessage(data);
+              if (result) {
+                // Send pair_done
+                ws.send(JSON.stringify({ t: "pair_done" }));
+                ws.close();
+                resolve(result);
+              }
+            } catch (e: any) {
+              ws.close();
+              reject(e);
+            }
+          };
+
+          ws.onerror = () => {
+            reject(new Error(`WebSocket connection to relay failed: ${pairUrl}`));
+          };
+
+          ws.onclose = () => {
+            if (client && !client.completed) {
+              client.handleClose();
+              reject(client.error ?? new Error("Connection closed before pairing completed"));
+            }
+          };
+
+          // Timeout
+          const timer = setTimeout(() => {
+            ws.close();
+            reject(new Error("Pairing timed out (120s)"));
+          }, 120_000);
+          timer.unref();
+        });
+
+        // Save the node config to ~/.orka/nodes/<node_id>.json
+        const orkaHome = getOrkaHome();
+        const nodesDir = join(orkaHome, "nodes");
+        mkdirSync(nodesDir, { recursive: true });
+
+        const nodeConfig = {
+          node_id: result.nodeId,
+          node_name: result.nodeName,
+          noise_static_pubkey: Buffer.from(result.noiseStaticPubkey).toString("base64url"),
+          noise_key_id: result.noiseKeyId,
+          node_paths: result.nodePaths,
+          trust: {
+            mode: "paired",
+            paired_at: new Date().toISOString(),
+            pairing_export: Buffer.from(result.bootExport).toString("base64url"),
+          },
+        };
+
+        const configPath = join(nodesDir, `${result.nodeId}.json`);
+        writeFileSync(configPath, JSON.stringify(nodeConfig, null, 2) + "\n", { mode: 0o600 });
+
+        console.log("");
+        console.log("pairing successful!");
+        console.log(`  node id:   ${result.nodeId}`);
+        console.log(`  node name: ${result.nodeName}`);
+        console.log(`  key id:    ${result.noiseKeyId}`);
+        console.log(`  saved to:  ${configPath}`);
+      });
+    } finally {
+      // No svc to close for local-only commands
+    }
+  },
+});
+
+const nodeListCmd = command({
+  name: "list",
+  description: "List paired nodes",
+  args: {
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async () => {
+    try {
+      await withSpan("orka.cli.node.list", { "orka.command": "node.list" }, async () => {
+        const orkaHome = getOrkaHome();
+        const nodesDir = join(orkaHome, "nodes");
+
+        if (!existsSync(nodesDir)) {
+          console.log("no paired nodes");
+          console.log("");
+          console.log("pair with: orka node add <pairing-code>");
+          return;
+        }
+
+        const files = await Array.fromAsync(new Bun.Glob("*.json").scan(nodesDir));
+        if (files.length === 0) {
+          console.log("no paired nodes");
+          console.log("");
+          console.log("pair with: orka node add <pairing-code>");
+          return;
+        }
+
+        console.log(padR("NODE ID", 24) + padR("NAME", 30) + padR("PAIRED AT", 24) + "PATHS");
+        console.log("-".repeat(100));
+
+        for (const file of files.sort()) {
+          try {
+            const content = JSON.parse(readFileSync(join(nodesDir, file), "utf-8"));
+            const pairedAt = content.trust?.paired_at ? new Date(content.trust.paired_at).toISOString().slice(0, 19) : "unknown";
+            const paths = (content.node_paths ?? []).join(", ");
+            console.log(
+              padR(content.node_id ?? file, 24) +
+              padR(content.node_name ?? "-", 30) +
+              padR(pairedAt, 24) +
+              paths
+            );
+          } catch {
+            console.log(padR(file, 24) + "(invalid config)");
+          }
+        }
+      });
+    } finally {
+      // No svc to close
+    }
+  },
+});
+
+const nodeCmd = subcommands({
+  name: "node",
+  description: "Manage node pairing and connections",
+  cmds: {
+    pair: nodePairCmd,
+    add: nodeAddCmd,
+    list: nodeListCmd,
+  },
+});
+
+const NODE_SUBCOMMANDS = new Set(["pair", "add", "list"]);
+const NODE_PAIR_SUBCOMMANDS = new Set(["start"]);
+
 const app = subcommands({
   name: "orka",
   description: "Agent session orchestrator — spawn, monitor, and manage AI coding agents",
@@ -2011,6 +2263,7 @@ const app = subcommands({
     serve: serveCmd,
     relay: relayCmd,
     keygen: keygenCmd,
+    node: nodeCmd,
   },
 });
 
@@ -2063,6 +2316,24 @@ function normalizeArgv(argv: string[]): string[] | null {
     }
   }
 
+  if (top === "node") {
+    const sub = normalized[1];
+    if (!sub || !NODE_SUBCOMMANDS.has(sub)) {
+      console.error("usage: orka node <pair|add|list>");
+      console.error("  pair start [--ttl N] [--name S]   Start pairing on this node");
+      console.error("  add <pairing-code>                Pair with a remote node");
+      console.error("  list                              List paired nodes");
+      process.exit(1);
+    }
+    if (sub === "pair") {
+      const pairSub = normalized[2];
+      if (!pairSub || !NODE_PAIR_SUBCOMMANDS.has(pairSub)) {
+        console.error("usage: orka node pair start [--ttl N] [--name S]");
+        process.exit(1);
+      }
+    }
+  }
+
   return normalized;
 }
 
@@ -2109,6 +2380,7 @@ function printUsage(): void {
   console.log("  serve    Start daemon WS server           orka serve --port 7394");
   console.log("  relay    Relay router / account mgmt      orka relay --port 7390");
   console.log("  keygen   Manage E2E encryption keys       orka keygen client");
+  console.log("  node     Manage node pairing              orka node add <code>");
   console.log("");
   console.log("enum values:");
   console.log(`  --status   ${statusValues.join(", ")}`);

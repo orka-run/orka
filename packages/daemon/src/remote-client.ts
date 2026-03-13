@@ -16,6 +16,8 @@ import type {
   ApprovalDecision,
   PushChannel,
   DataFrame,
+  StartPairingParams,
+  StartPairingResult,
 } from "@orka/core";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent } from "@orka/core";
@@ -390,6 +392,10 @@ class RemoteClient implements OrkaService {
 
   async sendTurn(sessionId: string, text: string): Promise<void> {
     return this.call("sendTurn", { sessionId, text });
+  }
+
+  async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
+    return this.call("startPairing", params);
   }
 
   async getDiff(sessionId: string): Promise<DiffResult> {

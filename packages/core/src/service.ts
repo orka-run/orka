@@ -77,6 +77,24 @@ export interface MergeResult {
   cleaned: boolean;
 }
 
+// --- Pairing Types ---
+
+export interface StartPairingParams {
+  /** TTL in seconds for the enrollment (default: 600 = 10 minutes). */
+  ttlSec?: number;
+  /** Human-readable node name for display to the pairing client. */
+  nodeName?: string;
+}
+
+export interface StartPairingResult {
+  /** The enrollment ID (hex string) derived from the secret. */
+  enrollId: string;
+  /** The formatted pairing code for the user to enter on the client side. */
+  pairingCode: string;
+  /** Unix timestamp (ms) when the enrollment expires. */
+  expiresAt: number;
+}
+
 // --- OrkaService Interface ---
 
 /**
@@ -115,6 +133,9 @@ export interface OrkaService {
   // --- Worktree ---
   getDiff(sessionId: string): Promise<DiffResult>;
   merge(sessionId: string, cleanup?: boolean): Promise<MergeResult>;
+
+  // --- Pairing ---
+  startPairing(params: StartPairingParams): Promise<StartPairingResult>;
 
   // --- Bulk operations ---
   deleteSessions(ids: string[]): Promise<void>;

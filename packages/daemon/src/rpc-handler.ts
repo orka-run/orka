@@ -169,6 +169,8 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
           case "sendTurn":
             await svc.sendTurn(params.sessionId, params.text);
             return null;
+          case "startPairing":
+            return svc.startPairing(params);
           case "getDiff":
             return svc.getDiff(params.sessionId);
           case "merge":

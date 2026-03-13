@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { generateId } from "@orka/core";
@@ -20,7 +20,11 @@ import type {
   ApprovalRequest,
   ApprovalDecision,
   PushChannel,
+  StartPairingParams,
+  StartPairingResult,
 } from "@orka/core";
+import { generatePairingCode } from "@orka/core/crypto/protocol";
+import { EnrollmentStore } from "./pairing/enrollment-store";
 import {
   getSession,
   listSessions as dbListSessions,
@@ -54,8 +58,30 @@ import {
 import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerAdapterRegistry, providerService } from "./provider-runtime";
 import { queryMetricSnapshot, queryTraceLog } from "./tracing";
 
+export interface PairingConfig {
+  /** Node ID for pairing enrollment (e.g. "fra1-gpu-01"). */
+  nodeId: string;
+  /** Human-readable node name (e.g. "Frankfurt GPU Node 1"). */
+  nodeName: string;
+  /** Raw X25519 public key for Noise transport (32 bytes). */
+  transportPubkey: Uint8Array;
+  /** Key ID for the transport pubkey (e.g. "sha256:..."). */
+  transportKeyId: string;
+  /** Relay paths the client can reach this node at. */
+  relayPaths: string[];
+}
+
 class LocalClient implements OrkaService {
   private terminalManager: TerminalManager | null = null;
+  private enrollmentStore: EnrollmentStore | null = null;
+  private pairingConfig: PairingConfig | null = null;
+
+  constructor(pairingConfig?: PairingConfig) {
+    if (pairingConfig) {
+      this.pairingConfig = pairingConfig;
+      this.enrollmentStore = new EnrollmentStore();
+    }
+  }
 
   private getTerminalManager(): TerminalManager {
     if (!this.terminalManager) {
@@ -264,6 +290,35 @@ class LocalClient implements OrkaService {
     await runner.sendText(session.tmuxSessionName, text);
   }
 
+  async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
+    if (!this.enrollmentStore || !this.pairingConfig) {
+      throw new Error("Pairing is not configured on this node (missing pairing config)");
+    }
+
+    const { code, parsed } = generatePairingCode();
+    const ttlMs = (params.ttlSec ?? 600) * 1000;
+
+    const enrollId = this.enrollmentStore.create({
+      secret: parsed.secret,
+      nodeId: this.pairingConfig.nodeId,
+      nodeName: params.nodeName ?? this.pairingConfig.nodeName,
+      nodeTransportStaticPubkey: this.pairingConfig.transportPubkey,
+      relayPaths: this.pairingConfig.relayPaths,
+      ttlMs,
+    });
+
+    return {
+      enrollId,
+      pairingCode: code,
+      expiresAt: Date.now() + ttlMs,
+    };
+  }
+
+  /** Get the enrollment store (for use by pairing server handler). */
+  getEnrollmentStore(): EnrollmentStore | null {
+    return this.enrollmentStore;
+  }
+
   async getDiff(sessionId: string): Promise<DiffResult> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
@@ -470,8 +525,8 @@ class LocalClient implements OrkaService {
   }
 }
 
-export function createLocalClient(): OrkaService {
-  return new LocalClient();
+export function createLocalClient(pairingConfig?: PairingConfig): OrkaService {
+  return new LocalClient(pairingConfig);
 }
 
 function getProviderOutput(events: OrchestrationEvent[]): string {

@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./crypto": "./src/crypto.ts",
     "./crypto/protocol": "./src/crypto/index.ts",
-    "./transport/noise-transport": "./src/transport/noise-transport.ts"
+    "./transport/noise-transport": "./src/transport/noise-transport.ts",
+    "./pairing": "./src/pairing/pairing-client.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^2.1.1",
