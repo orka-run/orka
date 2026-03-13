@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { BackendKindSchema } from "./types";
 
 // Attribution: Push channel protocol inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 // See: wsTransport push/subscribe model
@@ -21,10 +22,27 @@ export interface PushEnvelope<T = unknown> {
   data: T;
 }
 
-export interface ServerWelcomeData {
-  serverVersion: string;
-  sessionCount: number;
-}
+export const PROTOCOL_VERSION = 1;
+
+export const ServerCapabilitiesSchema = z.object({
+  resume: z.boolean(),
+  encryption: z.union([z.string(), z.literal(false)]),
+  multiTurn: z.boolean(),
+  adapters: z.array(BackendKindSchema),
+  maxConcurrent: z.number().int().nonnegative(),
+  terminal: z.boolean(),
+});
+
+export type ServerCapabilities = z.infer<typeof ServerCapabilitiesSchema>;
+
+export const ServerWelcomeDataSchema = z.object({
+  serverVersion: z.string(),
+  sessionCount: z.number().int().nonnegative(),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  capabilities: ServerCapabilitiesSchema,
+});
+
+export type ServerWelcomeData = z.infer<typeof ServerWelcomeDataSchema>;
 
 export interface SessionUpdatedData {
   sessionId: string;

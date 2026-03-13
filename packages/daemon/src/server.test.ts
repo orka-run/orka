@@ -1,9 +1,10 @@
 import type { Server } from "bun";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { OrkaService } from "@orka/core";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { PROTOCOL_VERSION, type OrkaService } from "@orka/core";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resetConfigCache } from "./config";
 import { startServer } from "./server";
 
 const originalOrkaHome = process.env["ORKA_HOME"];
@@ -12,6 +13,7 @@ let testHome = "";
 let server: Server<unknown> | null = null;
 
 beforeEach(() => {
+  resetConfigCache();
   testHome = mkdtempSync(join(tmpdir(), "orka-server-test-"));
   process.env["ORKA_HOME"] = testHome;
 });
@@ -19,6 +21,7 @@ beforeEach(() => {
 afterEach(() => {
   server?.stop(true);
   server = null;
+  resetConfigCache();
   rmSync(testHome, { recursive: true, force: true });
   if (originalOrkaHome === undefined) {
     delete process.env["ORKA_HOME"];
@@ -28,6 +31,90 @@ afterEach(() => {
 });
 
 describe("startServer", () => {
+  test("returns protocol metadata and capabilities from /health", async () => {
+    writeFileSync(join(testHome, "config.toml"), ["[limits]", "max_concurrent = 4"].join("\n"), "utf8");
+
+    server = await startServer({} as OrkaService, {
+      port: 0,
+      hostname: "127.0.0.1",
+      encrypt: true,
+    });
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/health`);
+    expect(response.status).toBe(200);
+
+    const body = await response.json() as {
+      status: string;
+      protocolVersion: number;
+      publicKey?: string;
+      capabilities: Record<string, unknown>;
+    };
+
+    expect(body).toMatchObject({
+      status: "ok",
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: {
+        resume: false,
+        encryption: "x25519-aes256gcm",
+        multiTurn: true,
+        adapters: ["claude-code", "codex", "shell"],
+        maxConcurrent: 4,
+        terminal: true,
+      },
+    });
+    expect(body.publicKey).toEqual(expect.any(String));
+  });
+
+  test("pushes protocol metadata and capabilities in server.welcome", async () => {
+    const svc = {
+      listSessions: async () => [{ id: "sess-1" }, { id: "sess-2" }],
+    } as OrkaService;
+
+    server = await startServer(svc, {
+      port: 0,
+      hostname: "127.0.0.1",
+    });
+
+    const message = await new Promise<string>((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${server!.port}`);
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new Error("Timed out waiting for server.welcome"));
+      }, 2_000);
+
+      ws.onmessage = (event) => {
+        clearTimeout(timeout);
+        ws.close();
+        resolve(typeof event.data === "string" ? event.data : "");
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        ws.close();
+        reject(new Error("WebSocket connection failed"));
+      };
+    });
+
+    expect(JSON.parse(message)).toMatchObject({
+      type: "push",
+      channel: "server.welcome",
+      sequence: 1,
+      data: {
+        serverVersion: expect.any(String),
+        sessionCount: 2,
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {
+          resume: false,
+          encryption: false,
+          multiTurn: true,
+          adapters: ["claude-code", "codex", "shell"],
+          maxConcurrent: 0,
+          terminal: true,
+        },
+      },
+    });
+  });
+
   test("accepts OTLP JSON spans on /v1/traces", async () => {
     server = await startServer({} as OrkaService, {
       port: 0,
