@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./crypto": "./src/crypto.ts",
-    "./crypto/protocol": "./src/crypto/index.ts"
+    "./crypto/protocol": "./src/crypto/index.ts",
+    "./pairing": "./src/pairing/pairing-client.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^2.1.1",
