@@ -163,6 +163,15 @@ export type OrchestrationEvent =
       itemId?: string;
       message: string;
       timestamp: string;
+    }
+  | {
+      type: "event.passthrough";
+      sessionId: string;
+      turnId?: string;
+      originalType: string;
+      provider?: string;
+      rawPayload: unknown;
+      timestamp: string;
     };
 
 export type PersistedOrchestrationEvent = OrchestrationEvent & {

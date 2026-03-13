@@ -5,7 +5,7 @@ const UNKNOWN_REQUEST_PREFIX = "unknown-request:";
 const UNKNOWN_TURN_PREFIX = "unknown-turn:";
 const USER_STOP_REASONS = new Set(["stopped", "cancelled", "canceled"]);
 
-export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent): OrchestrationEvent | null {
+export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent): OrchestrationEvent {
   switch (event.type) {
     case "session.started":
       return { type: "session.started", sessionId, timestamp: event.createdAt };
@@ -160,8 +160,22 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         message: event.payload.message,
         timestamp: event.createdAt,
       };
-    default:
-      return null;
+    default: {
+      const passthroughEvent = event as ProviderRuntimeEvent & {
+        type: string;
+        payload: unknown;
+      };
+
+      return {
+        type: "event.passthrough",
+        sessionId,
+        ...(passthroughEvent.turnId ? { turnId: passthroughEvent.turnId } : {}),
+        originalType: passthroughEvent.type,
+        ...(passthroughEvent.provider ? { provider: passthroughEvent.provider } : {}),
+        rawPayload: passthroughEvent.payload,
+        timestamp: passthroughEvent.createdAt,
+      };
+    }
   }
 }
 

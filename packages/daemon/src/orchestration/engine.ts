@@ -39,10 +39,6 @@ export class OrchestrationEngine {
       { "orka.session.id": sessionId, "orka.provider.event_type": event.type },
       (span) => {
         const orchestrationEvent = mapProviderEvent(sessionId, event);
-        if (!orchestrationEvent) {
-          span.addEvent("orka.orchestration.skipped");
-          return;
-        }
 
         this.options.persistEvent?.({
           ...orchestrationEvent,
