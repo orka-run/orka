@@ -1,7 +1,7 @@
 import { ROOT_CONTEXT, propagation, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
 import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR } from "@orka/core";
-import { decryptRequest, encryptResponse } from "@orka/core";
+import { decryptRequest, encryptResponse } from "@orka/core/crypto";
 import { pushHub } from "./push";
 import { insertClientError, listClientErrors } from "./db";
 import { getDaemonMetrics, getTracer, queryTraceLog, withSpan } from "./tracing";

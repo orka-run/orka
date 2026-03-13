@@ -3,7 +3,8 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
-import { ensureKeyPair, loadKeyPair, loadPublicKey, isMethodNotFound } from "@orka/core";
+import { isMethodNotFound } from "@orka/core";
+import { ensureKeyPair, loadKeyPair, loadPublicKey } from "@orka/core/crypto";
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,

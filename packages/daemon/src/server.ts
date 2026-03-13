@@ -5,13 +5,11 @@ import type {
   ServerWelcomeData,
 } from "@orka/core";
 import {
-  deriveSessionKey,
-  ensureKeyPair,
-  loadKeyPair,
   PROTOCOL_VERSION,
   PushControlRequestSchema,
   ReconnectStrategy,
 } from "@orka/core";
+import { deriveSessionKey, ensureKeyPair, loadKeyPair } from "@orka/core/crypto";
 import daemonPackageJson from "../package.json";
 import { getConfig, type OrkaConfig } from "./config";
 import { GracefulShutdown } from "./graceful-shutdown";

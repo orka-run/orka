@@ -18,7 +18,8 @@ import type {
   PushChannel,
 } from "@orka/core";
 import { context, propagation, trace } from "@opentelemetry/api";
-import { encryptRequest, decryptResponse, deriveSessionKey, ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent } from "@orka/core";
+import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent } from "@orka/core";
+import { encryptRequest, decryptResponse, deriveSessionKey } from "@orka/core/crypto";
 import { withSpan } from "./tracing";
 
 export interface RemoteClientOptions {
