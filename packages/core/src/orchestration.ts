@@ -114,6 +114,12 @@ export type OrchestrationEvent =
       turnId?: string;
       itemId?: string;
       message: string;
+    }>
+  | OrchestrationEventEnvelope<"event.passthrough", {
+      turnId?: string;
+      originalType: string;
+      provider?: string;
+      rawPayload: unknown;
     }>;
 
 export type PersistedOrchestrationEvent = OrchestrationEvent & {

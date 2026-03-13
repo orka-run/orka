@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, test, expect } from "bun:test";
-import { createEvent, type OrchestrationEvent } from "@orka/core";
+import { createEvent, type OrchestrationEvent, type ProviderRuntimeEvent } from "@orka/core";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,6 +111,56 @@ describe("OrchestrationEngine", () => {
         sessionId: "session-1",
         timestamp: "2026-03-11T00:00:00.000Z",
       }),
+    ]);
+  });
+
+  test("persists unknown provider events as passthrough events", () => {
+    const persisted: unknown[] = [];
+    const engine = new OrchestrationEngine({
+      persistEvent: (event) => {
+        persisted.push(event);
+      },
+    });
+
+    const rawPayload = {
+      code: "future_event",
+      detail: {
+        value: 42,
+      },
+    };
+
+    engine.ingest(
+      "session-1",
+      {
+        eventId: "evt-passthrough",
+        provider: "claude-code",
+        threadId: "thread-1",
+        createdAt: "2026-03-13T00:00:00.000Z",
+        type: "provider.future.event",
+        payload: rawPayload,
+      } as unknown as ProviderRuntimeEvent,
+    );
+
+    expect(engine.getSessionEvents("session-1")).toEqual([
+      {
+        type: "event.passthrough",
+        sessionId: "session-1",
+        originalType: "provider.future.event",
+        provider: "claude-code",
+        rawPayload,
+        timestamp: "2026-03-13T00:00:00.000Z",
+      },
+    ]);
+    expect(persisted).toEqual([
+      {
+        eventId: "evt-passthrough",
+        provider: "claude-code",
+        type: "event.passthrough",
+        sessionId: "session-1",
+        originalType: "provider.future.event",
+        rawPayload,
+        timestamp: "2026-03-13T00:00:00.000Z",
+      },
     ]);
   });
 

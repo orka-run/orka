@@ -112,6 +112,8 @@ function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState {
       case "item.updated":
         // Just finished a tool, model is thinking about next step
         return "thinking";
+      case "event.passthrough":
+        continue;
       default:
         continue;
     }
@@ -357,6 +359,21 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
 
     // request.resolved: skip (already handled in first pass)
     if (event.type === "request.resolved") continue;
+
+    if (event.type === "event.passthrough") {
+      flushAssistant();
+      flushToolGroup();
+      entries.push({
+        id: `passthrough-${event.sessionId}-${event.timestamp}`,
+        type: "system",
+        timestamp: event.timestamp,
+        title: `Unrecognized event: ${event.originalType}`,
+        body: typeof event.rawPayload === "object"
+          ? (JSON.stringify(event.rawPayload, null, 2) ?? "")
+          : String(event.rawPayload ?? ""),
+      });
+      continue;
+    }
 
     // Non-tool, non-delta event: flush both accumulators
     if (
