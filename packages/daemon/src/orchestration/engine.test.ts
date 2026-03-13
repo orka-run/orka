@@ -141,6 +141,12 @@ describe("OrchestrationEngine", () => {
       } as unknown as ProviderRuntimeEvent,
     );
 
+    const expectedRawPayload = {
+      payload: rawPayload,
+      eventId: "evt-passthrough",
+      threadId: "thread-1",
+    };
+
     expect(engine.getSessionEvents("session-1")).toEqual([
       {
         v: 1,
@@ -148,7 +154,7 @@ describe("OrchestrationEngine", () => {
         sessionId: "session-1",
         originalType: "provider.future.event",
         provider: "claude-code",
-        rawPayload,
+        rawPayload: expectedRawPayload,
         timestamp: "2026-03-13T00:00:00.000Z",
       },
     ]);
@@ -160,7 +166,7 @@ describe("OrchestrationEngine", () => {
         type: "event.passthrough",
         sessionId: "session-1",
         originalType: "provider.future.event",
-        rawPayload,
+        rawPayload: expectedRawPayload,
         timestamp: "2026-03-13T00:00:00.000Z",
       },
     ]);
