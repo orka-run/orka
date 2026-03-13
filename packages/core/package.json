@@ -6,7 +6,8 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./crypto": "./src/crypto.ts"
+    "./crypto": "./src/crypto.ts",
+    "./crypto/protocol": "./src/crypto/index.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^2.1.1",
