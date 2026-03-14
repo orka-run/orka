@@ -82,7 +82,7 @@ export async function startDaemonWithNoise(opts?: {
     httpUrl: `http://127.0.0.1:${port}`,
     async stop() {
       try {
-        // Kill all tmux sessions spawned during the test
+        // Stop all running sessions spawned during the test
         const sessions = await svc.listSessions();
         await Promise.all(
           sessions

@@ -243,7 +243,7 @@ describe("Noise NK through Relay", () => {
   }, 30_000);
 
   afterAll(async () => {
-    // Kill all spawned tmux sessions before stopping servers
+    // Stop all running sessions before stopping servers
     for (const svc of [svcA, svcB]) {
       try {
         const sessions = await svc?.listSessions();

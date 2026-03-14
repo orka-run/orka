@@ -3,7 +3,6 @@
  *
  * Tests the complete RPC path through the relay to a real daemon.
  * Runs relay + daemon in-process (no Docker needed).
- * Requires tmux for daemon session management.
  *
  * Run with: bun test tests/e2e/routing.e2e.test.ts
  */
@@ -21,17 +20,8 @@ process.env["ORKA_HOME"] = daemonHome;
 process.env["ORKA_RELAY_DATA"] = relayHome;
 
 import { createLocalClient, startServer } from "@orka/daemon";
+import type { OrkaService } from "@orka/core";
 import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
-
-let tmuxAvailable = false;
-try {
-  const proc = Bun.spawnSync(["tmux", "-V"], { stdout: "pipe", stderr: "pipe" });
-  tmuxAvailable = proc.exitCode === 0;
-} catch {
-  tmuxAvailable = false;
-}
-
-const describeE2E = tmuxAvailable ? describe : describe.skip;
 
 /** Send JSON-RPC via WebSocket and wait for response. */
 function rpc(ws: WebSocket, method: string, params: any = {}, id?: string): Promise<any> {
@@ -62,16 +52,15 @@ function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
   });
 }
 
-describeE2E("Full-Stack Routing", () => {
+describe("Full-Stack Routing", () => {
   let relay: RelayHandle;
   let daemonServer: any;
+  let svc: OrkaService;
   let testRepo: string;
 
   let relayPort: number;
   let clientApiKey: string;
   let nodeApiKey: string;
-
-  const spawnedTmuxNames: string[] = [];
 
   beforeAll(async () => {
     // 1. Create temp git repo
@@ -111,7 +100,7 @@ describeE2E("Full-Stack Routing", () => {
     nodeApiKey = nodeKeyData.apiKey;
 
     // 4. Start daemon and register with relay
-    const svc = createLocalClient();
+    svc = createLocalClient();
     daemonServer = await startServer(svc, {
       port: 0,
       hostname: "127.0.0.1",
@@ -125,9 +114,15 @@ describeE2E("Full-Stack Routing", () => {
   }, 30_000);
 
   afterAll(async () => {
-    for (const name of spawnedTmuxNames) {
-      try { await $`tmux kill-session -t ${name}`.quiet(); } catch {}
-    }
+    // Stop all running sessions
+    try {
+      const sessions = await svc?.listSessions();
+      if (sessions) {
+        await Promise.all(
+          sessions.filter((s) => s.status === "running").map((s) => svc.stop(s.id).catch(() => {})),
+        );
+      }
+    } catch {}
     try { daemonServer?.stop?.(true); } catch {}
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });
@@ -190,7 +185,6 @@ describeE2E("Full-Stack Routing", () => {
     expect(resp.error).toBeUndefined();
     expect(resp.result.id).toMatch(/^sess-/);
     expect(resp.result.status).toBe("running");
-    spawnedTmuxNames.push(resp.result.tmuxSessionName);
 
     // Verify we can read the session back through the relay
     const getResp = await rpc(ws, "getSession", { id: resp.result.id });
@@ -228,16 +222,22 @@ describeE2E("Full-Stack Routing", () => {
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(spawnResp.result.tmuxSessionName);
     const sessionId = spawnResp.result.id;
 
     // Stop it through the relay
     const stopResp = await rpc(ws, "stop", { sessionId });
     expect(stopResp.error).toBeUndefined();
 
-    // Verify it's cancelled
-    const getResp = await rpc(ws, "getSession", { id: sessionId });
-    expect(getResp.result.status).toBe("cancelled");
+    // Wait for the async event consumer to finalize status
+    const deadline = Date.now() + 5_000;
+    let status = "running";
+    while (Date.now() < deadline) {
+      const getResp = await rpc(ws, "getSession", { id: sessionId });
+      status = getResp.result.status;
+      if (status === "cancelled" || status === "completed" || status === "failed") break;
+      await Bun.sleep(200);
+    }
+    expect(status).toBe("cancelled");
 
     ws.close();
   });
@@ -245,7 +245,6 @@ describeE2E("Full-Stack Routing", () => {
   // ---- Account Isolation ----
 
   test("second account cannot see first account's sessions", async () => {
-    // Sign up a second account
     const signup2 = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -253,12 +252,10 @@ describeE2E("Full-Stack Routing", () => {
     });
     const { apiKey: key2 } = await signup2.json() as any;
 
-    // Connect second account as client — should get error (no nodes)
     const ws2 = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${key2}&role=client`);
     await waitForOpen(ws2);
 
     const resp = await rpc(ws2, "listSessions", { filters: {} });
-    // Should get "No nodes available" error since account 2 has no registered nodes
     expect(resp.error).toBeTruthy();
     expect(resp.error).not.toBeNull();
     expect(resp.error!.code).toBe(503);
@@ -294,7 +291,6 @@ describeE2E("Full-Stack Routing", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
     await waitForOpen(ws);
 
-    // Send 5 sequential requests
     for (let i = 0; i < 5; i++) {
       const resp = await rpc(ws, "listSessions", { filters: {} }, `batch-${i}`);
       expect(resp.error).toBeUndefined();

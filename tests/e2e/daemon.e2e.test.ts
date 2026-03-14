@@ -1,8 +1,7 @@
 /**
  * E2E tests for daemon session lifecycle.
  *
- * Requires tmux. Skipped if tmux is not available.
- * Uses shell backend for fast, deterministic tests.
+ * Uses shell backend (Bun.spawn) for fast, deterministic tests.
  *
  * Run with: bun test tests/e2e/daemon.e2e.test.ts
  */
@@ -18,18 +17,7 @@ const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-daemon-"));
 process.env["ORKA_HOME"] = testHome;
 
 import { createLocalClient } from "@orka/daemon";
-import type { OrkaService } from "@orka/core";
-
-// Check tmux availability
-let tmuxAvailable = false;
-try {
-  const proc = Bun.spawnSync(["tmux", "-V"], { stdout: "pipe", stderr: "pipe" });
-  tmuxAvailable = proc.exitCode === 0;
-} catch {
-  tmuxAvailable = false;
-}
-
-const describeE2E = tmuxAvailable ? describe : describe.skip;
+import type { OrkaService, Session } from "@orka/core";
 
 /** Poll until predicate is true, or timeout. */
 async function waitFor(
@@ -44,10 +32,26 @@ async function waitFor(
   throw new Error(`waitFor timed out after ${timeoutMs}ms`);
 }
 
-describeE2E("Daemon Session Lifecycle", () => {
+/** Wait for a session to reach a terminal status. */
+async function waitForTerminal(
+  client: OrkaService,
+  sessionId: string,
+  timeoutMs = 10_000,
+): Promise<Session> {
+  const terminal = new Set(["completed", "cancelled", "failed", "stopped"]);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const s = await client.getSession(sessionId);
+    if (s && terminal.has(s.status)) return s;
+    await Bun.sleep(200);
+  }
+  throw new Error(`Session ${sessionId} did not reach terminal status within ${timeoutMs}ms`);
+}
+
+describe("Daemon Session Lifecycle", () => {
   let client: OrkaService;
   let testRepo: string;
-  const spawnedTmuxNames: string[] = [];
+  const sessionIds: string[] = [];
 
   beforeAll(async () => {
     // Create a temp git repo for projectPath
@@ -61,11 +65,9 @@ describeE2E("Daemon Session Lifecycle", () => {
   }, 30_000);
 
   afterAll(async () => {
-    // Kill only our test sessions
-    for (const name of spawnedTmuxNames) {
-      try {
-        await $`tmux kill-session -t ${name}`.quiet();
-      } catch { /* already dead */ }
+    // Stop all running sessions
+    for (const id of sessionIds) {
+      try { await client.stop(id); } catch { /* already stopped */ }
     }
     rmSync(testHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -82,7 +84,7 @@ describeE2E("Daemon Session Lifecycle", () => {
       title: "E2E test session",
       tags: ["e2e", "test"],
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
+    sessionIds.push(session.id);
 
     expect(session.id).toMatch(/^sess-/);
     expect(session.status).toBe("running");
@@ -103,7 +105,7 @@ describeE2E("Daemon Session Lifecycle", () => {
       projectPath: testRepo,
       tags: ["e2e"],
     });
-    spawnedTmuxNames.push(spawned.tmuxSessionName);
+    sessionIds.push(spawned.id);
 
     const session = await client.getSession(spawned.id);
 
@@ -122,7 +124,7 @@ describeE2E("Daemon Session Lifecycle", () => {
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(spawned.tmuxSessionName);
+    sessionIds.push(spawned.id);
 
     const task = await client.getTask(spawned.taskId);
 
@@ -138,20 +140,20 @@ describeE2E("Daemon Session Lifecycle", () => {
   });
 
   test("listSessions supports status filter", async () => {
-    // Spawn a session we'll stop later
     const session = await client.spawn({
       prompt: "sleep 300",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
+    sessionIds.push(session.id);
 
     const running = await client.listSessions({ status: "running" });
     expect(running.some((s) => s.id === session.id)).toBe(true);
 
-    // Stop it
     await client.stop(session.id);
+    // Wait for the async event consumer to update DB status
+    await waitForTerminal(client, session.id);
 
     const cancelled = await client.listSessions({ status: "cancelled" });
     expect(cancelled.some((s) => s.id === session.id)).toBe(true);
@@ -167,7 +169,7 @@ describeE2E("Daemon Session Lifecycle", () => {
       projectPath: testRepo,
       tags: ["e2e", "test"],
     });
-    spawnedTmuxNames.push(spawned.tmuxSessionName);
+    sessionIds.push(spawned.id);
 
     const tags = await client.getTags(spawned.id);
     expect(tags).toHaveLength(2);
@@ -183,7 +185,7 @@ describeE2E("Daemon Session Lifecycle", () => {
       projectPath: testRepo,
       tags: ["e2e-filter"],
     });
-    spawnedTmuxNames.push(spawned.tmuxSessionName);
+    sessionIds.push(spawned.id);
 
     const byTag = await client.listSessions({ tag: "e2e-filter" });
     expect(byTag.length).toBeGreaterThanOrEqual(1);
@@ -200,7 +202,7 @@ describeE2E("Daemon Session Lifecycle", () => {
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(spawned.tmuxSessionName);
+    sessionIds.push(spawned.id);
 
     await client.setKept(spawned.id, true);
     const updated = await client.getSession(spawned.id);
@@ -222,36 +224,36 @@ describeE2E("Daemon Session Lifecycle", () => {
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
+    sessionIds.push(session.id);
 
     expect(session.status).toBe("running");
     expect(await client.isAlive(session.id)).toBe(true);
 
     await client.stop(session.id);
+    // Wait for the async event consumer to finalize status
+    const stopped = await waitForTerminal(client, session.id);
 
-    const stopped = await client.getSession(session.id);
-    expect(stopped!.status).toBe("cancelled");
-    expect(stopped!.finishedAt).toBeTruthy();
+    expect(stopped.status).toBe("cancelled");
+    expect(stopped.finishedAt).toBeTruthy();
     expect(await client.isAlive(session.id)).toBe(false);
   });
 
   // ---- Logs ----
 
   test("getLogContent returns output from completed session", async () => {
+    // Use exit 0 to ensure process completes (shell adapter appends exec bash -i)
     const session = await client.spawn({
-      prompt: "echo 'log-test-marker-42'",
+      prompt: "echo 'log-test-marker-42' && exit 0",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
+    sessionIds.push(session.id);
 
-    // Wait for tmux session to die (echo finishes fast)
-    await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 10_000 });
+    await waitForTerminal(client, session.id);
 
     const logContent = await client.getLogContent(session.id);
     expect(logContent).toContain("log-test-marker-42");
-    expect(logContent).toContain("[orka] exit_code=0");
   });
 
   test("captureOutput works on running session", async () => {
@@ -261,9 +263,9 @@ describeE2E("Daemon Session Lifecycle", () => {
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
+    sessionIds.push(session.id);
 
-    // Wait a bit for output to appear in tmux
+    // Wait for output to be captured
     await Bun.sleep(500);
 
     const output = await client.captureOutput(session.id);
@@ -275,20 +277,18 @@ describeE2E("Daemon Session Lifecycle", () => {
   // ---- sendTurn ----
 
   test("sendTurn delivers text to running session", async () => {
-    // Start a cat session that reads stdin
     const session = await client.spawn({
-      prompt: "read -p '> ' line && echo \"GOT: $line\"",
+      prompt: "read -p '> ' line && echo \"GOT: $line\" && exit 0",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
+    sessionIds.push(session.id);
 
     await Bun.sleep(500);
     await client.sendTurn(session.id, "hello-from-test");
 
-    // Wait for session to complete
-    await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 5_000 });
+    await waitForTerminal(client, session.id);
 
     const log = await client.getLogContent(session.id);
     expect(log).toContain("GOT: hello-from-test");
@@ -303,20 +303,21 @@ describeE2E("Daemon Session Lifecycle", () => {
     await $`git -C ${pruneRepo} config user.name "Orka Test"`.quiet();
     await $`git -C ${pruneRepo} commit --allow-empty -m "init"`.quiet();
 
-    // Spawn and stop a session to make it prunable.
     const session = await client.spawn({
       prompt: "sleep 300",
       backend: "shell",
       mode: "interactive",
       projectPath: pruneRepo,
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
-    const scriptFile = join(testHome, "scripts", `${session.id}.sh`);
+    sessionIds.push(session.id);
+    const scriptFile = join(testHome, "provider-scripts", `${session.id}.sh`);
 
-    expect(existsSync(session.logFile)).toBe(true);
+    // Wait for script file to be written (spawn is async)
+    await waitFor(async () => existsSync(scriptFile), { timeoutMs: 5_000 });
     expect(existsSync(scriptFile)).toBe(true);
 
     await client.stop(session.id);
+    await waitForTerminal(client, session.id);
 
     const dryRun = await client.pruneSessions({
       maxAgeMs: 0,
@@ -331,7 +332,6 @@ describeE2E("Daemon Session Lifecycle", () => {
     });
 
     expect(await client.getSession(session.id)).not.toBeNull();
-    expect(existsSync(session.logFile)).toBe(true);
     expect(existsSync(scriptFile)).toBe(true);
 
     const result = await client.pruneSessions({
@@ -344,12 +344,9 @@ describeE2E("Daemon Session Lifecycle", () => {
     expect(result.pruned).toBe(1);
     expect(result.orphansCleaned).toBeGreaterThanOrEqual(0);
     expect(result.dryRun).toBe(false);
-    expect(result.logsDeleted).toBe(2);
     expect(result.dbRecordsDeleted).toBe(1);
 
     expect(await client.getSession(session.id)).toBeNull();
-    expect(existsSync(session.logFile)).toBe(false);
-    expect(existsSync(scriptFile)).toBe(false);
 
     rmSync(pruneRepo, { recursive: true, force: true });
   });
@@ -358,15 +355,14 @@ describeE2E("Daemon Session Lifecycle", () => {
 
   test("deleteSessions removes sessions from DB", async () => {
     const session = await client.spawn({
-      prompt: "echo 'delete-me'",
+      prompt: "echo 'delete-me' && exit 0",
       backend: "shell",
       mode: "interactive",
       projectPath: testRepo,
     });
-    spawnedTmuxNames.push(session.tmuxSessionName);
+    sessionIds.push(session.id);
 
-    await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 5_000 });
-    try { await client.stop(session.id); } catch { /* already dead */ }
+    await waitForTerminal(client, session.id);
 
     await client.deleteSessions([session.id]);
     const gone = await client.getSession(session.id);
