@@ -7,17 +7,14 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { insertTask, insertSession, insertSessionTags, updateSessionStatus, updateSessionRawLogFile, getSession, getOrkaHome, listSessions, saveSessionDiff, insertUsageRecord, getChildSessions } from "./db";
 import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, deleteBranch } from "./worktree";
 import { assertBackendInstalled } from "./backends";
-import { getConfig } from "./config";
-import { approvalManager, orchestrationEngine, providerService } from "./provider-runtime";
-import { pushHub } from "./push";
+import type { DaemonContext } from "./daemon-context";
 import { getDaemonMetrics, withSpan } from "./tracing";
 
 /** Spawn a new agent session. Returns the created session. */
-export async function spawnSession(req: SpawnRequest): Promise<Session> {
+export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promise<Session> {
   return withSpan("orka.spawn", {
     "orka.backend": req.backend,
     "orka.mode": req.mode,
@@ -28,9 +25,9 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     assertBackendInstalled(req.backend);
 
     // Check concurrent session limit
-    const { maxConcurrent } = getConfig().limits;
+    const { maxConcurrent } = ctx.config.limits;
     if (maxConcurrent > 0) {
-      const running = listSessions("running");
+      const running = ctx.db.listSessions("running");
       if (running.length >= maxConcurrent) {
         throw new Error(
           `Concurrent session limit reached (${running.length}/${maxConcurrent}). ` +
@@ -58,7 +55,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       model: req.model ?? null,
       createdAt: now,
     };
-    insertTask(task);
+    ctx.db.insertTask(task);
 
     // 2. Prepare workspace — auto-worktree for background sessions
     let workingDir = projectPath;
@@ -66,18 +63,18 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       workingDir = await withSpan("orka.worktree.create", {
         "orka.session.id": sessionId,
         "orka.branch": req.branch,
-      }, async () => worktreeCreate(projectPath, sessionId, req.branch));
+      }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { branch: req.branch, config: ctx.config }));
     } else if (req.mode === "background") {
       workingDir = await withSpan("orka.worktree.create", {
         "orka.session.id": sessionId,
         "orka.branch": `orka/${sessionId}`,
-      }, async () => worktreeCreate(projectPath, sessionId));
+      }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { config: ctx.config }));
     }
 
     span.setAttribute("orka.workdir", workingDir);
 
     // 3. Log file
-    const logsDir = join(getOrkaHome(), "logs");
+    const logsDir = join(ctx.orkaHome, "logs");
     mkdirSync(logsDir, { recursive: true });
     const logFile = join(logsDir, `${sessionId}.log`);
 
@@ -103,17 +100,17 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(req.env ? { env: req.env } : {}),
     };
-    insertSession(session);
+    ctx.db.insertSession(session);
 
     // 4b. Store tags
     if (req.tags && req.tags.length > 0) {
-      insertSessionTags(sessionId, req.tags);
+      ctx.db.insertSessionTags(sessionId, req.tags);
       span.setAttribute("orka.tags", req.tags.join(","));
     }
 
     // 5. Start provider runtime session
     const startedAt = new Date().toISOString();
-    const handle = await providerService.startSession(req.backend, {
+    const handle = await ctx.providerService.startSession(req.backend, {
       threadId: sessionId,
       cwd: workingDir,
       ...(req.model ? { model: req.model } : {}),
@@ -126,28 +123,29 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     });
 
     const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
-    updateSessionRawLogFile(sessionId, rawLogPath);
+    ctx.db.updateSessionRawLogFile(sessionId, rawLogPath);
 
-    updateSessionStatus(sessionId, "running", { startedAt });
+    ctx.db.updateSessionStatus(sessionId, "running", { startedAt });
     recordSessionStartedMetrics();
 
-    void consumeProviderEvents(sessionId, handle, orchestrationEngine, {
-      updateSessionStatus,
-      saveSessionDiff,
-      insertUsageRecord,
-      approvalManager,
+    void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine, {
+      updateSessionStatus: (id, status, extra) => ctx.db.updateSessionStatus(id, status, extra),
+      saveSessionDiff: (id, diff, status, extra) => ctx.db.saveSessionDiff(id, diff, status, extra),
+      insertUsageRecord: (record) => ctx.db.insertUsageRecord(record),
+      approvalManager: ctx.approvalManager,
       logFile,
       rawLogPath,
-      pushHub,
+      pushHub: ctx.pushHub,
       workingDir,
       projectPath,
       autoMerge: session.autoMerge,
       model: req.model ?? null,
-      getSession,
+      orkaHome: ctx.orkaHome,
+      getSession: (id) => ctx.db.getSession(id),
       cleanupWorktree: async () => {
-        const currentSession = getSession(sessionId);
+        const currentSession = ctx.db.getSession(sessionId);
         if (currentSession) {
-          await tryCleanupWorktree(currentSession);
+          await tryCleanupWorktree(ctx, currentSession);
         }
       },
     })
@@ -155,7 +153,7 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
         console.error(`provider event consumer failed for session ${sessionId}`, error);
       })
       .finally(() => {
-        providerService.clearHandle(sessionId);
+        ctx.providerService.clearHandle(sessionId);
       });
 
     span.addEvent("session.started");
@@ -171,14 +169,14 @@ export async function reapSessions(): Promise<number> {
 }
 
 /** Stop a session via the provider runtime. */
-export async function stopSession(sessionId: string): Promise<void> {
+export async function stopSession(ctx: DaemonContext, sessionId: string): Promise<void> {
   return withSpan("orka.stop", { "orka.session.id": sessionId }, async (span) => {
-    const session = getSession(sessionId);
+    const session = ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    const providerHandle = providerService.getHandle(sessionId);
+    const providerHandle = ctx.providerService.getHandle(sessionId);
     if (providerHandle) {
-      await providerService.stopSession(sessionId);
+      await ctx.providerService.stopSession(sessionId);
       span.addEvent("session.stop_requested");
       return;
     }
@@ -190,36 +188,33 @@ export async function stopSession(sessionId: string): Promise<void> {
 
     // Session has no active provider handle but DB says running — mark cancelled
     const finishedAt = new Date().toISOString();
-    updateSessionStatus(sessionId, "cancelled", {
+    ctx.db.updateSessionStatus(sessionId, "cancelled", {
       finishedAt,
     });
     recordSessionTerminalMetrics(session.startedAt, finishedAt, "cancelled");
-    pushHub.broadcast("orchestration.sessionUpdated", {
+    ctx.pushHub.broadcast("orchestration.sessionUpdated", {
       sessionId,
       status: "cancelled",
     });
 
     span.addEvent("session.cancelled");
-    await tryCleanupWorktree(session);
+    await tryCleanupWorktree(ctx, session);
   });
 }
 
 
 /** Stop a session and all its running children (cascading stop). */
-export async function stopWithChildren(sessionId: string): Promise<void> {
+export async function stopWithChildren(ctx: DaemonContext, sessionId: string): Promise<void> {
   return withSpan("orka.stopWithChildren", { "orka.session.id": sessionId }, async () => {
-    const children = getChildSessions(sessionId).filter(s => s.status === "running");
-    await Promise.all(children.map(c => stopSession(c.id)));
-    await stopSession(sessionId);
+    const children = ctx.db.getChildSessions(sessionId).filter(s => s.status === "running");
+    await Promise.all(children.map(c => stopSession(ctx, c.id)));
+    await stopSession(ctx, sessionId);
   });
 }
 
-/** Remove worktree if the session was using one.
- *  Preserves worktrees that have uncommitted changes or commits ahead of parent.
- */
 /** Auto-merge worktree branch into parent repo on successful completion. */
-async function tryAutoMerge(session: Session, parentSpan: any): Promise<void> {
-  const wtDir = getWorktreeDir();
+async function tryAutoMerge(ctx: DaemonContext, session: Session, parentSpan: any): Promise<void> {
+  const wtDir = getWorktreeDir(ctx.orkaHome);
   if (!session.workingDir.startsWith(wtDir)) return;
   if (!session.projectPath) return;
 
@@ -245,8 +240,8 @@ async function tryAutoMerge(session: Session, parentSpan: any): Promise<void> {
   }
 }
 
-async function tryCleanupWorktree(session: Session): Promise<void> {
-  const wtDir = getWorktreeDir();
+async function tryCleanupWorktree(ctx: DaemonContext, session: Session): Promise<void> {
+  const wtDir = getWorktreeDir(ctx.orkaHome);
   if (!session.workingDir.startsWith(wtDir)) return;
   const repoPath = session.projectPath;
   if (!repoPath) return;
@@ -313,12 +308,12 @@ function recordSessionTerminalMetrics(
 }
 
 /** Clean up orphaned worktree dirs that don't belong to any active session. */
-export async function cleanupOrphanedWorktrees(): Promise<number> {
+export async function cleanupOrphanedWorktrees(ctx: DaemonContext): Promise<number> {
   return withSpan("orka.worktree.prune_orphans", {}, async (span) => {
-    const wtDir = getWorktreeDir();
+    const wtDir = getWorktreeDir(ctx.orkaHome);
     if (!existsSync(wtDir)) return 0;
 
-    const allSessions = listSessions();
+    const allSessions = ctx.db.listSessions();
     const activeWorkdirs = new Set(
       allSessions
         .filter((s) => s.status === "running" || s.status === "preparing")

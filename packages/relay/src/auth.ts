@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { Database } from "bun:sqlite";
 import { generateId } from "@orka/core";
 import {
   type ApiKeyRecord,
@@ -11,7 +12,7 @@ import {
   insertApiKey,
   updateApiKeyLastUsed,
 } from "./db";
-import { getRelayConfig } from "./config";
+import type { RelayConfig } from "./config";
 import { withSpanSync } from "./tracing";
 
 // --- API Key Generation ---
@@ -81,7 +82,7 @@ export interface AuthContext {
   keyHash: string;
 }
 
-// --- Auth Cache ---
+// --- Auth Cache (internal) ---
 
 interface CacheEntry {
   ctx: AuthContext;
@@ -128,41 +129,7 @@ class AuthCache {
   }
 }
 
-const authCache = new AuthCache();
-
-// Periodic cache pruning — unref'd so it doesn't keep the process alive
-const _pruneTimer = setInterval(() => authCache.prune(), 60_000);
-if (typeof _pruneTimer === "object" && "unref" in _pruneTimer) {
-  (_pruneTimer as any).unref();
-}
-
-// --- Batch last_used_at updates ---
-
-const lastUsedQueue = new Set<string>();
-let lastUsedFlushTimer: Timer | null = null;
-
-function queueLastUsedUpdate(keyHash: string): void {
-  lastUsedQueue.add(keyHash);
-  if (!lastUsedFlushTimer) {
-    lastUsedFlushTimer = setTimeout(flushLastUsed, 10_000);
-  }
-}
-
-function flushLastUsed(): void {
-  lastUsedFlushTimer = null;
-  for (const kh of lastUsedQueue) {
-    try { updateApiKeyLastUsed(kh); } catch { /* best effort */ }
-  }
-  lastUsedQueue.clear();
-}
-
-export function flushAuthUpdates(): void {
-  withSpanSync("orka.relay.auth.flush", {}, () => {
-    flushLastUsed();
-  });
-}
-
-// --- Authentication ---
+// --- Auth Result ---
 
 export interface AuthResult {
   success: boolean;
@@ -179,95 +146,170 @@ const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   maxMessageBytes: 1_048_576,
 };
 
+// --- AuthManager ---
+
 /**
- * Authenticate a request by API key.
- * Extracts key from Authorization header or ?token= query param.
- * Returns AuthContext on success, error on failure.
+ * AuthManager encapsulates all auth state: cache, last-used flush queue, and prune timer.
+ * Create one per relay instance. Call shutdown() to clean up timers.
  */
-export function authenticate(key: string): AuthResult {
-  return withSpanSync("orka.relay.auth.authenticate", {
-    "orka.auth.key_prefix": key.slice(0, 16),
-  }, (span) => {
-    if (!key) {
-      return { success: false, error: "Missing API key", code: 401 };
+export class AuthManager {
+  private readonly db: Database;
+  private readonly config: RelayConfig;
+  private readonly cache = new AuthCache();
+  private readonly lastUsedQueue = new Set<string>();
+  private lastUsedFlushTimer: Timer | null = null;
+  private readonly pruneTimer: Timer;
+
+  constructor(db: Database, config: RelayConfig) {
+    this.db = db;
+    this.config = config;
+
+    // Periodic cache pruning
+    this.pruneTimer = setInterval(() => this.cache.prune(), 60_000);
+    if (typeof this.pruneTimer === "object" && "unref" in this.pruneTimer) {
+      (this.pruneTimer as any).unref();
     }
+  }
 
-    const keyHash = hashKey(key);
-
-    // Check cache first
-    const cached = authCache.get(keyHash);
-    if (cached) {
-      span.setAttribute("orka.auth.cache_hit", true);
-      queueLastUsedUpdate(keyHash);
-      return { success: true, ctx: cached } as AuthResult;
-    }
-    span.setAttribute("orka.auth.cache_hit", false);
-
-    // DB lookup
-    const keyRecord = getApiKeyByHash(keyHash);
-    if (!keyRecord) {
-      // Check legacy token
-      const config = getRelayConfig();
-      if (config.auth.legacyToken && key === config.auth.legacyToken) {
-        // Legacy token: create a synthetic auth context
-        const ctx: AuthContext = {
-          accountId: "__legacy__",
-          account: {
-            id: "__legacy__",
-            email: "legacy@localhost",
-            name: "Legacy Token",
-            status: "active",
-            tier: "pro",
-            createdAt: "",
-            updatedAt: "",
-          },
-          permissions: "client",
-          tier: "pro",
-          rateLimits: DEFAULT_RATE_LIMITS,
-          keyHash,
-        };
-        authCache.set(keyHash, ctx);
-        return { success: true, ctx } as AuthResult;
+  /**
+   * Authenticate a request by API key.
+   * Extracts key from Authorization header or ?token= query param.
+   * Returns AuthContext on success, error on failure.
+   */
+  authenticate(key: string): AuthResult {
+    return withSpanSync("orka.relay.auth.authenticate", {
+      "orka.auth.key_prefix": key.slice(0, 16),
+    }, (span) => {
+      if (!key) {
+        return { success: false, error: "Missing API key", code: 401 };
       }
-      return { success: false, error: "Invalid API key", code: 401 } as AuthResult;
+
+      const keyHash = hashKey(key);
+
+      // Check cache first
+      const cached = this.cache.get(keyHash);
+      if (cached) {
+        span.setAttribute("orka.auth.cache_hit", true);
+        this.queueLastUsedUpdate(keyHash);
+        return { success: true, ctx: cached } as AuthResult;
+      }
+      span.setAttribute("orka.auth.cache_hit", false);
+
+      // DB lookup
+      const keyRecord = getApiKeyByHash(this.db, keyHash);
+      if (!keyRecord) {
+        // Check legacy token
+        if (this.config.auth.legacyToken && key === this.config.auth.legacyToken) {
+          // Legacy token: create a synthetic auth context
+          const ctx: AuthContext = {
+            accountId: "__legacy__",
+            account: {
+              id: "__legacy__",
+              email: "legacy@localhost",
+              name: "Legacy Token",
+              status: "active",
+              tier: "pro",
+              createdAt: "",
+              updatedAt: "",
+            },
+            permissions: "client",
+            tier: "pro",
+            rateLimits: DEFAULT_RATE_LIMITS,
+            keyHash,
+          };
+          this.cache.set(keyHash, ctx);
+          return { success: true, ctx } as AuthResult;
+        }
+        return { success: false, error: "Invalid API key", code: 401 } as AuthResult;
+      }
+
+      if (keyRecord.status !== "active") {
+        return { success: false, error: "API key revoked", code: 403 } as AuthResult;
+      }
+
+      // Load account
+      const account = getAccount(this.db, keyRecord.accountId);
+      if (!account) {
+        return { success: false, error: "Account not found", code: 403 } as AuthResult;
+      }
+
+      if (account.status === "suspended") {
+        return { success: false, error: "Account suspended", code: 403 } as AuthResult;
+      }
+      if (account.status === "deleted") {
+        return { success: false, error: "Account deleted", code: 403 } as AuthResult;
+      }
+
+      // Load rate limits
+      const rateLimits = getRateLimits(this.db, keyRecord.accountId) ?? { ...DEFAULT_RATE_LIMITS, accountId: keyRecord.accountId };
+
+      const ctx: AuthContext = {
+        accountId: keyRecord.accountId,
+        account,
+        permissions: keyRecord.permissions,
+        tier: account.tier,
+        rateLimits,
+        keyHash,
+      };
+
+      span.setAttribute("orka.account.id", ctx.accountId);
+      this.cache.set(keyHash, ctx);
+      this.queueLastUsedUpdate(keyHash);
+
+      return { success: true, ctx } as AuthResult;
+    });
+  }
+
+  /**
+   * Create an account and its first API key.
+   * Returns both the account and the raw API key (shown only once).
+   */
+  signup(email: string, name: string): { account: Account; apiKey: string } {
+    const account = createAccount(this.db, email, name);
+    const { key, record } = generateApiKey(account.id);
+    insertApiKey(this.db, record);
+    return { account, apiKey: key };
+  }
+
+  /** Flush any pending last_used_at updates immediately. */
+  flushAuthUpdates(): void {
+    withSpanSync("orka.relay.auth.flush", {}, () => {
+      this.flushLastUsed();
+    });
+  }
+
+  /** Shutdown: clear timers, flush pending updates. */
+  shutdown(): void {
+    clearInterval(this.pruneTimer);
+    if (this.lastUsedFlushTimer) {
+      clearTimeout(this.lastUsedFlushTimer);
+      this.lastUsedFlushTimer = null;
     }
+    this.flushLastUsed();
+  }
 
-    if (keyRecord.status !== "active") {
-      return { success: false, error: "API key revoked", code: 403 } as AuthResult;
+  // --- Internal ---
+
+  private queueLastUsedUpdate(keyHash: string): void {
+    this.lastUsedQueue.add(keyHash);
+    if (!this.lastUsedFlushTimer) {
+      this.lastUsedFlushTimer = setTimeout(() => this.flushLastUsed(), 10_000);
+      if (typeof this.lastUsedFlushTimer === "object" && "unref" in (this.lastUsedFlushTimer as any)) {
+        (this.lastUsedFlushTimer as any).unref();
+      }
     }
+  }
 
-    // Load account
-    const account = getAccount(keyRecord.accountId);
-    if (!account) {
-      return { success: false, error: "Account not found", code: 403 } as AuthResult;
+  private flushLastUsed(): void {
+    this.lastUsedFlushTimer = null;
+    for (const kh of this.lastUsedQueue) {
+      try { updateApiKeyLastUsed(this.db, kh); } catch { /* best effort */ }
     }
-
-    if (account.status === "suspended") {
-      return { success: false, error: "Account suspended", code: 403 } as AuthResult;
-    }
-    if (account.status === "deleted") {
-      return { success: false, error: "Account deleted", code: 403 } as AuthResult;
-    }
-
-    // Load rate limits
-    const rateLimits = getRateLimits(keyRecord.accountId) ?? { ...DEFAULT_RATE_LIMITS, accountId: keyRecord.accountId };
-
-    const ctx: AuthContext = {
-      accountId: keyRecord.accountId,
-      account,
-      permissions: keyRecord.permissions,
-      tier: account.tier,
-      rateLimits,
-      keyHash,
-    };
-
-    span.setAttribute("orka.account.id", ctx.accountId);
-    authCache.set(keyHash, ctx);
-    queueLastUsedUpdate(keyHash);
-
-    return { success: true, ctx } as AuthResult;
-  });
+    this.lastUsedQueue.clear();
+  }
 }
+
+// --- extractApiKey (stateless, no manager needed) ---
 
 /**
  * Extract API key from request.
@@ -287,15 +329,4 @@ export function extractApiKey(req: Request): string | null {
     const url = new URL(req.url);
     return url.searchParams.get("token");
   });
-}
-
-/**
- * Create an account and its first API key.
- * Returns both the account and the raw API key (shown only once).
- */
-export function signup(email: string, name: string): { account: Account; apiKey: string } {
-  const account = createAccount(email, name);
-  const { key, record } = generateApiKey(account.id);
-  insertApiKey(record);
-  return { account, apiKey: key };
 }

@@ -92,7 +92,7 @@ export interface UsageEvent {
   timestamp: string;
 }
 
-// --- Database Singleton ---
+// --- Database Factory ---
 
 const RELAY_DIR = ".orka-relay";
 const DB_FILE = "relay.db";
@@ -101,29 +101,19 @@ export function getRelayHome(): string {
   return process.env["ORKA_RELAY_DATA"] ?? join(process.env["HOME"] ?? "", RELAY_DIR);
 }
 
-function getDbPath(): string {
-  const dir = getRelayHome();
+/**
+ * Open (or create) a relay SQLite database at the given data directory.
+ * Each call returns a new, independent Database instance.
+ */
+export function openRelayDb(dataDir?: string): Database {
+  const dir = dataDir ?? getRelayHome();
   mkdirSync(dir, { recursive: true });
-  return join(dir, DB_FILE);
-}
-
-let _db: Database | null = null;
-
-export function getDb(): Database {
-  if (!_db) {
-    _db = new Database(getDbPath());
-    _db.exec("PRAGMA journal_mode = WAL");
-    _db.exec("PRAGMA foreign_keys = ON");
-    migrate(_db);
-  }
-  return _db;
-}
-
-export function closeDb(): void {
-  if (_db) {
-    _db.close();
-    _db = null;
-  }
+  const dbPath = join(dir, DB_FILE);
+  const db = new Database(dbPath);
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
+  migrate(db);
+  return db;
 }
 
 // --- Migrations ---
@@ -204,7 +194,7 @@ function migrate(db: Database): void {
 
 // --- Account CRUD ---
 
-export function createAccount(email: string, name: string): Account {
+export function createAccount(db: Database, email: string, name: string): Account {
   return withSpanSync("orka.relay.db.createAccount", { "orka.account.email": email }, () => {
     const now = new Date().toISOString();
     const account: Account = {
@@ -217,7 +207,7 @@ export function createAccount(email: string, name: string): Account {
       updatedAt: now,
     };
 
-    getDb()
+    db
       .prepare(
         `INSERT INTO accounts (id, email, name, status, tier, created_at, updated_at)
          VALUES ($id, $email, $name, $status, $tier, $createdAt, $updatedAt)`,
@@ -233,7 +223,7 @@ export function createAccount(email: string, name: string): Account {
       });
 
     // Insert default rate limits
-    getDb()
+    db
       .prepare(
         `INSERT INTO rate_limit_config (account_id, requests_per_minute, requests_per_hour, concurrent_connections, max_message_bytes, updated_at)
          VALUES (?, 60, 1000, 10, 1048576, ?)`,
@@ -244,47 +234,47 @@ export function createAccount(email: string, name: string): Account {
   });
 }
 
-export function getAccount(id: string): Account | null {
+export function getAccount(db: Database, id: string): Account | null {
   return withSpanSync("orka.relay.db.getAccount", { "orka.account.id": id }, () => {
-    const row = getDb().prepare("SELECT * FROM accounts WHERE id = ?").get(id) as any;
+    const row = db.prepare("SELECT * FROM accounts WHERE id = ?").get(id) as any;
     return row ? rowToAccount(row) : null;
   });
 }
 
-export function getAccountByEmail(email: string): Account | null {
+export function getAccountByEmail(db: Database, email: string): Account | null {
   return withSpanSync("orka.relay.db.getAccountByEmail", { "orka.account.email": email }, () => {
-    const row = getDb().prepare("SELECT * FROM accounts WHERE email = ?").get(email) as any;
+    const row = db.prepare("SELECT * FROM accounts WHERE email = ?").get(email) as any;
     return row ? rowToAccount(row) : null;
   });
 }
 
-export function updateAccountStatus(id: string, status: AccountStatus): void {
+export function updateAccountStatus(db: Database, id: string, status: AccountStatus): void {
   withSpanSync("orka.relay.db.updateAccountStatus", {
     "orka.account.id": id,
     "orka.account.status": status,
   }, () => {
-    getDb()
+    db
       .prepare("UPDATE accounts SET status = ?, updated_at = ? WHERE id = ?")
       .run(status, new Date().toISOString(), id);
   });
 }
 
-export function updateAccountTier(id: string, tier: Tier): void {
-  getDb()
+export function updateAccountTier(db: Database, id: string, tier: Tier): void {
+  db
     .prepare("UPDATE accounts SET tier = ?, updated_at = ? WHERE id = ?")
     .run(tier, new Date().toISOString(), id);
 }
 
-export function listAccounts(): Account[] {
-  const rows = getDb().prepare("SELECT * FROM accounts ORDER BY created_at DESC").all() as any[];
+export function listAccounts(db: Database): Account[] {
+  const rows = db.prepare("SELECT * FROM accounts ORDER BY created_at DESC").all() as any[];
   return rows.map(rowToAccount);
 }
 
 // --- API Key CRUD ---
 
-export function insertApiKey(record: ApiKeyRecord): void {
+export function insertApiKey(db: Database, record: ApiKeyRecord): void {
   withSpanSync("orka.relay.db.insertApiKey", { "orka.account.id": record.accountId }, () => {
-    getDb()
+    db
       .prepare(
         `INSERT INTO api_keys (id, account_id, key_hash, key_prefix, label, permissions, status, created_at)
          VALUES ($id, $accountId, $keyHash, $keyPrefix, $label, $permissions, $status, $createdAt)`,
@@ -302,45 +292,45 @@ export function insertApiKey(record: ApiKeyRecord): void {
   });
 }
 
-export function getApiKeyByHash(keyHash: string): ApiKeyRecord | null {
+export function getApiKeyByHash(db: Database, keyHash: string): ApiKeyRecord | null {
   return withSpanSync("orka.relay.db.getApiKey", {}, () => {
-    const row = getDb().prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(keyHash) as any;
+    const row = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(keyHash) as any;
     return row ? rowToApiKey(row) : null;
   });
 }
 
-export function listApiKeys(accountId: string): ApiKeyRecord[] {
+export function listApiKeys(db: Database, accountId: string): ApiKeyRecord[] {
   return withSpanSync("orka.relay.db.listApiKeys", { "orka.account.id": accountId }, () => {
-    const rows = getDb()
+    const rows = db
       .prepare("SELECT * FROM api_keys WHERE account_id = ? ORDER BY created_at DESC")
       .all(accountId) as any[];
     return rows.map(rowToApiKey);
   });
 }
 
-export function revokeApiKey(keyId: string, accountId: string): boolean {
+export function revokeApiKey(db: Database, keyId: string, accountId: string): boolean {
   return withSpanSync("orka.relay.db.revokeApiKey", { "orka.account.id": accountId, "orka.key.id": keyId }, () => {
-    const result = getDb()
+    const result = db
       .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ? AND account_id = ?")
       .run(keyId, accountId);
     return result.changes > 0;
   });
 }
 
-export function updateApiKeyLastUsed(keyHash: string): void {
-  getDb()
+export function updateApiKeyLastUsed(db: Database, keyHash: string): void {
+  db
     .prepare("UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?")
     .run(new Date().toISOString(), keyHash);
 }
 
 // --- Rate Limits ---
 
-export function getRateLimits(accountId: string): RateLimitConfig | null {
-  const row = getDb().prepare("SELECT * FROM rate_limit_config WHERE account_id = ?").get(accountId) as any;
+export function getRateLimits(db: Database, accountId: string): RateLimitConfig | null {
+  const row = db.prepare("SELECT * FROM rate_limit_config WHERE account_id = ?").get(accountId) as any;
   return row ? rowToRateLimits(row) : null;
 }
 
-export function updateRateLimits(accountId: string, limits: Partial<Omit<RateLimitConfig, "accountId">>): void {
+export function updateRateLimits(db: Database, accountId: string, limits: Partial<Omit<RateLimitConfig, "accountId">>): void {
   const sets: string[] = ["updated_at = ?"];
   const params: any[] = [new Date().toISOString()];
 
@@ -350,15 +340,14 @@ export function updateRateLimits(accountId: string, limits: Partial<Omit<RateLim
   if (limits.maxMessageBytes !== undefined) { sets.push("max_message_bytes = ?"); params.push(limits.maxMessageBytes); }
 
   params.push(accountId);
-  getDb().prepare(`UPDATE rate_limit_config SET ${sets.join(", ")} WHERE account_id = ?`).run(...params);
+  db.prepare(`UPDATE rate_limit_config SET ${sets.join(", ")} WHERE account_id = ?`).run(...params);
 }
 
 // --- Usage Events (batch insert) ---
 
-export function insertUsageEvents(events: UsageEvent[]): void {
+export function insertUsageEvents(db: Database, events: UsageEvent[]): void {
   if (events.length === 0) return;
   withSpanSync("orka.relay.db.insertUsageEvents", { "orka.event.count": events.length }, () => {
-    const db = getDb();
     const stmt = db.prepare(
       `INSERT INTO usage_events (account_id, event_type, bytes_in, bytes_out, node_id, request_method, timestamp)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -378,13 +367,13 @@ export interface UsageBucket {
   bytesOut: number;
 }
 
-export function getAccountUsage(accountId: string, from: string, to: string, granularity: "hour" | "day"): UsageBucket[] {
+export function getAccountUsage(db: Database, accountId: string, from: string, to: string, granularity: "hour" | "day"): UsageBucket[] {
   return withSpanSync("orka.relay.db.queryUsage", {
     "orka.account.id": accountId,
     "orka.usage.granularity": granularity,
   }, () => {
     const fmt = granularity === "hour" ? "%Y-%m-%dT%H:00:00" : "%Y-%m-%d";
-    const rows = getDb()
+    const rows = db
       .prepare(
         `SELECT strftime('${fmt}', timestamp) as period,
                 COUNT(*) as requests,
@@ -407,19 +396,19 @@ export function getAccountUsage(accountId: string, from: string, to: string, gra
   });
 }
 
-export function deleteOldUsageEvents(olderThan: string): number {
+export function deleteOldUsageEvents(db: Database, olderThan: string): number {
   return withSpanSync("orka.relay.db.deleteOldUsageEvents", {
     "orka.timestamp": olderThan,
   }, () => {
-    const result = getDb()
+    const result = db
       .prepare("DELETE FROM usage_events WHERE timestamp < ?")
       .run(olderThan);
     return result.changes;
   });
 }
 
-export function getAccountCount(): number {
-  const row = getDb().prepare("SELECT COUNT(*) as count FROM accounts WHERE status = 'active'").get() as any;
+export function getAccountCount(db: Database): number {
+  const row = db.prepare("SELECT COUNT(*) as count FROM accounts WHERE status = 'active'").get() as any;
   return row?.count ?? 0;
 }
 

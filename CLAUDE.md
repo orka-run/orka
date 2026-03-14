@@ -159,6 +159,50 @@ OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/s
 
 **Adding new spans:** use `withSpan(name, attributes, async (span) => { ... })` from `./tracing`.
 
+## Dependency Injection Policy
+
+**Constructor injection only. No service locators, no module-level singletons.**
+
+All stateful dependencies (databases, caches, config, services) must be created at the composition root and passed down via constructor/function parameters. Never import a singleton from a module and use it directly.
+
+**Anti-patterns (DO NOT):**
+```typescript
+// ❌ Module-level singleton (service locator)
+let _db: Database | null = null;
+export function getDb() {
+  if (!_db) _db = new Database(process.env.DATA_DIR);
+  return _db;
+}
+
+// ❌ Direct import of singleton
+import { getDb } from "./db";
+export function listUsers() { return getDb().query("..."); }
+```
+
+**Correct patterns (DO):**
+```typescript
+// ✅ Factory function creates isolated instance
+export function createRelay(opts: { dataDir: string; port: number }): RelayHandle {
+  const db = new Database(join(opts.dataDir, "relay.db"));
+  const authCache = new AuthCache(db);
+  const rateLimiter = new RateLimiter();
+  const api = createApiRouter({ db, rateLimiter });
+  // everything is wired via parameters, nothing imported from module scope
+  return { server, shutdown() { db.close(); } };
+}
+
+// ✅ Dependencies passed as parameters
+export function listUsers(db: Database) { return db.query("..."); }
+
+// ✅ Context object for many dependencies
+interface DaemonContext { db: Database; pushHub: PushHub; providerService: ProviderService; }
+export function createLocalClient(ctx: DaemonContext): OrkaService { ... }
+```
+
+**Why:** Module-level singletons make it impossible to run multiple instances in the same process (needed for test isolation, hot restart, multi-tenant). Constructor injection makes dependencies explicit and testable.
+
+**Exception:** OpenTelemetry tracing is global by design (uses `@opentelemetry/api` global tracer). This is acceptable.
+
 ## Key Architecture Decisions
 
 - **Daemon-only client path**: All daemon-backed CLI operations go through `RemoteClient`. `LocalClient` exists to serve RPCs inside `orka serve`, not as a normal CLI fast path.

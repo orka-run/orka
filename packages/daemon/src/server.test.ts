@@ -4,24 +4,26 @@ import { PROTOCOL_VERSION, type OrkaService } from "@orka/core";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resetConfigCache } from "./config";
+import { createDaemonContext, type DaemonContext } from "./daemon-context";
 import { startServer } from "./server";
 
 const originalOrkaHome = process.env["ORKA_HOME"];
 
 let testHome = "";
+let ctx: DaemonContext;
 let server: Server<unknown> | null = null;
 
 beforeEach(() => {
-  resetConfigCache();
   testHome = mkdtempSync(join(tmpdir(), "orka-server-test-"));
+  // Tracing module uses ORKA_HOME for trace file location (global by design)
   process.env["ORKA_HOME"] = testHome;
+  ctx = createDaemonContext(testHome);
 });
 
 afterEach(() => {
   server?.stop(true);
   server = null;
-  resetConfigCache();
+  ctx.db.close();
   rmSync(testHome, { recursive: true, force: true });
   if (originalOrkaHome === undefined) {
     delete process.env["ORKA_HOME"];
@@ -33,8 +35,11 @@ afterEach(() => {
 describe("startServer", () => {
   test("returns protocol metadata and capabilities from /health", async () => {
     writeFileSync(join(testHome, "config.toml"), ["[limits]", "max_concurrent = 4"].join("\n"), "utf8");
+    // Recreate ctx to pick up the new config
+    ctx.db.close();
+    ctx = createDaemonContext(testHome);
 
-    server = await startServer({} as OrkaService, {
+    server = await startServer(ctx, {} as OrkaService, {
       port: 0,
       hostname: "127.0.0.1",
       encrypt: true,
@@ -75,7 +80,7 @@ describe("startServer", () => {
       listSessions: async () => [{ id: "sess-1" }, { id: "sess-2" }],
     } as OrkaService;
 
-    server = await startServer(svc, {
+    server = await startServer(ctx, svc, {
       port: 0,
       hostname: "127.0.0.1",
     });
@@ -121,7 +126,7 @@ describe("startServer", () => {
   });
 
   test("accepts OTLP JSON spans on /v1/traces", async () => {
-    server = await startServer({} as OrkaService, {
+    server = await startServer(ctx, {} as OrkaService, {
       port: 0,
       hostname: "127.0.0.1",
     });

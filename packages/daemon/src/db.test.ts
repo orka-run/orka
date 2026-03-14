@@ -2,21 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  closeDb,
-  getSession,
-  deleteSessions,
-  getOrchestrationEvents,
-  getUsageBySession,
-  getUsageSummary,
-  insertOrchestrationEvent,
-  insertSession,
-  insertTask,
-  insertUsageRecord,
-} from "./db";
+import type { Session, Task } from "@orka/core";
+import { openDb, DatabaseRepository } from "./db";
 
-const prevOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
+let db: DatabaseRepository;
 
 function versioned<T extends Record<string, unknown>>(event: T): T & { v: number } {
   return {
@@ -26,23 +16,17 @@ function versioned<T extends Record<string, unknown>>(event: T): T & { v: number
 }
 
 beforeEach(() => {
-  closeDb();
   testHome = mkdtempSync(join(tmpdir(), "orka-db-test-"));
-  process.env["ORKA_HOME"] = testHome;
+  db = new DatabaseRepository(openDb(testHome));
 });
 
 afterEach(() => {
-  closeDb();
+  db.close();
   rmSync(testHome, { recursive: true, force: true });
-  if (prevOrkaHome === undefined) {
-    delete process.env["ORKA_HOME"];
-  } else {
-    process.env["ORKA_HOME"] = prevOrkaHome;
-  }
 });
 
 function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
-  insertTask({
+  db.insertTask({
     id: taskId,
     title: `Task ${sessionId}`,
     prompt: "Fix issue",
@@ -52,7 +36,7 @@ function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
     createdAt: "2026-01-01T00:00:00.000Z",
   });
 
-  insertSession({
+  db.insertSession({
     id: sessionId,
     taskId,
     workspaceId: `ws-${sessionId}`,
@@ -73,7 +57,7 @@ function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
 
 describe("usage_log helpers", () => {
   test("persists session customization fields for retry", () => {
-    insertTask({
+    db.insertTask({
       id: "task-sess-custom-2",
       title: "Task custom",
       prompt: "Fix issue",
@@ -83,7 +67,7 @@ describe("usage_log helpers", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
     });
 
-    insertSession({
+    db.insertSession({
       id: "sess-custom-2",
       taskId: "task-sess-custom-2",
       workspaceId: "ws-sess-custom-2",
@@ -104,14 +88,14 @@ describe("usage_log helpers", () => {
       env: { FOO: "bar" },
     });
 
-    const session = getSession("sess-custom-2");
+    const session = db.getSession("sess-custom-2");
     expect(session?.systemPrompt).toBe("Stay concise.");
     expect(session?.allowedTools).toEqual(["Bash", "Read"]);
     expect(session?.env).toEqual({ FOO: "bar" });
   });
 
   test("stores per-session usage and summarizes with filters", () => {
-    insertTask({
+    db.insertTask({
       id: "task-1",
       title: "Task 1",
       prompt: "Fix issue",
@@ -120,7 +104,7 @@ describe("usage_log helpers", () => {
       model: "claude-sonnet",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    insertTask({
+    db.insertTask({
       id: "task-2",
       title: "Task 2",
       prompt: "Refactor module",
@@ -130,7 +114,7 @@ describe("usage_log helpers", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
     });
 
-    insertSession({
+    db.insertSession({
       id: "sess-1",
       taskId: "task-1",
       workspaceId: "ws-1",
@@ -147,7 +131,7 @@ describe("usage_log helpers", () => {
       kept: false,
       autoMerge: false,
     });
-    insertSession({
+    db.insertSession({
       id: "sess-2",
       taskId: "task-2",
       workspaceId: "ws-2",
@@ -165,7 +149,7 @@ describe("usage_log helpers", () => {
       autoMerge: false,
     });
 
-    insertUsageRecord({
+    db.insertUsageRecord({
       sessionId: "sess-1",
       backend: "claude-code",
       inputTokens: 1200,
@@ -175,7 +159,7 @@ describe("usage_log helpers", () => {
       model: "claude-sonnet",
       recordedAt: "2026-01-02T00:00:00.000Z",
     });
-    insertUsageRecord({
+    db.insertUsageRecord({
       sessionId: "sess-1",
       backend: "claude-code",
       inputTokens: 9999,
@@ -185,7 +169,7 @@ describe("usage_log helpers", () => {
       model: "duplicate",
       recordedAt: "2026-01-03T00:00:00.000Z",
     });
-    insertUsageRecord({
+    db.insertUsageRecord({
       sessionId: "sess-2",
       backend: "codex",
       inputTokens: 800,
@@ -196,7 +180,7 @@ describe("usage_log helpers", () => {
       recordedAt: "2026-01-01T12:00:00.000Z",
     });
 
-    const sessionUsage = getUsageBySession("sess-1");
+    const sessionUsage = db.getUsageBySession("sess-1");
     expect(sessionUsage).toHaveLength(1);
     expect(sessionUsage[0]).toEqual({
       sessionId: "sess-1",
@@ -209,7 +193,7 @@ describe("usage_log helpers", () => {
       recordedAt: "2026-01-02T00:00:00.000Z",
     });
 
-    const total = getUsageSummary();
+    const total = db.getUsageSummary();
     expect(total).toEqual({
       totalCostUsd: 1.75,
       totalInputTokens: 2000,
@@ -232,7 +216,7 @@ describe("usage_log helpers", () => {
       },
     });
 
-    const recent = getUsageSummary({ since: "2026-01-01T18:00:00.000Z" });
+    const recent = db.getUsageSummary({ since: "2026-01-01T18:00:00.000Z" });
     expect(recent).toEqual({
       totalCostUsd: 1.25,
       totalInputTokens: 1200,
@@ -249,7 +233,7 @@ describe("usage_log helpers", () => {
       },
     });
 
-    const codexOnly = getUsageSummary({ backend: "codex" });
+    const codexOnly = db.getUsageSummary({ backend: "codex" });
     expect(codexOnly).toEqual({
       totalCostUsd: 0.5,
       totalInputTokens: 800,
@@ -272,14 +256,14 @@ describe("orchestration event helpers", () => {
   test("stores orchestration events and returns them in insertion order", () => {
     seedSession("sess-1");
 
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-1",
       provider: "claude-code",
       type: "session.started",
       sessionId: "sess-1",
       timestamp: "2026-01-01T00:00:00.000Z",
     });
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-2",
       provider: "claude-code",
       type: "turn.completed",
@@ -289,7 +273,7 @@ describe("orchestration event helpers", () => {
       timestamp: "2026-01-01T00:01:00.000Z",
     });
 
-    expect(getOrchestrationEvents("sess-1")).toEqual([
+    expect(db.getOrchestrationEvents("sess-1")).toEqual([
       versioned({
         type: "session.started",
         sessionId: "sess-1",
@@ -308,7 +292,7 @@ describe("orchestration event helpers", () => {
   test("migrates persisted orchestration events without a version to v1", () => {
     seedSession("sess-legacy");
 
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-legacy",
       provider: "claude-code",
       type: "session.started",
@@ -316,7 +300,7 @@ describe("orchestration event helpers", () => {
       timestamp: "2026-01-01T00:00:00.000Z",
     });
 
-    expect(getOrchestrationEvents("sess-legacy")).toEqual([
+    expect(db.getOrchestrationEvents("sess-legacy")).toEqual([
       versioned({
         type: "session.started",
         sessionId: "sess-legacy",
@@ -330,21 +314,21 @@ describe("orchestration event helpers", () => {
     seedSession("sess-2");
 
     // Insert 3 events for sess-1, 2 for sess-2
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-a1",
       provider: "claude-code",
       type: "session.started",
       sessionId: "sess-1",
       timestamp: "2026-01-01T00:00:00.000Z",
     });
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-b1",
       provider: "claude-code",
       type: "session.started",
       sessionId: "sess-2",
       timestamp: "2026-01-01T00:00:00.000Z",
     });
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-a2",
       provider: "claude-code",
       type: "content.delta",
@@ -354,7 +338,7 @@ describe("orchestration event helpers", () => {
       delta: "hello",
       timestamp: "2026-01-01T00:00:00.000Z",
     });
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-a3",
       provider: "claude-code",
       type: "content.delta",
@@ -364,7 +348,7 @@ describe("orchestration event helpers", () => {
       delta: " world",
       timestamp: "2026-01-01T00:00:00.000Z",
     });
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-b2",
       provider: "claude-code",
       type: "content.delta",
@@ -376,12 +360,12 @@ describe("orchestration event helpers", () => {
     });
 
     // sess-1 should have 3 events in insertion order despite same timestamp
-    const s1 = getOrchestrationEvents("sess-1");
+    const s1 = db.getOrchestrationEvents("sess-1");
     expect(s1).toHaveLength(3);
     expect(s1.map((e) => e.type)).toEqual(["session.started", "content.delta", "content.delta"]);
 
     // sess-2 should have independent seq, 2 events
-    const s2 = getOrchestrationEvents("sess-2");
+    const s2 = db.getOrchestrationEvents("sess-2");
     expect(s2).toHaveLength(2);
     expect(s2.map((e) => e.type)).toEqual(["session.started", "content.delta"]);
   });
@@ -389,7 +373,7 @@ describe("orchestration event helpers", () => {
   test("deletes persisted orchestration events when sessions are deleted", () => {
     seedSession("sess-1");
 
-    insertOrchestrationEvent({
+    db.insertOrchestrationEvent({
       eventId: "evt-1",
       provider: "claude-code",
       type: "session.started",
@@ -397,8 +381,8 @@ describe("orchestration event helpers", () => {
       timestamp: "2026-01-01T00:00:00.000Z",
     });
 
-    deleteSessions(["sess-1"]);
+    db.deleteSessions(["sess-1"]);
 
-    expect(getOrchestrationEvents("sess-1")).toEqual([]);
+    expect(db.getOrchestrationEvents("sess-1")).toEqual([]);
   });
 });

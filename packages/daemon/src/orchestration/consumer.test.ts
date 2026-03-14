@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { $ } from "bun";
 import { createEvent, type ProviderRuntimeEvent, type SessionStatus, type UsageRecord } from "@orka/core";
 import { ApprovalManager } from "../approval-manager";
-import { closeDb } from "../db";
 import { initTracing } from "../tracing";
 import { worktreeCreate } from "../worktree";
 import { OrchestrationEngine } from "./engine";
@@ -98,28 +97,19 @@ function recordStatusUpdate(
   });
 }
 
-const previousOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
 let repoPaths: string[] = [];
 
 beforeEach(() => {
   initTracing();
-  closeDb();
   testHome = mkdtempSync(join(tmpdir(), "orka-consumer-home-"));
   repoPaths = [];
-  process.env["ORKA_HOME"] = testHome;
 });
 
 afterEach(() => {
-  closeDb();
   rmSync(testHome, { recursive: true, force: true });
   for (const repoPath of repoPaths) {
     rmSync(repoPath, { recursive: true, force: true });
-  }
-  if (previousOrkaHome === undefined) {
-    delete process.env["ORKA_HOME"];
-  } else {
-    process.env["ORKA_HOME"] = previousOrkaHome;
   }
 });
 
@@ -263,7 +253,7 @@ describe("consumeProviderEvents", () => {
 
   test("auto-merges completed worktree sessions when configured", async () => {
     const repoPath = await createRepo();
-    const workingDir = await worktreeCreate(repoPath, "sess-merge");
+    const workingDir = await worktreeCreate(repoPath, "sess-merge", testHome);
     writeFileSync(join(workingDir, "tracked.txt"), "base\nmerged\n", "utf8");
     await $`git -C ${workingDir} add tracked.txt`.quiet();
     await $`git -C ${workingDir} commit -m "worktree change"`.quiet();
@@ -287,6 +277,7 @@ describe("consumeProviderEvents", () => {
       workingDir,
       projectPath: repoPath,
       autoMerge: true,
+      orkaHome: testHome,
     });
 
     queue.push(

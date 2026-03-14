@@ -34,6 +34,7 @@ export interface ProviderEventConsumerCallbacks {
   projectPath?: string;
   autoMerge?: boolean;
   model?: string | null;
+  orkaHome?: string;
   cleanupWorktree?: () => Promise<void>;
   getSession?: (sessionId: string) => Session | null;
 }
@@ -263,7 +264,8 @@ async function tryAutoMerge(
     return;
   }
 
-  const worktreeDir = getWorktreeDir();
+  if (!callbacks.orkaHome) return;
+  const worktreeDir = getWorktreeDir(callbacks.orkaHome);
   if (!workingDir.startsWith(worktreeDir)) {
     return;
   }

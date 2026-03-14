@@ -1,32 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getConfig, resetConfigCache } from "./config";
-
-const originalOrkaHome = process.env.ORKA_HOME;
-
-let testHome = "";
-
-beforeEach(() => {
-  resetConfigCache();
-  testHome = mkdtempSync(join(tmpdir(), "orka-config-test-"));
-  mkdirSync(testHome, { recursive: true });
-  process.env.ORKA_HOME = testHome;
-});
-
-afterEach(() => {
-  resetConfigCache();
-  rmSync(testHome, { recursive: true, force: true });
-  if (originalOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
-  } else {
-    process.env.ORKA_HOME = originalOrkaHome;
-  }
-});
+import { loadConfig } from "./config";
 
 describe("daemon config", () => {
   test("parses hooks.post_worktree_create as a single string for backward compatibility", () => {
+    const testHome = mkdtempSync(join(tmpdir(), "orka-config-test-"));
+    mkdirSync(testHome, { recursive: true });
     writeFileSync(
       join(testHome, "config.toml"),
       [
@@ -36,10 +17,16 @@ describe("daemon config", () => {
       "utf8",
     );
 
-    expect(getConfig().hooks.postWorktreeCreate).toEqual(["bun install"]);
+    try {
+      expect(loadConfig(testHome).hooks.postWorktreeCreate).toEqual(["bun install"]);
+    } finally {
+      rmSync(testHome, { recursive: true, force: true });
+    }
   });
 
   test("parses hooks.post_worktree_create as a string array", () => {
+    const testHome = mkdtempSync(join(tmpdir(), "orka-config-test-"));
+    mkdirSync(testHome, { recursive: true });
     writeFileSync(
       join(testHome, "config.toml"),
       [
@@ -49,13 +36,19 @@ describe("daemon config", () => {
       "utf8",
     );
 
-    expect(getConfig().hooks.postWorktreeCreate).toEqual([
-      "bun install",
-      "cp .env.example .env",
-    ]);
+    try {
+      expect(loadConfig(testHome).hooks.postWorktreeCreate).toEqual([
+        "bun install",
+        "cp .env.example .env",
+      ]);
+    } finally {
+      rmSync(testHome, { recursive: true, force: true });
+    }
   });
 
   test("parses hooks.post_worktree_create as an array of tables", () => {
+    const testHome = mkdtempSync(join(tmpdir(), "orka-config-test-"));
+    mkdirSync(testHome, { recursive: true });
     writeFileSync(
       join(testHome, "config.toml"),
       [
@@ -68,9 +61,13 @@ describe("daemon config", () => {
       "utf8",
     );
 
-    expect(getConfig().hooks.postWorktreeCreate).toEqual([
-      "bun install",
-      "cp .env.example .env",
-    ]);
+    try {
+      expect(loadConfig(testHome).hooks.postWorktreeCreate).toEqual([
+        "bun install",
+        "cp .env.example .env",
+      ]);
+    } finally {
+      rmSync(testHome, { recursive: true, force: true });
+    }
   });
 });

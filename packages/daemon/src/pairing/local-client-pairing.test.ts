@@ -4,32 +4,22 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { createLocalClient, type PairingConfig } from "../local-client";
-import { closeDb } from "../db";
-import { resetConfigCache } from "../config";
+import { createDaemonContext, type DaemonContext } from "../daemon-context";
 import { parsePairingCode } from "@orka/core/crypto/protocol";
 
-const originalOrkaHome = process.env["ORKA_HOME"];
-
 let testHome = "";
+let ctx: DaemonContext;
 
 beforeEach(() => {
-  closeDb();
-  resetConfigCache();
   testHome = mkdtempSync(join(tmpdir(), "orka-pairing-test-"));
   mkdirSync(testHome, { recursive: true });
   writeFileSync(join(testHome, "config.toml"), "");
-  process.env["ORKA_HOME"] = testHome;
+  ctx = createDaemonContext(testHome);
 });
 
 afterEach(() => {
-  closeDb();
-  resetConfigCache();
+  ctx.db.close();
   rmSync(testHome, { recursive: true, force: true });
-  if (originalOrkaHome === undefined) {
-    delete process.env["ORKA_HOME"];
-  } else {
-    process.env["ORKA_HOME"] = originalOrkaHome;
-  }
 });
 
 function makePairingConfig(): PairingConfig {
@@ -47,7 +37,7 @@ function makePairingConfig(): PairingConfig {
 describe("LocalClient startPairing", () => {
   test("returns a valid pairing code and enrollment details", async () => {
     const config = makePairingConfig();
-    const client = createLocalClient(config);
+    const client = createLocalClient(ctx, config);
 
     const result = await client.startPairing({});
 
@@ -67,7 +57,7 @@ describe("LocalClient startPairing", () => {
 
   test("respects custom TTL", async () => {
     const config = makePairingConfig();
-    const client = createLocalClient(config);
+    const client = createLocalClient(ctx, config);
 
     const result = await client.startPairing({ ttlSec: 60 });
 
@@ -80,7 +70,7 @@ describe("LocalClient startPairing", () => {
 
   test("generates unique pairing codes for each call", async () => {
     const config = makePairingConfig();
-    const client = createLocalClient(config);
+    const client = createLocalClient(ctx, config);
 
     const result1 = await client.startPairing({});
     const result2 = await client.startPairing({});
@@ -90,14 +80,14 @@ describe("LocalClient startPairing", () => {
   });
 
   test("throws when pairing is not configured", async () => {
-    const client = createLocalClient();
+    const client = createLocalClient(ctx);
 
     await expect(client.startPairing({})).rejects.toThrow("Pairing is not configured");
   });
 
   test("pairing code format matches XXXX-XXXX-XXXX-XXXX-XXXXX", async () => {
     const config = makePairingConfig();
-    const client = createLocalClient(config);
+    const client = createLocalClient(ctx, config);
 
     const result = await client.startPairing({});
 

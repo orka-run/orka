@@ -13,7 +13,7 @@ describe("UsageMeter", () => {
 
   beforeEach(() => {
     // Use a long interval so flush doesn't fire during tests
-    meter = new UsageMeter(600_000);
+    meter = new UsageMeter(null as any, 600_000);
   });
 
   test("record buffers events", () => {

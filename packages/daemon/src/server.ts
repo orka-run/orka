@@ -15,13 +15,11 @@ import { trace } from "@opentelemetry/api";
 import { ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseServerTransport } from "@orka/core/transport/noise-transport";
 import daemonPackageJson from "../package.json";
-import { getConfig, type OrkaConfig } from "./config";
+import type { OrkaConfig } from "./config";
+import type { DaemonContext } from "./daemon-context";
 import { GracefulShutdown } from "./graceful-shutdown";
-import { orchestrationEngine, providerAdapterRegistry } from "./provider-runtime";
-import { pushHub } from "./push";
 import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
-import { getOrkaHome } from "./db";
 import { getDaemonMetrics, getTracer, persistOtlpJsonTraces, withSpan } from "./tracing";
 
 export interface ServerOptions {
@@ -46,13 +44,13 @@ interface ServerWebSocketData {
 
 export const gracefulShutdown = new GracefulShutdown();
 
-export function buildCapabilities(config: OrkaConfig, encrypt?: boolean): ServerCapabilities {
+export function buildCapabilities(ctx: DaemonContext, encrypt?: boolean): ServerCapabilities {
   return {
     resume: false,
     encryption: encrypt ? "noise-nk" : false,
     multiTurn: true,
-    adapters: providerAdapterRegistry.list(),
-    maxConcurrent: config.limits.maxConcurrent,
+    adapters: ctx.providerAdapterRegistry.list(),
+    maxConcurrent: ctx.config.limits.maxConcurrent,
     terminal: true,
   };
 }
@@ -62,17 +60,17 @@ export function buildCapabilities(config: OrkaConfig, encrypt?: boolean): Server
  * Accepts WebSocket connections, dispatches JSON-RPC to the OrkaService.
  * Optionally registers with a relay for multi-machine routing.
  */
-export async function startServer(svc: OrkaService, opts: ServerOptions) {
+export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: ServerOptions) {
   return withSpan("orka.server.start", {}, async () => {
-    void orchestrationEngine;
+    const { pushHub } = ctx;
 
     // Load or generate Noise keypair for E2E encryption
     let noiseKeyInfo: NoiseKeyInfo | undefined;
     if (opts.encrypt) {
-      noiseKeyInfo = ensureNoiseKeyPair(getOrkaHome(), "node");
+      noiseKeyInfo = ensureNoiseKeyPair(ctx.orkaHome, "node");
       console.log(`E2E encryption enabled (noise key_id: ${noiseKeyInfo.keyId.slice(0, 30)}...)`);
     }
-    const capabilities = buildCapabilities(getConfig(), opts.encrypt);
+    const capabilities = buildCapabilities(ctx, opts.encrypt);
     const nodeId = opts.nodeId ?? `${opts.hostname ?? "127.0.0.1"}:${opts.port}`;
 
     const server = Bun.serve<ServerWebSocketData>({
@@ -218,7 +216,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
               }
 
               // Process RPC (no encKey - Noise handles encryption at the transport layer)
-              const responseStr = await handleRpcRequest(svc, JSON.stringify(rpc));
+              const responseStr = await handleRpcRequest(ctx, svc, JSON.stringify(rpc));
               const responseObj = JSON.parse(responseStr) as Record<string, unknown>;
               const encFrame = transport.encryptRpc(responseObj);
               ws.send(JSON.stringify(encFrame));
@@ -320,7 +318,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             }
           }
 
-          const response = await handleRpcRequest(svc, raw);
+          const response = await handleRpcRequest(ctx, svc, raw);
           ws.send(response);
         },
 
@@ -401,7 +399,7 @@ function registerWithRelay(svc: OrkaService, relayUrl: string, nodeId: string, t
 
       ws.onmessage = async (event) => {
         const raw = typeof event.data === "string" ? event.data : "";
-        const response = await handleRpcRequest(svc, raw);
+        const response = await handleRpcRequest(ctx, svc, raw);
         ws.send(response);
       };
 

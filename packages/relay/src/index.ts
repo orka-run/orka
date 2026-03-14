@@ -19,13 +19,13 @@
 
 import type { ServerWebSocket, Server } from "bun";
 import { RelayState, type SocketData, type AnySocketData } from "./state";
-import { authenticate, extractApiKey, flushAuthUpdates } from "./auth";
-import { handleApiRequest } from "./api";
+import { AuthManager, extractApiKey } from "./auth";
+import { handleApiRequest, SignupRateLimiter } from "./api";
 import { RateLimiter, GlobalRateLimiter } from "./rate-limiter";
 import { UsageMeter } from "./metering";
 import { AbuseDetector } from "./abuse";
-import { getRelayConfig } from "./config";
-import { closeDb } from "./db";
+import { loadRelayConfig } from "./config";
+import { openRelayDb, getRelayHome } from "./db";
 import { SingleInstanceCluster } from "./cluster";
 import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync } from "./tracing";
 import { PairingRouter } from "./pairing";
@@ -69,6 +69,8 @@ export interface RelayOptions {
   token?: string;
   /** Path to config TOML. */
   configPath?: string;
+  /** Override data directory (default: ORKA_RELAY_DATA or ~/.orka-relay). */
+  dataDir?: string;
 }
 
 export interface RelayHandle {
@@ -80,18 +82,22 @@ export interface RelayHandle {
 // --- Start Relay ---
 
 export function startRelay(opts: RelayOptions): RelayHandle {
-  const config = getRelayConfig();
+  const dataDir = opts.dataDir ?? getRelayHome();
+  const config = loadRelayConfig(dataDir, opts.configPath);
   initRelayTracing(config.observability.traceFile ? { traceFile: config.observability.traceFile } : undefined);
   return withSpanSync("orka.relay.start", {
     "orka.port": opts.port,
     "orka.hostname": opts.hostname ?? config.server.hostname,
   }, () => {
+    // --- Composition root: create all dependencies ---
+    const db = openRelayDb(dataDir);
     const state = new RelayState();
     const rateLimiter = new RateLimiter();
     const globalLimiter = new GlobalRateLimiter(config.rateLimits.globalRequestsPerSecond);
-    const meter = new UsageMeter();
+    const meter = new UsageMeter(db);
     const abuseDetector = new AbuseDetector();
     const pairingRouter = new PairingRouter();
+    const signupRateLimiter = new SignupRateLimiter();
     const cluster = new SingleInstanceCluster({ url: `ws://${opts.hostname ?? config.server.hostname}:${opts.port}` });
     const startTime = Date.now();
     let draining = false;
@@ -100,6 +106,8 @@ export function startRelay(opts: RelayOptions): RelayHandle {
     if (opts.token && !config.auth.legacyToken) {
       config.auth.legacyToken = opts.token;
     }
+
+    const authManager = new AuthManager(db, config);
 
     const server = Bun.serve<AnySocketData>({
       port: opts.port,
@@ -118,7 +126,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
           const key = extractApiKey(req);
           if (key) {
             // Authenticated health: include account-specific info
-            const auth = authenticate(key);
+            const auth = authManager.authenticate(key);
             if (auth.success && auth.ctx) {
               const stats = state.getAccountStats(auth.ctx.accountId);
               const nodes = state.getAccountNodes(auth.ctx.accountId);
@@ -166,7 +174,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
               headers: { "content-type": "application/json" },
             });
           }
-          const pairAuth = authenticate(pairKey);
+          const pairAuth = authManager.authenticate(pairKey);
           if (!pairAuth.success || !pairAuth.ctx) {
             return new Response(JSON.stringify({ error: pairAuth.error }), {
               status: pairAuth.code ?? 401,
@@ -191,7 +199,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 
         // --- API endpoints ---
         if (url.pathname.startsWith("/v1/")) {
-          const apiResponse = await handleApiRequest(req, url, state);
+          const apiResponse = await handleApiRequest(req, url, db, config, authManager, signupRateLimiter, state);
           if (apiResponse) return apiResponse;
           return new Response("Not found", { status: 404 });
         }
@@ -205,7 +213,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
           });
         }
 
-        const auth = authenticate(key);
+        const auth = authManager.authenticate(key);
         if (!auth.success || !auth.ctx) {
           metrics.authFailures.inc({ reason: auth.error ?? "unknown" });
           return new Response(JSON.stringify({ error: auth.error }), {
@@ -408,12 +416,13 @@ export function startRelay(opts: RelayOptions): RelayHandle {
         }
 
         // Flush all subsystems
-        flushAuthUpdates();
+        authManager.shutdown();
+        signupRateLimiter.shutdown();
         pairingRouter.shutdown();
         meter.shutdown();
         abuseDetector.shutdown();
         rateLimiter.shutdown();
-        closeDb();
+        db.close();
 
         // Stop the server
         server.stop(true);

@@ -13,9 +13,10 @@ import {
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
+  createDaemonContext,
   createRemoteClient,
   startServer,
-  getConfig,
+  loadConfig,
   getOrkaHome,
   initTracing,
   shutdownTracing,
@@ -527,7 +528,7 @@ const spawnCmd = command({
     words: restPositionals({ type: str, displayName: "prompt" }),
   },
   handler: async (args) => runCliCommand("spawn", async () => {
-    const cfg = getConfig().defaults;
+    const cfg = loadConfig(getOrkaHome()).defaults;
 
     if (args.prompt && args.promptFile) {
       fail("error: cannot use both --prompt and --prompt-file");
@@ -1723,7 +1724,8 @@ const serveCmd = command({
         };
       }
 
-      const localSvc = createLocalClient(pairingConfig);
+      const ctx = createDaemonContext();
+      const localSvc = createLocalClient(ctx, pairingConfig);
       const relayToken = args.relayToken ?? process.env["ORKA_TOKEN"];
       const serverOptions = {
         port,
@@ -1733,7 +1735,7 @@ const serveCmd = command({
         ...(relayToken ? { relayToken } : {}),
         ...(useEncrypt ? { encrypt: true } : {}),
       };
-      const server = await startServer(localSvc, serverOptions);
+      const server = await startServer(ctx, localSvc, serverOptions);
       console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
       if (args.relay) {
         console.log(`  relay: ${args.relay}`);

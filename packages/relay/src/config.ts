@@ -47,21 +47,24 @@ export const RelayConfigSchema = z.object({
 
 export type RelayConfig = z.infer<typeof RelayConfigSchema>;
 
-let _config: RelayConfig | null = null;
+/**
+ * Load relay config from a TOML file.
+ * @param dataDir  — override the data directory (default: getRelayHome())
+ * @param configPath — explicit path to config file (overrides dataDir-based path)
+ */
+export function loadRelayConfig(dataDir?: string, configPath?: string): RelayConfig {
+  const resolvedConfigPath = configPath
+    ?? process.env["ORKA_RELAY_CONFIG"]
+    ?? join(dataDir ?? getRelayHome(), "config.toml");
 
-export function getRelayConfig(): RelayConfig {
-  if (_config) return _config;
-
-  const configPath = process.env["ORKA_RELAY_CONFIG"] ?? join(getRelayHome(), "config.toml");
-  if (!existsSync(configPath)) {
-    _config = RelayConfigSchema.parse({});
-    return _config;
+  if (!existsSync(resolvedConfigPath)) {
+    return RelayConfigSchema.parse({});
   }
 
   try {
-    const raw = readFileSync(configPath, "utf-8");
+    const raw = readFileSync(resolvedConfigPath, "utf-8");
     const toml = parseSimpleToml(raw);
-    _config = RelayConfigSchema.parse({
+    return RelayConfigSchema.parse({
       server: parseSection(toml["server"], {
         port: "number",
         hostname: "string",
@@ -92,15 +95,8 @@ export function getRelayConfig(): RelayConfig {
       }),
     });
   } catch {
-    _config = RelayConfigSchema.parse({});
+    return RelayConfigSchema.parse({});
   }
-
-  return _config;
-}
-
-/** Reset cached config (for testing) */
-export function resetRelayConfig(): void {
-  _config = null;
 }
 
 // --- TOML Parsing ---

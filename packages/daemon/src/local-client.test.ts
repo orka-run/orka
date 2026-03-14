@@ -3,36 +3,24 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ProviderSessionHandle } from "@orka/core";
-import { closeDb, getOrchestrationEvents, getUsageBySession, insertOrchestrationEvent, insertSession, insertTask } from "./db";
+import { createDaemonContext, type DaemonContext } from "./daemon-context";
 import { createLocalClient } from "./local-client";
-import { pushHub } from "./push";
-import { resetConfigCache } from "./config";
-import { providerService } from "./provider-runtime";
-
-const originalOrkaHome = process.env["ORKA_HOME"];
 
 let testHome = "";
+let ctx: DaemonContext;
 
 beforeEach(() => {
-  closeDb();
-  resetConfigCache();
   testHome = mkdtempSync(join(tmpdir(), "orka-local-client-test-"));
   mkdirSync(testHome, { recursive: true });
-  process.env["ORKA_HOME"] = testHome;
+  ctx = createDaemonContext(testHome);
 });
 
 afterEach(() => {
-  for (const handle of providerService.listActiveSessions()) {
-    providerService.clearHandle(handle.threadId);
+  for (const handle of ctx.providerService.listActiveSessions()) {
+    ctx.providerService.clearHandle(handle.threadId);
   }
-  closeDb();
-  resetConfigCache();
+  ctx.db.close();
   rmSync(testHome, { recursive: true, force: true });
-  if (originalOrkaHome === undefined) {
-    delete process.env["ORKA_HOME"];
-  } else {
-    process.env["ORKA_HOME"] = originalOrkaHome;
-  }
 });
 
 describe("LocalClient provider runtime support", () => {
@@ -40,7 +28,7 @@ describe("LocalClient provider runtime support", () => {
     seedSession("sess-provider");
     seedProviderEvents("sess-provider");
 
-    const client = createLocalClient();
+    const client = createLocalClient(ctx);
 
     await expect(client.captureOutput("sess-provider")).resolves.toBe("Draft response.Final answer");
 
@@ -58,7 +46,7 @@ describe("LocalClient provider runtime support", () => {
       numTurns: 2,
     });
 
-    expect(getUsageBySession("sess-provider")).toEqual([
+    expect(ctx.db.getUsageBySession("sess-provider")).toEqual([
       {
         sessionId: "sess-provider",
         backend: "codex",
@@ -82,28 +70,28 @@ describe("LocalClient provider runtime support", () => {
       meta: {},
     };
 
-    const originalGetHandle = providerService.getHandle;
-    const originalSendTurn = providerService.sendTurn;
-    const originalBroadcast = pushHub.broadcast.bind(pushHub);
+    const originalGetHandle = ctx.providerService.getHandle;
+    const originalSendTurn = ctx.providerService.sendTurn;
+    const originalBroadcast = ctx.pushHub.broadcast.bind(ctx.pushHub);
     const sendTurnCalls: Array<{ sessionId: string; input: { input: string } }> = [];
     const broadcasts: Array<{ channel: string; data: unknown }> = [];
 
-    (providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
-    (providerService as any).sendTurn = async (sessionId: string, input: { input: string }) => {
+    (ctx.providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
+    (ctx.providerService as any).sendTurn = async (sessionId: string, input: { input: string }) => {
       sendTurnCalls.push({ sessionId, input });
     };
-    (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = ((channel, data) => {
+    (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = ((channel: string, data: unknown) => {
       broadcasts.push({ channel, data });
-    }) as typeof pushHub.broadcast;
+    }) as typeof ctx.pushHub.broadcast;
 
     try {
-      const client = createLocalClient();
+      const client = createLocalClient(ctx);
 
       await expect(client.isAlive("sess-live")).resolves.toBe(true);
       await client.sendTurn("sess-live", "continue");
 
       expect(sendTurnCalls).toEqual([{ sessionId: "sess-live", input: { input: "continue" } }]);
-      expect(getOrchestrationEvents("sess-live")).toContainEqual({
+      expect(ctx.db.getOrchestrationEvents("sess-live")).toContainEqual({
         v: 1,
         type: "user.input",
         sessionId: "sess-live",
@@ -121,15 +109,15 @@ describe("LocalClient provider runtime support", () => {
         },
       });
     } finally {
-      (providerService as any).getHandle = originalGetHandle;
-      (providerService as any).sendTurn = originalSendTurn;
-      (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = originalBroadcast;
+      (ctx.providerService as any).getHandle = originalGetHandle;
+      (ctx.providerService as any).sendTurn = originalSendTurn;
+      (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = originalBroadcast;
     }
   });
 });
 
 function seedSession(sessionId: string): void {
-  insertTask({
+  ctx.db.insertTask({
     id: `task-${sessionId}`,
     title: `Task ${sessionId}`,
     prompt: "Fix the provider runtime path",
@@ -139,7 +127,7 @@ function seedSession(sessionId: string): void {
     createdAt: "2026-01-01T00:00:00.000Z",
   });
 
-  insertSession({
+  ctx.db.insertSession({
     id: sessionId,
     taskId: `task-${sessionId}`,
     workspaceId: `ws-${sessionId}`,
@@ -159,7 +147,7 @@ function seedSession(sessionId: string): void {
 }
 
 function seedProviderEvents(sessionId: string): void {
-  insertOrchestrationEvent({
+  ctx.db.insertOrchestrationEvent({
     eventId: `${sessionId}-turn-1-start`,
     provider: "codex",
     type: "turn.started",
@@ -167,7 +155,7 @@ function seedProviderEvents(sessionId: string): void {
     turnId: "turn-1",
     timestamp: "2026-01-01T00:01:01.000Z",
   });
-  insertOrchestrationEvent({
+  ctx.db.insertOrchestrationEvent({
     eventId: `${sessionId}-turn-1-delta`,
     provider: "codex",
     type: "content.delta",
@@ -177,7 +165,7 @@ function seedProviderEvents(sessionId: string): void {
     delta: "Draft response.",
     timestamp: "2026-01-01T00:01:10.000Z",
   });
-  insertOrchestrationEvent({
+  ctx.db.insertOrchestrationEvent({
     eventId: `${sessionId}-turn-1-complete`,
     provider: "codex",
     type: "turn.completed",
@@ -190,7 +178,7 @@ function seedProviderEvents(sessionId: string): void {
     },
     timestamp: "2026-01-01T00:01:20.000Z",
   });
-  insertOrchestrationEvent({
+  ctx.db.insertOrchestrationEvent({
     eventId: `${sessionId}-turn-2-start`,
     provider: "codex",
     type: "turn.started",
@@ -198,7 +186,7 @@ function seedProviderEvents(sessionId: string): void {
     turnId: "turn-2",
     timestamp: "2026-01-01T00:01:30.000Z",
   });
-  insertOrchestrationEvent({
+  ctx.db.insertOrchestrationEvent({
     eventId: `${sessionId}-turn-2-delta-1`,
     provider: "codex",
     type: "content.delta",
@@ -208,7 +196,7 @@ function seedProviderEvents(sessionId: string): void {
     delta: "Final ",
     timestamp: "2026-01-01T00:01:40.000Z",
   });
-  insertOrchestrationEvent({
+  ctx.db.insertOrchestrationEvent({
     eventId: `${sessionId}-turn-2-delta-2`,
     provider: "codex",
     type: "content.delta",
@@ -218,7 +206,7 @@ function seedProviderEvents(sessionId: string): void {
     delta: "answer",
     timestamp: "2026-01-01T00:01:41.000Z",
   });
-  insertOrchestrationEvent({
+  ctx.db.insertOrchestrationEvent({
     eventId: `${sessionId}-turn-2-complete`,
     provider: "codex",
     type: "turn.completed",
@@ -233,4 +221,3 @@ function seedProviderEvents(sessionId: string): void {
     timestamp: "2026-01-01T00:01:50.000Z",
   });
 }
-

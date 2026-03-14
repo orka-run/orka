@@ -70,30 +70,22 @@ export function getOrkaHome(): string {
   return process.env["ORKA_HOME"] ?? join(process.env["HOME"] ?? "", ORKA_DIR);
 }
 
-function getDbPath(): string {
-  const dir = getOrkaHome();
-  mkdirSync(dir, { recursive: true });
-  return join(dir, DB_FILE);
+function getDbPath(orkaHome: string): string {
+  mkdirSync(orkaHome, { recursive: true });
+  return join(orkaHome, DB_FILE);
 }
 
-let _db: Database | null = null;
-
-export function getDb(): Database {
-  if (!_db) {
-    _db = new Database(getDbPath());
-    _db.exec("PRAGMA journal_mode = WAL");
-    _db.exec("PRAGMA busy_timeout = 5000");
-    _db.exec("PRAGMA foreign_keys = ON");
-    migrate(_db);
-  }
-  return _db;
-}
-
-export function closeDb(): void {
-  if (_db) {
-    _db.close();
-    _db = null;
-  }
+/**
+ * Open (or create) a SQLite database at orkaHome/orka.db and run migrations.
+ * Returns the raw Database instance — callers should wrap it in a DatabaseRepository.
+ */
+export function openDb(orkaHome: string): Database {
+  const db = new Database(getDbPath(orkaHome));
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA foreign_keys = ON");
+  migrate(db);
+  return db;
 }
 
 const MIGRATIONS = [
@@ -186,448 +178,7 @@ function migrate(db: Database): void {
   }
 }
 
-// --- Task CRUD ---
-
-export function insertTask(task: Task): void {
-  withSpanSync("orka.db.insertTask", { "orka.task.id": task.id }, () => {
-    getDb()
-      .prepare(
-        `INSERT INTO tasks (id, title, prompt, backend, mode, model, created_at)
-         VALUES ($id, $title, $prompt, $backend, $mode, $model, $createdAt)`,
-      )
-      .run({
-        $id: task.id,
-        $title: task.title,
-        $prompt: task.prompt,
-        $backend: task.backend,
-        $mode: task.mode,
-        $model: task.model,
-        $createdAt: task.createdAt,
-      });
-  });
-}
-
-export function getTask(id: string): Task | null {
-  return withSpanSync("orka.db.getTask", { "orka.task.id": id }, () => {
-    const row = getDb().prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
-    return row ? rowToTask(row) : null;
-  });
-}
-
-// --- Session CRUD ---
-
-export function insertSession(session: Session): void {
-  withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
-    getDb()
-      .prepare(
-        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id)
-         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId)`,
-      )
-      .run({
-        $id: session.id,
-        $taskId: session.taskId,
-        $workspaceId: session.workspaceId,
-        $status: session.status,
-        $backend: session.backend,
-        $mode: session.mode,
-        $projectPath: session.projectPath,
-        $workingDir: session.workingDir,
-        $logFile: session.logFile,
-        $createdAt: session.createdAt,
-        $startedAt: session.startedAt,
-        $finishedAt: session.finishedAt,
-        $exitCode: session.exitCode,
-        $kept: session.kept ? 1 : 0,
-        $autoMerge: session.autoMerge ? 1 : 0,
-        $systemPrompt: session.systemPrompt ?? null,
-        $allowedTools: session.allowedTools ? JSON.stringify(session.allowedTools) : null,
-        $envJson: session.env ? JSON.stringify(session.env) : null,
-        $rawLogFile: session.rawLogFile ?? null,
-        $parentSessionId: session.parentSessionId ?? null,
-      });
-  });
-}
-
-export function updateSessionStatus(
-  id: string,
-  status: SessionStatus,
-  extra?: { startedAt?: string; finishedAt?: string; exitCode?: number },
-): void {
-  withSpanSync("orka.db.updateSessionStatus", { "orka.session.id": id, "orka.session.status": status }, () => {
-    const sets = ["status = $status"];
-    const params: Record<string, any> = { $id: id, $status: status };
-
-    if (extra?.startedAt) {
-      sets.push("started_at = $startedAt");
-      params["$startedAt"] = extra.startedAt;
-    }
-    if (extra?.finishedAt) {
-      sets.push("finished_at = $finishedAt");
-      params["$finishedAt"] = extra.finishedAt;
-    }
-    if (extra?.exitCode !== undefined) {
-      sets.push("exit_code = $exitCode");
-      params["$exitCode"] = extra.exitCode;
-    }
-
-    getDb()
-      .prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = $id`)
-      .run(params);
-  });
-}
-
-export function updateSessionRawLogFile(id: string, rawLogFile: string): void {
-  withSpanSync("orka.db.updateSessionRawLogFile", { "orka.session.id": id }, () => {
-    getDb()
-      .prepare("UPDATE sessions SET raw_log_file = ? WHERE id = ?")
-      .run(rawLogFile, id);
-  });
-}
-
-export function setSessionKept(id: string, kept: boolean): void {
-  withSpanSync("orka.db.setSessionKept", {}, () => {
-    getDb()
-      .prepare("UPDATE sessions SET kept = ? WHERE id = ?")
-      .run(kept ? 1 : 0, id);
-  });
-}
-
-export function saveSessionDiff(
-  sessionId: string,
-  diff: string,
-  status: string,
-  extra?: { commitLog?: string; commitDiff?: string },
-): void {
-  withSpanSync("orka.db.saveSessionDiff", { "orka.session.id": sessionId }, () => {
-    getDb()
-      .prepare("UPDATE sessions SET last_diff = ? WHERE id = ?")
-      .run(JSON.stringify({ status, diff, ...extra }), sessionId);
-  });
-}
-
-export function getSessionDiff(sessionId: string): { status: string; diff: string; commitLog?: string; commitDiff?: string } | null {
-  const row = getDb()
-    .prepare("SELECT last_diff FROM sessions WHERE id = ?")
-    .get(sessionId) as { last_diff: string | null } | undefined;
-  if (!row?.last_diff) return null;
-  return JSON.parse(row.last_diff);
-}
-
-export function getSession(id: string): Session | null {
-  return withSpanSync("orka.db.getSession", { "orka.session.id": id }, () => {
-    const row = getDb()
-      .prepare("SELECT * FROM sessions WHERE id = ?")
-      .get(id) as any;
-    return row ? rowToSession(row) : null;
-  });
-}
-
-export function listSessions(status?: SessionStatus, includeArchived = false): Session[] {
-  return withSpanSync("orka.db.listSessions", {}, () => {
-    const db = getDb();
-    const archiveFilter = includeArchived ? "" : " AND archived_at IS NULL";
-    const rows = status
-      ? (db
-          .prepare(`SELECT * FROM sessions WHERE status = ?${archiveFilter} ORDER BY created_at DESC`)
-          .all(status) as any[])
-      : (db
-          .prepare(`SELECT * FROM sessions WHERE 1=1${archiveFilter} ORDER BY created_at DESC`)
-          .all() as any[]);
-    return rows.map(rowToSession);
-  });
-}
-
-export function archiveSession(sessionId: string): void {
-  withSpanSync("orka.db.archiveSession", { "orka.session.id": sessionId }, () => {
-    getDb()
-      .prepare("UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
-      .run(new Date().toISOString(), sessionId);
-  });
-}
-
-export function unarchiveSession(sessionId: string): void {
-  withSpanSync("orka.db.unarchiveSession", { "orka.session.id": sessionId }, () => {
-    getDb()
-      .prepare("UPDATE sessions SET archived_at = NULL WHERE id = ?")
-      .run(sessionId);
-  });
-}
-
-export function archiveSessions(ids: string[]): number {
-  if (ids.length === 0) return 0;
-  return withSpanSync("orka.db.archiveSessions", { "orka.session.count": ids.length }, () => {
-    const db = getDb();
-    const now = new Date().toISOString();
-    const placeholders = ids.map(() => "?").join(", ");
-    const result = db
-      .prepare(`UPDATE sessions SET archived_at = ? WHERE id IN (${placeholders}) AND archived_at IS NULL`)
-      .run(now, ...ids);
-    return result.changes;
-  });
-}
-
-// --- Usage ---
-
-export function insertUsageRecord(record: UsageRecord): void {
-  withSpanSync("orka.db.insertUsageRecord", {
-    "orka.session.id": record.sessionId,
-    "orka.backend": record.backend,
-  }, () => {
-    getDb()
-      .prepare(
-        `INSERT INTO usage_log (
-           session_id,
-           backend,
-           input_tokens,
-           output_tokens,
-           cache_read_tokens,
-           cost_usd,
-           model,
-           recorded_at
-         )
-         SELECT
-           $sessionId,
-           $backend,
-           $inputTokens,
-           $outputTokens,
-           $cacheReadTokens,
-           $costUsd,
-           $model,
-           $recordedAt
-         WHERE NOT EXISTS (
-           SELECT 1 FROM usage_log WHERE session_id = $sessionId
-         )`,
-      )
-      .run({
-        $sessionId: record.sessionId,
-        $backend: record.backend,
-        $inputTokens: record.inputTokens,
-        $outputTokens: record.outputTokens,
-        $cacheReadTokens: record.cacheReadTokens,
-        $costUsd: record.costUsd,
-        $model: record.model,
-        $recordedAt: record.recordedAt,
-      });
-  });
-}
-
-export function getUsageBySession(sessionId: string): UsageRecord[] {
-  return withSpanSync("orka.db.getUsageBySession", { "orka.session.id": sessionId }, () => {
-    const rows = getDb()
-      .prepare(
-        `SELECT session_id, backend, input_tokens, output_tokens, cache_read_tokens, cost_usd, model, recorded_at
-         FROM usage_log
-         WHERE session_id = ?
-         ORDER BY recorded_at DESC`,
-      )
-      .all(sessionId) as any[];
-    return rows.map(rowToUsageRecord);
-  });
-}
-
-export function getUsageSummary(opts: { since?: string; backend?: string } = {}): UsageSummary {
-  return withSpanSync("orka.db.getUsageSummary", {}, () => {
-    const clauses: string[] = [];
-    const params: any[] = [];
-
-    if (opts.since) {
-      clauses.push("recorded_at >= ?");
-      params.push(opts.since);
-    }
-    if (opts.backend) {
-      clauses.push("backend = ?");
-      params.push(opts.backend);
-    }
-
-    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    const db = getDb();
-    const totals = db
-      .prepare(
-        `SELECT
-           COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS total_cost_usd,
-           COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
-           COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
-           COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
-           COUNT(DISTINCT session_id) AS session_count
-         FROM usage_log
-         ${where}`,
-      )
-      .get(...params) as {
-        total_cost_usd: number;
-        total_input_tokens: number;
-        total_output_tokens: number;
-        total_cache_read_tokens: number;
-        session_count: number;
-      } | null;
-
-    const byBackendRows = db
-      .prepare(
-        `SELECT
-           backend,
-           COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS cost,
-           COALESCE(SUM(input_tokens), 0) AS input_tokens,
-           COALESCE(SUM(output_tokens), 0) AS output_tokens,
-           COUNT(DISTINCT session_id) AS sessions
-         FROM usage_log
-         ${where}
-         GROUP BY backend
-         ORDER BY cost DESC, backend ASC`,
-      )
-      .all(...params) as Array<{
-        backend: string;
-        cost: number;
-        input_tokens: number;
-        output_tokens: number;
-        sessions: number;
-      }>;
-
-    return {
-      totalCostUsd: totals?.total_cost_usd ?? 0,
-      totalInputTokens: totals?.total_input_tokens ?? 0,
-      totalOutputTokens: totals?.total_output_tokens ?? 0,
-      totalCacheReadTokens: totals?.total_cache_read_tokens ?? 0,
-      sessionCount: totals?.session_count ?? 0,
-      byBackend: Object.fromEntries(
-        byBackendRows.map((row) => [
-          row.backend,
-          {
-            cost: row.cost,
-            inputTokens: row.input_tokens,
-            outputTokens: row.output_tokens,
-            sessions: row.sessions,
-          },
-        ]),
-      ),
-    };
-  });
-}
-
-// --- Orchestration events ---
-
-export function insertOrchestrationEvent(event: PersistedOrchestrationEvent): void {
-  withSpanSync("orka.db.insertOrchestrationEvent", {
-    "orka.session.id": event.sessionId,
-    "orka.provider": event.provider,
-  }, () => {
-    const payload = stripPersistedEventFields(event);
-    getDb()
-      .prepare(
-        `INSERT INTO orchestration_events (
-           event_id,
-           session_id,
-           type,
-           payload,
-           turn_id,
-           item_id,
-           request_id,
-           provider,
-           timestamp,
-           seq
-         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-           (SELECT COALESCE(MAX(seq), 0) + 1 FROM orchestration_events WHERE session_id = ?))`,
-      )
-      .run(
-        event.eventId,
-        event.sessionId,
-        event.type,
-        JSON.stringify(payload),
-        getTurnId(payload),
-        getItemId(payload),
-        getRequestId(payload),
-        event.provider,
-        event.timestamp,
-        event.sessionId,
-      );
-  });
-}
-
-export function getOrchestrationEvents(sessionId: string): OrchestrationEvent[] {
-  return withSpanSync("orka.db.getOrchestrationEvents", { "orka.session.id": sessionId }, () => {
-    const rows = getDb()
-      .prepare(
-        `SELECT payload
-         FROM orchestration_events
-         WHERE session_id = ?
-         ORDER BY seq ASC`,
-      )
-      .all(sessionId) as unknown[];
-    return rows.map(rowToOrchestrationEvent);
-  });
-}
-
-export function deleteOrchestrationEvents(sessionIds: string[]): void {
-  if (sessionIds.length === 0) return;
-  withSpanSync("orka.db.deleteOrchestrationEvents", { "orka.session.count": sessionIds.length }, () => {
-    const placeholders = sessionIds.map(() => "?").join(", ");
-    getDb()
-      .prepare(`DELETE FROM orchestration_events WHERE session_id IN (${placeholders})`)
-      .run(...sessionIds);
-  });
-}
-
-// --- Delete ---
-
-export function deleteSessions(ids: string[]): void {
-  if (ids.length === 0) return;
-  withSpanSync("orka.db.deleteSessions", { "orka.session.count": ids.length }, () => {
-    const db = getDb();
-    const placeholders = ids.map(() => "?").join(", ");
-    // Collect task_ids before deleting sessions
-    const taskIds = db
-      .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
-      .all(...ids) as { task_id: string }[];
-    deleteOrchestrationEvents(ids);
-    db.prepare(`DELETE FROM usage_log WHERE session_id IN (${placeholders})`).run(...ids);
-    db.prepare(`DELETE FROM session_tags WHERE session_id IN (${placeholders})`).run(...ids);
-    db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
-    // Delete orphaned tasks
-    for (const { task_id } of taskIds) {
-      const ref = db.prepare("SELECT 1 FROM sessions WHERE task_id = ? LIMIT 1").get(task_id);
-      if (!ref) {
-        db.prepare("DELETE FROM tasks WHERE id = ?").run(task_id);
-      }
-    }
-  });
-}
-
-// --- Tags ---
-
-export function insertSessionTags(sessionId: string, tags: string[]): void {
-  withSpanSync("orka.db.insertSessionTags", {}, () => {
-    if (tags.length === 0) return;
-    const db = getDb();
-    const stmt = db.prepare("INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)");
-    for (const tag of tags) {
-      stmt.run(sessionId, tag);
-    }
-  });
-}
-
-export function getSessionTags(sessionId: string): string[] {
-  return withSpanSync("orka.db.getSessionTags", {}, () => {
-    const rows = getDb()
-      .prepare("SELECT tag FROM session_tags WHERE session_id = ? ORDER BY tag")
-      .all(sessionId) as { tag: string }[];
-    return rows.map((r) => r.tag);
-  });
-}
-
-export function listSessionsByTag(tag: string): Session[] {
-  return withSpanSync("orka.db.listSessionsByTag", {}, () => {
-    const rows = getDb()
-      .prepare(
-        `SELECT s.* FROM sessions s
-         INNER JOIN session_tags t ON s.id = t.session_id
-         WHERE t.tag = ?
-         ORDER BY s.created_at DESC`,
-      )
-      .all(tag) as any[];
-    return rows.map(rowToSession);
-  });
-}
-
-// --- Client errors ---
+// --- Client error interface (used by DatabaseRepository and rpc-handler) ---
 
 export interface ClientError {
   id: number;
@@ -638,42 +189,494 @@ export interface ClientError {
   receivedAt: string;
 }
 
-export function insertClientError(report: { error: string; stack?: string; url: string; timestamp: string }): void {
-  withSpanSync("orka.db.insertClientError", {}, () => {
-    getDb()
-      .prepare(
-        `INSERT INTO client_errors (error, stack, url, timestamp, received_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(report.error, report.stack ?? null, report.url, report.timestamp, new Date().toISOString());
-  });
-}
+// --- Repository class ---
 
-export function listClientErrors(limit = 50): ClientError[] {
-  return withSpanSync("orka.db.listClientErrors", {}, () => {
-    const rows = getDb()
-      .prepare("SELECT id, error, stack, url, timestamp, received_at FROM client_errors ORDER BY id DESC LIMIT ?")
-      .all(limit) as Array<{ id: number; error: string; stack: string | null; url: string; timestamp: string; received_at: string }>;
-    return rows.map((row) => ({
-      id: row.id,
-      error: row.error,
-      stack: row.stack,
-      url: row.url,
-      timestamp: row.timestamp,
-      receivedAt: row.received_at,
-    }));
-  });
-}
+/**
+ * All database operations bundled together.
+ * Construct with an open Database; then pass the repository through DaemonContext.
+ */
+export class DatabaseRepository {
+  constructor(private readonly db: Database) {}
 
-// --- Child sessions ---
+  close(): void {
+    this.db.close();
+  }
 
-export function getChildSessions(parentId: string): Session[] {
-  return withSpanSync("orka.db.getChildSessions", { "orka.session.parent_id": parentId }, () => {
-    const rows = getDb()
-      .prepare("SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY created_at DESC")
-      .all(parentId) as any[];
-    return rows.map(rowToSession);
-  });
+  // --- Task CRUD ---
+
+  insertTask(task: Task): void {
+    withSpanSync("orka.db.insertTask", { "orka.task.id": task.id }, () => {
+      this.db
+        .prepare(
+          `INSERT INTO tasks (id, title, prompt, backend, mode, model, created_at)
+           VALUES ($id, $title, $prompt, $backend, $mode, $model, $createdAt)`,
+        )
+        .run({
+          $id: task.id,
+          $title: task.title,
+          $prompt: task.prompt,
+          $backend: task.backend,
+          $mode: task.mode,
+          $model: task.model,
+          $createdAt: task.createdAt,
+        });
+    });
+  }
+
+  getTask(id: string): Task | null {
+    return withSpanSync("orka.db.getTask", { "orka.task.id": id }, () => {
+      const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
+      return row ? rowToTask(row) : null;
+    });
+  }
+
+  // --- Session CRUD ---
+
+  insertSession(session: Session): void {
+    withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
+      this.db
+        .prepare(
+          `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id)
+           VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId)`,
+        )
+        .run({
+          $id: session.id,
+          $taskId: session.taskId,
+          $workspaceId: session.workspaceId,
+          $status: session.status,
+          $backend: session.backend,
+          $mode: session.mode,
+          $projectPath: session.projectPath,
+          $workingDir: session.workingDir,
+          $logFile: session.logFile,
+          $createdAt: session.createdAt,
+          $startedAt: session.startedAt,
+          $finishedAt: session.finishedAt,
+          $exitCode: session.exitCode,
+          $kept: session.kept ? 1 : 0,
+          $autoMerge: session.autoMerge ? 1 : 0,
+          $systemPrompt: session.systemPrompt ?? null,
+          $allowedTools: session.allowedTools ? JSON.stringify(session.allowedTools) : null,
+          $envJson: session.env ? JSON.stringify(session.env) : null,
+          $rawLogFile: session.rawLogFile ?? null,
+          $parentSessionId: session.parentSessionId ?? null,
+        });
+    });
+  }
+
+  updateSessionStatus(
+    id: string,
+    status: SessionStatus,
+    extra?: { startedAt?: string; finishedAt?: string; exitCode?: number },
+  ): void {
+    withSpanSync("orka.db.updateSessionStatus", { "orka.session.id": id, "orka.session.status": status }, () => {
+      const sets = ["status = $status"];
+      const params: Record<string, any> = { $id: id, $status: status };
+
+      if (extra?.startedAt) {
+        sets.push("started_at = $startedAt");
+        params["$startedAt"] = extra.startedAt;
+      }
+      if (extra?.finishedAt) {
+        sets.push("finished_at = $finishedAt");
+        params["$finishedAt"] = extra.finishedAt;
+      }
+      if (extra?.exitCode !== undefined) {
+        sets.push("exit_code = $exitCode");
+        params["$exitCode"] = extra.exitCode;
+      }
+
+      this.db
+        .prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = $id`)
+        .run(params);
+    });
+  }
+
+  updateSessionRawLogFile(id: string, rawLogFile: string): void {
+    withSpanSync("orka.db.updateSessionRawLogFile", { "orka.session.id": id }, () => {
+      this.db
+        .prepare("UPDATE sessions SET raw_log_file = ? WHERE id = ?")
+        .run(rawLogFile, id);
+    });
+  }
+
+  setSessionKept(id: string, kept: boolean): void {
+    withSpanSync("orka.db.setSessionKept", {}, () => {
+      this.db
+        .prepare("UPDATE sessions SET kept = ? WHERE id = ?")
+        .run(kept ? 1 : 0, id);
+    });
+  }
+
+  saveSessionDiff(
+    sessionId: string,
+    diff: string,
+    status: string,
+    extra?: { commitLog?: string; commitDiff?: string },
+  ): void {
+    withSpanSync("orka.db.saveSessionDiff", { "orka.session.id": sessionId }, () => {
+      this.db
+        .prepare("UPDATE sessions SET last_diff = ? WHERE id = ?")
+        .run(JSON.stringify({ status, diff, ...extra }), sessionId);
+    });
+  }
+
+  getSessionDiff(sessionId: string): { status: string; diff: string; commitLog?: string; commitDiff?: string } | null {
+    const row = this.db
+      .prepare("SELECT last_diff FROM sessions WHERE id = ?")
+      .get(sessionId) as { last_diff: string | null } | undefined;
+    if (!row?.last_diff) return null;
+    return JSON.parse(row.last_diff);
+  }
+
+  getSession(id: string): Session | null {
+    return withSpanSync("orka.db.getSession", { "orka.session.id": id }, () => {
+      const row = this.db
+        .prepare("SELECT * FROM sessions WHERE id = ?")
+        .get(id) as any;
+      return row ? rowToSession(row) : null;
+    });
+  }
+
+  listSessions(status?: SessionStatus, includeArchived = false): Session[] {
+    return withSpanSync("orka.db.listSessions", {}, () => {
+      const archiveFilter = includeArchived ? "" : " AND archived_at IS NULL";
+      const rows = status
+        ? (this.db
+            .prepare(`SELECT * FROM sessions WHERE status = ?${archiveFilter} ORDER BY created_at DESC`)
+            .all(status) as any[])
+        : (this.db
+            .prepare(`SELECT * FROM sessions WHERE 1=1${archiveFilter} ORDER BY created_at DESC`)
+            .all() as any[]);
+      return rows.map(rowToSession);
+    });
+  }
+
+  archiveSession(sessionId: string): void {
+    withSpanSync("orka.db.archiveSession", { "orka.session.id": sessionId }, () => {
+      this.db
+        .prepare("UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
+        .run(new Date().toISOString(), sessionId);
+    });
+  }
+
+  unarchiveSession(sessionId: string): void {
+    withSpanSync("orka.db.unarchiveSession", { "orka.session.id": sessionId }, () => {
+      this.db
+        .prepare("UPDATE sessions SET archived_at = NULL WHERE id = ?")
+        .run(sessionId);
+    });
+  }
+
+  archiveSessions(ids: string[]): number {
+    if (ids.length === 0) return 0;
+    return withSpanSync("orka.db.archiveSessions", { "orka.session.count": ids.length }, () => {
+      const now = new Date().toISOString();
+      const placeholders = ids.map(() => "?").join(", ");
+      const result = this.db
+        .prepare(`UPDATE sessions SET archived_at = ? WHERE id IN (${placeholders}) AND archived_at IS NULL`)
+        .run(now, ...ids);
+      return result.changes;
+    });
+  }
+
+  // --- Usage ---
+
+  insertUsageRecord(record: UsageRecord): void {
+    withSpanSync("orka.db.insertUsageRecord", {
+      "orka.session.id": record.sessionId,
+      "orka.backend": record.backend,
+    }, () => {
+      this.db
+        .prepare(
+          `INSERT INTO usage_log (
+             session_id,
+             backend,
+             input_tokens,
+             output_tokens,
+             cache_read_tokens,
+             cost_usd,
+             model,
+             recorded_at
+           )
+           SELECT
+             $sessionId,
+             $backend,
+             $inputTokens,
+             $outputTokens,
+             $cacheReadTokens,
+             $costUsd,
+             $model,
+             $recordedAt
+           WHERE NOT EXISTS (
+             SELECT 1 FROM usage_log WHERE session_id = $sessionId
+           )`,
+        )
+        .run({
+          $sessionId: record.sessionId,
+          $backend: record.backend,
+          $inputTokens: record.inputTokens,
+          $outputTokens: record.outputTokens,
+          $cacheReadTokens: record.cacheReadTokens,
+          $costUsd: record.costUsd,
+          $model: record.model,
+          $recordedAt: record.recordedAt,
+        });
+    });
+  }
+
+  getUsageBySession(sessionId: string): UsageRecord[] {
+    return withSpanSync("orka.db.getUsageBySession", { "orka.session.id": sessionId }, () => {
+      const rows = this.db
+        .prepare(
+          `SELECT session_id, backend, input_tokens, output_tokens, cache_read_tokens, cost_usd, model, recorded_at
+           FROM usage_log
+           WHERE session_id = ?
+           ORDER BY recorded_at DESC`,
+        )
+        .all(sessionId) as any[];
+      return rows.map(rowToUsageRecord);
+    });
+  }
+
+  getUsageSummary(opts: { since?: string; backend?: string } = {}): UsageSummary {
+    return withSpanSync("orka.db.getUsageSummary", {}, () => {
+      const clauses: string[] = [];
+      const params: any[] = [];
+
+      if (opts.since) {
+        clauses.push("recorded_at >= ?");
+        params.push(opts.since);
+      }
+      if (opts.backend) {
+        clauses.push("backend = ?");
+        params.push(opts.backend);
+      }
+
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const totals = this.db
+        .prepare(
+          `SELECT
+             COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS total_cost_usd,
+             COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+             COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+             COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
+             COUNT(DISTINCT session_id) AS session_count
+           FROM usage_log
+           ${where}`,
+        )
+        .get(...params) as {
+          total_cost_usd: number;
+          total_input_tokens: number;
+          total_output_tokens: number;
+          total_cache_read_tokens: number;
+          session_count: number;
+        } | null;
+
+      const byBackendRows = this.db
+        .prepare(
+          `SELECT
+             backend,
+             COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS cost,
+             COALESCE(SUM(input_tokens), 0) AS input_tokens,
+             COALESCE(SUM(output_tokens), 0) AS output_tokens,
+             COUNT(DISTINCT session_id) AS sessions
+           FROM usage_log
+           ${where}
+           GROUP BY backend
+           ORDER BY cost DESC, backend ASC`,
+        )
+        .all(...params) as Array<{
+          backend: string;
+          cost: number;
+          input_tokens: number;
+          output_tokens: number;
+          sessions: number;
+        }>;
+
+      return {
+        totalCostUsd: totals?.total_cost_usd ?? 0,
+        totalInputTokens: totals?.total_input_tokens ?? 0,
+        totalOutputTokens: totals?.total_output_tokens ?? 0,
+        totalCacheReadTokens: totals?.total_cache_read_tokens ?? 0,
+        sessionCount: totals?.session_count ?? 0,
+        byBackend: Object.fromEntries(
+          byBackendRows.map((row) => [
+            row.backend,
+            {
+              cost: row.cost,
+              inputTokens: row.input_tokens,
+              outputTokens: row.output_tokens,
+              sessions: row.sessions,
+            },
+          ]),
+        ),
+      };
+    });
+  }
+
+  // --- Orchestration events ---
+
+  insertOrchestrationEvent(event: PersistedOrchestrationEvent): void {
+    withSpanSync("orka.db.insertOrchestrationEvent", {
+      "orka.session.id": event.sessionId,
+      "orka.provider": event.provider,
+    }, () => {
+      const payload = stripPersistedEventFields(event);
+      this.db
+        .prepare(
+          `INSERT INTO orchestration_events (
+             event_id,
+             session_id,
+             type,
+             payload,
+             turn_id,
+             item_id,
+             request_id,
+             provider,
+             timestamp,
+             seq
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+             (SELECT COALESCE(MAX(seq), 0) + 1 FROM orchestration_events WHERE session_id = ?))`,
+        )
+        .run(
+          event.eventId,
+          event.sessionId,
+          event.type,
+          JSON.stringify(payload),
+          getTurnId(payload),
+          getItemId(payload),
+          getRequestId(payload),
+          event.provider,
+          event.timestamp,
+          event.sessionId,
+        );
+    });
+  }
+
+  getOrchestrationEvents(sessionId: string): OrchestrationEvent[] {
+    return withSpanSync("orka.db.getOrchestrationEvents", { "orka.session.id": sessionId }, () => {
+      const rows = this.db
+        .prepare(
+          `SELECT payload
+           FROM orchestration_events
+           WHERE session_id = ?
+           ORDER BY seq ASC`,
+        )
+        .all(sessionId) as unknown[];
+      return rows.map(rowToOrchestrationEvent);
+    });
+  }
+
+  deleteOrchestrationEvents(sessionIds: string[]): void {
+    if (sessionIds.length === 0) return;
+    withSpanSync("orka.db.deleteOrchestrationEvents", { "orka.session.count": sessionIds.length }, () => {
+      const placeholders = sessionIds.map(() => "?").join(", ");
+      this.db
+        .prepare(`DELETE FROM orchestration_events WHERE session_id IN (${placeholders})`)
+        .run(...sessionIds);
+    });
+  }
+
+  // --- Delete ---
+
+  deleteSessions(ids: string[]): void {
+    if (ids.length === 0) return;
+    withSpanSync("orka.db.deleteSessions", { "orka.session.count": ids.length }, () => {
+      const placeholders = ids.map(() => "?").join(", ");
+      // Collect task_ids before deleting sessions
+      const taskIds = this.db
+        .prepare(`SELECT DISTINCT task_id FROM sessions WHERE id IN (${placeholders})`)
+        .all(...ids) as { task_id: string }[];
+      this.deleteOrchestrationEvents(ids);
+      this.db.prepare(`DELETE FROM usage_log WHERE session_id IN (${placeholders})`).run(...ids);
+      this.db.prepare(`DELETE FROM session_tags WHERE session_id IN (${placeholders})`).run(...ids);
+      this.db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids);
+      // Delete orphaned tasks
+      for (const { task_id } of taskIds) {
+        const ref = this.db.prepare("SELECT 1 FROM sessions WHERE task_id = ? LIMIT 1").get(task_id);
+        if (!ref) {
+          this.db.prepare("DELETE FROM tasks WHERE id = ?").run(task_id);
+        }
+      }
+    });
+  }
+
+  // --- Tags ---
+
+  insertSessionTags(sessionId: string, tags: string[]): void {
+    withSpanSync("orka.db.insertSessionTags", {}, () => {
+      if (tags.length === 0) return;
+      const stmt = this.db.prepare("INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)");
+      for (const tag of tags) {
+        stmt.run(sessionId, tag);
+      }
+    });
+  }
+
+  getSessionTags(sessionId: string): string[] {
+    return withSpanSync("orka.db.getSessionTags", {}, () => {
+      const rows = this.db
+        .prepare("SELECT tag FROM session_tags WHERE session_id = ? ORDER BY tag")
+        .all(sessionId) as { tag: string }[];
+      return rows.map((r) => r.tag);
+    });
+  }
+
+  listSessionsByTag(tag: string): Session[] {
+    return withSpanSync("orka.db.listSessionsByTag", {}, () => {
+      const rows = this.db
+        .prepare(
+          `SELECT s.* FROM sessions s
+           INNER JOIN session_tags t ON s.id = t.session_id
+           WHERE t.tag = ?
+           ORDER BY s.created_at DESC`,
+        )
+        .all(tag) as any[];
+      return rows.map(rowToSession);
+    });
+  }
+
+  // --- Client errors ---
+
+  insertClientError(report: { error: string; stack?: string; url: string; timestamp: string }): void {
+    withSpanSync("orka.db.insertClientError", {}, () => {
+      this.db
+        .prepare(
+          `INSERT INTO client_errors (error, stack, url, timestamp, received_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(report.error, report.stack ?? null, report.url, report.timestamp, new Date().toISOString());
+    });
+  }
+
+  listClientErrors(limit = 50): ClientError[] {
+    return withSpanSync("orka.db.listClientErrors", {}, () => {
+      const rows = this.db
+        .prepare("SELECT id, error, stack, url, timestamp, received_at FROM client_errors ORDER BY id DESC LIMIT ?")
+        .all(limit) as Array<{ id: number; error: string; stack: string | null; url: string; timestamp: string; received_at: string }>;
+      return rows.map((row) => ({
+        id: row.id,
+        error: row.error,
+        stack: row.stack,
+        url: row.url,
+        timestamp: row.timestamp,
+        receivedAt: row.received_at,
+      }));
+    });
+  }
+
+  // --- Child sessions ---
+
+  getChildSessions(parentId: string): Session[] {
+    return withSpanSync("orka.db.getChildSessions", { "orka.session.parent_id": parentId }, () => {
+      const rows = this.db
+        .prepare("SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY created_at DESC")
+        .all(parentId) as any[];
+      return rows.map(rowToSession);
+    });
+  }
 }
 
 // --- Row mappers ---

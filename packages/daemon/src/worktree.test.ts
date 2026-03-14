@@ -3,30 +3,20 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resetConfigCache } from "./config";
+import { loadConfig } from "./config";
 import { worktreeCreate } from "./worktree";
-
-const originalOrkaHome = process.env.ORKA_HOME;
 
 let testHome = "";
 let repoPath = "";
 
 beforeEach(async () => {
-  resetConfigCache();
   testHome = mkdtempSync(join(tmpdir(), "orka-worktree-test-"));
-  process.env.ORKA_HOME = testHome;
   repoPath = await createRepo();
 });
 
 afterEach(() => {
-  resetConfigCache();
   rmSync(testHome, { recursive: true, force: true });
   rmSync(repoPath, { recursive: true, force: true });
-  if (originalOrkaHome === undefined) {
-    delete process.env.ORKA_HOME;
-  } else {
-    process.env.ORKA_HOME = originalOrkaHome;
-  }
 });
 
 describe("worktreeCreate", () => {
@@ -36,7 +26,8 @@ describe("worktreeCreate", () => {
       `post_worktree_create = "printf 'hook ran' > hook.txt"`,
     ]);
 
-    const wtPath = await worktreeCreate(repoPath, "sess-hook");
+    const config = loadConfig(testHome);
+    const wtPath = await worktreeCreate(repoPath, "sess-hook", testHome, { config });
 
     expect(readFileSync(join(wtPath, "hook.txt"), "utf8")).toBe("hook ran");
   });
@@ -47,7 +38,8 @@ describe("worktreeCreate", () => {
       `post_worktree_create = ["printf 'first' > first.txt", "printf 'second' > second.txt"]`,
     ]);
 
-    const wtPath = await worktreeCreate(repoPath, "sess-hook-multi");
+    const config = loadConfig(testHome);
+    const wtPath = await worktreeCreate(repoPath, "sess-hook-multi", testHome, { config });
 
     expect(readFileSync(join(wtPath, "first.txt"), "utf8")).toBe("first");
     expect(readFileSync(join(wtPath, "second.txt"), "utf8")).toBe("second");
@@ -72,7 +64,8 @@ describe("worktreeCreate", () => {
     };
 
     try {
-      const wtPath = await worktreeCreate(repoPath, "sess-hook-fail");
+      const config = loadConfig(testHome);
+      const wtPath = await worktreeCreate(repoPath, "sess-hook-fail", testHome, { config });
 
       expect(existsSync(wtPath)).toBe(true);
       expect(readFileSync(join(wtPath, "first.txt"), "utf8")).toBe("first");
@@ -88,7 +81,6 @@ describe("worktreeCreate", () => {
 
 function writeConfig(lines: string[]): void {
   writeFileSync(join(testHome, "config.toml"), lines.join("\n"), "utf8");
-  resetConfigCache();
 }
 
 async function createRepo(): Promise<string> {

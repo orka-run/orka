@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { generateId } from "@orka/core";
@@ -25,28 +25,8 @@ import type {
 } from "@orka/core";
 import { generatePairingCode } from "@orka/core/crypto/protocol";
 import { EnrollmentStore } from "./pairing/enrollment-store";
-import {
-  getSession,
-  listSessions as dbListSessions,
-  getTask,
-  setSessionKept,
-  getSessionTags,
-  listSessionsByTag,
-  getChildSessions as dbGetChildSessions,
-  deleteSessions as dbDeleteSessions,
-  archiveSession as dbArchiveSession,
-  unarchiveSession as dbUnarchiveSession,
-  getUsageBySession,
-  getUsageSummary as dbGetUsageSummary,
-  getOrkaHome,
-  getSessionDiff,
-  getOrchestrationEvents,
-  deleteOrchestrationEvents,
-  insertOrchestrationEvent,
-  insertUsageRecord,
-} from "./db";
+import type { DaemonContext } from "./daemon-context";
 import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
-import { pushHub } from "./push";
 import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
 import {
@@ -55,7 +35,6 @@ import {
   deleteBranch,
   getWorktreeDir,
 } from "./worktree";
-import { approvalManager, orchestrationEngine, providerAdapterRegistry, providerService } from "./provider-runtime";
 import { queryMetricSnapshot, queryTraceLog, withSpan } from "./tracing";
 import { PairingServer } from "./pairing/pairing-server";
 import type { PairMessage } from "@orka/core";
@@ -78,11 +57,13 @@ export interface PairingConfig {
 }
 
 class LocalClient implements OrkaService {
+  private readonly ctx: DaemonContext;
   private terminalManager: TerminalManager | null = null;
   private enrollmentStore: EnrollmentStore | null = null;
   private pairingConfig: PairingConfig | null = null;
 
-  constructor(pairingConfig?: PairingConfig) {
+  constructor(ctx: DaemonContext, pairingConfig?: PairingConfig) {
+    this.ctx = ctx;
     if (pairingConfig) {
       this.pairingConfig = pairingConfig;
       this.enrollmentStore = new EnrollmentStore();
@@ -97,11 +78,11 @@ class LocalClient implements OrkaService {
   }
 
   async spawn(req: SpawnRequest): Promise<Session> {
-    return spawnSession(req);
+    return spawnSession(this.ctx, req);
   }
 
   async stop(sessionId: string): Promise<void> {
-    return stopSession(sessionId);
+    return stopSession(this.ctx, sessionId);
   }
 
   async reap(): Promise<number> {
@@ -109,13 +90,13 @@ class LocalClient implements OrkaService {
   }
 
   async getSession(id: string): Promise<Session | null> {
-    return getSession(id);
+    return this.ctx.db.getSession(id);
   }
 
   async listSessions(filters?: SessionFilters): Promise<Session[]> {
     const includeArchived = filters?.includeArchived ?? false;
     if (filters?.tag) {
-      let sessions = listSessionsByTag(filters.tag);
+      let sessions = this.ctx.db.listSessionsByTag(filters.tag);
       if (filters.status) {
         sessions = sessions.filter((s) => s.status === filters.status);
       }
@@ -124,34 +105,34 @@ class LocalClient implements OrkaService {
       }
       return sessions;
     }
-    return dbListSessions(filters?.status, includeArchived);
+    return this.ctx.db.listSessions(filters?.status, includeArchived);
   }
 
   async getChildSessions(sessionId: string): Promise<Session[]> {
-    return dbGetChildSessions(sessionId);
+    return this.ctx.db.getChildSessions(sessionId);
   }
 
   async getTask(id: string): Promise<Task | null> {
-    return getTask(id);
+    return this.ctx.db.getTask(id);
   }
 
   async setKept(sessionId: string, kept: boolean): Promise<void> {
-    setSessionKept(sessionId, kept);
+    this.ctx.db.setSessionKept(sessionId, kept);
   }
 
   async getTags(sessionId: string): Promise<string[]> {
-    return getSessionTags(sessionId);
+    return this.ctx.db.getSessionTags(sessionId);
   }
 
   async getResult(sessionId: string): Promise<SessionResult | null> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) return null;
 
-    const result = buildProviderSessionResult(sessionId, session);
+    const result = this.buildProviderSessionResult(sessionId, session);
     const parsedResult =
       result ?? (session.logFile ? parseSessionResult(session.logFile, session) : null);
     if (parsedResult) {
-      insertUsageRecord({
+      this.ctx.db.insertUsageRecord({
         sessionId: session.id,
         backend: session.backend,
         inputTokens: parsedResult.inputTokens,
@@ -166,20 +147,20 @@ class LocalClient implements OrkaService {
   }
 
   async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
-    return getOrchestrationEvents(sessionId);
+    return this.ctx.db.getOrchestrationEvents(sessionId);
   }
 
   async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
-    const events = getOrchestrationEvents(sessionId);
+    const events = this.ctx.db.getOrchestrationEvents(sessionId);
     return eventsToChat(events);
   }
 
   async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {
     if (!opts?.sessionId) {
-      return dbGetUsageSummary(opts);
+      return this.ctx.db.getUsageSummary(opts);
     }
 
-    const records = getUsageBySession(opts.sessionId).filter((record) => {
+    const records = this.ctx.db.getUsageBySession(opts.sessionId).filter((record) => {
       if (opts.backend && record.backend !== opts.backend) {
         return false;
       }
@@ -226,10 +207,10 @@ class LocalClient implements OrkaService {
   }
 
   async captureOutput(sessionId: string): Promise<string> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    const output = getProviderOutput(getOrchestrationEvents(sessionId));
+    const output = getProviderOutput(this.ctx.db.getOrchestrationEvents(sessionId));
     if (output) {
       return output;
     }
@@ -243,22 +224,22 @@ class LocalClient implements OrkaService {
   }
 
   async getLogContent(sessionId: string): Promise<string | null> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session?.logFile || !existsSync(session.logFile)) return null;
     return readFileSync(session.logFile, "utf-8");
   }
 
   async isAlive(sessionId: string): Promise<boolean> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) return false;
-    return !!providerService.getHandle(sessionId);
+    return !!this.ctx.providerService.getHandle(sessionId);
   }
 
   async sendTurn(sessionId: string, text: string): Promise<void> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    const handle = providerService.getHandle(sessionId);
+    const handle = this.ctx.providerService.getHandle(sessionId);
     if (!handle) {
       throw new Error(`Session ${sessionId} is not running`);
     }
@@ -270,13 +251,13 @@ class LocalClient implements OrkaService {
       text,
       timestamp: new Date().toISOString(),
     };
-    insertOrchestrationEvent({
+    this.ctx.db.insertOrchestrationEvent({
       ...event,
       provider: handle.provider,
       eventId: generateId("evt"),
     });
-    pushHub.broadcast("orchestration.event", event);
-    await providerService.sendTurn(sessionId, { input: text });
+    this.ctx.pushHub.broadcast("orchestration.event", event);
+    await this.ctx.providerService.sendTurn(sessionId, { input: text });
   }
 
   async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
@@ -399,7 +380,7 @@ class LocalClient implements OrkaService {
   }
 
   async getDiff(sessionId: string): Promise<DiffResult> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
     try {
@@ -408,17 +389,17 @@ class LocalClient implements OrkaService {
       const branchDiff = await captureBranchDiff(session.workingDir, session.projectPath);
       return { status, diff, ...branchDiff };
     } catch {
-      const saved = getSessionDiff(sessionId);
+      const saved = this.ctx.db.getSessionDiff(sessionId);
       if (saved) return saved;
       throw new Error(`Cannot read git status in ${session.workingDir} (worktree may have been cleaned up)`);
     }
   }
 
   async merge(sessionId: string, cleanup = true): Promise<MergeResult> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    const wtDir = getWorktreeDir();
+    const wtDir = getWorktreeDir(this.ctx.orkaHome);
     if (!session.workingDir.startsWith(wtDir)) {
       throw new Error(`Session ${sessionId} is not using a worktree`);
     }
@@ -440,22 +421,22 @@ class LocalClient implements OrkaService {
   }
 
   async deleteSessions(ids: string[]): Promise<void> {
-    dbDeleteSessions(ids);
+    this.ctx.db.deleteSessions(ids);
   }
 
   async archiveSession(sessionId: string): Promise<void> {
-    dbArchiveSession(sessionId);
+    this.ctx.db.archiveSession(sessionId);
   }
 
   async unarchiveSession(sessionId: string): Promise<void> {
-    dbUnarchiveSession(sessionId);
+    this.ctx.db.unarchiveSession(sessionId);
   }
 
   async pruneSessions(opts: PruneOptions): Promise<PruneResult> {
     const cutoff = new Date(Date.now() - opts.maxAgeMs).toISOString();
     const pruneStatuses = new Set(["completed", "cancelled", "failed"]);
 
-    let sessions = dbListSessions().filter(
+    let sessions = this.ctx.db.listSessions().filter(
       (s) => pruneStatuses.has(s.status) && s.createdAt < cutoff,
     );
 
@@ -473,7 +454,7 @@ class LocalClient implements OrkaService {
 
     let logsDeleted = 0;
     if (opts.purgeLogs) {
-      const scriptsDir = join(getOrkaHome(), "scripts");
+      const scriptsDir = join(this.ctx.orkaHome, "scripts");
       for (const s of sessions) {
         if (s.logFile && existsSync(s.logFile)) {
           unlinkSync(s.logFile);
@@ -489,11 +470,11 @@ class LocalClient implements OrkaService {
 
     let dbRecordsDeleted = 0;
     if (opts.purgeDb) {
-      dbDeleteSessions(sessions.map((s) => s.id));
+      this.ctx.db.deleteSessions(sessions.map((s) => s.id));
       dbRecordsDeleted = sessions.length;
     }
 
-    const orphansCleaned = await cleanupOrphanedWorktrees();
+    const orphansCleaned = await cleanupOrphanedWorktrees(this.ctx);
 
     return {
       pruned: sessions.length,
@@ -506,19 +487,19 @@ class LocalClient implements OrkaService {
 
   async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {
     if (sessionId) {
-      return approvalManager.getPendingForSession(sessionId);
+      return this.ctx.approvalManager.getPendingForSession(sessionId);
     }
-    return approvalManager.getPending();
+    return this.ctx.approvalManager.getPending();
   }
 
   async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
-    const resolved = approvalManager.resolve(requestId, decision);
+    const resolved = this.ctx.approvalManager.resolve(requestId, decision);
     if (!resolved) {
       throw new Error(`Approval request not found or already resolved: ${requestId}`);
     }
 
-    if (providerService.getHandle(resolved.threadId)) {
-      await providerService.respondToRequest(
+    if (this.ctx.providerService.getHandle(resolved.threadId)) {
+      await this.ctx.providerService.respondToRequest(
         resolved.threadId,
         requestId,
         decision === "approve" || decision === "approve_session" ? "approve" : "deny",
@@ -527,13 +508,13 @@ class LocalClient implements OrkaService {
   }
 
   async backfillSession(sessionId: string): Promise<{ eventsReplayed: number }> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     if (!session.rawLogFile || !existsSync(session.rawLogFile)) {
       throw new Error(`No raw log file for session ${sessionId}`);
     }
 
-    const adapter = providerAdapterRegistry.get(session.backend);
+    const adapter = this.ctx.providerAdapterRegistry.get(session.backend);
     if (!adapter?.replayRawLog) {
       throw new Error(`Backend "${session.backend}" does not support replay`);
     }
@@ -545,15 +526,70 @@ class LocalClient implements OrkaService {
       .map((l) => JSON.parse(l) as RawProviderLine);
 
     // Delete existing orchestration events for this session
-    deleteOrchestrationEvents([sessionId]);
+    this.ctx.db.deleteOrchestrationEvents([sessionId]);
 
     let eventsReplayed = 0;
     for await (const event of adapter.replayRawLog(sessionId, lines)) {
-      orchestrationEngine.ingest(sessionId, event);
+      this.ctx.orchestrationEngine.ingest(sessionId, event);
       eventsReplayed++;
     }
 
     return { eventsReplayed };
+  }
+
+  private buildProviderSessionResult(
+    sessionId: string,
+    session: { taskId: string; startedAt: string | null; finishedAt: string | null; status: string },
+  ): SessionResult | null {
+    const events = this.ctx.db.getOrchestrationEvents(sessionId);
+    const turnCompleted = events.filter(
+      (event): event is Extract<OrchestrationEvent, { type: "turn.completed" }> => event.type === "turn.completed",
+    );
+    const output = getProviderOutputForLastTurn(events, turnCompleted.at(-1)?.turnId);
+
+    if (turnCompleted.length === 0 && !output) {
+      return null;
+    }
+
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let costUsd: number | null = null;
+
+    for (const event of turnCompleted) {
+      inputTokens += event.tokens?.input ?? 0;
+      outputTokens += event.tokens?.output ?? 0;
+      if (event.cost !== undefined) {
+        costUsd = (costUsd ?? 0) + event.cost;
+      }
+    }
+
+    const hasFailedTurn = turnCompleted.some((event) => event.state === "failed");
+    const hasFailedItem = events.some(
+      (event) =>
+        event.type === "item.completed" &&
+        event.status === "failed" &&
+        (turnCompleted.length === 0 || event.turnId === turnCompleted.at(-1)?.turnId),
+    );
+    const hasRuntimeFailure = events.some(
+      (event) => event.type === "session.failed" || (event.type === "runtime.error" && event.terminal === true),
+    );
+    const durationMs =
+      session.startedAt && session.finishedAt
+        ? new Date(session.finishedAt).getTime() - new Date(session.startedAt).getTime()
+        : 0;
+
+    return {
+      result: output,
+      isError: session.status === "failed" || hasFailedTurn || hasFailedItem || hasRuntimeFailure,
+      durationMs,
+      costUsd,
+      inputTokens,
+      outputTokens,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
+      model: this.ctx.db.getTask(session.taskId)?.model ?? null,
+      numTurns: turnCompleted.length,
+    };
   }
 
   async getMetrics(): Promise<Record<string, unknown> | null> {
@@ -573,7 +609,7 @@ class LocalClient implements OrkaService {
   async reportEventGap(_channel: PushChannel, _expectedSeq: number, _gotSeq: number): Promise<void> {}
 
   async terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }> {
-    const session = getSession(sessionId);
+    const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     const term = this.getTerminalManager().open(sessionId, {
       cwd: session.workingDir,
@@ -604,8 +640,8 @@ class LocalClient implements OrkaService {
   }
 }
 
-export function createLocalClient(pairingConfig?: PairingConfig): OrkaService {
-  return new LocalClient(pairingConfig);
+export function createLocalClient(ctx: DaemonContext, pairingConfig?: PairingConfig): OrkaService {
+  return new LocalClient(ctx, pairingConfig);
 }
 
 function getProviderOutput(events: OrchestrationEvent[]): string {
@@ -613,61 +649,6 @@ function getProviderOutput(events: OrchestrationEvent[]): string {
     .filter((event): event is Extract<OrchestrationEvent, { type: "content.delta" }> => event.type === "content.delta")
     .map((event) => event.delta)
     .join("");
-}
-
-function buildProviderSessionResult(
-  sessionId: string,
-  session: { taskId: string; startedAt: string | null; finishedAt: string | null; status: string },
-): SessionResult | null {
-  const events = getOrchestrationEvents(sessionId);
-  const turnCompleted = events.filter(
-    (event): event is Extract<OrchestrationEvent, { type: "turn.completed" }> => event.type === "turn.completed",
-  );
-  const output = getProviderOutputForLastTurn(events, turnCompleted.at(-1)?.turnId);
-
-  if (turnCompleted.length === 0 && !output) {
-    return null;
-  }
-
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let costUsd: number | null = null;
-
-  for (const event of turnCompleted) {
-    inputTokens += event.tokens?.input ?? 0;
-    outputTokens += event.tokens?.output ?? 0;
-    if (event.cost !== undefined) {
-      costUsd = (costUsd ?? 0) + event.cost;
-    }
-  }
-
-  const hasFailedTurn = turnCompleted.some((event) => event.state === "failed");
-  const hasFailedItem = events.some(
-    (event) =>
-      event.type === "item.completed" &&
-      event.status === "failed" &&
-      (turnCompleted.length === 0 || event.turnId === turnCompleted.at(-1)?.turnId),
-  );
-  const hasRuntimeFailure = events.some(
-    (event) => event.type === "session.failed" || (event.type === "runtime.error" && event.terminal === true),
-  );
-  const durationMs =
-    session.startedAt && session.finishedAt
-      ? new Date(session.finishedAt).getTime() - new Date(session.startedAt).getTime()
-      : 0;
-
-  return {
-    result: output,
-    isError: session.status === "failed" || hasFailedTurn || hasFailedItem || hasRuntimeFailure,
-    durationMs,
-    costUsd,
-    inputTokens,
-    outputTokens,
-    cacheReadTokens: 0,
-    cacheCreateTokens: 0,
-    model: getTask(session.taskId)?.model ?? null,
-    numTurns: turnCompleted.length,
-  };
 }
 
 function getProviderOutputForLastTurn(events: OrchestrationEvent[], turnId?: string): string {

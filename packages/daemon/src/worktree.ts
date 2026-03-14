@@ -1,8 +1,7 @@
 import { $ } from "bun";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
-import { getOrkaHome } from "./db";
-import { getConfig } from "./config";
+import type { OrkaConfig } from "./config";
 import { withSpan } from "./tracing";
 
 export interface WorktreeInfo {
@@ -11,24 +10,26 @@ export interface WorktreeInfo {
   commit: string;
 }
 
-/** Get the global worktrees directory (~/.orka/worktrees/). */
-export function getWorktreeDir(): string {
-  return join(getOrkaHome(), "worktrees");
+/** Get the global worktrees directory for a given orkaHome. */
+export function getWorktreeDir(orkaHome: string): string {
+  return join(orkaHome, "worktrees");
 }
 
 /** Create a git worktree for a session. Returns the worktree path. */
 export async function worktreeCreate(
   repoPath: string,
   sessionSlug: string,
-  branch?: string,
+  orkaHome: string,
+  opts?: { branch?: string; config?: OrkaConfig },
 ): Promise<string> {
+  const branch = opts?.branch;
   const spanBranch = branch ?? `orka/${sessionSlug}`;
   return withSpan("orka.worktree.create", {
     projectPath: repoPath,
     sessionId: sessionSlug,
     branch: spanBranch,
   }, async () => {
-    const wtDir = getWorktreeDir();
+    const wtDir = getWorktreeDir(orkaHome);
     mkdirSync(wtDir, { recursive: true });
     const wtPath = join(wtDir, sessionSlug);
 
@@ -50,14 +51,16 @@ export async function worktreeCreate(
       await $`git -C ${repoPath} worktree add -b ${autoBranch} ${wtPath}`.quiet();
     }
 
-    await runPostCreateHook(wtPath, sessionSlug);
+    if (opts?.config) {
+      await runPostCreateHook(wtPath, sessionSlug, opts.config);
+    }
 
     return wtPath;
   });
 }
 
-async function runPostCreateHook(wtPath: string, sessionSlug: string): Promise<void> {
-  const hookCommands = getConfig().hooks.postWorktreeCreate
+async function runPostCreateHook(wtPath: string, sessionSlug: string, config: OrkaConfig): Promise<void> {
+  const hookCommands = config.hooks.postWorktreeCreate
     .map((command) => command.trim())
     .filter((command) => command.length > 0);
 
@@ -108,11 +111,12 @@ export async function worktreeRemove(
 /** List all orka worktrees for a given repo. */
 export async function worktreeList(
   repoPath: string,
+  orkaHome: string,
 ): Promise<WorktreeInfo[]> {
   return withSpan("orka.worktree.list", {
     repoPath,
   }, async () => {
-    const wtDir = getWorktreeDir();
+    const wtDir = getWorktreeDir(orkaHome);
     const result =
       await $`git -C ${repoPath} worktree list --porcelain`.quiet().text();
 

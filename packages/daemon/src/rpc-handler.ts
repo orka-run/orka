@@ -1,8 +1,7 @@
 import { ROOT_CONTEXT, propagation, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
 import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR, RPC_INVALID_REQUEST } from "@orka/core";
-import { pushHub } from "./push";
-import { insertClientError, listClientErrors } from "./db";
+import type { DaemonContext } from "./daemon-context";
 import { getDaemonMetrics, getTracer, queryTraceLog, withSpan } from "./tracing";
 
 const SLOW_RPC_THRESHOLD_MS = 1_000;
@@ -12,6 +11,7 @@ const SLOW_RPC_THRESHOLD_MS = 1_000;
  * Returns a JSON-RPC response string. Never throws.
  */
 export async function handleRpcRequest(
+  ctx: DaemonContext,
   svc: OrkaService,
   raw: string,
 ): Promise<string> {
@@ -59,7 +59,7 @@ export async function handleRpcRequest(
       let isError = false;
 
       try {
-        const result = await dispatch(svc, req.method, req.params ?? {}, trace.setSpan(parentContext, span));
+        const result = await dispatch(ctx, svc, req.method, req.params ?? {}, trace.setSpan(parentContext, span));
         const response: any = { jsonrpc: "2.0", id, result };
 
         span.setStatus({ code: SpanStatusCode.OK });
@@ -84,8 +84,9 @@ export async function handleRpcRequest(
   );
 }
 
-async function dispatch(svc: OrkaService, method: string, params: any, parentContext = ROOT_CONTEXT): Promise<any> {
+async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, params: any, parentContext = ROOT_CONTEXT): Promise<any> {
   return withSpan("orka.rpc.dispatch", { "orka.method": method }, async (span) => {
+    const { pushHub } = ctx;
     const startedAt = performance.now();
     try {
       return await (async () => {
@@ -213,7 +214,7 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
           case "backfillSession":
             return svc.backfillSession(params.sessionId);
           case "reportClientError":
-            insertClientError({
+            ctx.db.insertClientError({
               error: params.error ?? "unknown",
               stack: params.stack,
               url: params.url ?? "",
@@ -221,7 +222,7 @@ async function dispatch(svc: OrkaService, method: string, params: any, parentCon
             });
             return null;
           case "listClientErrors":
-            return listClientErrors(params.limit ?? 50);
+            return ctx.db.listClientErrors(params.limit ?? 50);
           case "getMetrics":
             return svc.getMetrics();
           case "queryTraces":

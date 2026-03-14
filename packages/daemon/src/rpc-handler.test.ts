@@ -3,7 +3,8 @@ import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { OrkaService, Session } from "@orka/core";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { pushHub } from "./push";
+import { PushHub } from "./push-hub";
+import type { DaemonContext } from "./daemon-context";
 import { handleRpcRequest } from "./rpc-handler";
 
 function makeSession(overrides: Partial<Session> = {}): Session {
@@ -50,22 +51,28 @@ async function withTestTracing(
   }
 }
 
-describe("handleRpcRequest", () => {
+function makeMockCtx(): { ctx: DaemonContext; events: Array<{ channel: string; data: unknown }> } {
+  const pushHub = new PushHub();
+  const events: Array<{ channel: string; data: unknown }> = [];
   const originalBroadcast = pushHub.broadcast.bind(pushHub);
-  let events: Array<{ channel: string; data: unknown }>;
+  (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = ((channel: string, data: unknown) => {
+    events.push({ channel, data });
+  }) as typeof pushHub.broadcast;
 
-  beforeEach(() => {
-    events = [];
-    (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = ((channel, data) => {
-      events.push({ channel, data });
-    }) as typeof pushHub.broadcast;
-  });
+  const ctx = {
+    pushHub,
+    db: {
+      insertClientError: () => {},
+      listClientErrors: () => [],
+    },
+  } as unknown as DaemonContext;
 
-  afterEach(() => {
-    (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = originalBroadcast;
-  });
+  return { ctx, events };
+}
 
+describe("handleRpcRequest", () => {
   test("broadcasts session updates after spawn", async () => {
+    const { ctx, events } = makeMockCtx();
     const session = makeSession();
     const svc = {
       async spawn() {
@@ -74,6 +81,7 @@ describe("handleRpcRequest", () => {
     } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
+      ctx,
       svc,
       JSON.stringify({ jsonrpc: "2.0", id: 1, method: "spawn", params: {} }),
     );
@@ -91,6 +99,7 @@ describe("handleRpcRequest", () => {
   });
 
   test("broadcasts session updates after stop", async () => {
+    const { ctx, events } = makeMockCtx();
     const session = makeSession({ status: "cancelled", finishedAt: "2026-03-11T10:05:00.000Z" });
     let stoppedSessionId: string | null = null;
     const svc = {
@@ -103,6 +112,7 @@ describe("handleRpcRequest", () => {
     } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
+      ctx,
       svc,
       JSON.stringify({ jsonrpc: "2.0", id: 2, method: "stop", params: { sessionId: session.id } }),
     );
@@ -125,6 +135,7 @@ describe("handleRpcRequest", () => {
   });
 
   test("broadcasts session deletions after deleteSessions", async () => {
+    const { ctx, events } = makeMockCtx();
     const deletedIds: string[][] = [];
     const svc = {
       async deleteSessions(ids: string[]) {
@@ -133,6 +144,7 @@ describe("handleRpcRequest", () => {
     } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
+      ctx,
       svc,
       JSON.stringify({
         jsonrpc: "2.0",
@@ -162,6 +174,7 @@ describe("handleRpcRequest", () => {
 
   test("dispatches reportEventGap and creates a delivery gap span", async () => {
     await withTestTracing(async ({ exporter, provider }) => {
+      const { ctx } = makeMockCtx();
       const reportedGaps: Array<{ channel: string; expectedSeq: number; gotSeq: number }> = [];
 
       const svc = {
@@ -171,6 +184,7 @@ describe("handleRpcRequest", () => {
       } as unknown as OrkaService;
 
       const response = await handleRpcRequest(
+        ctx,
         svc,
         JSON.stringify({
           jsonrpc: "2.0",
@@ -209,6 +223,7 @@ describe("handleRpcRequest", () => {
 
   test("creates a child span from the caller traceparent", async () => {
     await withTestTracing(async ({ exporter, provider }) => {
+      const { ctx } = makeMockCtx();
       const svc = {
         async reap() {
           return 1;
@@ -224,6 +239,7 @@ describe("handleRpcRequest", () => {
         traceparent = carrier.traceparent ?? "";
 
         const response = await handleRpcRequest(
+          ctx,
           svc,
           JSON.stringify({ jsonrpc: "2.0", id: 4, method: "reap", traceparent }),
         );
@@ -252,6 +268,7 @@ describe("handleRpcRequest", () => {
 
   test("creates a dispatch child span with the rpc method attribute", async () => {
     await withTestTracing(async ({ exporter, provider }) => {
+      const { ctx } = makeMockCtx();
       const svc = {
         async reap() {
           return 7;
@@ -259,6 +276,7 @@ describe("handleRpcRequest", () => {
       } as unknown as OrkaService;
 
       const response = await handleRpcRequest(
+        ctx,
         svc,
         JSON.stringify({ jsonrpc: "2.0", id: 5, method: "reap", params: {} }),
       );
@@ -284,6 +302,7 @@ describe("handleRpcRequest", () => {
 
   test("marks slow requests with the slow attribute", async () => {
     await withTestTracing(async ({ exporter, provider }) => {
+      const { ctx } = makeMockCtx();
       const svc = {
         async reap() {
           await Bun.sleep(1_050);
@@ -292,6 +311,7 @@ describe("handleRpcRequest", () => {
       } as unknown as OrkaService;
 
       const response = await handleRpcRequest(
+        ctx,
         svc,
         JSON.stringify({ jsonrpc: "2.0", id: 6, method: "reap", params: {} }),
       );
@@ -315,6 +335,7 @@ describe("handleRpcRequest", () => {
   });
 
   test("dispatches startPairing to svc.startPairing", async () => {
+    const { ctx } = makeMockCtx();
     const svc = {
       async startPairing(params: { ttlSec?: number }) {
         return {
@@ -326,6 +347,7 @@ describe("handleRpcRequest", () => {
     } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
+      ctx,
       svc,
       JSON.stringify({
         jsonrpc: "2.0",

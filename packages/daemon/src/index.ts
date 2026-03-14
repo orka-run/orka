@@ -5,9 +5,11 @@ export { createRemoteClient } from "./remote-client";
 export type { RemoteClientOptions } from "./remote-client";
 export { startServer } from "./server";
 export type { ServerOptions } from "./server";
+export { createDaemonContext } from "./daemon-context";
+export type { DaemonContext } from "./daemon-context";
 
 // --- CLI-local utilities (not part of OrkaService) ---
-export { getConfig } from "./config";
+export { loadConfig } from "./config";
 export type { OrkaConfig } from "./config";
 export { initTracing, shutdownTracing, getTracer, getMeter, getDaemonMetrics, queryMetricSnapshot, withSpan, withSpanSync, setLogLevel } from "./tracing";
 export type { DaemonMetrics, LogLevel, MetricSnapshot } from "./tracing";

@@ -2,7 +2,6 @@ import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { parse, type TomlTable, type TomlValue } from "smol-toml";
 import { z } from "zod/v4";
-import { getOrkaHome } from "./db";
 import { withSpanSync } from "./tracing";
 
 const DefaultsSchema = z.object({
@@ -32,16 +31,16 @@ export const ConfigSchema = z.object({
 
 export type OrkaConfig = z.infer<typeof ConfigSchema>;
 
-let _config: OrkaConfig | null = null;
-
-export function getConfig(): OrkaConfig {
+/**
+ * Load configuration from orkaHome/config.toml.
+ * Returns a fresh parsed config every call — no caching.
+ * Cache in DaemonContext if you need a singleton per process.
+ */
+export function loadConfig(orkaHome: string): OrkaConfig {
   return withSpanSync("orka.config.load", {}, () => {
-    if (_config) return _config;
-
-    const configPath = join(getOrkaHome(), "config.toml");
+    const configPath = join(orkaHome, "config.toml");
     if (!existsSync(configPath)) {
-      _config = ConfigSchema.parse({});
-      return _config;
+      return ConfigSchema.parse({});
     }
 
     try {
@@ -51,7 +50,7 @@ export function getConfig(): OrkaConfig {
       const limits = getTable(toml.limits);
       const hooks = getTable(toml.hooks);
 
-      _config = ConfigSchema.parse({
+      return ConfigSchema.parse({
         defaults:
           defaults !== undefined
             ? {
@@ -71,15 +70,9 @@ export function getConfig(): OrkaConfig {
             : undefined,
       });
     } catch {
-      _config = ConfigSchema.parse({});
+      return ConfigSchema.parse({});
     }
-
-    return _config;
   });
-}
-
-export function resetConfigCache(): void {
-  _config = null;
 }
 
 function getTable(value: TomlValue | undefined): TomlTable | undefined {
