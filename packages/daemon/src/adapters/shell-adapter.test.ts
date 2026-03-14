@@ -1,56 +1,79 @@
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
-import type { RunnerSession, SessionRunner } from "../runner";
 import { ShellAdapter } from "./shell-adapter";
 
-class MockSessionRunner implements SessionRunner {
-  readonly spawnCalls: Array<{ name: string; scriptPath: string; cwd: string }> = [];
-  readonly killCalls: string[] = [];
-  readonly sendKeysCalls: Array<{ name: string; keys: string }> = [];
-  readonly sendTextCalls: Array<{ name: string; text: string }> = [];
-  hasSequence: boolean[] = [];
-  captureSequence: string[] = [];
-  running = true;
-  captureOutput = "";
+type ShellProcess = ReturnType<typeof Bun.spawn>;
+type ShellSpawn = typeof Bun.spawn;
 
-  async spawn(name: string, scriptPath: string, cwd: string): Promise<void> {
-    this.spawnCalls.push({ name, scriptPath, cwd });
-    this.running = true;
-  }
+function createMockProcess(opts?: {
+  stdout?: string;
+  exitCode?: number;
+}): { proc: ShellProcess; stdin: { written: string[]; flushed: number }; resolve: () => void } {
+  const stdoutText = opts?.stdout ?? "";
+  const exitCode = opts?.exitCode ?? 0;
 
-  async kill(name: string): Promise<void> {
-    this.killCalls.push(name);
-    this.running = false;
-  }
+  const stdoutStream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (stdoutText) {
+        controller.enqueue(new TextEncoder().encode(stdoutText));
+      }
+      controller.close();
+    },
+  });
 
-  async has(_name: string): Promise<boolean> {
-    return this.hasSequence.length > 0 ? this.hasSequence.shift() ?? false : this.running;
-  }
+  const stderrStream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close();
+    },
+  });
 
-  async list(): Promise<RunnerSession[]> {
-    return [];
-  }
+  const stdinTracker = { written: [] as string[], flushed: 0 };
+  let resolveExited: (code: number) => void;
+  const exitedPromise = new Promise<number>((r) => {
+    resolveExited = r;
+  });
 
-  async capture(_name: string, _lines?: number): Promise<string> {
-    return this.captureSequence.length > 0 ? this.captureSequence.shift() ?? "" : this.captureOutput;
-  }
+  const proc = {
+    pid: 12345,
+    stdout: stdoutStream,
+    stderr: stderrStream,
+    stdin: {
+      write(data: string) {
+        stdinTracker.written.push(data);
+      },
+      flush() {
+        stdinTracker.flushed++;
+      },
+      end() {},
+    },
+    exited: exitedPromise,
+    killed: false,
+    kill() {
+      this.killed = true;
+      resolveExited(exitCode);
+    },
+    unref() {},
+    ref() {},
+  } as unknown as ShellProcess;
 
-  async sendKeys(name: string, keys: string): Promise<void> {
-    this.sendKeysCalls.push({ name, keys });
-  }
+  return {
+    proc,
+    stdin: stdinTracker,
+    resolve: () => resolveExited(exitCode),
+  };
+}
 
-  async sendText(name: string, text: string): Promise<void> {
-    this.sendTextCalls.push({ name, text });
-  }
-
-  async attach(_name: string): Promise<void> {}
+function createMockSpawn(mockProc: ShellProcess): ShellSpawn {
+  return ((_cmd: string[], _opts?: unknown) => {
+    return mockProc;
+  }) as unknown as ShellSpawn;
 }
 
 describe("ShellAdapter", () => {
   test("startSession emits session.started first", async () => {
     useTempOrkaHome("started");
-    const runner = new MockSessionRunner();
-    const adapter = new ShellAdapter(runner);
+    const { proc, resolve } = createMockProcess();
+    const adapter = new ShellAdapter(createMockSpawn(proc));
     const handle = await adapter.startSession({
       threadId: "thread-1",
       cwd: "/tmp/project",
@@ -62,7 +85,6 @@ describe("ShellAdapter", () => {
 
     expect(started.type).toBe("session.started");
     expect(started.provider).toBe("shell");
-    expect(runner.spawnCalls).toHaveLength(1);
 
     await adapter.stopSession(handle);
     await iterator.next();
@@ -70,8 +92,14 @@ describe("ShellAdapter", () => {
 
   test("startSession writes env exports into the shell script", async () => {
     useTempOrkaHome("env");
-    const runner = new MockSessionRunner();
-    const adapter = new ShellAdapter(runner);
+    let spawnedArgs: [string[], unknown] | null = null;
+    const { proc } = createMockProcess();
+    const mockSpawn = ((cmd: string[], opts?: unknown) => {
+      spawnedArgs = [cmd, opts];
+      return proc;
+    }) as unknown as ShellSpawn;
+
+    const adapter = new ShellAdapter(mockSpawn);
     const handle = await adapter.startSession({
       threadId: "thread-env",
       cwd: "/tmp/project",
@@ -79,8 +107,9 @@ describe("ShellAdapter", () => {
       env: { FOO: "bar baz" },
     });
 
-    expect(runner.spawnCalls).toHaveLength(1);
-    const script = readFileSync(runner.spawnCalls[0]!.scriptPath, "utf8");
+    expect(spawnedArgs).not.toBeNull();
+    const scriptPath = spawnedArgs![0][1];
+    const script = readFileSync(scriptPath, "utf8");
     expect(script).toContain("export FOO='bar baz'");
     expect(script).toContain("unset CLAUDECODE");
 
@@ -89,8 +118,8 @@ describe("ShellAdapter", () => {
 
   test("stopSession emits session.exited", async () => {
     useTempOrkaHome("stopped");
-    const runner = new MockSessionRunner();
-    const adapter = new ShellAdapter(runner);
+    const { proc } = createMockProcess();
+    const adapter = new ShellAdapter(createMockSpawn(proc));
     const handle = await adapter.startSession({ threadId: "thread-stop" });
     const iterator = handle.events[Symbol.asyncIterator]();
 
@@ -101,17 +130,17 @@ describe("ShellAdapter", () => {
     const exited = await nextEvent(iterator);
     expect(exited.type).toBe("session.exited");
     expect(exited.payload).toEqual({ reason: "stopped", exitKind: "graceful" });
-    expect(runner.killCalls).toEqual(["orka-shell-thread-stop"]);
   });
 
   test("events stream yields lifecycle events in order", async () => {
     useTempOrkaHome("order");
-    const runner = new MockSessionRunner();
-    runner.hasSequence = [true, false];
-    runner.captureSequence = ["hello"];
-    const adapter = new ShellAdapter(runner);
+    const { proc, resolve } = createMockProcess({ stdout: "hello" });
+    const adapter = new ShellAdapter(createMockSpawn(proc));
     const handle = await adapter.startSession({ threadId: "thread-order" });
     const iterator = handle.events[Symbol.asyncIterator]();
+
+    // Process exits naturally after stdout is consumed
+    resolve();
 
     const first = await nextEvent(iterator);
     const second = await nextEvent(iterator);
@@ -125,17 +154,35 @@ describe("ShellAdapter", () => {
     expect(second.payload).toEqual({ streamKind: "command_output", delta: "hello" });
   });
 
-  test("interruptTurn sends ctrl-c without throwing", async () => {
+  test("interruptTurn writes ctrl-c to stdin", async () => {
     useTempOrkaHome("interrupt");
-    const runner = new MockSessionRunner();
-    const adapter = new ShellAdapter(runner);
+    const { proc, stdin } = createMockProcess();
+    const adapter = new ShellAdapter(createMockSpawn(proc));
     const handle = await adapter.startSession({ threadId: "thread-interrupt" });
     const iterator = handle.events[Symbol.asyncIterator]();
 
     await nextEvent(iterator);
     await expect(adapter.interruptTurn(handle)).resolves.toBeUndefined();
 
-    expect(runner.sendKeysCalls).toEqual([{ name: "orka-shell-thread-interrupt", keys: "\u0003" }]);
+    expect(stdin.written).toEqual(["\u0003"]);
+    expect(stdin.flushed).toBe(1);
+
+    await adapter.stopSession(handle);
+    await iterator.next();
+  });
+
+  test("sendTurn writes input followed by newline to stdin", async () => {
+    useTempOrkaHome("send");
+    const { proc, stdin } = createMockProcess();
+    const adapter = new ShellAdapter(createMockSpawn(proc));
+    const handle = await adapter.startSession({ threadId: "thread-send" });
+    const iterator = handle.events[Symbol.asyncIterator]();
+
+    await nextEvent(iterator);
+    await adapter.sendTurn(handle, { input: "ls -la" });
+
+    expect(stdin.written).toEqual(["ls -la\n"]);
+    expect(stdin.flushed).toBe(1);
 
     await adapter.stopSession(handle);
     await iterator.next();

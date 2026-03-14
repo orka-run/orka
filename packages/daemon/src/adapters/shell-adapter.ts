@@ -13,12 +13,12 @@ import type { Span } from "@opentelemetry/api";
 import { createEvent } from "@orka/core";
 import { buildBackendCommand, buildEnvExports } from "../backends";
 import { getOrkaHome } from "../db";
-import type { SessionRunner } from "../runner";
 import { withSpan } from "../tracing";
 
-const POLL_INTERVAL_MS = 500;
-const CAPTURE_LINES = 1000;
 const CTRL_C = "\u0003";
+
+type ShellProcess = ReturnType<typeof Bun.spawn>;
+type ShellSpawn = typeof Bun.spawn;
 
 interface AsyncQueueResult<T> {
   done: boolean;
@@ -77,19 +77,18 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
 }
 
 interface ShellSessionRuntime {
-  sessionName: string;
+  proc: ShellProcess;
   scriptPath: string;
   queue: AsyncEventQueue<ProviderRuntimeEvent>;
   rawEvents: AsyncEventQueue<RawProviderLine>;
   closed: boolean;
   exitEmitted: boolean;
-  lastCapture: string;
 }
 
 export class ShellAdapter implements ProviderAdapter {
   readonly kind = "shell" as const;
 
-  constructor(private runner: SessionRunner) {}
+  constructor(private readonly spawnProcess: ShellSpawn = Bun.spawn.bind(Bun)) {}
 
   async startSession(input: ProviderSessionStartInput): Promise<ProviderSessionHandle> {
     return withSpan(
@@ -101,7 +100,6 @@ export class ShellAdapter implements ProviderAdapter {
       },
       async (span) => {
         const threadId = input.threadId;
-        const sessionName = buildSessionName(threadId);
         const cwd = input.cwd ?? process.cwd();
         const scriptsDir = join(getOrkaHome(), "provider-scripts");
         const scriptPath = join(scriptsDir, `${sanitizeName(threadId)}.sh`);
@@ -110,18 +108,22 @@ export class ShellAdapter implements ProviderAdapter {
         await mkdir(scriptsDir, { recursive: true });
         await writeFile(scriptPath, buildScript(command, input.env), "utf8");
 
-        await this.runner.spawn(sessionName, scriptPath, cwd);
+        const proc = this.spawnProcess(["bash", scriptPath], {
+          cwd,
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        });
         span.addEvent("process.spawned", { "orka.command": command });
 
         const rawEventsQueue = new AsyncEventQueue<RawProviderLine>();
         const runtime: ShellSessionRuntime = {
-          sessionName,
+          proc,
           scriptPath,
           queue: new AsyncEventQueue<ProviderRuntimeEvent>(),
           rawEvents: rawEventsQueue,
           closed: false,
           exitEmitted: false,
-          lastCapture: "",
         };
 
         emitShellEvent(
@@ -129,13 +131,13 @@ export class ShellAdapter implements ProviderAdapter {
           createEvent(
             "session.started",
             threadId,
-            { message: `shell session started in tmux (${sessionName})` },
+            { message: `shell session started (pid ${proc.pid})` },
             { provider: this.kind },
           ),
           span,
         );
 
-        void this.pollSession(threadId, runtime);
+        void this.streamOutput(threadId, runtime);
 
         return {
           threadId,
@@ -143,7 +145,6 @@ export class ShellAdapter implements ProviderAdapter {
           events: runtime.queue,
           rawEvents: rawEventsQueue,
           meta: {
-            sessionName,
             scriptPath,
             runtime,
           },
@@ -163,7 +164,9 @@ export class ShellAdapter implements ProviderAdapter {
         if (input.input === undefined) return;
 
         const runtime = getRuntime(handle);
-        await this.runner.sendText(runtime.sessionName, input.input);
+        const text = `${input.input}\n`;
+        runtime.proc.stdin.write(text);
+        runtime.proc.stdin.flush();
       },
     );
   }
@@ -171,7 +174,8 @@ export class ShellAdapter implements ProviderAdapter {
   async interruptTurn(handle: ProviderSessionHandle): Promise<void> {
     await withSpan("orka.provider.shell.interrupt_turn", { "orka.session.id": handle.threadId }, async () => {
       const runtime = getRuntime(handle);
-      await this.runner.sendKeys(runtime.sessionName, CTRL_C);
+      runtime.proc.stdin.write(CTRL_C);
+      runtime.proc.stdin.flush();
     });
   }
 
@@ -180,9 +184,7 @@ export class ShellAdapter implements ProviderAdapter {
       const runtime = getRuntime(handle);
       runtime.closed = true;
 
-      if (await this.runner.has(runtime.sessionName)) {
-        await this.runner.kill(runtime.sessionName);
-      }
+      runtime.proc.kill();
 
       span.addEvent("process.exited", { "orka.exit_code": -1 });
       this.emitSessionExited(handle.threadId, runtime, "stopped", "graceful", span);
@@ -197,54 +199,50 @@ export class ShellAdapter implements ProviderAdapter {
     await withSpan("orka.provider.shell.respond_to_request", { "orka.session.id": handle.threadId }, async () => {});
   }
 
-  private async pollSession(threadId: string, runtime: ShellSessionRuntime): Promise<void> {
+  private async streamOutput(threadId: string, runtime: ShellSessionRuntime): Promise<void> {
     await withSpan(
       "orka.provider.shell.parse_output",
       { "orka.session.id": threadId, "orka.backend": this.kind },
       async (span) => {
-        while (!runtime.closed) {
+        const decoder = new TextDecoder();
+
+        const readStream = async (stream: ReadableStream<Uint8Array> | null) => {
+          if (!stream) return;
           try {
-            const running = await this.runner.has(runtime.sessionName);
-            if (!running) {
-              span.addEvent("process.exited", { "orka.exit_code": -1 });
-              this.emitSessionExited(threadId, runtime, "process exited", "graceful", span);
-              return;
+            for await (const chunk of stream) {
+              if (runtime.closed) return;
+              const text = decoder.decode(chunk, { stream: true });
+              if (text.length > 0) {
+                runtime.rawEvents.push({ direction: "out", data: text, ts: new Date().toISOString() });
+                emitShellEvent(
+                  runtime.queue,
+                  createEvent(
+                    "content.delta",
+                    threadId,
+                    { streamKind: "command_output", delta: text },
+                    { provider: this.kind },
+                  ),
+                  span,
+                );
+              }
             }
-
-            const capture = await this.runner.capture(runtime.sessionName, CAPTURE_LINES);
-            const delta = diffCapture(runtime.lastCapture, capture);
-            runtime.lastCapture = capture;
-
-            if (delta.length > 0) {
-              runtime.rawEvents.push({ direction: "out", data: delta, ts: new Date().toISOString() });
-              emitShellEvent(
-                runtime.queue,
-                createEvent(
-                  "content.delta",
-                  threadId,
-                  { streamKind: "command_output", delta },
-                  { provider: this.kind },
-                ),
-                span,
-              );
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            emitShellEvent(
-              runtime.queue,
-              createEvent(
-                "runtime.error",
-                threadId,
-                { message, class: "provider_error" },
-                { provider: this.kind },
-              ),
-              span,
-            );
-            this.emitSessionExited(threadId, runtime, "polling failed", "error", span);
-            return;
+          } catch {
+            // Stream closed — handled by proc.exited below
           }
+        };
 
-          await sleep(POLL_INTERVAL_MS);
+        // Read stdout and stderr concurrently, merging both into the event stream
+        const stdoutDone = readStream(runtime.proc.stdout as ReadableStream<Uint8Array> | null);
+        const stderrDone = readStream(runtime.proc.stderr as ReadableStream<Uint8Array> | null);
+
+        // Wait for the process to exit
+        const exitCode = await runtime.proc.exited;
+        // Wait for streams to finish draining
+        await Promise.allSettled([stdoutDone, stderrDone]);
+
+        if (!runtime.closed) {
+          span.addEvent("process.exited", { "orka.exit_code": exitCode });
+          this.emitSessionExited(threadId, runtime, "process exited", "graceful", span);
         }
       },
     );
@@ -298,11 +296,7 @@ function getRuntime(handle: ProviderSessionHandle): ShellSessionRuntime {
 }
 
 function isShellSessionRuntime(value: unknown): value is ShellSessionRuntime {
-  return typeof value === "object" && value !== null && "sessionName" in value && "queue" in value;
-}
-
-function buildSessionName(threadId: string): string {
-  return `orka-shell-${sanitizeName(threadId)}`;
+  return typeof value === "object" && value !== null && "proc" in value && "queue" in value;
 }
 
 function sanitizeName(value: string): string {
@@ -321,24 +315,4 @@ function buildScript(command: string, env?: Record<string, string>): string {
   }
   lines.push('exec "${SHELL:-/bin/bash}" -i');
   return `${lines.join("\n")}\n`;
-}
-
-function diffCapture(previous: string, current: string): string {
-  if (current === previous) return "";
-  if (current.startsWith(previous)) return current.slice(previous.length);
-
-  const overlap = Math.min(previous.length, current.length);
-  for (let size = overlap; size > 0; size--) {
-    if (previous.endsWith(current.slice(0, size))) {
-      return current.slice(size);
-    }
-  }
-
-  return current;
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
