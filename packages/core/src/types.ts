@@ -61,7 +61,6 @@ export interface Session {
   status: SessionStatus;
   backend: BackendKind;
   mode: SessionMode;
-  tmuxSessionName: string;
   projectPath: string;
   workingDir: string;
   logFile: string;

@@ -7,9 +7,6 @@ export { startServer } from "./server";
 export type { ServerOptions } from "./server";
 
 // --- CLI-local utilities (not part of OrkaService) ---
-export type { RunnerSession, SessionRunner } from "./runner";
-export { TmuxRunner, defaultRunner, tmuxAttach } from "./tmux";
-export { setRunner, getRunner } from "./orchestrator";
 export { getConfig } from "./config";
 export type { OrkaConfig } from "./config";
 export { initTracing, shutdownTracing, getTracer, getMeter, getDaemonMetrics, queryMetricSnapshot, withSpan, withSpanSync, setLogLevel } from "./tracing";

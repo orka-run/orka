@@ -45,7 +45,7 @@ import {
   insertOrchestrationEvent,
   insertUsageRecord,
 } from "./db";
-import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees, getRunner } from "./orchestrator";
+import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
 import { pushHub } from "./push";
 import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
@@ -55,7 +55,7 @@ import {
   deleteBranch,
   getWorktreeDir,
 } from "./worktree";
-import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerAdapterRegistry, providerService } from "./provider-runtime";
+import { approvalManager, orchestrationEngine, providerAdapterRegistry, providerService } from "./provider-runtime";
 import { queryMetricSnapshot, queryTraceLog, withSpan } from "./tracing";
 import { PairingServer } from "./pairing/pairing-server";
 import type { PairMessage } from "@orka/core";
@@ -147,8 +147,7 @@ class LocalClient implements OrkaService {
     const session = getSession(sessionId);
     if (!session) return null;
 
-    const result =
-      isProviderRuntimeEnabled() ? buildProviderSessionResult(sessionId, session) : null;
+    const result = buildProviderSessionResult(sessionId, session);
     const parsedResult =
       result ?? (session.logFile ? parseSessionResult(session.logFile, session) : null);
     if (parsedResult) {
@@ -230,16 +229,9 @@ class LocalClient implements OrkaService {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    if (isProviderRuntimeEnabled()) {
-      const output = getProviderOutput(getOrchestrationEvents(sessionId));
-      if (output) {
-        return output;
-      }
-    }
-
-    const runner = getRunner();
-    if (await runner.has(session.tmuxSessionName)) {
-      return runner.capture(session.tmuxSessionName);
+    const output = getProviderOutput(getOrchestrationEvents(sessionId));
+    if (output) {
+      return output;
     }
 
     // Fall back to log file
@@ -259,41 +251,32 @@ class LocalClient implements OrkaService {
   async isAlive(sessionId: string): Promise<boolean> {
     const session = getSession(sessionId);
     if (!session) return false;
-    if (isProviderRuntimeEnabled()) {
-      const handle = providerService.getHandle(sessionId);
-      if (handle) return true;
-    }
-    return getRunner().has(session.tmuxSessionName);
+    return !!providerService.getHandle(sessionId);
   }
 
   async sendTurn(sessionId: string, text: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
-    if (isProviderRuntimeEnabled()) {
-      const handle = providerService.getHandle(sessionId);
-      if (handle) {
-        const event: OrchestrationEvent = {
-          v: 1,
-          type: "user.input",
-          sessionId,
-          text,
-          timestamp: new Date().toISOString(),
-        };
-        insertOrchestrationEvent({
-          ...event,
-          provider: handle.provider,
-          eventId: generateId("evt"),
-        });
-        pushHub.broadcast("orchestration.event", event);
-        await providerService.sendTurn(sessionId, { input: text });
-        return;
-      }
-    }
-    const runner = getRunner();
-    if (!(await runner.has(session.tmuxSessionName))) {
+
+    const handle = providerService.getHandle(sessionId);
+    if (!handle) {
       throw new Error(`Session ${sessionId} is not running`);
     }
-    await runner.sendText(session.tmuxSessionName, text);
+
+    const event: OrchestrationEvent = {
+      v: 1,
+      type: "user.input",
+      sessionId,
+      text,
+      timestamp: new Date().toISOString(),
+    };
+    insertOrchestrationEvent({
+      ...event,
+      provider: handle.provider,
+      eventId: generateId("evt"),
+    });
+    pushHub.broadcast("orchestration.event", event);
+    await providerService.sendTurn(sessionId, { input: text });
   }
 
   async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
@@ -534,7 +517,7 @@ class LocalClient implements OrkaService {
       throw new Error(`Approval request not found or already resolved: ${requestId}`);
     }
 
-    if (isProviderRuntimeEnabled() && providerService.getHandle(resolved.threadId)) {
+    if (providerService.getHandle(resolved.threadId)) {
       await providerService.respondToRequest(
         resolved.threadId,
         requestId,

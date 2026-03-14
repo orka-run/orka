@@ -31,7 +31,6 @@ const SessionRowSchema = z.object({
   status: SessionStatusSchema,
   backend: BackendKindSchema,
   mode: SessionModeSchema,
-  tmux_session_name: z.string(),
   project_path: z.string().default(""),
   working_dir: z.string(),
   log_file: z.string().default(""),
@@ -123,6 +122,7 @@ const MIGRATIONS = [
   { version: 23, sql: `ALTER TABLE sessions ADD COLUMN parent_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL` },
   { version: 24, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)` },
   { version: 25, sql: `ALTER TABLE sessions ADD COLUMN archived_at TEXT` },
+  { version: 26, sql: `ALTER TABLE sessions DROP COLUMN tmux_session_name` },
 ];
 
 function migrate(db: Database): void {
@@ -143,7 +143,6 @@ function migrate(db: Database): void {
       status TEXT NOT NULL DEFAULT 'queued',
       backend TEXT NOT NULL,
       mode TEXT NOT NULL,
-      tmux_session_name TEXT NOT NULL,
       working_dir TEXT NOT NULL,
       log_file TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
@@ -221,8 +220,8 @@ export function insertSession(session: Session): void {
   withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
     getDb()
       .prepare(
-        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, tmux_session_name, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id)
-         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $tmuxSessionName, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId)`,
+        `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id)
+         VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId)`,
       )
       .run({
         $id: session.id,
@@ -231,7 +230,6 @@ export function insertSession(session: Session): void {
         $status: session.status,
         $backend: session.backend,
         $mode: session.mode,
-        $tmuxSessionName: session.tmuxSessionName,
         $projectPath: session.projectPath,
         $workingDir: session.workingDir,
         $logFile: session.logFile,
@@ -366,13 +364,6 @@ export function archiveSessions(ids: string[]): number {
       .run(now, ...ids);
     return result.changes;
   });
-}
-
-export function findSessionByTmux(tmuxName: string): Session | null {
-  const row = getDb()
-    .prepare("SELECT * FROM sessions WHERE tmux_session_name = ?")
-    .get(tmuxName) as any;
-  return row ? rowToSession(row) : null;
 }
 
 // --- Usage ---
@@ -709,7 +700,6 @@ function rowToSession(row: unknown): Session {
     status: data.status,
     backend: data.backend,
     mode: data.mode,
-    tmuxSessionName: data.tmux_session_name,
     projectPath: data.project_path,
     workingDir: data.working_dir,
     logFile: data.log_file,

@@ -101,12 +101,10 @@ ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=mysecret ORKA_ENCRYPT=1 orka ps
 - **Language**: TypeScript (strict mode)
 - **Validation**: zod/v4 — import as `import { z } from "zod/v4"`. Enum schemas in core/types.ts, config validation, DB row parsing
 - **Storage**: SQLite via bun:sqlite (~/.orka/orka.db), versioned migrations in db.ts, `PRAGMA busy_timeout = 5000`
-- **Primary session runtime**: provider runtime with adapter registry (`ClaudeCodeAdapter`, `CodexAdapter`, `ShellAdapter`) and persisted orchestration events
-- **Legacy session runtime**: tmux fallback when `[providers] use_runtime = false`
+- **Session runtime**: provider runtime with adapter registry (`ClaudeCodeAdapter`, `CodexAdapter`, `ShellAdapter`) and persisted orchestration events
 - **Worktrees**: ~/.orka/worktrees/<session-id> (OUTSIDE main repo for isolation)
 - **Logs**: ~/.orka/logs/<session-id>.log
-- **Scripts**: ~/.orka/scripts/<session-id>.sh for the legacy tmux fallback path
-- **Config**: ~/.orka/config.toml (optional, TOML with [defaults], [limits], and [providers] sections; `providers.use_runtime = true` by default)
+- **Config**: ~/.orka/config.toml (optional, TOML with [defaults], [limits], and [hooks] sections)
 - **Dashboard transport**: dashboard uses same-origin `/ws` in both Vite dev proxy and nginx prod proxy
 - **Tracing**: OpenTelemetry (see Observability section)
 - **Issue tracking**: beads (`bd` CLI)
@@ -147,9 +145,8 @@ The **OrkaService** interface (`@orka/core/service.ts`) is the contract between 
 OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/sdk-trace-base`.
 
 **Instrumented operations:**
-- `orka.spawn` — full session lifecycle (child spans include `orka.worktree.create` and `orka.provider.start_session`; tmux spans remain on the legacy path)
-- `orka.reap` — session reaping with per-session events (exit codes)
-- `orka.stop` — session stop (`orka.provider.stop_session` on the primary path, `orka.tmux.kill` on the fallback path)
+- `orka.spawn` — full session lifecycle (child spans include `orka.worktree.create` and `orka.provider.start_session`)
+- `orka.stop` — session stop (`orka.provider.stop_session`)
 - `orka.worktree.cleanup` — with skip reasons (`kept`, `uncommitted_changes`, `commits_ahead`)
 - `orka.worktree.prune_orphans` — orphaned worktree cleanup
 
@@ -164,14 +161,13 @@ OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/s
 
 - **Daemon-only client path**: All daemon-backed CLI operations go through `RemoteClient`. `LocalClient` exists to serve RPCs inside `orka serve`, not as a normal CLI fast path.
 - **Daemon auto-start**: The CLI treats the daemon as required infrastructure. If `127.0.0.1:7394` is unhealthy, it starts `orka serve` in a detached session, records `~/.orka/daemon.pid`, and logs to `~/.orka/logs/daemon.log`.
-- **Provider runtime is the default**: `getConfig().providers.useRuntime` defaults to `true`, so sessions normally run through the provider adapter system with orchestration events persisted in SQLite. The tmux path remains only as a compatibility fallback when `providers.use_runtime = false`.
+- **Provider runtime is always on**: All sessions run through the provider adapter system with orchestration events persisted in SQLite.
 - **Named worktree branches**: Background sessions auto-create `orka/<session-id>` branches (not detached HEAD), so agent commits are never lost. Use `orka merge <id>` to integrate.
 - **Smart worktree cleanup**: Worktrees are preserved during reap/stop if they have uncommitted changes, commits ahead of parent, or are marked with `orka keep`. Only clean worktrees are auto-removed.
 - **Worktrees outside main repo**: Background sessions get worktrees at `~/.orka/worktrees/` so `git rev-parse --show-toplevel` returns the worktree path, not the parent repo.
-- **Event-sourced session reads**: On the runtime path, `getResult()` and `captureOutput()` reconstruct data from persisted orchestration events; legacy log parsing remains as fallback support.
-- **Script files for tmux fallback**: Commands are written to `~/.orka/scripts/<id>.sh` and tmux runs `bash <path>` on the legacy path, which avoids nested `bash -c` shell escaping issues.
+- **Event-sourced session reads**: `getResult()` and `captureOutput()` reconstruct data from persisted orchestration events; log file parsing remains as fallback support.
 - **Session stores projectPath**: The original repo root is stored in the session record, separate from workingDir (which may be a worktree). Used for retry, merge, and worktree cleanup.
-- **Auto-reap on every CLI invocation**: `reapSessions()` runs before every daemon-backed command except `wait`. It mainly covers the legacy tmux fallback path and skips live provider-runtime handles.
+- **Auto-reap on every CLI invocation**: `reapSessions()` runs before every daemon-backed command except `wait`. With provider-only runtime, it is currently a no-op.
 - **CLAUDECODE env unset**: Spawned agent scripts `unset CLAUDECODE` before running claude CLI, because Claude Code detects nested sessions and refuses to start.
 - **Concurrent limits**: Configurable via `[limits] max_concurrent = "5"` in config.toml (0 = unlimited).
 - **zod/v4 default gotcha**: When using `.default({})` on nested zod objects, inner field defaults are NOT applied. Always use `Schema.default(Schema.parse({}))` pattern (see config.ts).
@@ -270,11 +266,10 @@ When spawning agents, always use `--reasoning-effort high` for codex.
 
 ## Agent Sessions
 
-- The default execution path is provider-backed and event-sourced inside the daemon.
+- All sessions run through the provider runtime, which is event-sourced inside the daemon.
 - The provider runtime registers `ClaudeCodeAdapter`, `CodexAdapter`, and `ShellAdapter`, and persists orchestration events for output/result reconstruction.
 - Logs are still written to `~/.orka/logs/` for diagnostics and streaming.
 - Background sessions automatically get isolated worktrees with named branches.
-- Use `orka result <id>` to extract final output, cost, and token usage from the runtime timeline or legacy logs.
+- Use `orka result <id>` to extract final output, cost, and token usage from the runtime timeline.
 - **Codex agents must be explicitly told to `git commit` in the prompt** — they don't auto-commit.
 - `--auto-merge` merges the worktree branch into parent on successful completion.
-- Backward compatibility: the tmux-backed backend commands and script files still exist when `providers.use_runtime` is disabled.

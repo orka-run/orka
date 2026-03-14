@@ -17,7 +17,7 @@ beforeEach(() => {
   resetConfigCache();
   testHome = mkdtempSync(join(tmpdir(), "orka-pairing-test-"));
   mkdirSync(testHome, { recursive: true });
-  writeFileSync(join(testHome, "config.toml"), "[providers]\nuse_runtime = true\n");
+  writeFileSync(join(testHome, "config.toml"), "");
   process.env["ORKA_HOME"] = testHome;
 });
 

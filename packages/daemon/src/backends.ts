@@ -3,7 +3,7 @@ import type { BackendKind, SessionMode, ReasoningEffort } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
 export interface BackendCommand {
-  /** The shell command to run inside tmux. */
+  /** The shell command string for the backend. */
   command: string;
 }
 
@@ -64,7 +64,7 @@ export function buildBackendCommand(
         break;
     }
 
-    // Wrap: tee output to log file + keep tmux alive after exit
+    // Wrap: tee output to log file and capture exit code
     if (opts?.logFile) {
       const lf = shellEscape(opts.logFile);
       cmd = `{ ${cmd} ; } 2>&1 | tee ${lf} ; echo "" >> ${lf} ; echo "[orka] exit_code=$?" >> ${lf}`;
