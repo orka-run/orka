@@ -1,6 +1,8 @@
 # Orka — Agent Session Orchestrator
 
-See also: [AGENTS.md](./AGENTS.md) for issue tracking and agent workflow conventions.
+## No Backward Compatibility
+
+**This project is NOT in production.** Do not maintain backward compatibility, legacy code paths, or deprecation shims. When replacing a system (e.g. encryption protocol, transport layer), remove the old code entirely. Do not keep "legacy" fallbacks "just in case". Delete dead code aggressively.
 
 ## Command Output Policy
 
@@ -184,28 +186,25 @@ bun test packages/ tests/
 # Unit tests only
 bun test packages/
 
-# E2E tests only (requires Docker)
+# E2E tests only (no Docker needed — runs relay + daemon in-process)
 bun test tests/e2e/
-
-# Rebuild Docker images after source changes
-docker build -f Dockerfile.relay -t orka-relay-test .
-docker build -f Dockerfile.daemon -t orka-daemon-test .
 ```
 
 **Unit tests** (`packages/*/src/*.test.ts`): Pure logic tests for relay modules — rate-limiter, state, cluster, abuse, config, auth, metering, reconnect. Uses `bun:test`, no external deps.
 
-**E2E tests** (`tests/e2e/`): Testcontainers-based tests that spin up relay in Docker. Auto-skip when Docker is unavailable. Uses `testcontainers` npm package.
+**E2E tests** (`tests/e2e/`): In-process tests that start relay and daemon directly via `startRelay({ port: 0 })` and `startServer()`. No Docker required. Covers full-stack routing, auth, API endpoints, rate limiting, Noise encryption, and session lifecycle.
 
 **Key testing patterns:**
 - E2E tests share a single signup account per describe block to avoid signup rate limit (5/hour/IP)
-- Relay container uses log-based wait strategy (`Wait.forLogMessage`) — WS port doesn't respond to TCP probes
-- Docker images are built via `docker` CLI (not testcontainers' `fromDockerfile`) for layer cache reuse
+- Set `ORKA_RELAY_DATA` and `ORKA_HOME` to isolated temp dirs BEFORE importing relay/daemon modules
+- Use `relay.server.port` to get the assigned ephemeral port
+- Shutdown: `await relay.shutdown({ drainTimeoutMs: 1000 })`
 - Mock DB-dependent modules with `mock.module()` in unit tests (see metering.test.ts)
 
 **Docker files:**
 - `Dockerfile.relay` — relay server on `oven/bun:1`, port 7390
 - `Dockerfile.daemon` — daemon container with git and compatibility tooling, port 7394
-- `docker-compose.test.yml` — relay + daemon + toxiproxy for local dev
+- `docker-compose.yml` — daemon + dashboard for local dev
 - `.dockerignore` — excludes node_modules, .git, .orka, *.db
 
 ## Development Commands

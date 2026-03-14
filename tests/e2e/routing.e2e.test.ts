@@ -1,7 +1,8 @@
 /**
- * E2E tests for full-stack routing: client → relay → daemon → response.
+ * E2E tests for relay: routing, auth, API endpoints, rate limiting.
  *
- * Tests the complete RPC path through the relay to a real daemon.
+ * Tests the complete RPC path through the relay to a real daemon,
+ * plus relay HTTP API endpoints (signup, keys, usage, admin).
  * Runs relay + daemon in-process (no Docker needed).
  *
  * Run with: bun test tests/e2e/routing.e2e.test.ts
@@ -298,5 +299,117 @@ describe("Full-Stack Routing", () => {
     }
 
     ws.close();
+  });
+
+  // ---- Auth Flow ----
+
+  test("signup returns ork_live_ prefixed key and account is retrievable", async () => {
+    expect(clientApiKey.startsWith("ork_live_")).toBe(true);
+
+    const res = await fetch(`http://127.0.0.1:${relayPort}/v1/account`, {
+      headers: { Authorization: `Bearer ${clientApiKey}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.email).toBe("routing-test@orka.dev");
+  });
+
+  test("invalid API key returns 401 on account endpoint", async () => {
+    const res = await fetch(`http://127.0.0.1:${relayPort}/v1/account`, {
+      headers: { Authorization: "Bearer ork_live_invalid_key_here_xxxxx" },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("duplicate signup returns 409", async () => {
+    const res = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "routing-test@orka.dev", name: "Dup" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  // ---- Admin Auth ----
+
+  test("non-admin cannot access admin endpoints", async () => {
+    const res = await fetch(`http://127.0.0.1:${relayPort}/v1/admin/accounts`, {
+      headers: { Authorization: `Bearer ${clientApiKey}` },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  // ---- Key Management ----
+
+  test("create and revoke API keys", async () => {
+    const headers = { Authorization: `Bearer ${clientApiKey}`, "Content-Type": "application/json" };
+
+    // Create a key
+    const createRes = await fetch(`http://127.0.0.1:${relayPort}/v1/keys`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ label: "to-revoke" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { keyId } = await createRes.json() as any;
+
+    // Revoke it
+    const revokeRes = await fetch(`http://127.0.0.1:${relayPort}/v1/keys/${keyId}`, {
+      method: "DELETE",
+      headers,
+    });
+    expect(revokeRes.status).toBe(200);
+  });
+
+  test("cannot create more than max keys per account", async () => {
+    // Create a fresh account to avoid interference from other tests
+    const signupRes = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: `maxkeys-${Date.now()}@test.com`, name: "Max Keys" }),
+    });
+    const { apiKey } = await signupRes.json() as any;
+    const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+
+    // Create keys up to the limit (default 10, already have 1)
+    let lastStatus = 201;
+    for (let i = 0; i < 15; i++) {
+      const res = await fetch(`http://127.0.0.1:${relayPort}/v1/keys`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ label: `key-${i}` }),
+      });
+      lastStatus = res.status;
+      if (res.status !== 201) break;
+    }
+    expect(lastStatus).toBe(400);
+  });
+
+  // ---- Usage ----
+
+  test("usage endpoint returns data", async () => {
+    const res = await fetch(`http://127.0.0.1:${relayPort}/v1/usage`, {
+      headers: { Authorization: `Bearer ${clientApiKey}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(Array.isArray(body.buckets)).toBe(true);
+  });
+
+  // ---- Signup Rate Limiting ----
+  // This test must run last — it burns through the IP rate limit
+
+  test("signup rate limiting by IP", async () => {
+    let lastStatus = 201;
+    for (let i = 0; i < 10; i++) {
+      const res = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: `ratelimit-${i}-${Date.now()}@test.com`, name: "Rate Test" }),
+      });
+      lastStatus = res.status;
+      if (res.status === 429) break;
+    }
+    expect(lastStatus).toBe(429);
   });
 });
