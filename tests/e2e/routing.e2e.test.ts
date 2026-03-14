@@ -128,6 +128,8 @@ describe("Full-Stack Routing", () => {
       }
     } catch {}
     try { daemonServer?.stop?.(true); } catch {}
+    await Bun.sleep(500);
+    ctx?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });
     rmSync(relayHome, { recursive: true, force: true });

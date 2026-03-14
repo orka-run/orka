@@ -37,6 +37,7 @@ async function waitForTerminal(
 }
 
 describe("Worktree Management", () => {
+  let ctx: import("@orka/daemon").DaemonContext;
   let client: OrkaService;
   let testRepo: string;
   const sessionIds: string[] = [];
@@ -51,7 +52,7 @@ describe("Worktree Management", () => {
     await $`git -C ${testRepo} add -A`.quiet();
     await $`git -C ${testRepo} commit -m "init"`.quiet();
 
-    const ctx = createDaemonContext(testHome);
+    ctx = createDaemonContext(testHome);
     client = createLocalClient(ctx);
   }, 30_000);
 
@@ -60,6 +61,8 @@ describe("Worktree Management", () => {
       try { await client.stop(id); } catch { /* already stopped */ }
     }
     try { await $`git -C ${testRepo} worktree prune`.quiet(); } catch {}
+    await Bun.sleep(500);
+    ctx?.db.close();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
   });

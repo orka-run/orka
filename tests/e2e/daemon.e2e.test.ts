@@ -49,6 +49,7 @@ async function waitForTerminal(
 }
 
 describe("Daemon Session Lifecycle", () => {
+  let ctx: import("@orka/daemon").DaemonContext;
   let client: OrkaService;
   let testRepo: string;
   const sessionIds: string[] = [];
@@ -61,7 +62,7 @@ describe("Daemon Session Lifecycle", () => {
     await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
     await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
 
-    const ctx = createDaemonContext(testHome);
+    ctx = createDaemonContext(testHome);
     client = createLocalClient(ctx);
   }, 30_000);
 
@@ -70,6 +71,8 @@ describe("Daemon Session Lifecycle", () => {
     for (const id of sessionIds) {
       try { await client.stop(id); } catch { /* already stopped */ }
     }
+    await Bun.sleep(500);
+    ctx?.db.close();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
   });

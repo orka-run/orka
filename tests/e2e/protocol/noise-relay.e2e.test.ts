@@ -170,6 +170,8 @@ describe("Noise NK through Relay", () => {
   let relay: RelayHandle;
   let relayPort: number;
 
+  let ctxA: import("@orka/daemon").DaemonContext;
+  let ctxB: import("@orka/daemon").DaemonContext;
   let daemonServerA: Awaited<ReturnType<typeof startServer>>;
   let daemonServerB: Awaited<ReturnType<typeof startServer>>;
   let noiseKeyA: NoiseKeyInfo;
@@ -211,7 +213,7 @@ describe("Noise NK through Relay", () => {
     const nodeApiKeyB = ((await nodeKeyResB.json()) as { apiKey: string }).apiKey;
 
     // 3. Start daemon A with encryption + relay registration
-    const ctxA = createDaemonContext(daemonHomeA);
+    ctxA = createDaemonContext(daemonHomeA);
     svcA = createLocalClient(ctxA);
     daemonServerA = await startServer(ctxA, svcA, {
       port: 0,
@@ -225,7 +227,7 @@ describe("Noise NK through Relay", () => {
     noiseKeyA = await fetchNoiseKeyInfo(daemonPortA);
 
     // 4. Start daemon B with encryption + relay registration
-    const ctxB = createDaemonContext(daemonHomeB);
+    ctxB = createDaemonContext(daemonHomeB);
     svcB = createLocalClient(ctxB);
     daemonServerB = await startServer(ctxB, svcB, {
       port: 0,
@@ -256,6 +258,10 @@ describe("Noise NK through Relay", () => {
     }
     try { daemonServerA?.stop?.(true); } catch {}
     try { daemonServerB?.stop?.(true); } catch {}
+    // Let background event consumers finalize before closing DB
+    await Bun.sleep(500);
+    ctxA?.db.close();
+    ctxB?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHomeA, { recursive: true, force: true });
     rmSync(daemonHomeB, { recursive: true, force: true });

@@ -40,6 +40,8 @@ describe("Protocol Error Handling", () => {
 
   afterAll(async () => {
     await daemon?.stop();
+    await Bun.sleep(500);
+    daemon?.closeDb();
     rmSync(testHome, { recursive: true, force: true });
   });
 

@@ -30,6 +30,7 @@ export interface DaemonHandle {
   wsUrl: string;
   httpUrl: string;
   stop(): void | Promise<void>;
+  closeDb(): void;
 }
 
 export interface SecureConnection {
@@ -93,6 +94,9 @@ export async function startDaemonWithNoise(opts?: {
       try {
         server.stop(true);
       } catch {}
+    },
+    closeDb() {
+      ctx.db.close();
     },
   };
 }

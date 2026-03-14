@@ -157,6 +157,7 @@ async function runClientPairing(opts: {
 
 describe("SPAKE2 Pairing Protocol E2E", () => {
   let relay: RelayHandle;
+  let ctx: import("@orka/daemon").DaemonContext;
   let daemonServer: any;
   let svc: OrkaService;
   let relayPort: number;
@@ -213,7 +214,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     };
 
     // 4. Start daemon with pairing enabled
-    const ctx = createDaemonContext(daemonHome);
+    ctx = createDaemonContext(daemonHome);
     svc = createLocalClient(ctx, pairingConfig);
     daemonServer = await startServer(ctx, svc, {
       port: 0,
@@ -237,6 +238,8 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
       );
     } catch {}
     try { daemonServer?.stop?.(true); } catch {}
+    await Bun.sleep(500);
+    ctx?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });
     rmSync(relayHome, { recursive: true, force: true });
