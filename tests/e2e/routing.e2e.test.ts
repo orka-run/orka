@@ -22,7 +22,6 @@ process.env["ORKA_RELAY_DATA"] = relayHome;
 
 import { createLocalClient, startServer } from "@orka/daemon";
 import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
-import type { OrkaService } from "@orka/core";
 
 let tmuxAvailable = false;
 try {
@@ -66,7 +65,6 @@ function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
 describeE2E("Full-Stack Routing", () => {
   let relay: RelayHandle;
   let daemonServer: any;
-  let svc: OrkaService;
   let testRepo: string;
 
   let relayPort: number;
@@ -113,7 +111,7 @@ describeE2E("Full-Stack Routing", () => {
     nodeApiKey = nodeKeyData.apiKey;
 
     // 4. Start daemon and register with relay
-    svc = createLocalClient();
+    const svc = createLocalClient();
     daemonServer = await startServer(svc, {
       port: 0,
       hostname: "127.0.0.1",
@@ -262,7 +260,8 @@ describeE2E("Full-Stack Routing", () => {
     const resp = await rpc(ws2, "listSessions", { filters: {} });
     // Should get "No nodes available" error since account 2 has no registered nodes
     expect(resp.error).toBeTruthy();
-    expect(resp.error.code).toBe(503);
+    expect(resp.error).not.toBeNull();
+    expect(resp.error!.code).toBe(503);
 
     ws2.close();
   });

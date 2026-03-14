@@ -96,28 +96,39 @@ describeE2E("Daemon Session Lifecycle", () => {
   // ---- Queries ----
 
   test("getSession returns the spawned session", async () => {
-    const sessions = await client.listSessions();
-    const id = sessions[0]?.id;
-    if (!id) {
-      throw new Error("Expected at least one session");
-    }
-    const session = await client.getSession(id);
+    const spawned = await client.spawn({
+      prompt: "echo 'getSession-test'",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+      tags: ["e2e"],
+    });
+    spawnedTmuxNames.push(spawned.tmuxSessionName);
+
+    const session = await client.getSession(spawned.id);
 
     expect(session).not.toBeNull();
-    expect(session!.id).toBe(id);
+    expect(session!.id).toBe(spawned.id);
     expect(session!.backend).toBe("shell");
+    expect(session!.mode).toBe("background");
+    expect(session!.status).toBe("running");
+    expect(session!.projectPath).toBe(testRepo);
   });
 
   test("getTask returns the linked task", async () => {
-    const sessions = await client.listSessions();
-    const session = sessions[0];
-    if (!session) {
-      throw new Error("Expected at least one session");
-    }
-    const task = await client.getTask(session.taskId);
+    const spawned = await client.spawn({
+      prompt: "echo 'getTask-test'",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+    });
+    spawnedTmuxNames.push(spawned.tmuxSessionName);
+
+    const task = await client.getTask(spawned.taskId);
 
     expect(task).not.toBeNull();
-    expect(task!.prompt).toContain("echo");
+    expect(task!.id).toBe(spawned.taskId);
+    expect(task!.prompt).toContain("echo 'getTask-test'");
     expect(task!.backend).toBe("shell");
   });
 
@@ -149,39 +160,56 @@ describeE2E("Daemon Session Lifecycle", () => {
   // ---- Tags ----
 
   test("getTags returns session tags", async () => {
-    const sessions = await client.listSessions();
-    const tagged = sessions.find((s) => s.mode === "background");
-    if (!tagged) return; // skip if no tagged session
+    const spawned = await client.spawn({
+      prompt: "echo 'tags-test'",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+      tags: ["e2e", "test"],
+    });
+    spawnedTmuxNames.push(spawned.tmuxSessionName);
 
-    const tags = await client.getTags(tagged.id);
-    // First spawned session had ["e2e", "test"]
-    if (tags.length > 0) {
-      expect(tags).toContain("e2e");
-      expect(tags).toContain("test");
-    }
+    const tags = await client.getTags(spawned.id);
+    expect(tags).toHaveLength(2);
+    expect(tags).toContain("e2e");
+    expect(tags).toContain("test");
   });
 
   test("listSessions supports tag filter", async () => {
-    const byTag = await client.listSessions({ tag: "e2e" });
+    const spawned = await client.spawn({
+      prompt: "echo 'tag-filter-test'",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+      tags: ["e2e-filter"],
+    });
+    spawnedTmuxNames.push(spawned.tmuxSessionName);
+
+    const byTag = await client.listSessions({ tag: "e2e-filter" });
     expect(byTag.length).toBeGreaterThanOrEqual(1);
+    expect(byTag.some((s) => s.id === spawned.id)).toBe(true);
     expect(byTag[0]?.backend).toBe("shell");
   });
 
   // ---- Keep ----
 
   test("setKept marks session as kept", async () => {
-    const sessions = await client.listSessions();
-    const session = sessions[0];
-    if (!session) {
-      throw new Error("Expected at least one session");
-    }
+    const spawned = await client.spawn({
+      prompt: "echo 'kept-test'",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+    });
+    spawnedTmuxNames.push(spawned.tmuxSessionName);
 
-    await client.setKept(session.id, true);
-    const updated = await client.getSession(session.id);
+    await client.setKept(spawned.id, true);
+    const updated = await client.getSession(spawned.id);
+    expect(updated).not.toBeNull();
     expect(updated!.kept).toBe(true);
 
-    await client.setKept(session.id, false);
-    const reverted = await client.getSession(session.id);
+    await client.setKept(spawned.id, false);
+    const reverted = await client.getSession(spawned.id);
+    expect(reverted).not.toBeNull();
     expect(reverted!.kept).toBe(false);
   });
 
@@ -287,16 +315,21 @@ describeE2E("Daemon Session Lifecycle", () => {
   });
 
   test("getDiff shows git status in worktree", async () => {
-    // Find a session with a worktree
-    const sessions = await client.listSessions();
-    const wtSession = sessions.find((s) =>
-      s.workingDir.includes("worktrees") && existsSync(s.workingDir),
-    );
-    if (!wtSession) return; // skip if no worktree session available
+    const spawned = await client.spawn({
+      prompt: "echo 'diff-test'",
+      backend: "shell",
+      mode: "background",
+      projectPath: testRepo,
+    });
+    spawnedTmuxNames.push(spawned.tmuxSessionName);
 
-    const diff = await client.getDiff(wtSession.id);
-    expect(diff.status).toBeDefined();
-    expect(diff.diff).toBeDefined();
+    // Wait for completion so the worktree is stable
+    await waitFor(async () => !(await client.isAlive(spawned.id)), { timeoutMs: 10_000 });
+
+    const diff = await client.getDiff(spawned.id);
+    expect(typeof diff.status).toBe("string");
+    expect(diff.status.length).toBeGreaterThan(0);
+    expect(typeof diff.diff).toBe("string");
   });
 
   // ---- Prune ----
