@@ -1,5 +1,5 @@
 import { resolve, join } from "node:path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { $ } from "bun";
 import {
   generateId,
@@ -8,40 +8,13 @@ import {
   type SpawnRequest,
 } from "@orka/core";
 import { insertTask, insertSession, insertSessionTags, updateSessionStatus, updateSessionRawLogFile, getSession, getOrkaHome, listSessions, saveSessionDiff, insertUsageRecord, getChildSessions } from "./db";
-import { defaultRunner } from "./tmux";
-import type { SessionRunner } from "./runner";
 import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, deleteBranch } from "./worktree";
-import { buildBackendCommand, buildEnvExports, assertBackendInstalled } from "./backends";
+import { assertBackendInstalled } from "./backends";
 import { getConfig } from "./config";
-import { approvalManager, isProviderRuntimeEnabled, orchestrationEngine, providerService } from "./provider-runtime";
+import { approvalManager, orchestrationEngine, providerService } from "./provider-runtime";
 import { pushHub } from "./push";
 import { getDaemonMetrics, withSpan } from "./tracing";
-
-let _runner: SessionRunner = defaultRunner;
-
-export function setRunner(r: SessionRunner): void {
-  _runner = r;
-}
-
-export function getRunner(): SessionRunner {
-  return _runner;
-}
-
-/** Parse the exit code written by the backend into the log file.
- *  Looks for a line matching `[orka] exit_code=N` in the last 20 lines.
- */
-function parseExitCode(logFile: string): number | undefined {
-  if (!existsSync(logFile)) return undefined;
-  const lines = readFileSync(logFile, "utf8").split("\n");
-  const tail = lines.slice(-20);
-  for (const line of tail) {
-    const match = line.match(/\[orka\] exit_code=(\d+)/);
-    const exitCode = match?.[1];
-    if (exitCode) return parseInt(exitCode, 10);
-  }
-  return undefined;
-}
 
 /** Spawn a new agent session. Returns the created session. */
 export async function spawnSession(req: SpawnRequest): Promise<Session> {
@@ -70,7 +43,6 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
     const taskId = generateId("task");
     const sessionId = generateId("sess");
     const workspaceId = generateId("ws");
-    const tmuxName = `orka-${sessionId}`;
     const now = new Date().toISOString();
 
     span.setAttribute("orka.session.id", sessionId);
@@ -117,7 +89,6 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       status: "preparing",
       backend: req.backend,
       mode: req.mode,
-      tmuxSessionName: tmuxName,
       projectPath,
       workingDir,
       logFile,
@@ -140,184 +111,66 @@ export async function spawnSession(req: SpawnRequest): Promise<Session> {
       span.setAttribute("orka.tags", req.tags.join(","));
     }
 
-    if (isProviderRuntimeEnabled()) {
-      const startedAt = new Date().toISOString();
-      const handle = await providerService.startSession(req.backend, {
-        threadId: sessionId,
-        cwd: workingDir,
-        ...(req.model ? { model: req.model } : {}),
-        ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
-        prompt: req.prompt,
-        ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
-        ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
-        ...(req.env ? { env: req.env } : {}),
-        interactive: req.mode === "interactive",
-      });
-
-      const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
-      updateSessionRawLogFile(sessionId, rawLogPath);
-
-      updateSessionStatus(sessionId, "running", { startedAt });
-      recordSessionStartedMetrics();
-
-      void consumeProviderEvents(sessionId, handle, orchestrationEngine, {
-        updateSessionStatus,
-        saveSessionDiff,
-        insertUsageRecord,
-        approvalManager,
-        logFile,
-        rawLogPath,
-        pushHub,
-        workingDir,
-        projectPath,
-        autoMerge: session.autoMerge,
-        model: req.model ?? null,
-        getSession,
-        cleanupWorktree: async () => {
-          const currentSession = getSession(sessionId);
-          if (currentSession) {
-            await tryCleanupWorktree(currentSession);
-          }
-        },
-      })
-        .catch((error) => {
-          console.error(`provider event consumer failed for session ${sessionId}`, error);
-        })
-        .finally(() => {
-          providerService.clearHandle(sessionId);
-        });
-
-      span.addEvent("session.started");
-      return { ...session, status: "running", startedAt };
-    }
-
-    // 5. Build backend command (with log tee)
-    const { command } = buildBackendCommand(req.backend, req.prompt, req.mode, {
-      logFile,
-      sessionId,
+    // 5. Start provider runtime session
+    const startedAt = new Date().toISOString();
+    const handle = await providerService.startSession(req.backend, {
+      threadId: sessionId,
+      cwd: workingDir,
       ...(req.model ? { model: req.model } : {}),
       ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
-      projectPath,
+      prompt: req.prompt,
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
+      ...(req.env ? { env: req.env } : {}),
+      interactive: req.mode === "interactive",
     });
 
-    // 6. Write command to script file (avoids bash -c escaping hell)
-    //    Unset CLAUDECODE so nested claude-code sessions don't detect parent and refuse to start.
-    const scriptsDir = join(getOrkaHome(), "scripts");
-    mkdirSync(scriptsDir, { recursive: true });
-    const scriptPath = join(scriptsDir, `${sessionId}.sh`);
-    const daemonPort = process.env["ORKA_DAEMON_PORT"] ?? "7394";
-    writeFileSync(scriptPath, [
-      `#!/usr/bin/env bash`,
-      ...buildEnvExports(req.env),
-      `unset CLAUDECODE`,
-      command,
-      `_ORKA_EXIT=$?`,
-      `curl -sf "http://127.0.0.1:${daemonPort}/session-ended?id=${sessionId}&exitCode=$_ORKA_EXIT" 2>/dev/null || true`,
-      `exit $_ORKA_EXIT`,
-      "",
-    ].join("\n"));
+    const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
+    updateSessionRawLogFile(sessionId, rawLogPath);
 
-    // 7. Spawn tmux session
-    await _runner.spawn(tmuxName, scriptPath, workingDir);
-
-    const startedAt = new Date().toISOString();
     updateSessionStatus(sessionId, "running", { startedAt });
     recordSessionStartedMetrics();
+
+    void consumeProviderEvents(sessionId, handle, orchestrationEngine, {
+      updateSessionStatus,
+      saveSessionDiff,
+      insertUsageRecord,
+      approvalManager,
+      logFile,
+      rawLogPath,
+      pushHub,
+      workingDir,
+      projectPath,
+      autoMerge: session.autoMerge,
+      model: req.model ?? null,
+      getSession,
+      cleanupWorktree: async () => {
+        const currentSession = getSession(sessionId);
+        if (currentSession) {
+          await tryCleanupWorktree(currentSession);
+        }
+      },
+    })
+      .catch((error) => {
+        console.error(`provider event consumer failed for session ${sessionId}`, error);
+      })
+      .finally(() => {
+        providerService.clearHandle(sessionId);
+      });
 
     span.addEvent("session.started");
     return { ...session, status: "running", startedAt };
   });
 }
 
-/** Reap sessions whose tmux has exited but DB still says "running". */
+/** Reap orphaned sessions — with provider-only runtime, sessions are managed
+ *  by provider handles and reaped when the handle's event stream ends.
+ *  This function is kept as a no-op entry point for CLI compatibility. */
 export async function reapSessions(): Promise<number> {
-  const running = listSessions("running");
-  if (running.length === 0) return 0;
-
-  return withSpan("orka.reap", {
-    "orka.reap.running_count": running.length,
-  }, async (span) => {
-    const live = await _runner.list();
-    const liveNames = new Set(live.map((s) => s.name));
-    let reaped = 0;
-
-    for (const s of running) {
-      if (providerService.getHandle(s.id)) {
-        span.addEvent("session.reap_skipped_provider_runtime", { "orka.session.id": s.id });
-        continue;
-      }
-
-      if (!liveNames.has(s.tmuxSessionName)) {
-        // Grace period: don't reap sessions started less than 30s ago.
-        // tmuxList() can return incomplete results if the tmux server is busy
-        // during concurrent spawns, causing false reaps.
-        const startedMs = s.startedAt ? new Date(s.startedAt).getTime() : 0;
-        if (Date.now() - startedMs < 30_000) {
-          span.addEvent("session.reap_skipped_grace", { "orka.session.id": s.id });
-          continue;
-        }
-
-        // Double-check: tmuxList() may have returned stale/incomplete data.
-        // Verify this specific session is truly dead before reaping.
-        if (await _runner.has(s.tmuxSessionName)) {
-          span.addEvent("session.reap_skipped_alive", { "orka.session.id": s.id });
-          continue;
-        }
-
-        const exitCode = parseExitCode(s.logFile);
-        try {
-          const statusText = (await $`git -C ${s.workingDir} status`.text()).trim();
-          const diffText = (await $`git -C ${s.workingDir} diff`.text()).trim();
-          const extra = await captureBranchDiffForSession(s.workingDir, s.projectPath);
-          saveSessionDiff(s.id, diffText, statusText, extra);
-        } catch {
-          // Worktree may already be gone and diff persistence is best-effort.
-        }
-        const finishedAt = new Date().toISOString();
-        const nextStatus = exitCode !== undefined && exitCode !== 0
-          ? "failed"
-          : exitCode === 0
-            ? "completed"
-            : "interrupted";
-        updateSessionStatus(s.id, nextStatus, {
-          finishedAt,
-          ...(exitCode !== undefined ? { exitCode } : {}),
-        });
-        recordSessionTerminalMetrics(s.startedAt, finishedAt, nextStatus);
-        pushHub.broadcast("orchestration.sessionUpdated", {
-          sessionId: s.id,
-          status: nextStatus,
-        });
-
-        // Safety: kill tmux session in case it's lingering (e.g. remain-on-exit)
-        try { await _runner.kill(s.tmuxSessionName); } catch { /* already dead */ }
-
-        span.addEvent("session.reaped", {
-          "orka.session.id": s.id,
-          "orka.status": nextStatus,
-          "orka.exit_code": exitCode ?? -1,
-        });
-
-        // Auto-merge on success
-        if (s.autoMerge && nextStatus === "completed") {
-          await tryAutoMerge(s, span);
-        }
-
-        // NOTE: worktree cleanup is NOT done during reap — agents may commit to the
-        // main repo while working in a worktree, leaving the worktree "clean" but
-        // still needed. Worktrees are cleaned during explicit `orka prune` or `orka merge`.
-        reaped++;
-      }
-    }
-
-    span.setAttribute("orka.reap.reaped_count", reaped);
-    return reaped;
-  });
+  return withSpan("orka.reap", {}, async () => 0);
 }
 
-/** Stop a session: kill tmux, update status. */
+/** Stop a session via the provider runtime. */
 export async function stopSession(sessionId: string): Promise<void> {
   return withSpan("orka.stop", { "orka.session.id": sessionId }, async (span) => {
     const session = getSession(sessionId);
@@ -330,24 +183,12 @@ export async function stopSession(sessionId: string): Promise<void> {
       return;
     }
 
-    if (isProviderRuntimeEnabled() && session.status !== "running" && session.status !== "preparing") {
+    if (session.status !== "running" && session.status !== "preparing") {
       span.addEvent("session.stop_skipped_terminal");
       return;
     }
 
-    if (await _runner.has(session.tmuxSessionName)) {
-      await _runner.kill(session.tmuxSessionName);
-    }
-
-    try {
-      const statusText = (await $`git -C ${session.workingDir} status`.text()).trim();
-      const diffText = (await $`git -C ${session.workingDir} diff`.text()).trim();
-      const extra = await captureBranchDiffForSession(session.workingDir, session.projectPath);
-      saveSessionDiff(sessionId, diffText, statusText, extra);
-    } catch {
-      // Worktree may already be gone and diff persistence is best-effort.
-    }
-
+    // Session has no active provider handle but DB says running — mark cancelled
     const finishedAt = new Date().toISOString();
     updateSessionStatus(sessionId, "cancelled", {
       finishedAt,

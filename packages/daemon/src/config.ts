@@ -16,10 +16,6 @@ const LimitsSchema = z.object({
   maxConcurrent: z.number().default(0),
 });
 
-const ProvidersSchema = z.object({
-  useRuntime: z.boolean().default(true),
-});
-
 const HookCommandSchema = z.object({
   run: z.string(),
 });
@@ -31,7 +27,6 @@ const HooksSchema = z.object({
 export const ConfigSchema = z.object({
   defaults: DefaultsSchema.default(DefaultsSchema.parse({})),
   limits: LimitsSchema.default(LimitsSchema.parse({})),
-  providers: ProvidersSchema.default(ProvidersSchema.parse({})),
   hooks: HooksSchema.default(HooksSchema.parse({})),
 });
 
@@ -54,7 +49,6 @@ export function getConfig(): OrkaConfig {
       const toml = parse(raw);
       const defaults = getTable(toml.defaults);
       const limits = getTable(toml.limits);
-      const providers = getTable(toml.providers);
       const hooks = getTable(toml.hooks);
 
       _config = ConfigSchema.parse({
@@ -70,10 +64,6 @@ export function getConfig(): OrkaConfig {
         limits:
           limits?.max_concurrent !== undefined
             ? { maxConcurrent: getNumber(limits.max_concurrent) }
-            : undefined,
-        providers:
-          providers?.use_runtime !== undefined
-            ? { useRuntime: getBoolean(providers.use_runtime) }
             : undefined,
         hooks:
           hooks?.post_worktree_create !== undefined
@@ -106,10 +96,6 @@ function getString(value: TomlValue | undefined): string | undefined {
 
 function getNumber(value: TomlValue | undefined): number | undefined {
   return typeof value === "number" ? value : undefined;
-}
-
-function getBoolean(value: TomlValue | undefined): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
 }
 
 function normalizeHookCommands(value: TomlValue | undefined): string[] | undefined {

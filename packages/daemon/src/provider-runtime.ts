@@ -1,6 +1,5 @@
 import { ApprovalManager } from "./approval-manager";
 import { ClaudeCodeAdapter, CodexAdapter, ShellAdapter } from "./adapters";
-import { getConfig } from "./config";
 import { getOrchestrationEvents, insertOrchestrationEvent } from "./db";
 import { OrchestrationEngine } from "./orchestration/engine";
 import { ProviderAdapterRegistry } from "./provider-registry";
@@ -21,7 +20,3 @@ export const orchestrationEngine = new OrchestrationEngine({
   persistEvent: insertOrchestrationEvent,
   getSessionTimeline: getOrchestrationEvents,
 });
-
-export function isProviderRuntimeEnabled(): boolean {
-  return getConfig().providers.useRuntime;
-}

@@ -1,33 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ProviderSessionHandle } from "@orka/core";
 import { closeDb, getOrchestrationEvents, getUsageBySession, insertOrchestrationEvent, insertSession, insertTask } from "./db";
 import { createLocalClient } from "./local-client";
-import { getRunner, setRunner } from "./orchestrator";
 import { pushHub } from "./push";
 import { resetConfigCache } from "./config";
 import { providerService } from "./provider-runtime";
-import type { SessionRunner } from "./runner";
 
 const originalOrkaHome = process.env["ORKA_HOME"];
 
 let testHome = "";
-let originalRunner: SessionRunner;
 
 beforeEach(() => {
-  originalRunner = getRunner();
   closeDb();
   resetConfigCache();
   testHome = mkdtempSync(join(tmpdir(), "orka-local-client-test-"));
   mkdirSync(testHome, { recursive: true });
-  writeFileSync(join(testHome, "config.toml"), "[providers]\nuse_runtime = true\n");
   process.env["ORKA_HOME"] = testHome;
 });
 
 afterEach(() => {
-  setRunner(originalRunner);
   for (const handle of providerService.listActiveSessions()) {
     providerService.clearHandle(handle.threadId);
   }
@@ -45,7 +39,6 @@ describe("LocalClient provider runtime support", () => {
   test("captures provider output and builds results from orchestration events", async () => {
     seedSession("sess-provider");
     seedProviderEvents("sess-provider");
-    setRunner(createRunnerStub());
 
     const client = createLocalClient();
 
@@ -81,8 +74,6 @@ describe("LocalClient provider runtime support", () => {
 
   test("uses provider handles for liveness and input routing", async () => {
     seedSession("sess-live");
-    const runner = createRunnerStub();
-    setRunner(runner);
 
     const handle: ProviderSessionHandle = {
       threadId: "sess-live",
@@ -112,7 +103,6 @@ describe("LocalClient provider runtime support", () => {
       await client.sendTurn("sess-live", "continue");
 
       expect(sendTurnCalls).toEqual([{ sessionId: "sess-live", input: { input: "continue" } }]);
-      expect(runner.sendTextCalls).toEqual([]);
       expect(getOrchestrationEvents("sess-live")).toContainEqual({
         v: 1,
         type: "user.input",
@@ -156,7 +146,6 @@ function seedSession(sessionId: string): void {
     status: "completed",
     backend: "codex",
     mode: "background",
-    tmuxSessionName: `tmux-${sessionId}`,
     projectPath: "/tmp/project",
     workingDir: "/tmp/project",
     logFile: join(testHome, "logs", `${sessionId}.log`),
@@ -245,25 +234,3 @@ function seedProviderEvents(sessionId: string): void {
   });
 }
 
-function createRunnerStub(): SessionRunner & { sendTextCalls: Array<{ sessionName: string; text: string }> } {
-  const sendTextCalls: Array<{ sessionName: string; text: string }> = [];
-  return {
-    sendTextCalls,
-    async spawn() {},
-    async kill() {},
-    async has() {
-      return false;
-    },
-    async list() {
-      return [];
-    },
-    async capture() {
-      throw new Error("tmux capture should not be used");
-    },
-    async sendKeys() {},
-    async sendText(sessionName: string, text: string) {
-      sendTextCalls.push({ sessionName, text });
-    },
-    async attach() {},
-  };
-}

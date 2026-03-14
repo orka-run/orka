@@ -101,8 +101,8 @@ export interface StartPairingResult {
  * The abstract contract between CLI and daemon.
  * Implementations: LocalClient (in-process), RemoteClient (WS JSON-RPC).
  * All methods return Promises for network transparency.
- * All methods are session-ID-centric — no tmux names, file paths, or
- * implementation details leak through the interface.
+ * All methods are session-ID-centric — no file paths or implementation
+ * details leak through the interface.
  */
 export interface OrkaService {
   // --- Session lifecycle ---

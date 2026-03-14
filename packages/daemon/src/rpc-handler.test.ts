@@ -14,7 +14,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     status: "running",
     backend: "codex",
     mode: "interactive",
-    tmuxSessionName: "orka-sess-1",
     projectPath: "/tmp/project",
     workingDir: "/tmp/project",
     logFile: "/tmp/logs/sess-1.log",
