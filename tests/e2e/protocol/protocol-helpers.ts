@@ -54,18 +54,18 @@ export async function startDaemonWithNoise(opts?: {
   nodeId?: string;
 }): Promise<DaemonHandle> {
   // Dynamic import so ORKA_HOME is already in the env when daemon modules load.
-  const { createLocalClient, startServer } = await import("@orka/daemon");
+  const { createDaemonContext, createLocalClient, startServer } = await import("@orka/daemon");
   const { ensureNoiseKeyPair } = await import(
     "../../../packages/core/src/crypto"
   );
-  const { getOrkaHome } = await import("@orka/daemon");
 
   const nodeId = opts?.nodeId ?? "test-node";
-  const svc = createLocalClient();
+  const ctx = createDaemonContext();
+  const svc = createLocalClient(ctx);
 
-  const noiseKeyInfo = ensureNoiseKeyPair(getOrkaHome(), "node");
+  const noiseKeyInfo = ensureNoiseKeyPair(ctx.orkaHome, "node");
 
-  const server = await startServer(svc, {
+  const server = await startServer(ctx, svc, {
     port: 0,
     hostname: "127.0.0.1",
     nodeId,

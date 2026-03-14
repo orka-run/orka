@@ -28,7 +28,7 @@ import type { OrkaService, DataFrame } from "@orka/core";
 import { canonicalTransportOrigin } from "@orka/core";
 import type { NoiseKeyInfo } from "../../../packages/core/src/crypto";
 import { NoiseClientTransport } from "../../../packages/core/src/transport/noise-transport";
-import { createLocalClient, startServer } from "@orka/daemon";
+import { createDaemonContext, createLocalClient, startServer } from "@orka/daemon";
 import { startRelay, type RelayHandle } from "../../../packages/relay/src/index";
 
 // ---------------------------------------------------------------------------
@@ -211,9 +211,9 @@ describe("Noise NK through Relay", () => {
     const nodeApiKeyB = ((await nodeKeyResB.json()) as { apiKey: string }).apiKey;
 
     // 3. Start daemon A with encryption + relay registration
-    process.env["ORKA_HOME"] = daemonHomeA;
-    svcA = createLocalClient();
-    daemonServerA = await startServer(svcA, {
+    const ctxA = createDaemonContext(daemonHomeA);
+    svcA = createLocalClient(ctxA);
+    daemonServerA = await startServer(ctxA, svcA, {
       port: 0,
       hostname: "127.0.0.1",
       encrypt: true,
@@ -225,9 +225,9 @@ describe("Noise NK through Relay", () => {
     noiseKeyA = await fetchNoiseKeyInfo(daemonPortA);
 
     // 4. Start daemon B with encryption + relay registration
-    process.env["ORKA_HOME"] = daemonHomeB;
-    svcB = createLocalClient();
-    daemonServerB = await startServer(svcB, {
+    const ctxB = createDaemonContext(daemonHomeB);
+    svcB = createLocalClient(ctxB);
+    daemonServerB = await startServer(ctxB, svcB, {
       port: 0,
       hostname: "127.0.0.1",
       encrypt: true,

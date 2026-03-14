@@ -40,7 +40,7 @@ import {
 import { canonicalTransportOrigin } from "@orka/core";
 import type { OrkaService } from "@orka/core";
 import type { PairingConfig } from "@orka/daemon";
-import { createLocalClient, startServer } from "@orka/daemon";
+import { createDaemonContext, createLocalClient, startServer } from "@orka/daemon";
 import { startRelay, type RelayHandle } from "../../../packages/relay/src/index";
 import { waitForOpen } from "./protocol-helpers";
 
@@ -213,8 +213,9 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     };
 
     // 4. Start daemon with pairing enabled
-    svc = createLocalClient(pairingConfig);
-    daemonServer = await startServer(svc, {
+    const ctx = createDaemonContext(daemonHome);
+    svc = createLocalClient(ctx, pairingConfig);
+    daemonServer = await startServer(ctx, svc, {
       port: 0,
       hostname: "127.0.0.1",
       relayUrl: relayOrigin,

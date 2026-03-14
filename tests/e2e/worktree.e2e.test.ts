@@ -17,7 +17,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-wt-"));
 process.env["ORKA_HOME"] = testHome;
 
-import { createLocalClient } from "@orka/daemon";
+import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, Session } from "@orka/core";
 
 /** Wait for a session to reach a terminal status. */
@@ -51,7 +51,8 @@ describe("Worktree Management", () => {
     await $`git -C ${testRepo} add -A`.quiet();
     await $`git -C ${testRepo} commit -m "init"`.quiet();
 
-    client = createLocalClient();
+    const ctx = createDaemonContext(testHome);
+    client = createLocalClient(ctx);
   }, 30_000);
 
   afterAll(async () => {

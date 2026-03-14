@@ -371,7 +371,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
 
     // Register with relay if configured
     if (opts.relayUrl) {
-      registerWithRelay(svc, opts.relayUrl, nodeId, opts.relayToken);
+      registerWithRelay(ctx, svc, opts.relayUrl, nodeId, opts.relayToken);
     }
 
     return server;
@@ -382,7 +382,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
  * Connect to relay as a node. Relay forwards client requests to us,
  * we process them and send responses back through the relay.
  */
-function registerWithRelay(svc: OrkaService, relayUrl: string, nodeId: string, token?: string) {
+function registerWithRelay(ctx: DaemonContext, svc: OrkaService, relayUrl: string, nodeId: string, token?: string) {
   void withSpan("orka.server.register_relay", {}, async () => {
     let url = `${relayUrl}/register?node=${encodeURIComponent(nodeId)}`;
     if (token) url += `&token=${encodeURIComponent(token)}`;

@@ -16,7 +16,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-daemon-"));
 process.env["ORKA_HOME"] = testHome;
 
-import { createLocalClient } from "@orka/daemon";
+import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, Session } from "@orka/core";
 
 /** Poll until predicate is true, or timeout. */
@@ -61,7 +61,8 @@ describe("Daemon Session Lifecycle", () => {
     await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
     await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
 
-    client = createLocalClient();
+    const ctx = createDaemonContext(testHome);
+    client = createLocalClient(ctx);
   }, 30_000);
 
   afterAll(async () => {

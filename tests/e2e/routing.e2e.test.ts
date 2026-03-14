@@ -20,7 +20,8 @@ const relayHome = mkdtempSync(join(tmpdir(), "orka-e2e-routing-relay-"));
 process.env["ORKA_HOME"] = daemonHome;
 process.env["ORKA_RELAY_DATA"] = relayHome;
 
-import { createLocalClient, startServer } from "@orka/daemon";
+import { createDaemonContext, createLocalClient, startServer } from "@orka/daemon";
+import type { DaemonContext } from "@orka/daemon";
 import type { OrkaService } from "@orka/core";
 import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
 
@@ -55,6 +56,7 @@ function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
 
 describe("Full-Stack Routing", () => {
   let relay: RelayHandle;
+  let ctx: DaemonContext;
   let daemonServer: any;
   let svc: OrkaService;
   let testRepo: string;
@@ -101,8 +103,9 @@ describe("Full-Stack Routing", () => {
     nodeApiKey = nodeKeyData.apiKey;
 
     // 4. Start daemon and register with relay
-    svc = createLocalClient();
-    daemonServer = await startServer(svc, {
+    ctx = createDaemonContext(daemonHome);
+    svc = createLocalClient(ctx);
+    daemonServer = await startServer(ctx, svc, {
       port: 0,
       hostname: "127.0.0.1",
       relayUrl: `ws://127.0.0.1:${relayPort}`,
