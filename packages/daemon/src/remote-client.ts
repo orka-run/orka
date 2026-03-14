@@ -21,17 +21,13 @@ import type {
 } from "@orka/core";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent, canonicalTransportOrigin } from "@orka/core";
-import { encryptRequest, decryptResponse, deriveSessionKey, type NoiseKeyInfo } from "@orka/core/crypto";
+import { type NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseClientTransport } from "@orka/core/transport/noise-transport";
 import { withSpan } from "./tracing";
 
 export interface RemoteClientOptions {
   /** WebSocket URL of the daemon or relay */
   url: string;
-  /** Legacy client keypair for old E2E encryption. If provided with serverPublicKey, enables legacy encryption. */
-  keyPair?: { publicKey: string; privateKey: string };
-  /** Legacy server/node public key (base64). Required for legacy E2E encryption. */
-  serverPublicKey?: string;
   /** Noise transport key info for the server. If provided, uses Noise NK encryption. */
   noiseServerKey?: NoiseKeyInfo;
   /** Node ID for Noise transport. Required when using noiseServerKey. */
@@ -53,9 +49,6 @@ class RemoteClient implements OrkaService {
   private nextId = 1;
   private url: string;
   private connectPromise: Promise<void> | null = null;
-  private encKey: Buffer | null = null;
-  private keyPair: { publicKey: string; privateKey: string } | undefined;
-  private serverPublicKey: string | undefined;
   private noiseServerKey: NoiseKeyInfo | undefined;
   private nodeId: string | undefined;
   private relayOrigin: string;
@@ -64,8 +57,6 @@ class RemoteClient implements OrkaService {
 
   constructor(opts: RemoteClientOptions) {
     this.url = opts.url;
-    this.keyPair = opts.keyPair;
-    this.serverPublicKey = opts.serverPublicKey;
     this.noiseServerKey = opts.noiseServerKey;
     this.nodeId = opts.nodeId;
     this.relayOrigin = canonicalTransportOrigin(opts.relayOrigin);
@@ -84,24 +75,8 @@ class RemoteClient implements OrkaService {
       }
       if (this.connectPromise) return this.connectPromise;
 
-      // Legacy encryption: derive shared key
-      if (!this.useNoise && this.keyPair && this.serverPublicKey && !this.encKey) {
-        this.encKey = await deriveSessionKey(
-          this.keyPair.privateKey,
-          this.serverPublicKey,
-          Buffer.from(this.keyPair.publicKey + this.serverPublicKey).toString("base64").slice(0, 44),
-        );
-      }
-
-      // Legacy: append client public key to URL for server-side key derivation
-      let connectUrl = this.url;
-      if (!this.useNoise && this.keyPair) {
-        const sep = connectUrl.includes("?") ? "&" : "?";
-        connectUrl += `${sep}pubkey=${encodeURIComponent(this.keyPair.publicKey)}`;
-      }
-
       this.connectPromise = new Promise<void>((resolve, reject) => {
-        const ws = new WebSocket(connectUrl);
+        const ws = new WebSocket(this.url);
         ws.onopen = () => {
           this.ws = ws;
           this.connectPromise = null;
@@ -240,23 +215,6 @@ class RemoteClient implements OrkaService {
         return;
       }
     }
-    // Legacy encryption: decrypt _enc responses
-    else if (this.encKey && isRecord(resp) && resp["_enc"]) {
-      try {
-        resp = decryptResponse(this.encKey, resp);
-      } catch {
-        const respId = isRecord(resp) ? resp["id"] : undefined;
-        const pendingId = typeof respId === "string" ? respId : "";
-        const p = this.pending.get(pendingId);
-        if (p) {
-          this.pending.delete(pendingId);
-          clearTimeout(p.timer);
-          p.reject(new Error("E2E decryption failed"));
-        }
-        return;
-      }
-    }
-
     if (!isRecord(resp) || typeof resp["id"] !== "string") {
       return;
     }
@@ -313,11 +271,6 @@ class RemoteClient implements OrkaService {
           const frame = this.noiseTransport.encryptRpc(req);
           this.ws!.send(JSON.stringify(frame));
           return;
-        }
-
-        // Legacy encryption: encrypt params only
-        if (this.encKey && req.params) {
-          req = encryptRequest(this.encKey, req);
         }
 
         this.ws!.send(JSON.stringify(req));

@@ -1,7 +1,6 @@
 import { ROOT_CONTEXT, propagation, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
 import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR, RPC_INVALID_REQUEST } from "@orka/core";
-import { decryptRequest, encryptResponse } from "@orka/core/crypto";
 import { pushHub } from "./push";
 import { insertClientError, listClientErrors } from "./db";
 import { getDaemonMetrics, getTracer, queryTraceLog, withSpan } from "./tracing";
@@ -10,16 +9,14 @@ const SLOW_RPC_THRESHOLD_MS = 1_000;
 
 /**
  * Dispatch a JSON-RPC request to the OrkaService implementation.
- * Supports E2E encrypted payloads when encKey is provided.
  * Returns a JSON-RPC response string. Never throws.
  */
 export async function handleRpcRequest(
   svc: OrkaService,
   raw: string,
-  encKey?: Buffer | null,
 ): Promise<string> {
   const requestStartedAt = performance.now();
-  let req: RpcRequest & { _enc?: unknown };
+  let req: RpcRequest;
   try {
     req = JSON.parse(raw);
   } catch {
@@ -57,34 +54,13 @@ export async function handleRpcRequest(
     parentContext,
     async (span) => {
       const id = req.id;
-      const isEncrypted = !!req._enc;
       addPayloadEvent(span, "rpc.deserialize", raw);
-      let method = req.method ?? "unknown";
+      const method = req.method ?? "unknown";
       let isError = false;
-
-      if (isEncrypted && encKey) {
-        try {
-          req = decryptRequest(encKey, req);
-          method = req?.method ?? "unknown";
-          span.setAttribute("orka.method", method);
-        } catch {
-          isError = true;
-          span.setStatus({ code: SpanStatusCode.ERROR, message: "E2E decryption failed" });
-          return serializeRpcResponse(span, {
-            jsonrpc: "2.0",
-            id,
-            error: { code: RPC_PARSE_ERROR, message: "E2E decryption failed" },
-          });
-        }
-      }
 
       try {
         const result = await dispatch(svc, req.method, req.params ?? {}, trace.setSpan(parentContext, span));
-        let response: any = { jsonrpc: "2.0", id, result };
-
-        if (isEncrypted && encKey) {
-          response = encryptResponse(encKey, response);
-        }
+        const response: any = { jsonrpc: "2.0", id, result };
 
         span.setStatus({ code: SpanStatusCode.OK });
         return serializeRpcResponse(span, response);

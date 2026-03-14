@@ -12,7 +12,7 @@ import {
 } from "@orka/core";
 import type { PushChannel, DataFrame } from "@orka/core";
 import { trace } from "@opentelemetry/api";
-import { deriveSessionKey, ensureKeyPair, ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
+import { ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseServerTransport } from "@orka/core/transport/noise-transport";
 import daemonPackageJson from "../package.json";
 import { getConfig, type OrkaConfig } from "./config";
@@ -38,9 +38,7 @@ export interface ServerOptions {
 }
 
 interface ServerWebSocketData {
-  /** Legacy AES-GCM encryption key (old path) */
-  encKey?: Buffer;
-  /** Noise transport instance (new path) */
+  /** Noise transport instance for encrypted connections */
   noiseTransport?: NoiseServerTransport;
   /** Whether the first message has been received (for protocol detection) */
   firstMessageReceived?: boolean;
@@ -70,12 +68,8 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
 
     // Load or generate Noise keypair for E2E encryption
     let noiseKeyInfo: NoiseKeyInfo | undefined;
-    // Also keep legacy keypair for backward compatibility
-    let legacyKeyPair: { publicKey: string; privateKey: string } | undefined;
     if (opts.encrypt) {
       noiseKeyInfo = ensureNoiseKeyPair(getOrkaHome(), "node");
-      // Also ensure legacy keypair exists for backward compat
-      legacyKeyPair = ensureKeyPair(getOrkaHome(), "node");
       console.log(`E2E encryption enabled (noise key_id: ${noiseKeyInfo.keyId.slice(0, 30)}...)`);
     }
     const capabilities = buildCapabilities(getConfig(), opts.encrypt);
@@ -100,10 +94,6 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             body["publicKey"] = noiseKeyInfo.publicKeyB64;
             body["keyId"] = noiseKeyInfo.keyId;
             body["nodeId"] = nodeId;
-          }
-          // Also expose legacy public key for backward compat
-          if (legacyKeyPair) {
-            body["legacyPublicKey"] = legacyKeyPair.publicKey;
           }
           return new Response(JSON.stringify(body), {
             headers: { "content-type": "application/json" },
@@ -145,18 +135,8 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
           return new Response("ok");
         }
 
-        // Derive per-connection legacy encryption key from client's public key (backward compat)
-        let encKey: Buffer | undefined;
-        if (legacyKeyPair) {
-          const clientPubKey = url.searchParams.get("pubkey");
-          if (clientPubKey) {
-            const salt = Buffer.from(clientPubKey + legacyKeyPair.publicKey).toString("base64").slice(0, 44);
-            encKey = await deriveSessionKey(legacyKeyPair.privateKey, clientPubKey, salt);
-          }
-        }
-
         // Upgrade to WebSocket
-        if (server.upgrade(req, { data: encKey ? { encKey } : {} })) {
+        if (server.upgrade(req, { data: {} })) {
           return undefined;
         }
         return new Response("WebSocket upgrade required", { status: 426 });
@@ -312,7 +292,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
           }
           ws.data.firstMessageReceived = true;
 
-          // --- Legacy path (unencrypted or old AES-GCM encryption) ---
+          // --- Plaintext path (no encryption) ---
           const controlMessage = PushControlRequestSchema.safeParse(parsed);
           if (controlMessage.success) {
             const knownChannels = controlMessage.data.channels.filter(
@@ -340,8 +320,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
             }
           }
 
-          const encKey = ws.data?.encKey;
-          const response = await handleRpcRequest(svc, raw, encKey);
+          const response = await handleRpcRequest(svc, raw);
           ws.send(response);
         },
 
