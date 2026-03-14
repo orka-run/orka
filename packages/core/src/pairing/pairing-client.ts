@@ -9,12 +9,13 @@
  *   INIT → AWAIT_SERVER_HELLO → AWAIT_PAIR_RESP → AWAIT_PAIR_CONFIRM2
  *     → AWAIT_PAIR_BOOTSTRAP → COMPLETE
  *
- * After COMPLETE, the caller should:
- *   1. Close the pairing WebSocket
- *   2. Open a Noise_NK transport to nodePaths[0]
- *   3. Perform a real handshake with noiseStaticPubkey
- *   4. Only save trust record if handshake succeeds
- *   5. Send pair_done back
+ * After receiving the PairingClientResult, the caller MUST:
+ *   1. Open a Noise_NK transport to nodePaths[0]
+ *   2. Perform a real handshake with noiseStaticPubkey
+ *   3. Call confirmNoiseVerified() — this sends pair_done and transitions to COMPLETE
+ *   4. Only then save the trust record
+ *
+ * The client stays in AWAIT_NOISE_VERIFY until the caller confirms.
  */
 
 import { randomBytes } from "@noble/hashes/utils.js";
@@ -69,6 +70,7 @@ export type PairingClientState =
   | "AWAIT_PAIR_RESP"
   | "AWAIT_PAIR_CONFIRM2"
   | "AWAIT_PAIR_BOOTSTRAP"
+  | "AWAIT_NOISE_VERIFY"
   | "COMPLETE"
   | "FAILED";
 
@@ -225,6 +227,24 @@ export class PairingClient {
           `Unexpected message in state ${this._state}`,
         );
     }
+  }
+
+  /**
+   * Confirm that the Noise_NK handshake with the bootstrapped key succeeded.
+   * Sends pair_done to the server and transitions to COMPLETE.
+   *
+   * The caller MUST call this only after a successful Noise_NK handshake
+   * using the noiseStaticPubkey from the PairingClientResult.
+   */
+  confirmNoiseVerified(): void {
+    if (this._state !== "AWAIT_NOISE_VERIFY") {
+      throw new PairingError(
+        `Cannot confirm Noise: expected AWAIT_NOISE_VERIFY, got ${this._state}`,
+      );
+    }
+
+    this._onSend({ t: "pair_done" });
+    this._state = "COMPLETE";
   }
 
   /**
@@ -405,7 +425,7 @@ export class PairingClient {
       bootExport: this._bootExport!,
     };
 
-    this._state = "COMPLETE";
+    this._state = "AWAIT_NOISE_VERIFY";
     return this._result;
   }
 

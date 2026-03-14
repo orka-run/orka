@@ -277,10 +277,15 @@ async function runFullExchange(
   const r3 = await client.handleMessage(confirm2Json);
   expect(r3).toBeNull();
 
-  // Step 5: Server sends pair_bootstrap → client returns result
+  // Step 5: Server sends pair_bootstrap → client returns result (AWAIT_NOISE_VERIFY)
   const bootstrapJson = server.generateBootstrap();
   const result = await client.handleMessage(bootstrapJson);
   expect(result).not.toBeNull();
+  expect(client.state).toBe("AWAIT_NOISE_VERIFY");
+
+  // Step 6: Caller confirms Noise verify → pair_done sent → COMPLETE
+  client.confirmNoiseVerified();
+  expect(client.state).toBe("COMPLETE");
 
   return { result: result!, server, client, messages };
 }
@@ -445,13 +450,14 @@ describe("PairingClient", () => {
       expect(result.bootExport.some((b) => b !== 0)).toBe(true);
     });
 
-    test("client sends exactly 3 outgoing messages", async () => {
+    test("client sends exactly 4 outgoing messages", async () => {
       const { messages } = await runFullExchange(secret, relayOrigin);
 
-      expect(messages.length).toBe(3);
+      expect(messages.length).toBe(4);
       expect((messages[0] as any).t).toBe("pair_client_hello");
       expect((messages[1] as any).t).toBe("pair_init");
       expect((messages[2] as any).t).toBe("pair_confirm1");
+      expect((messages[3] as any).t).toBe("pair_done");
     });
 
     test("pair_init contains valid base64url pA (32-byte ed25519 point)", async () => {
@@ -510,6 +516,9 @@ describe("PairingClient", () => {
 
       const bootstrapJson = server.generateBootstrap();
       await client.handleMessage(bootstrapJson);
+      expect(client.state).toBe("AWAIT_NOISE_VERIFY");
+
+      client.confirmNoiseVerified();
       expect(client.state).toBe("COMPLETE");
     });
 
@@ -781,8 +790,17 @@ describe("PairingClient", () => {
       const { client } = await runFullExchange(secret, relayOrigin);
 
       await expect(
-        client.handleMessage(JSON.stringify({ t: "pair_done" })),
+        client.handleMessage(JSON.stringify({ t: "pair_server_hello", v: 1, pair_suite: "x", enroll_id: "y", expires_in_sec: 1, features: [] })),
       ).rejects.toThrow("Unexpected message in state COMPLETE");
+    });
+
+    test("confirmNoiseVerified in wrong state throws", () => {
+      const client = new PairingClient({ secret, relayOrigin, onSend: () => {} });
+      client.start();
+
+      expect(() => client.confirmNoiseVerified()).toThrow(
+        "Cannot confirm Noise: expected AWAIT_NOISE_VERIFY, got AWAIT_SERVER_HELLO",
+      );
     });
 
     test("pair_resp sent when expecting server_hello", async () => {

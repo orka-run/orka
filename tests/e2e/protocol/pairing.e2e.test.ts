@@ -109,8 +109,8 @@ async function runClientPairing(opts: {
             throw new Error("PairingClientResult: nodePaths is not an array");
           }
 
-          // Send pair_done to complete the protocol
-          ws.send(JSON.stringify({ t: "pair_done" }));
+          // Confirm Noise verify (sends pair_done via onSend)
+          client.confirmNoiseVerified();
           // Give the server a moment to process pair_done
           await Bun.sleep(200);
           ws.close();
