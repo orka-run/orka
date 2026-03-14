@@ -177,86 +177,9 @@ describe("Noise NK Transport", () => {
     ws.close();
   });
 
-  // ---- 7. Legacy X25519+AES-GCM encryption works ----
+  // ---- 7. Protocol auto-detection: Noise and plaintext ----
 
-  test("legacy X25519+AES-GCM encryption works", async () => {
-    // Dynamic import to get legacy crypto functions
-    const {
-      generateKeyPair,
-      deriveSessionKey,
-      encryptRequest,
-      decryptResponse,
-    } = await import("../../../packages/core/src/crypto");
-
-    // Generate a client keypair (legacy DER-encoded)
-    const clientKp = generateKeyPair();
-
-    // Derive shared session key (same as daemon does)
-    const serverPubKey = daemon.legacyKeyPair.publicKey;
-    const salt = Buffer.from(clientKp.publicKey + serverPubKey)
-      .toString("base64")
-      .slice(0, 44);
-    const encKey = await deriveSessionKey(clientKp.privateKey, serverPubKey, salt);
-
-    // Connect with pubkey query param (like RemoteClient does)
-    const ws = new WebSocket(
-      `${daemon.wsUrl}?pubkey=${encodeURIComponent(clientKp.publicKey)}`,
-    );
-    await waitForOpen(ws);
-
-    // Encrypt a request using legacy format
-    const rpcRequest = {
-      jsonrpc: "2.0",
-      id: "legacy-test-1",
-      method: "listSessions",
-      params: { filters: {} },
-    };
-    const encryptedReq = encryptRequest(encKey, rpcRequest);
-
-    // Should have _enc field instead of params
-    expect(encryptedReq._enc).toBeDefined();
-    expect(encryptedReq.params).toBeUndefined();
-
-    // Send and wait for response
-    const resp = await new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error("Legacy RPC timeout")),
-        10_000,
-      );
-      timer.unref?.();
-
-      const handler = (event: MessageEvent) => {
-        let parsed: Record<string, unknown>;
-        try {
-          parsed = JSON.parse(String(event.data));
-        } catch {
-          return;
-        }
-
-        if (parsed.id === "legacy-test-1") {
-          clearTimeout(timer);
-          ws.removeEventListener("message", handler);
-          resolve(parsed);
-        }
-      };
-
-      ws.addEventListener("message", handler);
-      ws.send(JSON.stringify(encryptedReq));
-    });
-
-    // Response should have _enc field (encrypted result)
-    expect(resp._enc).toBeDefined();
-
-    // Decrypt the response
-    const decrypted = decryptResponse(encKey, resp);
-    expect(Array.isArray(decrypted.result)).toBe(true);
-
-    ws.close();
-  });
-
-  // ---- 8. Protocol auto-detection: three connection types ----
-
-  test("protocol auto-detection: three connection types", async () => {
+  test("protocol auto-detection: Noise and plaintext coexist", async () => {
     // 1. Noise connection
     const { ws: noiseWs, transport } = await performNoiseHandshake(
       daemon.wsUrl,
@@ -269,61 +192,7 @@ describe("Noise NK Transport", () => {
     expect(noiseResp.error).toBeUndefined();
     expect(Array.isArray(noiseResp.result)).toBe(true);
 
-    // 2. Legacy encrypted connection
-    const {
-      generateKeyPair,
-      deriveSessionKey,
-      encryptRequest,
-      decryptResponse,
-    } = await import("../../../packages/core/src/crypto");
-    const clientKp = generateKeyPair();
-    const serverPubKey = daemon.legacyKeyPair.publicKey;
-    const salt = Buffer.from(clientKp.publicKey + serverPubKey)
-      .toString("base64")
-      .slice(0, 44);
-    const encKey = await deriveSessionKey(
-      clientKp.privateKey,
-      serverPubKey,
-      salt,
-    );
-    const legacyWs = new WebSocket(
-      `${daemon.wsUrl}?pubkey=${encodeURIComponent(clientKp.publicKey)}`,
-    );
-    await waitForOpen(legacyWs);
-    const legacyReq = encryptRequest(encKey, {
-      jsonrpc: "2.0",
-      id: "auto-detect-legacy",
-      method: "listSessions",
-      params: { filters: {} },
-    });
-    const legacyRespRaw = await new Promise<Record<string, unknown>>(
-      (resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("Legacy timeout")),
-          10_000,
-        );
-        timer.unref?.();
-        const handler = (event: MessageEvent) => {
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(String(event.data));
-          } catch {
-            return;
-          }
-          if (parsed.id === "auto-detect-legacy") {
-            clearTimeout(timer);
-            legacyWs.removeEventListener("message", handler);
-            resolve(parsed);
-          }
-        };
-        legacyWs.addEventListener("message", handler);
-        legacyWs.send(JSON.stringify(legacyReq));
-      },
-    );
-    const legacyResp = decryptResponse(encKey, legacyRespRaw);
-    expect(Array.isArray(legacyResp.result)).toBe(true);
-
-    // 3. Plaintext connection
+    // 2. Plaintext connection
     const plainWs = new WebSocket(daemon.wsUrl);
     await waitForOpen(plainWs);
     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
@@ -331,11 +200,10 @@ describe("Noise NK Transport", () => {
     expect(Array.isArray(plainResp.result)).toBe(true);
 
     noiseWs.close();
-    legacyWs.close();
     plainWs.close();
   });
 
-  // ---- 9. Encrypted welcome after Noise handshake ----
+  // ---- 8. Encrypted welcome after Noise handshake ----
 
   test("encrypted welcome after Noise handshake", async () => {
     const ws = new WebSocket(daemon.wsUrl);

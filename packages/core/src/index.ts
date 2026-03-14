@@ -7,7 +7,6 @@ export * from "./service";
 export * from "./rpc";
 // crypto.ts uses node:crypto — import directly from "@orka/core/crypto" in server code.
 // Do NOT re-export here to avoid breaking browser bundles (dashboard).
-export type { KeyPair } from "./crypto";
 export * from "./reconnect";
 export * from "./push-protocol";
 export * from "./errors";

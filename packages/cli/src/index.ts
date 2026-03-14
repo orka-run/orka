@@ -5,10 +5,7 @@ import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
 import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
 import {
-  ensureKeyPair,
   ensureNoiseKeyPair,
-  loadKeyPair,
-  loadPublicKey,
   loadNoiseKeyPair,
   loadNoisePublicKey,
   saveNoiseServerPublicKey,
@@ -345,19 +342,8 @@ function buildRemoteClient(url: string): OrkaService {
       });
     }
 
-    // 3. Fall back to legacy encryption
-    const keyPair = ensureKeyPair(orkaHome, "client");
-    let pubKey = serverPublicKey;
-    if (!pubKey) {
-      pubKey = loadPublicKey(orkaHome, "server") ?? undefined;
-    }
-    if (!pubKey) {
-      console.error("error: E2E encryption requires server public key (--server-key or ORKA_SERVER_KEY)");
-      console.error("  get it from: curl <daemon-url>/health | jq -r .publicKey");
-      console.error("  or save it:  orka keygen save-server <pubkey>");
-      process.exit(1);
-    }
-    return createRemoteClient({ url, keyPair, serverPublicKey: pubKey });
+    // No Noise key available — fall back to plaintext
+    console.error("warning: no Noise server key found, connecting without encryption");
   }
   return createRemoteClient(url);
 }
@@ -2062,22 +2048,6 @@ const relayCmd = subcommands({
   },
 });
 
-const keygenClientCmd = command({
-  name: "client",
-  description: "Generate/show client keypair",
-  args: {
-    rest: restPositionals({ type: str, displayName: "args" }),
-  },
-  handler: async () => runCliCommand("keygen", async () => {
-    const orkaHome = getOrkaHome();
-    // Legacy keypair (kept for backward compat)
-    const kp = ensureKeyPair(orkaHome, "client");
-    console.log("client keypair (legacy):");
-    console.log(`  public:  ${kp.publicKey}`);
-    console.log(`  stored:  ${orkaHome}/keys/client.pub, ${orkaHome}/keys/client.key`);
-  }),
-});
-
 const keygenNodeCmd = command({
   name: "node",
   description: "Generate/show node keypair (Noise transport)",
@@ -2086,17 +2056,11 @@ const keygenNodeCmd = command({
   },
   handler: async () => runCliCommand("keygen", async () => {
     const orkaHome = getOrkaHome();
-    // Generate Noise keypair (used by daemon for Noise NK transport)
     const noiseKey = ensureNoiseKeyPair(orkaHome, "node");
     console.log("node keypair (Noise NK):");
     console.log(`  public:  ${noiseKey.publicKeyB64}`);
     console.log(`  key_id:  ${noiseKey.keyId}`);
     console.log(`  stored:  ${orkaHome}/keys/node.noise.pub, ${orkaHome}/keys/node.noise.key`);
-    // Also ensure legacy keypair exists
-    const kp = ensureKeyPair(orkaHome, "node");
-    console.log("node keypair (legacy):");
-    console.log(`  public:  ${kp.publicKey}`);
-    console.log(`  stored:  ${orkaHome}/keys/node.pub, ${orkaHome}/keys/node.key`);
   }),
 });
 
@@ -2119,9 +2083,6 @@ const keygenSaveServerCmd = command({
     // Save as Noise public key (base64url raw 32-byte X25519)
     saveNoiseServerPublicKey(orkaHome, pubkey);
     console.log(`saved server Noise public key to ${keysDir}/server.noise.pub`);
-    // Also save in legacy format for backward compat
-    writeFileSync(join(keysDir, "server.pub"), pubkey, { mode: 0o644 });
-    console.log(`saved server legacy public key to ${keysDir}/server.pub`);
   }),
 });
 
@@ -2134,45 +2095,21 @@ const keygenShowCmd = command({
   handler: async () => runCliCommand("keygen", async () => {
     const orkaHome = getOrkaHome();
 
-    // Noise keys
     const noiseNode = loadNoiseKeyPair(orkaHome, "node");
     const noiseServer = loadNoisePublicKey(orkaHome, "server");
 
-    // Legacy keys
-    const clientKp = loadKeyPair(orkaHome, "client");
-    const nodeKp = loadKeyPair(orkaHome, "node");
-    const serverPub = loadPublicKey(orkaHome, "server");
-
-    console.log("--- Noise NK transport keys ---");
+    console.log("Noise NK transport keys:");
     if (noiseNode) {
-      console.log(`node public key:   ${noiseNode.publicKeyB64}`);
-      console.log(`  key_id:          ${noiseNode.keyId}`);
+      console.log(`  node public key:   ${noiseNode.publicKeyB64}`);
+      console.log(`  node key_id:       ${noiseNode.keyId}`);
     } else {
-      console.log("node keypair:      (not generated)");
+      console.log("  node keypair:      (not generated)");
     }
     if (noiseServer) {
-      console.log(`server public key: ${noiseServer.publicKeyB64}`);
-      console.log(`  key_id:          ${noiseServer.keyId}`);
+      console.log(`  server public key: ${noiseServer.publicKeyB64}`);
+      console.log(`  server key_id:     ${noiseServer.keyId}`);
     } else {
-      console.log("server public key: (not saved)");
-    }
-
-    console.log("");
-    console.log("--- Legacy keys ---");
-    if (clientKp) {
-      console.log(`client public key: ${clientKp.publicKey}`);
-    } else {
-      console.log("client keypair:    (not generated)");
-    }
-    if (nodeKp) {
-      console.log(`node public key:   ${nodeKp.publicKey}`);
-    } else {
-      console.log("node keypair:      (not generated)");
-    }
-    if (serverPub) {
-      console.log(`server public key: ${serverPub}`);
-    } else {
-      console.log("server public key: (not saved)");
+      console.log("  server public key: (not saved)");
     }
   }),
 });
@@ -2187,9 +2124,8 @@ const keygenHelpCmd = command({
     console.log("orka keygen — manage E2E encryption keys (Noise NK transport)");
     console.log("");
     console.log("subcommands:");
-    console.log("  client         Generate/show client keypair (legacy, for backward compat)");
-    console.log("  node           Generate/show node keypair (Noise NK + legacy)");
-    console.log("  save-server    Save a remote server's public key (Noise + legacy)");
+    console.log("  node           Generate/show node keypair (Noise NK)");
+    console.log("  save-server    Save a remote server's public key");
     console.log("  show           Show all stored keys");
     console.log("");
     console.log("usage:");
@@ -2206,7 +2142,6 @@ const keygenCmd = subcommands({
   name: "keygen",
   description: "Manage E2E encryption keys",
   cmds: {
-    client: keygenClientCmd,
     node: keygenNodeCmd,
     "save-server": keygenSaveServerCmd,
     show: keygenShowCmd,
