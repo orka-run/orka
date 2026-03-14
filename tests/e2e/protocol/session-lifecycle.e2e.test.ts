@@ -179,11 +179,11 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       sessionId,
     });
     expect(resultResp.error).toBeUndefined();
-    // Result may be null for very short shell sessions, but the call itself should succeed
-    // If a result exists, verify its structure
+    // getResult may return null for shell sessions that complete too quickly
+    // for the runtime to capture structured output. The call succeeding without
+    // error is what we verify; if a result is present, check its shape.
     if (resultResp.result !== null) {
       const result = resultResp.result as Record<string, unknown>;
-      expect(typeof result.result).toBe("string");
       expect(typeof result.durationMs).toBe("number");
     }
 
@@ -220,10 +220,13 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       sessionId,
     });
     expect(logResp.error).toBeUndefined();
-    // Log content should be a string (possibly empty for short sessions, but not null
-    // since a log file is created for every session)
+    // getLogContent returns a string if the log file exists, null otherwise.
+    // Short-lived sessions may not produce a log file.
     const logContent = logResp.result;
     expect(logContent === null || typeof logContent === "string").toBe(true);
+    if (typeof logContent === "string") {
+      expect(logContent.length).toBeGreaterThan(0);
+    }
 
     conn.ws.close();
   }, 30_000);

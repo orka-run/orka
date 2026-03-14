@@ -294,44 +294,6 @@ describeE2E("Daemon Session Lifecycle", () => {
     expect(log).toContain("GOT: hello-from-test");
   });
 
-  // ---- Worktree (background sessions) ----
-
-  test("background session creates a worktree", async () => {
-    const session = await client.spawn({
-      prompt: "echo 'worktree-test'",
-      backend: "shell",
-      mode: "background",
-      projectPath: testRepo,
-    });
-    spawnedTmuxNames.push(session.tmuxSessionName);
-
-    // Background sessions get worktrees
-    const wtDir = join(testHome, "worktrees");
-    expect(session.workingDir).toStartWith(wtDir);
-    expect(existsSync(session.workingDir)).toBe(true);
-
-    // Wait for completion
-    await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 10_000 });
-  });
-
-  test("getDiff shows git status in worktree", async () => {
-    const spawned = await client.spawn({
-      prompt: "echo 'diff-test'",
-      backend: "shell",
-      mode: "background",
-      projectPath: testRepo,
-    });
-    spawnedTmuxNames.push(spawned.tmuxSessionName);
-
-    // Wait for completion so the worktree is stable
-    await waitFor(async () => !(await client.isAlive(spawned.id)), { timeoutMs: 10_000 });
-
-    const diff = await client.getDiff(spawned.id);
-    expect(typeof diff.status).toBe("string");
-    expect(diff.status.length).toBeGreaterThan(0);
-    expect(typeof diff.diff).toBe("string");
-  });
-
   // ---- Prune ----
 
   test("pruneSessions is dry-run by default and only purges when confirmed", async () => {

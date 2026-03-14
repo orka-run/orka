@@ -84,7 +84,8 @@ describeE2E("Auth & Rate Limiting E2E", () => {
       ws.addEventListener("error", () => resolve(-1));
     });
     const code = await closed;
-    expect(code).not.toBe(1000);
+    // Expect a specific auth rejection code, not just "not normal closure"
+    expect(code === 4001 || code === 4003 || code === 1008 || code === -1).toBe(true);
   });
 
   test("WebSocket accepts valid token", async () => {

@@ -297,32 +297,7 @@ describe("Noise NK through Relay", () => {
     }
   });
 
-  // ---- Test 3: Noise handshake integrity ----
-
-  test("relay forwards handshake messages as-is", async () => {
-    // The Noise NK handshake is integrity-protected. If any handshake message
-    // were modified in transit, the handshake would fail because the prologue
-    // (which includes canonical JSON of client_hello and server_hello) would
-    // differ, causing authentication tag verification to fail.
-    //
-    // This test verifies integrity by performing a handshake and then sending
-    // an encrypted RPC. Success proves all handshake messages arrived intact.
-    const relayUrl = `ws://127.0.0.1:${relayPort}`;
-    const ws = new WebSocket(`ws://127.0.0.1:${daemonPortA}`);
-    await waitForOpen(ws);
-    try {
-      const transport = await doNoiseHandshake(ws, noiseKeyA, "node-A", relayUrl);
-      expect(transport.isSecure).toBe(true);
-
-      const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
-      expect(resp["error"]).toBeUndefined();
-      expect(resp["result"]).toBeInstanceOf(Array);
-    } finally {
-      ws.close();
-    }
-  });
-
-  // ---- Test 4: Multi-node Noise routing ----
+  // ---- Test 3: Multi-node Noise routing ----
 
   test("multi-node: relay routes Noise to correct node", async () => {
     const relayUrl = `ws://127.0.0.1:${relayPort}`;

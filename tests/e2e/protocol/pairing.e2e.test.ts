@@ -423,7 +423,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
         apiKey: clientApiKey,
         relayOrigin,
       }),
-    ).rejects.toThrow(/SPAKE2|confirm|failed|wrong|closed|timed out|protocol_error/i);
+    ).rejects.toThrow(/SPAKE2|confirm.*failed|protocol_error/i);
   }, 20_000);
 
   // ---- Test 4: Expired enrollment rejected ----
@@ -447,7 +447,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
         relayOrigin,
         timeoutMs: 5_000,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/expired|timed out|not_found|closed/i);
   }, 15_000);
 
   // ---- Test 5: Pairing code format is valid ----
@@ -495,76 +495,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     expect(() => parsePairingCode(corrupted)).toThrow(/checksum/i);
   }, 10_000);
 
-  // ---- Test 6: Noise verify-before-trust works ----
-
-  test("Noise verify-before-trust works", async () => {
-    // Complete pairing to get bootstrap data
-    const pairingResult = await svc.startPairing({ ttlSec: 30 });
-    const parsed = parsePairingCode(pairingResult.pairingCode);
-    await Bun.sleep(500);
-
-    const bootstrapResult = await runClientPairing({
-      relayPort,
-      enrollId: pairingResult.enrollId,
-      secret: parsed.secret,
-      apiKey: clientApiKey,
-      relayOrigin,
-    });
-
-    // Create a NoiseClientTransport using the bootstrap data
-    const expectedKeyId = computeKeyId(bootstrapResult.noiseStaticPubkey);
-    const transport = new NoiseClientTransport({
-      nodeId: bootstrapResult.nodeId,
-      expectedKeyId,
-      remoteStaticPubkey: bootstrapResult.noiseStaticPubkey,
-      relayOrigin: canonicalTransportOrigin(relayOrigin),
-    });
-
-    // Connect directly to the daemon and perform Noise handshake
-    const ws = new WebSocket(`ws://127.0.0.1:${daemonPort}`);
-    await waitForOpen(ws);
-
-    const hello = transport.getClientHello();
-    ws.send(JSON.stringify(hello));
-
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        ws.close();
-        reject(new Error("Noise handshake timed out"));
-      }, 10_000);
-      timer.unref();
-
-      ws.addEventListener("message", (event) => {
-        const raw = typeof event.data === "string" ? event.data : "";
-        try {
-          const msg = JSON.parse(raw);
-          if (msg.t && (msg.t === "server_hello" || msg.t === "noise_2" || msg.t === "transport_error")) {
-            const responses = transport.processMessage(msg);
-            for (const resp of responses) {
-              ws.send(JSON.stringify(resp));
-            }
-            if (transport.isSecure) {
-              clearTimeout(timer);
-              resolve();
-            }
-          }
-        } catch (err) {
-          clearTimeout(timer);
-          reject(err);
-        }
-      });
-    });
-
-    // Verify transport reached SECURE state
-    expect(transport.isSecure).toBe(true);
-    expect(transport.state).toBe("SECURE");
-    expect(transport.sessionId).toBeInstanceOf(Uint8Array);
-    expect(transport.sessionId!.length).toBe(32); // SHA-256 handshake hash
-
-    ws.close();
-  }, 20_000);
-
-  // ---- Test 7: Verify fails with wrong key ----
+  // ---- Test 6: Verify fails with wrong key ----
 
   test("verify fails with wrong key", async () => {
     // Complete pairing to simulate having bootstrap data

@@ -76,6 +76,7 @@ describeE2E("Relay E2E", () => {
 
     // Should get an error because B has no nodes
     expect(response["error"]).toBeTruthy();
+    expect((response["error"] as Record<string, unknown>)["code"]).toBe(503);
 
     wsNode.close();
     wsB.close();
@@ -89,6 +90,6 @@ describeE2E("Relay E2E", () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json() as any;
-    expect(body.buckets).toBeDefined();
+    expect(Array.isArray(body.buckets)).toBe(true);
   });
 });
