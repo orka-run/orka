@@ -24,7 +24,10 @@ import {
   PairingClient,
   type PairingClientResult,
 } from "../../../packages/core/src/pairing/pairing-client";
-import { parsePairingCode } from "../../../packages/core/src/crypto/pairing-code";
+import {
+  parsePairingCode,
+  generatePairingCode,
+} from "../../../packages/core/src/crypto/pairing-code";
 import {
   generateNoiseKeyPair,
   saveNoiseKeyPair,
@@ -71,9 +74,14 @@ async function runClientPairing(opts: {
   }
 
   return new Promise<PairingClientResult>((resolve, reject) => {
+    let settled = false;
+
     const timer = setTimeout(() => {
       ws.close();
-      reject(new Error("Pairing timed out"));
+      if (!settled) {
+        settled = true;
+        reject(new Error("Pairing timed out"));
+      }
     }, timeoutMs);
     timer.unref();
 
@@ -89,30 +97,53 @@ async function runClientPairing(opts: {
         const result = await client.handleMessage(raw);
         if (result) {
           clearTimeout(timer);
+
+          // Validate the result shape at runtime
+          if (typeof result.nodeId !== "string" || !result.nodeId) {
+            throw new Error("PairingClientResult: missing or invalid nodeId");
+          }
+          if (!(result.noiseStaticPubkey instanceof Uint8Array)) {
+            throw new Error("PairingClientResult: noiseStaticPubkey is not a Uint8Array");
+          }
+          if (!Array.isArray(result.nodePaths)) {
+            throw new Error("PairingClientResult: nodePaths is not an array");
+          }
+
           // Send pair_done to complete the protocol
           ws.send(JSON.stringify({ t: "pair_done" }));
           // Give the server a moment to process pair_done
           await Bun.sleep(200);
           ws.close();
-          resolve(result);
+          if (!settled) {
+            settled = true;
+            resolve(result);
+          }
         }
       } catch (err) {
         clearTimeout(timer);
         ws.close();
-        reject(err);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
       }
     });
 
     ws.addEventListener("close", () => {
       clearTimeout(timer);
-      if (!client.completed) {
+      if (!settled && !client.completed) {
+        settled = true;
         reject(client.error ?? new Error("WebSocket closed before pairing completed"));
       }
     });
 
     ws.addEventListener("error", (err) => {
       clearTimeout(timer);
-      reject(new Error(`WebSocket error: ${err}`));
+      ws.close();
+      if (!settled) {
+        settled = true;
+        reject(new Error(`WebSocket error: ${err}`));
+      }
     });
 
     // Start the handshake
@@ -241,6 +272,22 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     expect(result.nodePaths).toBeInstanceOf(Array);
     expect(result.nodePaths.length).toBeGreaterThan(0);
     expect(result.rpc).toContain("jsonrpc-2.0");
+
+    // Verify the returned key can actually be used: compute a key_id from it
+    // and confirm it matches the daemon's known key_id
+    const derivedKeyId = computeKeyId(result.noiseStaticPubkey);
+    expect(derivedKeyId).toBe(noiseKeyInfo.keyId);
+    expect(derivedKeyId).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // Verify the key can be used to construct a NoiseClientTransport (no throw)
+    const testTransport = new NoiseClientTransport({
+      nodeId: result.nodeId,
+      expectedKeyId: derivedKeyId,
+      remoteStaticPubkey: result.noiseStaticPubkey,
+      relayOrigin: canonicalTransportOrigin(relayOrigin),
+    });
+    expect(testTransport.state).toBe("WS_OPEN");
+    expect(testTransport.isSecure).toBe(false);
   }, 20_000);
 
   // ---- Test 2: Pairing bootstrap provides valid Noise key ----
@@ -360,7 +407,8 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     const wrongSecret = new Uint8Array(10);
     crypto.getRandomValues(wrongSecret);
 
-    // Attempt pairing with the wrong secret — should fail
+    // Attempt pairing with the wrong secret — should fail with SPAKE2 confirmation
+    // or exchange failure (the MAC won't match because the secrets differ)
     await expect(
       runClientPairing({
         relayPort,
@@ -369,7 +417,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
         apiKey: clientApiKey,
         relayOrigin,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/SPAKE2|confirm|failed|wrong|closed|timed out|protocol_error/i);
   }, 20_000);
 
   // ---- Test 4: Expired enrollment rejected ----
@@ -398,18 +446,24 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
 
   // ---- Test 5: Pairing code format is valid ----
 
-  test("pairing code format is valid", async () => {
+  test("pairing code format is valid and round-trips correctly", async () => {
     const pairingResult = await svc.startPairing({ ttlSec: 30 });
 
     // Verify pairing code matches XXXX-XXXX-XXXX-XXXX-XXXXX format
     const codeRegex = /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{5}$/;
     expect(pairingResult.pairingCode).toMatch(codeRegex);
 
-    // Verify parsePairingCode succeeds
+    // Verify parsePairingCode succeeds and round-trips the secret
     const parsed = parsePairingCode(pairingResult.pairingCode);
     expect(parsed.version).toBe(1);
     expect(parsed.secret).toBeInstanceOf(Uint8Array);
     expect(parsed.secret.length).toBe(10);
+
+    // Re-parse the same code — the secret must be byte-identical
+    const parsed2 = parsePairingCode(pairingResult.pairingCode);
+    expect(Buffer.from(parsed2.secret).toString("hex")).toBe(
+      Buffer.from(parsed.secret).toString("hex"),
+    );
 
     // Verify the enrollId matches
     expect(pairingResult.enrollId).toBeTruthy();
@@ -417,6 +471,22 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     // enrollId is 8 bytes = 16 hex characters
     expect(pairingResult.enrollId.length).toBe(16);
     expect(pairingResult.enrollId).toMatch(/^[0-9a-f]+$/);
+
+    // Verify generatePairingCode round-trips: generate locally and parse back
+    const { code: localCode, parsed: localParsed } = generatePairingCode();
+    expect(localCode).toMatch(codeRegex);
+    const reParsed = parsePairingCode(localCode);
+    expect(reParsed.version).toBe(localParsed.version);
+    expect(Buffer.from(reParsed.secret).toString("hex")).toBe(
+      Buffer.from(localParsed.secret).toString("hex"),
+    );
+
+    // Verify that a corrupted code throws (flip a character)
+    const chars = pairingResult.pairingCode.split("");
+    const alphaIdx = chars.findIndex((c) => /[0-9A-Z]/.test(c));
+    chars[alphaIdx] = chars[alphaIdx] === "0" ? "1" : "0";
+    const corrupted = chars.join("");
+    expect(() => parsePairingCode(corrupted)).toThrow(/checksum/i);
   }, 10_000);
 
   // ---- Test 6: Noise verify-before-trust works ----

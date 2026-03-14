@@ -59,6 +59,7 @@ describe("Protocol Error Handling", () => {
     });
 
     const ws = new WebSocket(daemon.wsUrl);
+    ws.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws);
 
     // Send client_hello — the expected_key_id won't match the daemon's real key_id
@@ -83,6 +84,7 @@ describe("Protocol Error Handling", () => {
 
   it("wrong key_id in client_hello produces transport_error", async () => {
     const ws = new WebSocket(daemon.wsUrl);
+    ws.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws);
 
     // Manually construct client_hello with wrong expected_key_id
@@ -115,6 +117,7 @@ describe("Protocol Error Handling", () => {
 
   it("wrong node_id in client_hello produces transport_error", async () => {
     const ws = new WebSocket(daemon.wsUrl);
+    ws.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws);
 
     const clientHello = {
@@ -151,6 +154,7 @@ describe("Protocol Error Handling", () => {
       daemon.noiseKeyInfo,
       daemon.nodeId,
     );
+    ws.addEventListener("error", () => {}); // prevent unhandled error events
 
     // Build a valid encrypted RPC frame, then corrupt the ciphertext
     const rpc = { jsonrpc: "2.0", id: "corrupt-test", method: "listSessions", params: { filters: {} } };
@@ -181,24 +185,40 @@ describe("Protocol Error Handling", () => {
 
   it("malformed first message handled gracefully", async () => {
     const ws1 = new WebSocket(daemon.wsUrl);
+    ws1.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws1);
 
     // Send garbage as the first message
     ws1.send("this is not valid json {{{");
 
-    // Give the daemon a moment to process
-    await Bun.sleep(300);
+    // Wait for ws1 to be fully closed before opening ws2.
+    // The daemon may close the connection after receiving garbage.
+    await new Promise<void>((resolve) => {
+      const closeTimer = setTimeout(() => {
+        // If the daemon didn't close it, close it ourselves
+        if (ws1.readyState !== WebSocket.CLOSED) {
+          ws1.close();
+        }
+        resolve();
+      }, 1000);
+      closeTimer.unref();
 
-    // Close the garbage connection
-    ws1.close();
+      ws1.addEventListener("close", () => {
+        clearTimeout(closeTimer);
+        resolve();
+      }, { once: true });
+    });
 
     // Verify daemon is still alive by sending a proper plain RPC on a new connection
     const ws2 = new WebSocket(daemon.wsUrl);
+    ws2.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws2);
 
     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
     expect(resp.error).toBeUndefined();
     expect(resp.result).toBeInstanceOf(Array);
+    expect(resp.jsonrpc).toBe("2.0");
+    expect(typeof resp.id).toBe("string");
 
     ws2.close();
   });
@@ -209,6 +229,7 @@ describe("Protocol Error Handling", () => {
 
   it("unsupported noise_suite in client_hello", async () => {
     const ws = new WebSocket(daemon.wsUrl);
+    ws.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws);
 
     const clientHello = {
@@ -245,20 +266,26 @@ describe("Protocol Error Handling", () => {
       daemon.noiseKeyInfo,
       daemon.nodeId,
     );
+    noiseWs.addEventListener("error", () => {}); // prevent unhandled error events
 
     // Open plain connection simultaneously
     const plainWs = new WebSocket(daemon.wsUrl);
+    plainWs.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(plainWs);
 
     // Send encrypted RPC on the Noise connection
     const encResp = await encryptedRpc(transport, noiseWs, "listSessions", { filters: {} });
     expect(encResp.error).toBeUndefined();
     expect(encResp.result).toBeInstanceOf(Array);
+    expect(encResp.jsonrpc).toBe("2.0");
+    expect(typeof encResp.id).toBe("string");
 
     // Send plain RPC on the plain connection
     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
     expect(plainResp.error).toBeUndefined();
     expect(plainResp.result).toBeInstanceOf(Array);
+    expect(plainResp.jsonrpc).toBe("2.0");
+    expect(typeof plainResp.id).toBe("string");
 
     // Both returned valid session lists without cross-contamination
     noiseWs.close();
@@ -278,6 +305,7 @@ describe("Protocol Error Handling", () => {
     });
 
     const ws = new WebSocket(daemon.wsUrl);
+    ws.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws);
 
     // Send client_hello
@@ -300,11 +328,14 @@ describe("Protocol Error Handling", () => {
 
     // Verify the daemon is still alive and functioning
     const ws2 = new WebSocket(daemon.wsUrl);
+    ws2.addEventListener("error", () => {}); // prevent unhandled error events
     await waitForOpen(ws2);
 
     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
     expect(resp.error).toBeUndefined();
     expect(resp.result).toBeInstanceOf(Array);
+    expect(resp.jsonrpc).toBe("2.0");
+    expect(typeof resp.id).toBe("string");
 
     ws2.close();
   }, 15_000);
