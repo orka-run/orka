@@ -38,8 +38,8 @@ describe("Protocol Error Handling", () => {
     daemon = await startDaemonWithNoise({ nodeId: "proto-err-node" });
   }, 30_000);
 
-  afterAll(() => {
-    daemon?.stop();
+  afterAll(async () => {
+    await daemon?.stop();
     rmSync(testHome, { recursive: true, force: true });
   });
 

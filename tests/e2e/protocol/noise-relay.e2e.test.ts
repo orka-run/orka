@@ -178,6 +178,8 @@ describe("Noise NK through Relay", () => {
   let daemonPortB: number;
 
   let clientApiKey: string;
+  let svcA: OrkaService;
+  let svcB: OrkaService;
 
   beforeAll(async () => {
     // 1. Start in-process relay (ephemeral port)
@@ -210,7 +212,7 @@ describe("Noise NK through Relay", () => {
 
     // 3. Start daemon A with encryption + relay registration
     process.env["ORKA_HOME"] = daemonHomeA;
-    const svcA = createLocalClient();
+    svcA = createLocalClient();
     daemonServerA = await startServer(svcA, {
       port: 0,
       hostname: "127.0.0.1",
@@ -224,7 +226,7 @@ describe("Noise NK through Relay", () => {
 
     // 4. Start daemon B with encryption + relay registration
     process.env["ORKA_HOME"] = daemonHomeB;
-    const svcB = createLocalClient();
+    svcB = createLocalClient();
     daemonServerB = await startServer(svcB, {
       port: 0,
       hostname: "127.0.0.1",
@@ -241,6 +243,17 @@ describe("Noise NK through Relay", () => {
   }, 30_000);
 
   afterAll(async () => {
+    // Kill all spawned tmux sessions before stopping servers
+    for (const svc of [svcA, svcB]) {
+      try {
+        const sessions = await svc?.listSessions();
+        if (sessions) {
+          await Promise.all(
+            sessions.filter((s) => s.status === "running").map((s) => svc.stop(s.id).catch(() => {})),
+          );
+        }
+      } catch {}
+    }
     try { daemonServerA?.stop?.(true); } catch {}
     try { daemonServerB?.stop?.(true); } catch {}
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}

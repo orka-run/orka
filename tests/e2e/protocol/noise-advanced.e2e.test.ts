@@ -47,8 +47,8 @@ describe("Noise NK Transport — Advanced", () => {
     daemon = await startDaemonWithNoise({ nodeId: "noise-adv-test-node" });
   }, 30_000);
 
-  afterAll(() => {
-    daemon?.stop();
+  afterAll(async () => {
+    await daemon?.stop();
     rmSync(orkaHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
   });

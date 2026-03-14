@@ -29,7 +29,7 @@ export interface DaemonHandle {
   nodeId: string;
   wsUrl: string;
   httpUrl: string;
-  stop(): void;
+  stop(): void | Promise<void>;
 }
 
 export interface SecureConnection {
@@ -80,7 +80,16 @@ export async function startDaemonWithNoise(opts?: {
     nodeId,
     wsUrl: `ws://127.0.0.1:${port}`,
     httpUrl: `http://127.0.0.1:${port}`,
-    stop() {
+    async stop() {
+      try {
+        // Kill all tmux sessions spawned during the test
+        const sessions = await svc.listSessions();
+        await Promise.all(
+          sessions
+            .filter((s) => s.status === "running")
+            .map((s) => svc.stop(s.id).catch(() => {})),
+        );
+      } catch {}
       try {
         server.stop(true);
       } catch {}

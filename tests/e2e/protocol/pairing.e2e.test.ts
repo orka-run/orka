@@ -229,6 +229,12 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
   }, 30_000);
 
   afterAll(async () => {
+    try {
+      const sessions = await svc.listSessions();
+      await Promise.all(
+        sessions.filter((s) => s.status === "running").map((s) => svc.stop(s.id).catch(() => {})),
+      );
+    } catch {}
     try { daemonServer?.stop?.(true); } catch {}
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });

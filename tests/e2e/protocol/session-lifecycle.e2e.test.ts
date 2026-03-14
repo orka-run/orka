@@ -69,8 +69,8 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     daemon = await startDaemonWithNoise({ nodeId: "lifecycle-test-node" });
   }, 30_000);
 
-  afterAll(() => {
-    daemon?.stop();
+  afterAll(async () => {
+    await daemon?.stop();
     rmSync(orkaHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
   });
