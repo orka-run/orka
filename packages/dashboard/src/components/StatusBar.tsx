@@ -1,9 +1,12 @@
+import { Settings } from "lucide-react";
 import { useRpcLatency } from "../lib/rpcLatencyStore";
 import { useConnectionStore } from "../stores/connectionStore";
+import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
 
 interface StatusBarProps {
   sessionCount: number;
   serverSessionCount?: number | null;
+  onOpenConnectionSettings?: () => void;
 }
 
 function getConnectionIndicator(status: ReturnType<typeof useConnectionStore.getState>["status"]) {
@@ -27,9 +30,10 @@ function getConnectionIndicator(status: ReturnType<typeof useConnectionStore.get
   };
 }
 
-export function StatusBar({ sessionCount, serverSessionCount = null }: StatusBarProps) {
+export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConnectionSettings }: StatusBarProps) {
   const status = useConnectionStore((state) => state.status);
   const reconnectAttempts = useConnectionStore((state) => state.reconnectAttempts);
+  const endpointUrl = useConnectionSettingsStore((s) => s.endpointUrl);
   const { connectionRtt } = useRpcLatency();
   const { dotClassName, label } = getConnectionIndicator(status);
   const displayedSessionCount = serverSessionCount ?? sessionCount;
@@ -39,13 +43,24 @@ export function StatusBar({ sessionCount, serverSessionCount = null }: StatusBar
   return (
     <footer className="flex items-center justify-between border-t border-zinc-800 bg-zinc-900 px-4 py-1.5 text-xs text-zinc-500">
       <div className="flex items-center gap-3">
-        <span className="inline-flex items-center gap-1.5 text-zinc-300">
+        <button
+          type="button"
+          onClick={onOpenConnectionSettings}
+          className="inline-flex items-center gap-1.5 text-zinc-300 transition hover:text-zinc-100"
+          title="Connection settings"
+        >
           <span className={`h-2 w-2 rounded-full ${dotClassName}`} />
           <span>
             {label}
             {reconnectLabel}
           </span>
-        </span>
+          {endpointUrl ? (
+            <span className="max-w-48 truncate text-zinc-500" title={endpointUrl}>
+              {endpointUrl}
+            </span>
+          ) : null}
+          <Settings className="h-3 w-3 text-zinc-600" />
+        </button>
         {showRtt ? <span>RTT: {Math.round(connectionRtt)}ms</span> : null}
         <span>
           {displayedSessionCount} session{displayedSessionCount !== 1 ? "s" : ""}

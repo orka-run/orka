@@ -6,9 +6,11 @@ import type {
   SessionUpdatedData,
 } from "@orka/core";
 import { parseWireEvent } from "@orka/core";
+import { appendAuthToken } from "@orka/client";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { ConnectionBanner } from "./components/ConnectionBanner";
+import { ConnectionSettingsDialog } from "./components/ConnectionSettingsDialog";
 import { DevOverlay } from "./components/DevOverlay";
 import { DraftChatView, type DraftSettings } from "./components/DraftChatView";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
@@ -20,6 +22,7 @@ import { getTracer, initDashboardTracing } from "./lib/tracing";
 import { TransportContext } from "./lib/transportContext";
 import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
+import { useConnectionSettingsStore } from "./stores/connectionSettingsStore";
 import { SELECTED_SESSION_KEY, useSessionStore } from "./stores/sessionStore";
 
 initDashboardTracing();
@@ -49,6 +52,11 @@ function parseHashSessionId(): string | null {
   return match?.[1] ?? null;
 }
 
+function getEffectiveUrl(endpointUrl: string | null, authToken: string | null): string {
+  if (!endpointUrl) return DEFAULT_DAEMON_URL;
+  return authToken ? appendAuthToken(endpointUrl, authToken) : endpointUrl;
+}
+
 interface AppShellProps {
   transport: WsTransport;
 }
@@ -58,6 +66,7 @@ function AppShell({ transport }: AppShellProps) {
   const hasRestoredRef = useRef(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
+  const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
@@ -285,22 +294,39 @@ function AppShell({ transport }: AppShellProps) {
           onSpawned={handleDraftSpawned}
           {...(advancedDefaults ? { initialValues: advancedDefaults } : {})}
         />
-        <StatusBar sessionCount={sessions.length} serverSessionCount={serverSessionCount} />
+        <StatusBar
+          sessionCount={sessions.length}
+          serverSessionCount={serverSessionCount}
+          onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
+        />
+        <ConnectionSettingsDialog
+          open={isConnectionSettingsOpen}
+          onClose={() => setIsConnectionSettingsOpen(false)}
+        />
       </div>
     </TransportContext.Provider>
   );
 }
 
+function createTransport(url: string): WsTransport {
+  const t = new WsTransport(url);
+  t.registerChannelTransform("orchestration.event", (data) => parseWireEvent(data));
+  return t;
+}
+
 export function App() {
-  const transportRef = useRef<WsTransport | null>(null);
-  if (!transportRef.current) {
-    const t = new WsTransport(DEFAULT_DAEMON_URL);
-    // Register boundary validation for orchestration event push channel.
-    // Normalizes wire events (unknown types become event.passthrough, version migration applied).
-    t.registerChannelTransform("orchestration.event", (data) => parseWireEvent(data));
-    transportRef.current = t;
+  const endpointUrl = useConnectionSettingsStore((s) => s.endpointUrl);
+  const authToken = useConnectionSettingsStore((s) => s.authToken);
+  const effectiveUrl = useMemo(() => getEffectiveUrl(endpointUrl, authToken), [endpointUrl, authToken]);
+
+  const transportRef = useRef<{ url: string; transport: WsTransport } | null>(null);
+
+  // Re-create transport when effective URL changes
+  if (!transportRef.current || transportRef.current.url !== effectiveUrl) {
+    transportRef.current?.transport.disconnect();
+    transportRef.current = { url: effectiveUrl, transport: createTransport(effectiveUrl) };
   }
-  const transport = transportRef.current;
+  const transport = transportRef.current.transport;
 
   const reportError = async (report: ClientErrorReport): Promise<void> => {
     await transport.request("reportClientError", report).catch(() => undefined);
@@ -308,7 +334,7 @@ export function App() {
 
   return (
     <ErrorBoundary reportError={reportError}>
-      <AppShell transport={transport} />
+      <AppShell key={effectiveUrl} transport={transport} />
       <DevOverlay />
     </ErrorBoundary>
   );
