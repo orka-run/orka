@@ -5,10 +5,11 @@ const STORAGE_KEY = "orka-connection-settings";
 interface ConnectionSettings {
   endpointUrl: string | null;
   authToken: string | null;
+  pairedNodeId: string | null;
 }
 
 interface ConnectionSettingsState extends ConnectionSettings {
-  setEndpoint: (url: string | null, token: string | null) => void;
+  setEndpoint: (url: string | null, token: string | null, pairedNodeId?: string | null) => void;
 }
 
 function loadFromStorage(): ConnectionSettings {
@@ -19,12 +20,13 @@ function loadFromStorage(): ConnectionSettings {
       return {
         endpointUrl: parsed.endpointUrl ?? null,
         authToken: parsed.authToken ?? null,
+        pairedNodeId: parsed.pairedNodeId ?? null,
       };
     }
   } catch {
     // localStorage unavailable or corrupt
   }
-  return { endpointUrl: null, authToken: null };
+  return { endpointUrl: null, authToken: null, pairedNodeId: null };
 }
 
 function saveToStorage(settings: ConnectionSettings): void {
@@ -37,8 +39,12 @@ function saveToStorage(settings: ConnectionSettings): void {
 
 export const useConnectionSettingsStore = create<ConnectionSettingsState>((set) => ({
   ...loadFromStorage(),
-  setEndpoint: (url, token) => {
-    const settings: ConnectionSettings = { endpointUrl: url, authToken: token };
+  setEndpoint: (url, token, pairedNodeId) => {
+    const settings: ConnectionSettings = {
+      endpointUrl: url,
+      authToken: token,
+      pairedNodeId: pairedNodeId ?? null,
+    };
     saveToStorage(settings);
     set(settings);
   },

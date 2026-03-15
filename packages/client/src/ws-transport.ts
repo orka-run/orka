@@ -1,7 +1,6 @@
 // Attribution: WsTransport design inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData, DataFrame, TransportPayload } from "@orka/core";
 import { isProtocolCompatible, MethodNotFoundError, PROTOCOL_VERSION_RANGE, RPC_METHOD_NOT_FOUND } from "@orka/core";
-import type { NoiseKeyInfo } from "@orka/core/crypto";
 import type { NoiseClientTransport } from "@orka/core/transport/noise-transport";
 import type { Span } from "@opentelemetry/api";
 import {
@@ -51,7 +50,7 @@ export type ProtocolMismatchHandler = (info: ProtocolMismatchInfo) => void;
 
 export interface NoiseConfig {
   nodeId: string;
-  serverKey: NoiseKeyInfo;
+  serverKey: { publicKey: Uint8Array; keyId: string };
   relayOrigin?: string;
 }
 

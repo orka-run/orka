@@ -1,9 +1,8 @@
-import type { NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseClientTransport } from "@orka/core/transport/noise-transport";
 
 export interface NoiseHandshakeOptions {
   nodeId: string;
-  serverKey: NoiseKeyInfo;
+  serverKey: { publicKey: Uint8Array; keyId: string };
   relayOrigin: string;
   timeoutMs?: number;
 }

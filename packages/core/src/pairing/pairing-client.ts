@@ -25,6 +25,7 @@ import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 
 import { createSpake2A, type Spake2Result } from "../crypto/spake2";
 import { blake3Truncated, concatBytes, sha256 } from "../crypto/hash";
+import { toBase64url, fromBase64url, toHex } from "../crypto/encoding";
 import {
   PAIR_SUITE,
   PairServerHelloSchema,
@@ -90,14 +91,6 @@ export class PairingError extends Error {
 
 const encoder = new TextEncoder();
 
-function toBase64url(data: Uint8Array): string {
-  return Buffer.from(data).toString("base64url");
-}
-
-function fromBase64url(str: string): Uint8Array {
-  return new Uint8Array(Buffer.from(str, "base64url"));
-}
-
 /**
  * Derive the enroll_id from the pairing secret.
  *
@@ -107,7 +100,7 @@ function deriveEnrollId(secret: Uint8Array): string {
   const prefix = encoder.encode("orka/pair/v1/enroll-id");
   const input = concatBytes(prefix, secret);
   const truncated = blake3Truncated(input, 8);
-  return Buffer.from(truncated).toString("hex");
+  return toHex(truncated);
 }
 
 // ---------------------------------------------------------------------------

@@ -25,3 +25,8 @@ export {
   type Spake2Options,
   type Spake2Result,
 } from "./spake2";
+export {
+  toBase64url,
+  fromBase64url,
+  toHex,
+} from "./encoding";

@@ -12,7 +12,7 @@
  * Displayed as 4-4-4-4-5 groups separated by dashes.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes } from "@noble/hashes/utils.js";
 
 // --- Crockford Base32 ---
 

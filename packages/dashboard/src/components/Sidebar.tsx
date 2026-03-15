@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useId, useState } from "react";
-import { MessageSquarePlus, Plus, Search, Server } from "lucide-react";
+import { Link2, MessageSquarePlus, Plus, Search, Server } from "lucide-react";
 import type { NodeInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
@@ -15,6 +15,7 @@ interface SidebarProps {
   onNewSession: () => void;
   onSelectDraft?: () => void;
   onSelectNode: (nodeId: string | null) => void;
+  onPairNode?: () => void;
 }
 
 export function Sidebar({
@@ -27,6 +28,7 @@ export function Sidebar({
   onNewSession,
   onSelectDraft,
   onSelectNode,
+  onPairNode,
 }: SidebarProps) {
   const searchId = useId();
   const [query, setQuery] = useState("");
@@ -52,14 +54,26 @@ export function Sidebar({
               {runningCount} active / {nodeFilteredSessions.length} total
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onNewSession}
-            className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 transition hover:bg-white"
-          >
-            <Plus className="h-4 w-4" />
-            New Session
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onNewSession}
+              className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 transition hover:bg-white"
+            >
+              <Plus className="h-4 w-4" />
+              New Session
+            </button>
+            {onPairNode && (
+              <button
+                type="button"
+                onClick={onPairNode}
+                title="Pair Node"
+                className="rounded-lg border border-zinc-800 p-2 text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-100"
+              >
+                <Link2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
         {showNodeSelector ? (
           <NodeSelector

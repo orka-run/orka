@@ -6,7 +6,7 @@ import type {
   SessionUpdatedData,
 } from "@orka/core";
 import { parseWireEvent } from "@orka/core";
-import { appendAuthToken } from "@orka/client";
+import { appendAuthToken, type NoiseConfig } from "@orka/client";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { ConnectionBanner } from "./components/ConnectionBanner";
@@ -15,11 +15,14 @@ import { DevOverlay } from "./components/DevOverlay";
 import { DraftChatView, type DraftSettings } from "./components/DraftChatView";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { NewSessionDialog } from "./components/NewSessionDialog";
+import { PairNodeDialog } from "./components/PairNodeDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { StatusBar } from "./components/StatusBar";
 import { getTracer, initDashboardTracing } from "./lib/tracing";
 import { TransportContext } from "./lib/transportContext";
+import { loadNoiseKey, hexToBytes } from "./lib/noiseKeys";
+import { loadPairedNode } from "./lib/nodeRegistry";
 import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useConnectionSettingsStore } from "./stores/connectionSettingsStore";
@@ -68,6 +71,7 @@ function AppShell({ transport }: AppShellProps) {
   const [isDraftActive, setIsDraftActive] = useState(false);
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
+  const [isPairNodeOpen, setIsPairNodeOpen] = useState(false);
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
@@ -282,6 +286,7 @@ function AppShell({ transport }: AppShellProps) {
             onSelectDraft={activateDraft}
             onNewSession={activateDraft}
             onSelectNode={selectNode}
+            onPairNode={() => setIsPairNodeOpen(true)}
           />
           <main className="flex-1 overflow-hidden">
             {selectedId ? (
@@ -328,28 +333,47 @@ function AppShell({ transport }: AppShellProps) {
           open={isConnectionSettingsOpen}
           onClose={() => setIsConnectionSettingsOpen(false)}
         />
+        <PairNodeDialog
+          open={isPairNodeOpen}
+          onClose={() => setIsPairNodeOpen(false)}
+        />
       </div>
     </TransportContext.Provider>
   );
 }
 
-function createTransport(url: string): WsTransport {
-  const t = new WsTransport(url);
+function createTransport(url: string, noiseConfig?: NoiseConfig): WsTransport {
+  const t = new WsTransport(url, noiseConfig ? { noiseConfig } : undefined);
   t.registerChannelTransform("orchestration.event", (data) => parseWireEvent(data));
   return t;
+}
+
+function resolveNoiseConfig(pairedNodeId: string | null): NoiseConfig | undefined {
+  if (!pairedNodeId) return undefined;
+  const key = loadNoiseKey(pairedNodeId);
+  const node = loadPairedNode(pairedNodeId);
+  if (!key || !node) return undefined;
+  return {
+    nodeId: pairedNodeId,
+    serverKey: { publicKey: hexToBytes(key.publicKey), keyId: key.keyId },
+    relayOrigin: node.relayOrigin,
+  };
 }
 
 export function App() {
   const endpointUrl = useConnectionSettingsStore((s) => s.endpointUrl);
   const authToken = useConnectionSettingsStore((s) => s.authToken);
+  const pairedNodeId = useConnectionSettingsStore((s) => s.pairedNodeId);
   const effectiveUrl = useMemo(() => getEffectiveUrl(endpointUrl, authToken), [endpointUrl, authToken]);
+  const noiseConfig = useMemo(() => resolveNoiseConfig(pairedNodeId), [pairedNodeId]);
 
-  const transportRef = useRef<{ url: string; transport: WsTransport } | null>(null);
+  const transportKey = `${effectiveUrl}::${pairedNodeId ?? ""}`;
+  const transportRef = useRef<{ key: string; transport: WsTransport } | null>(null);
 
-  // Re-create transport when effective URL changes
-  if (!transportRef.current || transportRef.current.url !== effectiveUrl) {
+  // Re-create transport when effective URL or paired node changes
+  if (!transportRef.current || transportRef.current.key !== transportKey) {
     transportRef.current?.transport.disconnect();
-    transportRef.current = { url: effectiveUrl, transport: createTransport(effectiveUrl) };
+    transportRef.current = { key: transportKey, transport: createTransport(effectiveUrl, noiseConfig) };
   }
   const transport = transportRef.current.transport;
 
@@ -359,7 +383,7 @@ export function App() {
 
   return (
     <ErrorBoundary reportError={reportError}>
-      <AppShell key={effectiveUrl} transport={transport} />
+      <AppShell key={transportKey} transport={transport} />
       <DevOverlay />
     </ErrorBoundary>
   );

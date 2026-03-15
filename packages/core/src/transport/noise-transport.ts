@@ -16,6 +16,7 @@
  */
 
 import { sha256 } from "../crypto/hash";
+import { toBase64url, fromBase64url, toHex } from "../crypto/encoding";
 import {
   createInitiator,
   createResponder,
@@ -53,7 +54,7 @@ import {
 /** Compute key_id from a static public key: "sha256:" + hex(SHA-256(pubkey)). */
 export function computeKeyId(publicKey: Uint8Array): string {
   const hash = sha256(publicKey);
-  return "sha256:" + Buffer.from(hash).toString("hex");
+  return "sha256:" + toHex(hash);
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +195,7 @@ export class NoiseClientTransport {
     const payload: TransportPayload = { v: 1, kind: "rpc", rpc };
     const plaintext = new TextEncoder().encode(JSON.stringify(payload));
     const ct = this.sendCipher.encrypt(plaintext);
-    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+    return { t: "data", ct: toBase64url(ct) };
   }
 
   /** Encrypt a push envelope into a data frame. Only valid in SECURE state. */
@@ -207,7 +208,7 @@ export class NoiseClientTransport {
     const payload: TransportPayload = { v: 1, kind: "push", push };
     const plaintext = new TextEncoder().encode(JSON.stringify(payload));
     const ct = this.sendCipher.encrypt(plaintext);
-    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+    return { t: "data", ct: toBase64url(ct) };
   }
 
   /** Encrypt a push control message into a data frame. Only valid in SECURE state. */
@@ -220,7 +221,7 @@ export class NoiseClientTransport {
     const payload: TransportPayload = { v: 1, kind: "push_control", push_control: pushControl };
     const plaintext = new TextEncoder().encode(JSON.stringify(payload));
     const ct = this.sendCipher.encrypt(plaintext);
-    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+    return { t: "data", ct: toBase64url(ct) };
   }
 
   /** Decrypt an incoming data frame and return the full transport payload. Only valid in SECURE state. */
@@ -230,8 +231,8 @@ export class NoiseClientTransport {
         "NoiseClientTransport: cannot decrypt — transport is not in SECURE state",
       );
     }
-    const ct = Buffer.from(frame.ct, "base64url");
-    const plaintext = this.recvCipher.decrypt(new Uint8Array(ct));
+    const ct = fromBase64url(frame.ct);
+    const plaintext = this.recvCipher.decrypt(ct);
     const decoded = JSON.parse(new TextDecoder().decode(plaintext));
     return TransportPayloadSchema.parse(decoded);
   }
@@ -274,7 +275,7 @@ export class NoiseClientTransport {
     const msg1 = this.initiator.writeMessage1();
     const noise1: Noise1 = {
       t: "noise_1",
-      msg: Buffer.from(msg1).toString("base64url"),
+      msg: toBase64url(msg1),
     };
 
     this._state = "NOISE_1_SENT";
@@ -302,8 +303,8 @@ export class NoiseClientTransport {
     }
 
     const noise2 = Noise2Schema.parse(raw);
-    const msg2Bytes = Buffer.from(noise2.msg, "base64url");
-    const { result } = this.initiator.readMessage2(new Uint8Array(msg2Bytes));
+    const msg2Bytes = fromBase64url(noise2.msg);
+    const { result } = this.initiator.readMessage2(msg2Bytes);
 
     this.sendCipher = result.sendCipher;
     this.recvCipher = result.recvCipher;
@@ -418,7 +419,7 @@ export class NoiseServerTransport {
     const payload: TransportPayload = { v: 1, kind: "rpc", rpc };
     const plaintext = new TextEncoder().encode(JSON.stringify(payload));
     const ct = this.sendCipher.encrypt(plaintext);
-    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+    return { t: "data", ct: toBase64url(ct) };
   }
 
   /** Encrypt a push envelope into a data frame. Only valid in SECURE state. */
@@ -431,7 +432,7 @@ export class NoiseServerTransport {
     const payload: TransportPayload = { v: 1, kind: "push", push };
     const plaintext = new TextEncoder().encode(JSON.stringify(payload));
     const ct = this.sendCipher.encrypt(plaintext);
-    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+    return { t: "data", ct: toBase64url(ct) };
   }
 
   /** Encrypt a push control message into a data frame. Only valid in SECURE state. */
@@ -444,7 +445,7 @@ export class NoiseServerTransport {
     const payload: TransportPayload = { v: 1, kind: "push_control", push_control: pushControl };
     const plaintext = new TextEncoder().encode(JSON.stringify(payload));
     const ct = this.sendCipher.encrypt(plaintext);
-    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+    return { t: "data", ct: toBase64url(ct) };
   }
 
   /** Decrypt an incoming data frame and return the full transport payload. Only valid in SECURE state. */
@@ -454,8 +455,8 @@ export class NoiseServerTransport {
         "NoiseServerTransport: cannot decrypt — transport is not in SECURE state",
       );
     }
-    const ct = Buffer.from(frame.ct, "base64url");
-    const plaintext = this.recvCipher.decrypt(new Uint8Array(ct));
+    const ct = fromBase64url(frame.ct);
+    const plaintext = this.recvCipher.decrypt(ct);
     const decoded = JSON.parse(new TextDecoder().decode(plaintext));
     return TransportPayloadSchema.parse(decoded);
   }
@@ -509,7 +510,7 @@ export class NoiseServerTransport {
     }
 
     const noise1 = Noise1Schema.parse(raw);
-    const msg1Bytes = Buffer.from(noise1.msg, "base64url");
+    const msg1Bytes = fromBase64url(noise1.msg);
 
     // Compute prologue
     const prologue = computeTransportPrologue(
@@ -522,7 +523,7 @@ export class NoiseServerTransport {
     this.responder = createResponder(prologue, this.opts.staticKeypair);
 
     // Read message 1
-    this.responder.readMessage1(new Uint8Array(msg1Bytes));
+    this.responder.readMessage1(msg1Bytes);
 
     // Write message 2
     const { msg: msg2Bytes, result } = this.responder.writeMessage2();
@@ -533,7 +534,7 @@ export class NoiseServerTransport {
 
     const noise2: Noise2 = {
       t: "noise_2",
-      msg: Buffer.from(msg2Bytes).toString("base64url"),
+      msg: toBase64url(msg2Bytes),
     };
 
     this._state = "NOISE_2_SENT";
