@@ -1859,7 +1859,7 @@ const serveCmd = command({
         ...(relayToken ? { relayToken } : {}),
         ...(useEncrypt ? { encrypt: true } : {}),
       };
-      const server = await startServer(ctx, localSvc, serverOptions);
+      const { server } = await startServer(ctx, localSvc, serverOptions);
       console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
       if (args.relay) {
         console.log(`  relay: ${args.relay}`);

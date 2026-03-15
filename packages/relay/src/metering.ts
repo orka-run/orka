@@ -1,15 +1,24 @@
 import { Database } from "bun:sqlite";
-import { type UsageEvent, insertUsageEvents, deleteOldUsageEvents } from "./db";
+import { type UsageEvent, insertUsageEvents as defaultInsert, deleteOldUsageEvents as defaultDelete } from "./db";
 import { withSpanSync } from "./tracing";
+
+export interface UsageMeterDeps {
+  insertUsageEvents?: (db: Database, events: UsageEvent[]) => void;
+  deleteOldUsageEvents?: (db: Database, cutoff: string) => void;
+}
 
 export class UsageMeter {
   private readonly db: Database;
   private buffer: UsageEvent[] = [];
   private flushTimer: Timer;
   private retentionTimer: Timer;
+  private readonly insertFn: (db: Database, events: UsageEvent[]) => void;
+  private readonly deleteFn: (db: Database, cutoff: string) => void;
 
-  constructor(db: Database, flushIntervalMs: number = 5_000) {
+  constructor(db: Database, flushIntervalMs: number = 5_000, deps?: UsageMeterDeps) {
     this.db = db;
+    this.insertFn = deps?.insertUsageEvents ?? defaultInsert;
+    this.deleteFn = deps?.deleteOldUsageEvents ?? defaultDelete;
     this.flushTimer = setInterval(() => this.flush(), flushIntervalMs);
     if (typeof this.flushTimer === "object" && "unref" in this.flushTimer) {
       (this.flushTimer as any).unref();
@@ -76,7 +85,7 @@ export class UsageMeter {
       const batch = this.buffer;
       this.buffer = [];
       try {
-        insertUsageEvents(this.db, batch);
+        this.insertFn(this.db, batch);
       } catch {
         // Best effort — don't crash on metering failure
       }
@@ -86,7 +95,7 @@ export class UsageMeter {
   private cleanOld(): void {
     const cutoff = new Date(Date.now() - 90 * 24 * 3_600_000).toISOString();
     try {
-      deleteOldUsageEvents(this.db, cutoff);
+      this.deleteFn(this.db, cutoff);
     } catch { /* best effort */ }
   }
 

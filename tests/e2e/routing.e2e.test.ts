@@ -105,13 +105,13 @@ describe("Full-Stack Routing", () => {
     // 4. Start daemon and register with relay
     ctx = createDaemonContext(daemonHome);
     svc = createLocalClient(ctx);
-    daemonServer = await startServer(ctx, svc, {
+    ({ server: daemonServer } = await startServer(ctx, svc, {
       port: 0,
       hostname: "127.0.0.1",
       relayUrl: `ws://127.0.0.1:${relayPort}`,
       nodeId: "test-daemon",
       relayToken: nodeApiKey,
-    });
+    }));
 
     // Wait for node registration to propagate
     await Bun.sleep(500);

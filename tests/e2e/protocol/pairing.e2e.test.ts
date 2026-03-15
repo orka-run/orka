@@ -216,14 +216,14 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     // 4. Start daemon with pairing enabled
     ctx = createDaemonContext(daemonHome);
     svc = createLocalClient(ctx, pairingConfig);
-    daemonServer = await startServer(ctx, svc, {
+    ({ server: daemonServer } = await startServer(ctx, svc, {
       port: 0,
       hostname: "127.0.0.1",
       relayUrl: relayOrigin,
       nodeId: NODE_ID,
       relayToken: nodeApiKey,
       encrypt: true,
-    });
+    }));
     daemonPort = daemonServer.port;
 
     // Wait for relay registration

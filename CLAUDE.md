@@ -165,7 +165,16 @@ OpenTelemetry tracing is integrated via `@opentelemetry/api` + `@opentelemetry/s
 
 All stateful dependencies (databases, caches, config, services) must be created at the composition root and passed down via constructor/function parameters. Never import a singleton from a module and use it directly.
 
-**Anti-patterns (DO NOT):**
+### Rules
+
+1. **No inheritance**: `extends` is forbidden except for Error subclasses and React `Component` (required for error boundaries). Use composition and factory functions instead.
+2. **No module-level singletons**: All state must be created at composition roots and passed via parameters. No `let _instance = null; export function getInstance()` patterns.
+3. **Constructor/factory injection only**: Dependencies passed as function parameters or factory options objects.
+4. **`mock.module()` forbidden in tests**: Use DI (factory parameters / deps objects) for test doubles instead. `mock.module()` poisons the global module cache across test files and breaks test isolation.
+5. **Composition roots**: Only `daemon-context.ts`, `createLocalClient()`, relay `index.ts` / `startRelay()`, and CLI `index.ts` may use `new` to wire dependencies. All other code receives dependencies as parameters.
+
+### Anti-patterns (DO NOT)
+
 ```typescript
 // ❌ Module-level singleton (service locator)
 let _db: Database | null = null;
@@ -177,17 +186,31 @@ export function getDb() {
 // ❌ Direct import of singleton
 import { getDb } from "./db";
 export function listUsers() { return getDb().query("..."); }
+
+// ❌ Class inheritance for code reuse
+class WsTransport extends BaseTransport { ... }
+
+// ❌ mock.module() in tests (poisons global module cache)
+mock.module("./db", () => ({ insertEvents: mock(() => {}) }));
+
+// ❌ Hardcoded new inside services (should be injected)
+class LocalClient {
+  private getManager() {
+    if (!this.mgr) this.mgr = new TerminalManager(); // ❌
+    return this.mgr;
+  }
+}
 ```
 
-**Correct patterns (DO):**
+### Correct patterns (DO)
+
 ```typescript
-// ✅ Factory function creates isolated instance
+// ✅ Factory function creates isolated instance (composition root)
 export function createRelay(opts: { dataDir: string; port: number }): RelayHandle {
   const db = new Database(join(opts.dataDir, "relay.db"));
   const authCache = new AuthCache(db);
   const rateLimiter = new RateLimiter();
   const api = createApiRouter({ db, rateLimiter });
-  // everything is wired via parameters, nothing imported from module scope
   return { server, shutdown() { db.close(); } };
 }
 
@@ -197,11 +220,26 @@ export function listUsers(db: Database) { return db.query("..."); }
 // ✅ Context object for many dependencies
 interface DaemonContext { db: Database; pushHub: PushHub; providerService: ProviderService; }
 export function createLocalClient(ctx: DaemonContext): OrkaService { ... }
+
+// ✅ Injectable deps for testability (no mock.module needed)
+export class UsageMeter {
+  constructor(db: Database, interval?: number, deps?: { insertFn?: InsertFn }) { ... }
+}
+// In tests:
+const meter = new UsageMeter(null as any, 600_000, { insertFn: mock(() => {}) });
 ```
+
+### Linting
+
+Run `bun run lint:di` to check for DI violations. See `scripts/lint-di.ts`.
 
 **Why:** Module-level singletons make it impossible to run multiple instances in the same process (needed for test isolation, hot restart, multi-tenant). Constructor injection makes dependencies explicit and testable.
 
 **Exception:** OpenTelemetry tracing is global by design (uses `@opentelemetry/api` global tracer). This is acceptable.
+
+**Known residual violations** (documented, not yet refactored due to scope):
+- `relay/src/tracing.ts`: `export const metrics` — application-specific metrics singleton used throughout relay hot path (25 occurrences across 2 files). Refactoring requires threading metrics through all relay handlers.
+- `cli/src/index.ts`: `getSvc()` — lazy-caches OrkaService in CLI entry point. Acceptable as CLI composition root but uses singleton pattern.
 
 ## Key Architecture Decisions
 

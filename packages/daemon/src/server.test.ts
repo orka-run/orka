@@ -39,11 +39,11 @@ describe("startServer", () => {
     ctx.db.close();
     ctx = createDaemonContext(testHome);
 
-    server = await startServer(ctx, {} as OrkaService, {
+    ({ server } = await startServer(ctx, {} as OrkaService, {
       port: 0,
       hostname: "127.0.0.1",
       encrypt: true,
-    });
+    }));
 
     const response = await fetch(`http://127.0.0.1:${server.port}/health`);
     expect(response.status).toBe(200);
@@ -80,10 +80,10 @@ describe("startServer", () => {
       listSessions: async () => [{ id: "sess-1" }, { id: "sess-2" }],
     } as OrkaService;
 
-    server = await startServer(ctx, svc, {
+    ({ server } = await startServer(ctx, svc, {
       port: 0,
       hostname: "127.0.0.1",
-    });
+    }));
 
     const message = await new Promise<string>((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${server!.port}`);
@@ -126,10 +126,10 @@ describe("startServer", () => {
   });
 
   test("accepts OTLP JSON spans on /v1/traces", async () => {
-    server = await startServer(ctx, {} as OrkaService, {
+    ({ server } = await startServer(ctx, {} as OrkaService, {
       port: 0,
       hostname: "127.0.0.1",
-    });
+    }));
 
     const response = await fetch(`http://127.0.0.1:${server.port}/v1/traces`, {
       method: "POST",

@@ -66,7 +66,7 @@ export async function startDaemonWithNoise(opts?: {
 
   const noiseKeyInfo = ensureNoiseKeyPair(ctx.orkaHome, "node");
 
-  const server = await startServer(ctx, svc, {
+  const { server } = await startServer(ctx, svc, {
     port: 0,
     hostname: "127.0.0.1",
     nodeId,

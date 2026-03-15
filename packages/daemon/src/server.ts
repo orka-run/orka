@@ -42,8 +42,6 @@ interface ServerWebSocketData {
   firstMessageReceived?: boolean;
 }
 
-export const gracefulShutdown = new GracefulShutdown();
-
 export function buildCapabilities(ctx: DaemonContext, encrypt?: boolean): ServerCapabilities {
   return {
     resume: false,
@@ -63,6 +61,7 @@ export function buildCapabilities(ctx: DaemonContext, encrypt?: boolean): Server
 export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: ServerOptions) {
   return withSpan("orka.server.start", {}, async () => {
     const { pushHub } = ctx;
+    const gracefulShutdown = new GracefulShutdown();
 
     // Load or generate Noise keypair for E2E encryption
     let noiseKeyInfo: NoiseKeyInfo | undefined;
@@ -397,7 +396,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
       registerWithRelay(ctx, svc, opts.relayUrl, nodeId, opts.relayToken, noiseKeyInfo);
     }
 
-    return server;
+    return { server, gracefulShutdown };
   });
 }
 

@@ -174,8 +174,8 @@ describe("Noise NK through Relay", () => {
 
   let ctxA: import("@orka/daemon").DaemonContext;
   let ctxB: import("@orka/daemon").DaemonContext;
-  let daemonServerA: Awaited<ReturnType<typeof startServer>>;
-  let daemonServerB: Awaited<ReturnType<typeof startServer>>;
+  let daemonServerA: Awaited<ReturnType<typeof startServer>>["server"];
+  let daemonServerB: Awaited<ReturnType<typeof startServer>>["server"];
   let noiseKeyA: NoiseKeyInfo;
   let noiseKeyB: NoiseKeyInfo;
   let daemonPortA: number;
@@ -217,28 +217,28 @@ describe("Noise NK through Relay", () => {
     // 3. Start daemon A with encryption + relay registration
     ctxA = createDaemonContext(daemonHomeA);
     svcA = createLocalClient(ctxA);
-    daemonServerA = await startServer(ctxA, svcA, {
+    ({ server: daemonServerA } = await startServer(ctxA, svcA, {
       port: 0,
       hostname: "127.0.0.1",
       encrypt: true,
       nodeId: "node-A",
       relayUrl: `ws://127.0.0.1:${relayPort}`,
       relayToken: nodeApiKeyA,
-    });
+    }));
     daemonPortA = daemonServerA.port;
     noiseKeyA = await fetchNoiseKeyInfo(daemonPortA);
 
     // 4. Start daemon B with encryption + relay registration
     ctxB = createDaemonContext(daemonHomeB);
     svcB = createLocalClient(ctxB);
-    daemonServerB = await startServer(ctxB, svcB, {
+    ({ server: daemonServerB } = await startServer(ctxB, svcB, {
       port: 0,
       hostname: "127.0.0.1",
       encrypt: true,
       nodeId: "node-B",
       relayUrl: `ws://127.0.0.1:${relayPort}`,
       relayToken: nodeApiKeyB,
-    });
+    }));
     daemonPortB = daemonServerB.port;
     noiseKeyB = await fetchNoiseKeyInfo(daemonPortB);
 

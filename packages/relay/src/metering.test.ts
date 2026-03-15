@@ -1,19 +1,17 @@
 import { describe, test, beforeEach, mock } from "bun:test";
 import { UsageMeter } from "./metering";
 
-// Mock the DB functions since we don't want actual SQLite in unit tests
-mock.module("./db", () => ({
-  insertUsageEvents: mock(() => {}),
-  deleteOldUsageEvents: mock(() => {}),
-  getRelayHome: () => "/tmp/orka-test-relay",
-}));
-
 describe("UsageMeter", () => {
   let meter: UsageMeter;
 
+  const noopDeps = {
+    insertUsageEvents: mock(() => {}),
+    deleteOldUsageEvents: mock(() => {}),
+  };
+
   beforeEach(() => {
     // Use a long interval so flush doesn't fire during tests
-    meter = new UsageMeter(null as any, 600_000);
+    meter = new UsageMeter(null as any, 600_000, noopDeps);
   });
 
   test("record buffers events", () => {

@@ -57,25 +57,23 @@ export interface PairingConfig {
   relayToken?: string;
 }
 
+interface LocalClientDeps {
+  terminalManager: TerminalManager;
+  enrollmentStore?: EnrollmentStore;
+  pairingConfig?: PairingConfig;
+}
+
 class LocalClient implements OrkaService {
   private readonly ctx: DaemonContext;
-  private terminalManager: TerminalManager | null = null;
-  private enrollmentStore: EnrollmentStore | null = null;
-  private pairingConfig: PairingConfig | null = null;
+  private readonly terminalManager: TerminalManager;
+  private readonly enrollmentStore: EnrollmentStore | null;
+  private readonly pairingConfig: PairingConfig | null;
 
-  constructor(ctx: DaemonContext, pairingConfig?: PairingConfig) {
+  constructor(ctx: DaemonContext, deps: LocalClientDeps) {
     this.ctx = ctx;
-    if (pairingConfig) {
-      this.pairingConfig = pairingConfig;
-      this.enrollmentStore = new EnrollmentStore();
-    }
-  }
-
-  private getTerminalManager(): TerminalManager {
-    if (!this.terminalManager) {
-      this.terminalManager = new TerminalManager();
-    }
-    return this.terminalManager;
+    this.terminalManager = deps.terminalManager;
+    this.enrollmentStore = deps.enrollmentStore ?? null;
+    this.pairingConfig = deps.pairingConfig ?? null;
   }
 
   async spawn(req: SpawnRequest): Promise<Session> {
@@ -612,7 +610,7 @@ class LocalClient implements OrkaService {
   async terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }> {
     const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
-    const term = this.getTerminalManager().open(sessionId, {
+    const term = this.terminalManager.open(sessionId, {
       cwd: session.workingDir,
       ...(opts?.cols !== undefined ? { cols: opts.cols } : {}),
       ...(opts?.rows !== undefined ? { rows: opts.rows } : {}),
@@ -621,19 +619,19 @@ class LocalClient implements OrkaService {
   }
 
   async terminalWrite(termId: string, data: string): Promise<void> {
-    this.getTerminalManager().write(termId, data);
+    this.terminalManager.write(termId, data);
   }
 
   async terminalResize(termId: string, cols: number, rows: number): Promise<void> {
-    this.getTerminalManager().resize(termId, cols, rows);
+    this.terminalManager.resize(termId, cols, rows);
   }
 
   async terminalClose(termId: string): Promise<void> {
-    this.getTerminalManager().close(termId);
+    this.terminalManager.close(termId);
   }
 
   async terminalList(sessionId: string): Promise<Array<{ id: string; cols: number; rows: number }>> {
-    return this.getTerminalManager().listForSession(sessionId).map((t) => ({
+    return this.terminalManager.listForSession(sessionId).map((t) => ({
       id: t.id,
       cols: t.cols,
       rows: t.rows,
@@ -651,7 +649,11 @@ class LocalClient implements OrkaService {
 }
 
 export function createLocalClient(ctx: DaemonContext, pairingConfig?: PairingConfig): OrkaService {
-  return new LocalClient(ctx, pairingConfig);
+  const deps: LocalClientDeps = {
+    terminalManager: new TerminalManager(),
+    ...(pairingConfig ? { pairingConfig, enrollmentStore: new EnrollmentStore() } : {}),
+  };
+  return new LocalClient(ctx, deps);
 }
 
 function getProviderOutput(events: OrchestrationEvent[]): string {
