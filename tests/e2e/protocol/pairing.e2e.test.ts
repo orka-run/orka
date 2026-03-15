@@ -383,8 +383,10 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
         try {
           const frame = JSON.parse(raw);
           if (frame.t === "data") {
-            const decrypted = transport.decryptData(frame);
-            // Skip push messages (encrypted welcome, etc.), wait for the RPC response
+            const payload = transport.decryptFrame(frame);
+            // Skip non-RPC payloads (encrypted welcome push, etc.)
+            if (payload.kind !== "rpc") return;
+            const decrypted = payload.rpc;
             if ((decrypted as any).jsonrpc === "2.0") {
               clearTimeout(timer);
               resolve(decrypted);

@@ -248,21 +248,24 @@ describe("Noise NK Transport", () => {
 
           // After SECURE: look for encrypted data frames
           if (msg.t === "data" && typeof msg.ct === "string") {
-            let decrypted: Record<string, unknown>;
+            let payload: import("@orka/core").TransportPayload;
             try {
-              decrypted = transport.decryptData(msg);
+              payload = transport.decryptFrame(msg);
             } catch {
               return;
             }
 
             // Check if this is the welcome push
-            if (
-              decrypted.type === "push" &&
-              decrypted.channel === "server.welcome"
-            ) {
-              clearTimeout(timer);
-              ws.removeEventListener("message", handler);
-              resolve(decrypted.data as Record<string, unknown>);
+            if (payload.kind === "push") {
+              const push = payload.push as Record<string, unknown>;
+              if (
+                push.type === "push" &&
+                push.channel === "server.welcome"
+              ) {
+                clearTimeout(timer);
+                ws.removeEventListener("message", handler);
+                resolve(push.data as Record<string, unknown>);
+              }
             }
           }
         };

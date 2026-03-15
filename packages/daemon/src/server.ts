@@ -10,7 +10,7 @@ import {
   canonicalTransportOrigin,
 } from "@orka/core";
 import { ReconnectStrategy } from "@orka/client";
-import type { PushChannel, DataFrame } from "@orka/core";
+import type { PushChannel, DataFrame, TransportPayload } from "@orka/core";
 import { trace } from "@opentelemetry/api";
 import { ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseServerTransport } from "@orka/core/transport/noise-transport";
@@ -155,17 +155,16 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
             const transport = ws.data.noiseTransport;
 
             if (transport.isSecure) {
-              // SECURE state: decrypt incoming data frame, process RPC, encrypt response
+              // SECURE state: decrypt incoming data frame, dispatch by payload kind
               const frame = parsed as DataFrame;
               if (!frame || frame.t !== "data" || typeof frame.ct !== "string") {
-                // Not a data frame — could be a push control message sent in cleartext
-                // after the secure channel is established. Drop it.
+                // Not a data frame in secure mode. Drop it.
                 return;
               }
 
-              let rpc: Record<string, unknown>;
+              let payload: TransportPayload;
               try {
-                rpc = transport.decryptData(frame);
+                payload = transport.decryptFrame(frame);
               } catch (err) {
                 const activeSpan = trace.getActiveSpan();
                 if (activeSpan) {
@@ -186,19 +185,27 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
                 return;
               }
 
-              // Handle push control messages that were encrypted
-              const controlMessage = PushControlRequestSchema.safeParse(rpc);
-              if (controlMessage.success) {
-                const knownChannels = controlMessage.data.channels.filter(
-                  (ch): ch is PushChannel => PushChannelSchema.safeParse(ch).success,
-                );
-                if (controlMessage.data.type === "subscribe") {
-                  pushHub.subscribe(ws, knownChannels);
-                } else {
-                  pushHub.unsubscribe(ws, knownChannels);
+              // Dispatch by payload kind
+              if (payload.kind === "push_control") {
+                const controlMessage = PushControlRequestSchema.safeParse(payload.push_control);
+                if (controlMessage.success) {
+                  const knownChannels = controlMessage.data.channels.filter(
+                    (ch): ch is PushChannel => PushChannelSchema.safeParse(ch).success,
+                  );
+                  if (controlMessage.data.type === "subscribe") {
+                    pushHub.subscribe(ws, knownChannels);
+                  } else {
+                    pushHub.unsubscribe(ws, knownChannels);
+                  }
                 }
                 return;
               }
+
+              if (payload.kind !== "rpc") {
+                return;
+              }
+
+              const rpc = payload.rpc;
 
               // Reject spawn requests during shutdown
               if (gracefulShutdown.shuttingDown) {
@@ -229,8 +236,15 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
               ws.send(JSON.stringify(resp));
             }
 
-            // If we just reached SECURE state, record the event and send welcome encrypted
+            // If we just reached SECURE state, register push encoder and send welcome
             if (transport.isSecure) {
+              // Register encoder so PushHub encrypts push messages for this client
+              pushHub.setClientEncoder(ws, (payload) => {
+                const push = JSON.parse(payload) as Record<string, unknown>;
+                const encFrame = transport.encryptPush(push);
+                return JSON.stringify(encFrame);
+              });
+
               const tracer = getTracer();
               const hsSpan = tracer.startSpan("orka.noise.handshake_complete", {
                 attributes: { "orka.transport.side": "server" },
@@ -244,15 +258,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
                   protocolVersion: PROTOCOL_VERSION,
                   capabilities,
                 };
-                // Send welcome as an encrypted push frame
-                const pushEnvelope = {
-                  type: "push",
-                  channel: "server.welcome",
-                  sequence: 1,
-                  data: welcome,
-                };
-                const encWelcome = transport.encryptRpc(pushEnvelope);
-                ws.send(JSON.stringify(encWelcome));
+                pushHub.send(ws, "server.welcome" as PushChannel, welcome);
               });
             }
             return;

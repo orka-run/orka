@@ -210,7 +210,7 @@ export async function performNoiseHandshake(
     const m = msg as Record<string, unknown>;
     if (m?.t === "data" && typeof m.ct === "string") {
       try {
-        transport.decryptData(m as DataFrame);
+        transport.decryptFrame(m as DataFrame);
       } catch {
         // Ignore decrypt errors during drain
       }
@@ -276,7 +276,7 @@ export function drainEncryptedMessages(
       try {
         const parsed = JSON.parse(String(event.data));
         if (parsed?.t === "data" && typeof parsed.ct === "string") {
-          transport.decryptData(parsed as DataFrame);
+          transport.decryptFrame(parsed as DataFrame);
         }
       } catch {
         // Ignore non-decryptable frames
@@ -321,14 +321,17 @@ export function encryptedRpc(
         const parsed = JSON.parse(String(event.data));
         // Skip non-data frames (e.g. cleartext welcome)
         if (!parsed || parsed.t !== "data" || typeof parsed.ct !== "string") return;
-        const decrypted = transport.decryptData(parsed as DataFrame);
+        const payload = transport.decryptFrame(parsed as DataFrame);
+        // Skip non-RPC payloads (push messages, etc.)
+        if (payload.kind !== "rpc") return;
+        const decrypted = payload.rpc;
         if (decrypted.id === reqId) {
           clearTimeout(timer);
           ws.removeEventListener("message", handler);
           resolve(decrypted);
         }
       } catch {
-        // Ignore frames we can't decrypt (e.g. push messages)
+        // Ignore frames we can't decrypt
       }
     };
     ws.addEventListener("message", handler);

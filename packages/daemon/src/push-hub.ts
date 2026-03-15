@@ -17,11 +17,19 @@ function getSessionId(data: unknown): string | null {
   return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
 }
 
+export type PushEncoder = (payload: string) => string;
+
 export class PushHub {
   private readonly subscribers = new Map<PushChannel, Set<ServerWebSocket<unknown>>>();
   private readonly subscriptions = new Map<ServerWebSocket<unknown>, Set<PushChannel>>();
   private readonly directSequences = new Map<ServerWebSocket<unknown>, number>();
   private readonly broadcastSequences = new Map<PushChannel, number>();
+  private readonly clientEncoders = new Map<ServerWebSocket<unknown>, PushEncoder>();
+
+  /** Register a custom encoder for a client (e.g. Noise encryption). */
+  setClientEncoder(ws: ServerWebSocket<unknown>, encoder: PushEncoder): void {
+    this.clientEncoders.set(ws, encoder);
+  }
 
   subscribe(ws: ServerWebSocket<unknown>, channels: PushChannel[]): void {
     withSpanSync("orka.push.subscribe", { "orka.channel.count": channels.length }, () => {
@@ -85,6 +93,7 @@ export class PushHub {
 
       this.subscriptions.delete(ws);
       this.directSequences.delete(ws);
+      this.clientEncoders.delete(ws);
     });
   }
 
@@ -142,7 +151,12 @@ export class PushHub {
         data,
       };
 
-      ws.send(JSON.stringify(envelope));
+      let payload = JSON.stringify(envelope);
+      const encoder = this.clientEncoders.get(ws);
+      if (encoder) {
+        payload = encoder(payload);
+      }
+      ws.send(payload);
       return envelope;
     });
   }

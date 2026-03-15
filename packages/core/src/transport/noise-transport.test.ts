@@ -658,6 +658,72 @@ describe("NoiseTransport", () => {
     });
   });
 
+  describe("encrypted push exchange", () => {
+    it("server can send encrypted push to client", () => {
+      const { client, server } = performHandshake();
+
+      const push = { type: "push", channel: "server.welcome", sequence: 1, data: { hello: true } };
+      const frame = server.encryptPush(push);
+
+      expect(frame.t).toBe("data");
+      expect(typeof frame.ct).toBe("string");
+
+      const payload = client.decryptFrame(frame);
+      expect(payload.kind).toBe("push");
+      if (payload.kind === "push") {
+        expect(payload.push).toEqual(push);
+      }
+    });
+
+    it("client can send encrypted push_control to server", () => {
+      const { client, server } = performHandshake();
+
+      const control = { type: "subscribe", channels: ["server.welcome", "orchestration.sessionUpdated"] };
+      const frame = client.encryptPushControl(control);
+
+      expect(frame.t).toBe("data");
+      const payload = server.decryptFrame(frame);
+      expect(payload.kind).toBe("push_control");
+      if (payload.kind === "push_control") {
+        expect(payload.push_control).toEqual(control);
+      }
+    });
+
+    it("decryptData rejects non-rpc payloads", () => {
+      const { client, server } = performHandshake();
+
+      const push = { type: "push", channel: "test", sequence: 1, data: {} };
+      const frame = server.encryptPush(push);
+
+      expect(() => client.decryptData(frame)).toThrow(/Expected RPC payload, got push/);
+    });
+
+    it("decryptFrame returns full payload for all kinds", () => {
+      const { client, server } = performHandshake();
+
+      // RPC
+      const rpc = { jsonrpc: "2.0", method: "test", id: 1 };
+      const rpcFrame = client.encryptRpc(rpc);
+      const rpcPayload = server.decryptFrame(rpcFrame);
+      expect(rpcPayload.kind).toBe("rpc");
+      if (rpcPayload.kind === "rpc") {
+        expect(rpcPayload.rpc).toEqual(rpc);
+      }
+
+      // Push
+      const push = { type: "push", channel: "test", sequence: 1, data: {} };
+      const pushFrame = server.encryptPush(push);
+      const pushPayload = client.decryptFrame(pushFrame);
+      expect(pushPayload.kind).toBe("push");
+
+      // Push control
+      const ctrl = { type: "subscribe", channels: ["test"] };
+      const ctrlFrame = client.encryptPushControl(ctrl);
+      const ctrlPayload = server.decryptFrame(ctrlFrame);
+      expect(ctrlPayload.kind).toBe("push_control");
+    });
+  });
+
   describe("large payload", () => {
     it("encrypts and decrypts a large RPC payload", () => {
       const { client, server } = performHandshake();

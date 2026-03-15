@@ -197,8 +197,34 @@ export class NoiseClientTransport {
     return { t: "data", ct: Buffer.from(ct).toString("base64url") };
   }
 
-  /** Decrypt an incoming data frame. Only valid in SECURE state. */
-  decryptData(frame: DataFrame): Record<string, unknown> {
+  /** Encrypt a push envelope into a data frame. Only valid in SECURE state. */
+  encryptPush(push: Record<string, unknown>): DataFrame {
+    if (this._state !== "SECURE" || !this.sendCipher) {
+      throw new Error(
+        "NoiseClientTransport: cannot encrypt — transport is not in SECURE state",
+      );
+    }
+    const payload: TransportPayload = { v: 1, kind: "push", push };
+    const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+    const ct = this.sendCipher.encrypt(plaintext);
+    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+  }
+
+  /** Encrypt a push control message into a data frame. Only valid in SECURE state. */
+  encryptPushControl(pushControl: Record<string, unknown>): DataFrame {
+    if (this._state !== "SECURE" || !this.sendCipher) {
+      throw new Error(
+        "NoiseClientTransport: cannot encrypt — transport is not in SECURE state",
+      );
+    }
+    const payload: TransportPayload = { v: 1, kind: "push_control", push_control: pushControl };
+    const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+    const ct = this.sendCipher.encrypt(plaintext);
+    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+  }
+
+  /** Decrypt an incoming data frame and return the full transport payload. Only valid in SECURE state. */
+  decryptFrame(frame: DataFrame): TransportPayload {
     if (this._state !== "SECURE" || !this.recvCipher) {
       throw new Error(
         "NoiseClientTransport: cannot decrypt — transport is not in SECURE state",
@@ -207,7 +233,15 @@ export class NoiseClientTransport {
     const ct = Buffer.from(frame.ct, "base64url");
     const plaintext = this.recvCipher.decrypt(new Uint8Array(ct));
     const decoded = JSON.parse(new TextDecoder().decode(plaintext));
-    const payload = TransportPayloadSchema.parse(decoded);
+    return TransportPayloadSchema.parse(decoded);
+  }
+
+  /** Decrypt an incoming data frame containing an RPC payload. Only valid in SECURE state. */
+  decryptData(frame: DataFrame): Record<string, unknown> {
+    const payload = this.decryptFrame(frame);
+    if (payload.kind !== "rpc") {
+      throw new Error(`Expected RPC payload, got ${payload.kind}`);
+    }
     return payload.rpc;
   }
 
@@ -387,8 +421,34 @@ export class NoiseServerTransport {
     return { t: "data", ct: Buffer.from(ct).toString("base64url") };
   }
 
-  /** Decrypt an incoming data frame. Only valid in SECURE state. */
-  decryptData(frame: DataFrame): Record<string, unknown> {
+  /** Encrypt a push envelope into a data frame. Only valid in SECURE state. */
+  encryptPush(push: Record<string, unknown>): DataFrame {
+    if (this._state !== "SECURE" || !this.sendCipher) {
+      throw new Error(
+        "NoiseServerTransport: cannot encrypt — transport is not in SECURE state",
+      );
+    }
+    const payload: TransportPayload = { v: 1, kind: "push", push };
+    const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+    const ct = this.sendCipher.encrypt(plaintext);
+    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+  }
+
+  /** Encrypt a push control message into a data frame. Only valid in SECURE state. */
+  encryptPushControl(pushControl: Record<string, unknown>): DataFrame {
+    if (this._state !== "SECURE" || !this.sendCipher) {
+      throw new Error(
+        "NoiseServerTransport: cannot encrypt — transport is not in SECURE state",
+      );
+    }
+    const payload: TransportPayload = { v: 1, kind: "push_control", push_control: pushControl };
+    const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+    const ct = this.sendCipher.encrypt(plaintext);
+    return { t: "data", ct: Buffer.from(ct).toString("base64url") };
+  }
+
+  /** Decrypt an incoming data frame and return the full transport payload. Only valid in SECURE state. */
+  decryptFrame(frame: DataFrame): TransportPayload {
     if (this._state !== "SECURE" || !this.recvCipher) {
       throw new Error(
         "NoiseServerTransport: cannot decrypt — transport is not in SECURE state",
@@ -397,7 +457,15 @@ export class NoiseServerTransport {
     const ct = Buffer.from(frame.ct, "base64url");
     const plaintext = this.recvCipher.decrypt(new Uint8Array(ct));
     const decoded = JSON.parse(new TextDecoder().decode(plaintext));
-    const payload = TransportPayloadSchema.parse(decoded);
+    return TransportPayloadSchema.parse(decoded);
+  }
+
+  /** Decrypt an incoming data frame containing an RPC payload. Only valid in SECURE state. */
+  decryptData(frame: DataFrame): Record<string, unknown> {
+    const payload = this.decryptFrame(frame);
+    if (payload.kind !== "rpc") {
+      throw new Error(`Expected RPC payload, got ${payload.kind}`);
+    }
     return payload.rpc;
   }
 

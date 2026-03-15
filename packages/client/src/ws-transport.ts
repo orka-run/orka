@@ -1,5 +1,5 @@
 // Attribution: WsTransport design inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData, DataFrame } from "@orka/core";
+import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData, DataFrame, TransportPayload } from "@orka/core";
 import { isProtocolCompatible, MethodNotFoundError, PROTOCOL_VERSION_RANGE, RPC_METHOD_NOT_FOUND } from "@orka/core";
 import type { NoiseKeyInfo } from "@orka/core/crypto";
 import type { NoiseClientTransport } from "@orka/core/transport/noise-transport";
@@ -194,6 +194,8 @@ export class WsTransport {
 
     const ws = this.ws;
     this.ws = null;
+    this.noiseTransport = null;
+    this.noiseHandshaking = false;
 
     if (ws) {
       this.connectionSpan?.addEvent("ws.disconnect_requested");
@@ -201,8 +203,6 @@ export class WsTransport {
     }
 
     this.outbox = [];
-    this.noiseTransport = null;
-    this.noiseHandshaking = false;
     this.rejectAllPending(new Error("Connection closed"));
     this.endConnectionSpan("disconnected");
     this.reconnectDelay = 500;
@@ -386,17 +386,26 @@ export class WsTransport {
       return;
     }
 
-    // Noise decryption: unwrap encrypted data frames
+    // Noise transport: decrypt data frames and dispatch by payload kind
     if (this.noiseTransport?.isSecure) {
-      const frame = parsed as Record<string, unknown>;
-      if (frame["t"] === "data" && typeof frame["ct"] === "string") {
-        try {
-          parsed = this.noiseTransport.decryptData(frame as DataFrame);
-        } catch {
-          return;
-        }
+      const frame = parsed as { t?: string; ct?: string };
+      if (frame?.t !== "data" || typeof frame?.ct !== "string") {
+        return;
+      }
+
+      let payload: TransportPayload;
+      try {
+        payload = this.noiseTransport.decryptFrame(frame as DataFrame);
+      } catch {
+        return;
+      }
+
+      if (payload.kind === "rpc") {
+        parsed = payload.rpc;
+      } else if (payload.kind === "push") {
+        parsed = payload.push;
       } else {
-        return; // Non-data frames ignored in Noise mode
+        return;
       }
     }
 
@@ -592,7 +601,7 @@ export class WsTransport {
 
     this.messagesSent++;
     if (this.noiseTransport?.isSecure) {
-      const rpc = JSON.parse(payload);
+      const rpc = JSON.parse(payload) as Record<string, unknown>;
       const frame = this.noiseTransport.encryptRpc(rpc);
       this.ws.send(JSON.stringify(frame));
     } else {
@@ -611,12 +620,11 @@ export class WsTransport {
     }
 
     this.messagesSent++;
-    const msg = { type, channels };
     if (this.noiseTransport?.isSecure) {
-      const frame = this.noiseTransport.encryptRpc(msg);
+      const frame = this.noiseTransport.encryptPushControl({ type, channels });
       this.ws.send(JSON.stringify(frame));
     } else {
-      this.ws.send(JSON.stringify(msg));
+      this.ws.send(JSON.stringify({ type, channels }));
     }
   }
 

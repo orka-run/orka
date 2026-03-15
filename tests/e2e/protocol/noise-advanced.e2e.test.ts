@@ -30,7 +30,7 @@ import {
   type DaemonWithNoise,
   type SecureConnection,
 } from "./protocol-helpers";
-import type { DataFrame } from "@orka/core";
+import type { DataFrame, TransportPayload } from "@orka/core";
 
 describe("Noise NK Transport — Advanced", () => {
   let daemon: DaemonWithNoise;
@@ -154,21 +154,19 @@ describe("Noise NK Transport — Advanced", () => {
     );
 
     // Subscribe to orchestration.sessionUpdated via an encrypted push control message.
-    // The server handles encrypted push control messages in the Noise path.
+    // The server handles encrypted push_control payloads in the Noise path.
     const subscribeMsg = {
       type: "subscribe",
       channels: ["orchestration.sessionUpdated"],
     };
-    const subFrame = transport.encryptRpc(subscribeMsg);
+    const subFrame = transport.encryptPushControl(subscribeMsg);
     ws.send(JSON.stringify(subFrame));
 
     // Give the subscription time to register
     await Bun.sleep(200);
 
-    // Set up a listener for push events. Because PushHub sends cleartext
-    // envelopes, push broadcasts arrive as cleartext JSON (not encrypted data
-    // frames). The Noise channel encrypts RPC request/response but the PushHub
-    // sends directly via ws.send(JSON.stringify(envelope)).
+    // Set up a listener for push events. Push messages for Noise clients are
+    // encrypted as data frames with kind: "push" in the transport payload.
     const pushPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         ws.removeEventListener("message", handler);
@@ -180,29 +178,21 @@ describe("Noise NK Transport — Advanced", () => {
         try {
           const parsed = JSON.parse(String(event.data));
 
-          // Push events may arrive as cleartext envelopes from PushHub
-          if (
-            parsed.type === "push" &&
-            parsed.channel === "orchestration.sessionUpdated"
-          ) {
-            clearTimeout(timer);
-            ws.removeEventListener("message", handler);
-            resolve(parsed);
-            return;
-          }
-
-          // Or they may arrive as encrypted data frames if the server wraps them
+          // Push events arrive as encrypted data frames
           if (parsed.t === "data" && typeof parsed.ct === "string") {
             try {
-              const decrypted = transport.decryptData(parsed as DataFrame);
-              if (
-                decrypted.type === "push" &&
-                decrypted.channel === "orchestration.sessionUpdated"
-              ) {
-                clearTimeout(timer);
-                ws.removeEventListener("message", handler);
-                resolve(decrypted);
-                return;
+              const payload = transport.decryptFrame(parsed as DataFrame);
+              if (payload.kind === "push") {
+                const push = payload.push as Record<string, unknown>;
+                if (
+                  push.type === "push" &&
+                  push.channel === "orchestration.sessionUpdated"
+                ) {
+                  clearTimeout(timer);
+                  ws.removeEventListener("message", handler);
+                  resolve(push);
+                  return;
+                }
               }
             } catch {
               // Ignore frames we can't decrypt

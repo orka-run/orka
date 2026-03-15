@@ -108,12 +108,38 @@ describe("schema validation", () => {
     expect(parsed.ct).toBe("Y2lwaGVydGV4dA");
   });
 
-  test("TransportPayloadSchema accepts valid input", () => {
+  test("TransportPayloadSchema accepts valid rpc input", () => {
     const tp = { v: 1 as const, kind: "rpc" as const, rpc: { jsonrpc: "2.0", method: "test" } };
     const parsed = TransportPayloadSchema.parse(tp);
     expect(parsed.v).toBe(1);
     expect(parsed.kind).toBe("rpc");
-    expect(parsed.rpc).toEqual({ jsonrpc: "2.0", method: "test" });
+    if (parsed.kind === "rpc") {
+      expect(parsed.rpc).toEqual({ jsonrpc: "2.0", method: "test" });
+    }
+  });
+
+  test("TransportPayloadSchema accepts valid push input", () => {
+    const tp = { v: 1 as const, kind: "push" as const, push: { type: "push", channel: "server.welcome", sequence: 1, data: {} } };
+    const parsed = TransportPayloadSchema.parse(tp);
+    expect(parsed.v).toBe(1);
+    expect(parsed.kind).toBe("push");
+    if (parsed.kind === "push") {
+      expect(parsed.push).toEqual({ type: "push", channel: "server.welcome", sequence: 1, data: {} });
+    }
+  });
+
+  test("TransportPayloadSchema accepts valid push_control input", () => {
+    const tp = { v: 1 as const, kind: "push_control" as const, push_control: { type: "subscribe", channels: ["server.welcome"] } };
+    const parsed = TransportPayloadSchema.parse(tp);
+    expect(parsed.v).toBe(1);
+    expect(parsed.kind).toBe("push_control");
+    if (parsed.kind === "push_control") {
+      expect(parsed.push_control).toEqual({ type: "subscribe", channels: ["server.welcome"] });
+    }
+  });
+
+  test("TransportPayloadSchema rejects unknown kind", () => {
+    expect(() => TransportPayloadSchema.parse({ v: 1, kind: "unknown", data: {} })).toThrow();
   });
 });
 

@@ -134,13 +134,15 @@ function encryptedRpc(
       const frame = parsed as Record<string, unknown>;
       if (frame["t"] !== "data" || typeof frame["ct"] !== "string") return;
       try {
-        const decrypted = transport.decryptData(frame as DataFrame);
+        const payload = transport.decryptFrame(frame as DataFrame);
+        if (payload.kind !== "rpc") return;
+        const decrypted = payload.rpc;
         if (decrypted["id"] === reqId) {
           clearTimeout(timer);
           ws.removeEventListener("message", handler);
           resolve(decrypted);
         }
-      } catch { /* decryption failed — skip (might be a push) */ }
+      } catch { /* decryption failed — skip */ }
     };
     ws.addEventListener("message", handler);
     const rpcEnvelope: Record<string, unknown> = { jsonrpc: "2.0", id: reqId, method, params };

@@ -142,11 +142,23 @@ export type DataFrame = z.infer<typeof DataFrameSchema>;
 // ---------------------------------------------------------------------------
 
 /** Plaintext payload carried inside a data frame after decryption. */
-export const TransportPayloadSchema = z.object({
-  v: z.literal(1),
-  kind: z.literal("rpc"),
-  rpc: z.record(z.string(), z.unknown()),
-}).passthrough();
+export const TransportPayloadSchema = z.discriminatedUnion("kind", [
+  z.object({
+    v: z.literal(1),
+    kind: z.literal("rpc"),
+    rpc: z.record(z.string(), z.unknown()),
+  }).passthrough(),
+  z.object({
+    v: z.literal(1),
+    kind: z.literal("push"),
+    push: z.record(z.string(), z.unknown()),
+  }).passthrough(),
+  z.object({
+    v: z.literal(1),
+    kind: z.literal("push_control"),
+    push_control: z.record(z.string(), z.unknown()),
+  }).passthrough(),
+]);
 
 export type TransportPayload = z.infer<typeof TransportPayloadSchema>;
 
