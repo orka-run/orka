@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { X, Check, LoaderCircle, AlertCircle } from "lucide-react";
 import { PairingClient, PairingError } from "@orka/core/pairing";
 import type { PairingClientResult } from "@orka/core/pairing";
+import type { PairWithNodeResult } from "@orka/core";
 import { parsePairingCode } from "@orka/core/crypto/protocol";
 import { driveNoiseHandshake } from "@orka/client";
 import { computeKeyId } from "@orka/core/transport/noise-transport";
@@ -9,6 +10,8 @@ import { toHex } from "@orka/core/crypto/protocol";
 import { saveNoiseKey } from "../lib/noiseKeys";
 import { savePairedNode } from "../lib/nodeRegistry";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
+import { useMode } from "../hooks/useMode";
+import { useTransport } from "../lib/transportContext";
 
 interface PairNodeDialogProps {
   open: boolean;
@@ -43,12 +46,15 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
   const relayUrlId = useId();
   const currentEndpoint = useConnectionSettingsStore((s) => s.endpointUrl);
   const setEndpoint = useConnectionSettingsStore((s) => s.setEndpoint);
+  const { mode } = useMode();
+  const transport = useTransport();
 
   const [code, setCode] = useState("");
   const [relayUrl, setRelayUrl] = useState("");
   const [step, setStep] = useState<PairStep>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PairingClientResult | null>(null);
+  const [localResult, setLocalResult] = useState<PairWithNodeResult | null>(null);
 
   const pairWsRef = useRef<WebSocket | null>(null);
   const verifyWsRef = useRef<WebSocket | null>(null);
@@ -68,6 +74,7 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
     setStep("idle");
     setError(null);
     setResult(null);
+    setLocalResult(null);
   }, [open, currentEndpoint]);
 
   // Escape to close
@@ -96,7 +103,29 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
     setStep("idle");
   }
 
-  async function startPairing() {
+  async function startPairingLocal() {
+    setError(null);
+    setStep("connecting");
+
+    const trimmedRelay = relayUrl.trim().replace(/\/+$/, "");
+    if (!trimmedRelay) {
+      fail("Relay URL is required");
+      return;
+    }
+
+    try {
+      const res = await transport.request<PairWithNodeResult>("pairWithNode", {
+        pairingCode: code.replace(/-/g, ""),
+        relayUrl: trimmedRelay,
+      });
+      setLocalResult(res);
+      setStep("done");
+    } catch (e) {
+      fail(e instanceof Error ? e.message : "Pairing failed");
+    }
+  }
+
+  async function startPairingHosted() {
     setError(null);
     setStep("connecting");
 
@@ -174,6 +203,14 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
     }
   }
 
+  function startPairing() {
+    if (mode === "local") {
+      startPairingLocal();
+    } else {
+      startPairingHosted();
+    }
+  }
+
   async function verifyNoise(
     pairingResult: PairingClientResult,
     client: PairingClient,
@@ -231,14 +268,16 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
   }
 
   function handleConnect() {
-    if (!result) return;
-    const nodePath = result.nodePaths[0];
-    if (nodePath) {
-      setEndpoint(nodePath, null, result.nodeId);
+    if (result) {
+      const nodePath = result.nodePaths[0];
+      if (nodePath) {
+        setEndpoint(nodePath, null, result.nodeId);
+      }
     }
     onClose();
   }
 
+  const doneResult = localResult ?? result;
   const isPairing = step !== "idle" && step !== "done";
   const canStart = code.replace(/-/g, "").length >= 20 && relayUrl.trim().length > 0;
 
@@ -266,7 +305,7 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
         </div>
 
         <div className="space-y-5 px-6 py-5">
-          {step === "done" && result ? (
+          {step === "done" && doneResult ? (
             /* Success state */
             <div className="space-y-4">
               <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-4">
@@ -276,29 +315,41 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
                 </div>
                 <div className="mt-3 space-y-1 text-sm text-zinc-300">
                   <p>
-                    Node: <span className="text-zinc-100">{result.nodeName}</span>
+                    Node: <span className="text-zinc-100">{doneResult.nodeName}</span>
                   </p>
                   <p>
-                    ID: <span className="font-mono text-xs text-zinc-400">{result.nodeId}</span>
+                    ID: <span className="font-mono text-xs text-zinc-400">{doneResult.nodeId}</span>
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-xl border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:text-zinc-100"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConnect}
-                  className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400"
-                >
-                  Connect
-                </button>
+                {mode === "local" ? (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400"
+                  >
+                    Done
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-xl border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:text-zinc-100"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConnect}
+                      className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400"
+                    >
+                      Connect
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -339,32 +390,38 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
                 <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
                   <div className="flex items-center gap-3">
                     <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-sky-400" />
-                    <span className="text-sm text-zinc-300">
-                      <span className="text-sky-300">
-                        {STEPS.find((s) => s.key === step)?.label}
+                    {mode === "local" ? (
+                      <span className="text-sm text-sky-300">Pairing via daemon...</span>
+                    ) : (
+                      <span className="text-sm text-zinc-300">
+                        <span className="text-sky-300">
+                          {STEPS.find((s) => s.key === step)?.label}
+                        </span>
+                        <span className="ml-2 text-zinc-500">
+                          ({STEPS.findIndex((s) => s.key === step) + 1}/{STEPS.length})
+                        </span>
                       </span>
-                      <span className="ml-2 text-zinc-500">
-                        ({STEPS.findIndex((s) => s.key === step) + 1}/{STEPS.length})
-                      </span>
-                    </span>
+                    )}
                   </div>
-                  <div className="mt-2 flex gap-1">
-                    {STEPS.map(({ key }, i) => {
-                      const currentIndex = STEPS.findIndex((s) => s.key === step);
-                      return (
-                        <div
-                          key={key}
-                          className={`h-1 flex-1 rounded-full transition-colors ${
-                            i < currentIndex
-                              ? "bg-emerald-500"
-                              : i === currentIndex
-                                ? "bg-sky-500"
-                                : "bg-zinc-800"
-                          }`}
-                        />
-                      );
-                    })}
-                  </div>
+                  {mode !== "local" && (
+                    <div className="mt-2 flex gap-1">
+                      {STEPS.map(({ key }, i) => {
+                        const currentIndex = STEPS.findIndex((s) => s.key === step);
+                        return (
+                          <div
+                            key={key}
+                            className={`h-1 flex-1 rounded-full transition-colors ${
+                              i < currentIndex
+                                ? "bg-emerald-500"
+                                : i === currentIndex
+                                  ? "bg-sky-500"
+                                  : "bg-zinc-800"
+                            }`}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
