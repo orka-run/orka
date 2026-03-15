@@ -133,11 +133,15 @@ export const metrics = {
 const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
 const TRACE_FILE_MAX_COMPRESSED = 5; // Keep up to 5 compressed archives
 
-function compressWithZstd(src: string, dst: string): void {
-  const data = readFileSync(src);
-  const compressed = Bun.zstdCompressSync(data);
-  writeFileSync(dst, compressed);
-  unlinkSync(src);
+function compressWithZstdAsync(src: string, dst: string): void {
+  Bun.file(src).arrayBuffer().then((buf) =>
+    Bun.zstdCompress(new Uint8Array(buf)),
+  ).then((compressed) => {
+    writeFileSync(dst, compressed);
+    unlinkSync(src);
+  }).catch(() => {
+    try { renameSync(src, dst.replace(/\.zst$/, "")); } catch { /* ignore */ }
+  });
 }
 
 function rotateTraceFileIfNeeded(logFile: string): void {
@@ -161,7 +165,7 @@ function rotateTraceFileIfNeeded(logFile: string): void {
   }
 
   renameSync(logFile, `${logFile}.rotating`);
-  compressWithZstd(`${logFile}.rotating`, `${logFile}.1.zst`);
+  compressWithZstdAsync(`${logFile}.rotating`, `${logFile}.1.zst`);
 }
 
 class FileSpanExporter {

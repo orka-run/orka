@@ -217,11 +217,17 @@ export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
 const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
 const TRACE_FILE_MAX_COMPRESSED = 5; // Keep up to 5 compressed archives
 
-function compressWithZstd(src: string, dst: string): void {
-  const data = readFileSync(src);
-  const compressed = Bun.zstdCompressSync(data);
-  writeFileSync(dst, compressed);
-  unlinkSync(src);
+function compressWithZstdAsync(src: string, dst: string): void {
+  // Fire-and-forget: read, compress, write, remove source — all async to avoid blocking event loop
+  Bun.file(src).arrayBuffer().then((buf) =>
+    Bun.zstdCompress(new Uint8Array(buf)),
+  ).then((compressed) => {
+    writeFileSync(dst, compressed);
+    unlinkSync(src);
+  }).catch(() => {
+    // Compression failed — keep uncompressed as fallback
+    try { renameSync(src, dst.replace(/\.zst$/, "")); } catch { /* ignore */ }
+  });
 }
 
 function rotateTraceFileIfNeeded(logFile: string): void {
@@ -249,7 +255,7 @@ function rotateTraceFileIfNeeded(logFile: string): void {
 
   // Compress current file to .1.zst
   renameSync(logFile, `${logFile}.rotating`);
-  compressWithZstd(`${logFile}.rotating`, `${logFile}.1.zst`);
+  compressWithZstdAsync(`${logFile}.rotating`, `${logFile}.1.zst`);
 }
 
 function appendTraceLogEntries(entries: TraceLogEntry[]): void {
