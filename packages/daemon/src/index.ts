@@ -20,6 +20,8 @@ export {
 } from "./projects";
 export type { ProjectEntry } from "./projects";
 export { getOrkaHome } from "./db";
+export { createNodeRegistry } from "./node-registry";
+export type { NodeRegistry } from "./node-registry";
 export { formatLog, formatEvent, parseLine } from "./log-formatter";
 export { createDrainableWorker, type DrainableWorker } from "./drainable-worker";
 export * from "./adapters";

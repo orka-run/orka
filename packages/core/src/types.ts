@@ -117,6 +117,20 @@ export type ChatEntry =
 export const ReasoningEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
+// --- Stored Node (daemon-side node registry) ---
+
+export interface StoredNode {
+  nodeId: string;
+  nodeName: string;
+  relayUrl: string;
+  relayToken?: string;
+  nodePaths: string[];
+  pairedAt: string; // ISO 8601
+  noiseStaticPubkey: string; // base64url, 32 bytes
+  noiseKeyId: string; // "sha256:..."
+  autoConnect: boolean; // default true
+}
+
 export interface SpawnRequest {
   prompt: string;
   title?: string;
