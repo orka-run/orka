@@ -1,7 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, LoaderCircle, Shield, ShieldOff, Square } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, ScrollText, Shield, ShieldOff, Square } from "lucide-react";
 import type { SessionResult } from "@orka/core";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
@@ -15,6 +15,7 @@ interface SessionViewProps {
   sessionId: string;
   transport: WsTransport;
   onSelectionLoadSettled: (sessionId: string, status: "ok" | "error", error?: unknown) => void;
+  isMobile?: boolean;
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -50,7 +51,14 @@ function formatTokenCount(count: number): string {
   return String(count);
 }
 
-export function SessionView({ sessionId, transport, onSelectionLoadSettled }: SessionViewProps) {
+const TAB_ICONS: Record<string, React.ReactNode> = {
+  overview: <Eye className="h-4 w-4" />,
+  chat: <MessageSquare className="h-4 w-4" />,
+  logs: <ScrollText className="h-4 w-4" />,
+  diff: <FileCode className="h-4 w-4" />,
+};
+
+export function SessionView({ sessionId, transport, onSelectionLoadSettled, isMobile = false }: SessionViewProps) {
   const [activeTab, setActiveTab] = useState<"overview" | "chat" | "logs" | "diff">("chat");
   const [isStopping, setIsStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -112,69 +120,40 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled }: Se
 
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-zinc-800 px-6 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-lg font-semibold text-zinc-100">{activeSession.title}</p>
-            <p className="mt-1 text-sm font-mono text-zinc-500">{sessionId}</p>
+      <header className={`border-b border-zinc-800 ${isMobile ? "px-3 py-2" : "px-6 py-3"}`}>
+        <div className={`flex items-center justify-between gap-4 ${isMobile ? "gap-2" : ""}`}>
+          <div className="min-w-0 flex-1">
+            <p className={`truncate font-semibold text-zinc-100 ${isMobile ? "text-sm" : "text-lg"}`}>{activeSession.title}</p>
+            {!isMobile && <p className="mt-1 text-sm font-mono text-zinc-500">{sessionId}</p>}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 shrink-0">
             {isStoppable ? (
               <button
                 type="button"
                 onClick={() => void handleStopSession()}
                 disabled={isStopping}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-200 transition hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-50"
+                className={`inline-flex items-center gap-2 rounded-lg border border-red-900/70 bg-red-950/40 text-sm font-medium text-red-200 transition hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-50 ${isMobile ? "p-2" : "px-3 py-2"}`}
               >
                 {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
-                {isStopping ? "Stopping..." : "Stop Session"}
+                {!isMobile && (isStopping ? "Stopping..." : "Stop Session")}
               </button>
             ) : null}
             <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
-              <button
-                type="button"
-                onClick={() => { setActiveTab("overview"); }}
-                className={`rounded-md px-3 py-1.5 text-sm ${
-                  activeTab === "overview"
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-500 transition hover:text-zinc-200"
-                }`}
-              >
-                Overview
-              </button>
-              <button
-                type="button"
-                onClick={() => { setActiveTab("chat"); }}
-                className={`rounded-md px-3 py-1.5 text-sm ${
-                  activeTab === "chat"
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-500 transition hover:text-zinc-200"
-                }`}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                onClick={() => { setActiveTab("logs"); }}
-                className={`rounded-md px-3 py-1.5 text-sm ${
-                  activeTab === "logs"
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-500 transition hover:text-zinc-200"
-                }`}
-              >
-                Logs
-              </button>
-              <button
-                type="button"
-                onClick={() => { setActiveTab("diff"); }}
-                className={`rounded-md px-3 py-1.5 text-sm ${
-                  activeTab === "diff"
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-500 transition hover:text-zinc-200"
-                }`}
-              >
-                Diff
-              </button>
+              {(["overview", "chat", "logs", "diff"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => { setActiveTab(tab); }}
+                  className={`rounded-md ${isMobile ? "p-1.5" : "px-3 py-1.5"} text-sm ${
+                    activeTab === tab
+                      ? "bg-zinc-800 text-zinc-100"
+                      : "text-zinc-500 transition hover:text-zinc-200"
+                  }`}
+                  title={tab.charAt(0).toUpperCase() + tab.slice(1)}
+                >
+                  {isMobile ? TAB_ICONS[tab] : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
             </div>
           </div>
         </div>

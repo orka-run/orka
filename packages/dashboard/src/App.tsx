@@ -16,7 +16,7 @@ import { DraftChatView, type DraftSettings } from "./components/DraftChatView";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { MobileHeader } from "./components/MobileHeader";
 import { MobileSidebarDrawer } from "./components/MobileSidebarDrawer";
-import { MobileTabBar, type MobileTab } from "./components/MobileTabBar";
+import { MobileTabBar } from "./components/MobileTabBar";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { NodeManagementDialog } from "./components/NodeManagementDialog";
 import { PairNodeDialog } from "./components/PairNodeDialog";
@@ -73,6 +73,7 @@ interface AppShellProps {
 
 function AppShell({ transport }: AppShellProps) {
   const { mode } = useMode();
+  const isMobile = useMobileBreakpoint();
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
   const hasRestoredRef = useRef(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
@@ -80,6 +81,7 @@ function AppShell({ transport }: AppShellProps) {
   const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
   const [isPairNodeOpen, setIsPairNodeOpen] = useState(false);
   const [isNodeManagementOpen, setIsNodeManagementOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
@@ -100,11 +102,6 @@ function AppShell({ transport }: AppShellProps) {
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
   const defaultProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
 
-  // Mobile layout state
-  const { isMobile } = useMobileBreakpoint();
-  const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
-  const [mobileTab, setMobileTab] = useState<MobileTab>("sessions");
-
   const handleSelectSession = (id: string) => {
     const pendingSelection = selectionSpanRef.current;
     if (pendingSelection) {
@@ -124,6 +121,7 @@ function AppShell({ transport }: AppShellProps) {
     };
 
     selectSession(id);
+    setIsMobileSidebarOpen(false);
   };
 
   const handleSelectionLoadSettled = useEffectEvent((sessionId: string, status: "ok" | "error", error?: unknown) => {
@@ -149,23 +147,11 @@ function AppShell({ transport }: AppShellProps) {
     selectionSpanRef.current = null;
   });
 
-  const handleMobileTabChange = useCallback((tab: MobileTab) => {
-    setMobileTab(tab);
-    if (tab === "settings") {
-      setIsConnectionSettingsOpen(true);
-    }
-  }, []);
-
-  const handleMobileSelectSession = useCallback((id: string) => {
-    handleSelectSession(id);
-    setIsSidebarDrawerOpen(false);
-    setMobileTab("chat");
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const activateDraft = () => {
+  const activateDraft = useCallback(() => {
     setIsDraftActive(true);
     selectSession(null);
-  };
+    setIsMobileSidebarOpen(false);
+  }, [selectSession]);
 
   const handleOpenAdvanced = (settings: DraftSettings) => {
     setAdvancedDefaults(settings);
@@ -313,18 +299,21 @@ function AppShell({ transport }: AppShellProps) {
     };
   }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus]);
 
-  const manageNodesHandler = mode === "local" && pairedNodes.length > 0 ? () => setIsNodeManagementOpen(true) : undefined;
   const sidebarProps = {
     sessions,
     selectedId,
     isDraftActive,
     nodes,
     selectedNodeId,
+    onSelect: (id: string) => {
+      handleSelectSession(id);
+      // Keep draft in sidebar but show the selected session
+    },
     onSelectDraft: activateDraft,
     onNewSession: activateDraft,
     onSelectNode: selectNode,
     onPairNode: () => setIsPairNodeOpen(true),
-    ...(manageNodesHandler ? { onManageNodes: manageNodesHandler } : {}),
+    onManageNodes: mode === "local" && pairedNodes.length > 0 ? () => setIsNodeManagementOpen(true) : undefined,
   };
 
   const mainContent = selectedId ? (
@@ -332,6 +321,7 @@ function AppShell({ transport }: AppShellProps) {
       sessionId={selectedId}
       transport={transport}
       onSelectionLoadSettled={handleSelectionLoadSettled}
+      isMobile={isMobile}
     />
   ) : isDraftActive ? (
     <DraftChatView
@@ -339,155 +329,110 @@ function AppShell({ transport }: AppShellProps) {
       onSpawned={handleDraftSpawned}
       onOpenAdvanced={handleOpenAdvanced}
     />
-  ) : null;
-
-  const mobileMainContent = (() => {
-    if (mobileTab === "sessions" || mobileTab === "settings") return null;
-    if (!selectedId) {
-      return (
-        <div className="flex h-full items-center justify-center px-6 text-center text-sm text-zinc-500">
-          Select a session from the Sessions tab
-        </div>
-      );
-    }
-    if (mobileTab === "chat") {
-      return (
-        <SessionView
-          sessionId={selectedId}
-          transport={transport}
-          onSelectionLoadSettled={handleSelectionLoadSettled}
-        />
-      );
-    }
-    // diff and logs tabs reuse SessionView (it has its own tab system)
-    return (
-      <SessionView
-        sessionId={selectedId}
-        transport={transport}
-        onSelectionLoadSettled={handleSelectionLoadSettled}
-      />
-    );
-  })();
+  ) : isMobile ? (
+    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="rounded-full bg-zinc-800 p-4">
+        <svg className="h-8 w-8 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
+        </svg>
+      </div>
+      <p className="text-sm text-zinc-400">Select a session to view details</p>
+      <button
+        type="button"
+        onClick={activateDraft}
+        className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-white"
+      >
+        New Session
+      </button>
+    </div>
+  ) : (
+    <div className="flex h-full items-center justify-center text-zinc-500">
+      Select a session or press{" "}
+      <kbd className="mx-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
+        Ctrl+N
+      </kbd>{" "}
+      to start a new chat
+    </div>
+  );
 
   return (
     <TransportContext.Provider value={transport}>
-      {/* ── Desktop layout (lg+) ── */}
-      {!isMobile && (
-        <div className="flex h-screen flex-col">
-          <ConnectionBanner />
-          <div className="flex flex-1 overflow-hidden">
-            <Sidebar
-              {...sidebarProps}
-              onSelect={(id) => {
-                handleSelectSession(id);
-              }}
+      <div className="flex h-screen flex-col">
+        <ConnectionBanner />
+        {isMobile ? (
+          <>
+            <MobileHeader onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)} />
+            <main className="flex-1 overflow-hidden">{mainContent}</main>
+            <MobileTabBar
+              hasSelectedSession={!!selectedId}
+              onNewSession={activateDraft}
+              onShowSessions={() => setIsMobileSidebarOpen(true)}
             />
-            <main className="flex-1 overflow-hidden">
-              {mainContent ?? (
-                <div className="flex h-full items-center justify-center text-zinc-500">
-                  Select a session or press{" "}
-                  <kbd className="mx-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
-                    Ctrl+N
-                  </kbd>{" "}
-                  to start a new chat
-                </div>
-              )}
-            </main>
-          </div>
-          <StatusBar
-            sessionCount={sessions.length}
-            serverSessionCount={serverSessionCount}
-            onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
-          />
-        </div>
-      )}
-
-      {/* ── Mobile layout (<lg) ── */}
-      {isMobile && (
-        <div className="flex h-screen flex-col">
-          <ConnectionBanner />
-          <MobileHeader
-            title={selectedSession?.title ?? null}
-            onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
-          />
-          <div className="flex-1 overflow-y-auto pb-14">
-            {mobileTab === "sessions" ? (
-              <div className="flex flex-col">
-                <Sidebar
-                  {...sidebarProps}
-                  className="flex w-full flex-col bg-zinc-950"
-                  onSelect={handleMobileSelectSession}
-                />
-              </div>
-            ) : (
-              <main className="h-full overflow-hidden">
-                {mobileMainContent}
-              </main>
-            )}
-          </div>
-          <MobileTabBar
-            activeTab={mobileTab}
-            onTabChange={handleMobileTabChange}
-            hasActiveSession={!!selectedId}
-          />
-          <MobileSidebarDrawer
-            open={isSidebarDrawerOpen}
-            onClose={() => setIsSidebarDrawerOpen(false)}
-          >
-            <Sidebar
-              {...sidebarProps}
-              onSelect={(id) => {
-                handleMobileSelectSession(id);
-              }}
+            <MobileSidebarDrawer
+              open={isMobileSidebarOpen}
+              onClose={() => setIsMobileSidebarOpen(false)}
+            >
+              <Sidebar {...sidebarProps} fullWidth />
+            </MobileSidebarDrawer>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-1 overflow-hidden">
+              <Sidebar {...sidebarProps} />
+              <main className="flex-1 overflow-hidden">{mainContent}</main>
+            </div>
+            <StatusBar
+              sessionCount={sessions.length}
+              serverSessionCount={serverSessionCount}
+              onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
             />
-          </MobileSidebarDrawer>
-        </div>
-      )}
-
-      {/* ── Shared dialogs (both layouts) ── */}
-      <NewSessionDialog
-        open={isNewSessionOpen}
-        transport={transport}
-        defaultProjectPath={defaultProjectPath}
-        nodes={nodes}
-        onClose={() => {
-          setIsNewSessionOpen(false);
-          setAdvancedDefaults(null);
-        }}
-        onSpawned={handleDraftSpawned}
-        {...(advancedDefaults ? { initialValues: advancedDefaults } : {})}
-      />
-      <ConnectionSettingsDialog
-        open={isConnectionSettingsOpen}
-        onClose={() => setIsConnectionSettingsOpen(false)}
-      />
-      <PairNodeDialog
-        open={isPairNodeOpen}
-        onClose={() => {
-          setIsPairNodeOpen(false);
-          if (mode === "local") void fetchPairedNodes(transport);
-        }}
-      />
-      {mode === "local" && (
-        <NodeManagementDialog
-          open={isNodeManagementOpen}
-          onClose={() => setIsNodeManagementOpen(false)}
-          pairedNodes={pairedNodes}
-          liveNodes={nodes}
-          onRemoveNode={async (nodeId) => {
-            await useNodeStore.getState().removeNode(transport, nodeId);
-            void fetchNodes(transport);
+          </>
+        )}
+        <NewSessionDialog
+          open={isNewSessionOpen}
+          transport={transport}
+          defaultProjectPath={defaultProjectPath}
+          nodes={nodes}
+          onClose={() => {
+            setIsNewSessionOpen(false);
+            setAdvancedDefaults(null);
           }}
-          onConnectNode={async (nodeId) => {
-            await useNodeStore.getState().connectNode(transport, nodeId);
-            void fetchNodes(transport);
-          }}
-          onDisconnectNode={async (nodeId) => {
-            await useNodeStore.getState().disconnectNode(transport, nodeId);
-            void fetchNodes(transport);
+          onSpawned={handleDraftSpawned}
+          {...(advancedDefaults ? { initialValues: advancedDefaults } : {})}
+        />
+        <ConnectionSettingsDialog
+          open={isConnectionSettingsOpen}
+          onClose={() => setIsConnectionSettingsOpen(false)}
+        />
+        <PairNodeDialog
+          open={isPairNodeOpen}
+          onClose={() => {
+            setIsPairNodeOpen(false);
+            // Refresh paired nodes after pairing dialog closes (new node may have been paired)
+            if (mode === "local") void fetchPairedNodes(transport);
           }}
         />
-      )}
+        {mode === "local" && (
+          <NodeManagementDialog
+            open={isNodeManagementOpen}
+            onClose={() => setIsNodeManagementOpen(false)}
+            pairedNodes={pairedNodes}
+            liveNodes={nodes}
+            onRemoveNode={async (nodeId) => {
+              await useNodeStore.getState().removeNode(transport, nodeId);
+              void fetchNodes(transport);
+            }}
+            onConnectNode={async (nodeId) => {
+              await useNodeStore.getState().connectNode(transport, nodeId);
+              void fetchNodes(transport);
+            }}
+            onDisconnectNode={async (nodeId) => {
+              await useNodeStore.getState().disconnectNode(transport, nodeId);
+              void fetchNodes(transport);
+            }}
+          />
+        )}
+      </div>
     </TransportContext.Provider>
   );
 }
