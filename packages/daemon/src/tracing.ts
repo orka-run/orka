@@ -36,7 +36,8 @@ import {
 import { ExportResultCode, W3CTraceContextPropagator, type ExportResult } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { getOrkaHome } from "./db";
 
@@ -215,7 +216,18 @@ export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
 }
 
 const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
-const TRACE_FILE_MAX_ROTATED = 2; // Keep traces.jsonl, .1, .2
+const TRACE_FILE_MAX_COMPRESSED = 5; // Keep up to 5 compressed archives
+
+function compressWithZstd(src: string, dst: string): boolean {
+  try {
+    execSync(`zstd -q --rm -o ${JSON.stringify(dst)} ${JSON.stringify(src)}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    // zstd not available — fall back to keeping uncompressed
+    try { renameSync(src, dst); } catch { /* ignore */ }
+    return false;
+  }
+}
 
 function rotateTraceFileIfNeeded(logFile: string): void {
   try {
@@ -225,17 +237,24 @@ function rotateTraceFileIfNeeded(logFile: string): void {
     return; // File doesn't exist yet
   }
 
-  // Rotate: remove oldest, shift existing, rename current
-  for (let i = TRACE_FILE_MAX_ROTATED; i >= 1; i--) {
-    const src = i === 1 ? logFile : `${logFile}.${i - 1}`;
-    const dst = `${logFile}.${i}`;
-    try {
-      if (i === TRACE_FILE_MAX_ROTATED) {
-        try { unlinkSync(dst); } catch { /* doesn't exist */ }
-      }
-      renameSync(src, dst);
-    } catch { /* source doesn't exist */ }
+  // Remove oldest compressed archive
+  try { unlinkSync(`${logFile}.${TRACE_FILE_MAX_COMPRESSED}.zst`); } catch { /* doesn't exist */ }
+  try { unlinkSync(`${logFile}.${TRACE_FILE_MAX_COMPRESSED}`); } catch { /* uncompressed fallback */ }
+
+  // Shift existing archives
+  for (let i = TRACE_FILE_MAX_COMPRESSED; i >= 2; i--) {
+    // Try .zst first, then uncompressed
+    for (const ext of [".zst", ""]) {
+      try {
+        renameSync(`${logFile}.${i - 1}${ext}`, `${logFile}.${i}${ext}`);
+        break;
+      } catch { /* doesn't exist */ }
+    }
   }
+
+  // Compress current file to .1.zst
+  renameSync(logFile, `${logFile}.rotating`);
+  compressWithZstd(`${logFile}.rotating`, `${logFile}.1.zst`);
 }
 
 function appendTraceLogEntries(entries: TraceLogEntry[]): void {
