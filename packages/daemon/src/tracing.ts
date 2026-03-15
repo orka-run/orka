@@ -37,7 +37,6 @@ import { ExportResultCode, W3CTraceContextPropagator, type ExportResult } from "
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { getOrkaHome } from "./db";
 
@@ -218,15 +217,11 @@ export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
 const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
 const TRACE_FILE_MAX_COMPRESSED = 5; // Keep up to 5 compressed archives
 
-function compressWithZstd(src: string, dst: string): boolean {
-  try {
-    execSync(`zstd -q --rm -o ${JSON.stringify(dst)} ${JSON.stringify(src)}`, { stdio: "ignore" });
-    return true;
-  } catch {
-    // zstd not available — fall back to keeping uncompressed
-    try { renameSync(src, dst); } catch { /* ignore */ }
-    return false;
-  }
+function compressWithZstd(src: string, dst: string): void {
+  const data = readFileSync(src);
+  const compressed = Bun.zstdCompressSync(data);
+  writeFileSync(dst, compressed);
+  unlinkSync(src);
 }
 
 function rotateTraceFileIfNeeded(logFile: string): void {

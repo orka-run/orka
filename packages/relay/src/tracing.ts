@@ -7,8 +7,7 @@ import {
 import { ExportResultCode } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRelayHome } from "./db";
 
@@ -134,14 +133,11 @@ export const metrics = {
 const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
 const TRACE_FILE_MAX_COMPRESSED = 5; // Keep up to 5 compressed archives
 
-function compressWithZstd(src: string, dst: string): boolean {
-  try {
-    execSync(`zstd -q --rm -o ${JSON.stringify(dst)} ${JSON.stringify(src)}`, { stdio: "ignore" });
-    return true;
-  } catch {
-    try { renameSync(src, dst); } catch { /* ignore */ }
-    return false;
-  }
+function compressWithZstd(src: string, dst: string): void {
+  const data = readFileSync(src);
+  const compressed = Bun.zstdCompressSync(data);
+  writeFileSync(dst, compressed);
+  unlinkSync(src);
 }
 
 function rotateTraceFileIfNeeded(logFile: string): void {
