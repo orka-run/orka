@@ -2,6 +2,7 @@ import { Settings } from "lucide-react";
 import { useRpcLatency } from "../lib/rpcLatencyStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
+import { useMode } from "../hooks/useMode";
 
 interface StatusBarProps {
   sessionCount: number;
@@ -34,11 +35,13 @@ export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConne
   const status = useConnectionStore((state) => state.status);
   const reconnectAttempts = useConnectionStore((state) => state.reconnectAttempts);
   const endpointUrl = useConnectionSettingsStore((s) => s.endpointUrl);
+  const { mode } = useMode();
   const { connectionRtt } = useRpcLatency();
   const { dotClassName, label } = getConnectionIndicator(status);
   const displayedSessionCount = serverSessionCount ?? sessionCount;
   const showRtt = status === "connected" && connectionRtt !== null;
   const reconnectLabel = status === "reconnecting" ? ` (attempt ${reconnectAttempts})` : "";
+  const connectionTarget = mode === "local" ? "Local daemon" : endpointUrl;
 
   return (
     <footer className="flex items-center justify-between border-t border-zinc-800 bg-zinc-900 px-4 py-1.5 text-xs text-zinc-500">
@@ -54,9 +57,9 @@ export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConne
             {label}
             {reconnectLabel}
           </span>
-          {endpointUrl ? (
-            <span className="max-w-48 truncate text-zinc-500" title={endpointUrl}>
-              {endpointUrl}
+          {connectionTarget ? (
+            <span className="max-w-48 truncate text-zinc-500" title={connectionTarget}>
+              {connectionTarget}
             </span>
           ) : null}
           <Settings className="h-3 w-3 text-zinc-600" />
