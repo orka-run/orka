@@ -10,11 +10,11 @@ import {
   loadNoisePublicKey,
   saveNoiseServerPublicKey,
 } from "@orka/core/crypto";
+import { createOrkaClient } from "@orka/client";
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
   createDaemonContext,
-  createRemoteClient,
   startServer,
   loadConfig,
   getOrkaHome,
@@ -323,7 +323,7 @@ function buildRemoteClient(url: string): OrkaService {
         keyId: nodeConfig.noise_key_id,
         publicKeyB64: nodeConfig.noise_static_pubkey,
       };
-      return createRemoteClient({
+      return createOrkaClient({
         url,
         noiseServerKey,
         nodeId: nodeConfig.node_id,
@@ -335,7 +335,7 @@ function buildRemoteClient(url: string): OrkaService {
     const noiseServerKey = loadNoisePublicKey(orkaHome, "server");
     if (noiseServerKey) {
       const nodeId = process.env["ORKA_NODE_ID"] ?? "";
-      return createRemoteClient({
+      return createOrkaClient({
         url,
         noiseServerKey,
         nodeId,
@@ -346,7 +346,7 @@ function buildRemoteClient(url: string): OrkaService {
     // No Noise key available — fall back to plaintext
     console.error("warning: no Noise server key found, connecting without encryption");
   }
-  return createRemoteClient(url);
+  return createOrkaClient(url);
 }
 
 // svc is initialized lazily — all commands go through the daemon via RPC.

@@ -162,7 +162,7 @@ describe("WsTransport", () => {
       count: 1,
     });
     const rpcSpan = exporter.getFinishedSpans().find(
-      (span) => span.name === "orka.dashboard.rpc" && span.attributes["orka.method"] === "listSessions",
+      (span) => span.name === "orka.client.rpc" && span.attributes["orka.method"] === "listSessions",
     );
     expect(rpcSpan).toBeDefined();
     expect(rpcSpan?.attributes["orka.status"]).toBe("ok");
@@ -197,7 +197,7 @@ describe("WsTransport", () => {
     expect(request.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
 
     const rpcSpan = exporter.getFinishedSpans().find(
-      (span) => span.name === "orka.dashboard.rpc" && span.attributes["orka.method"] === "listSessions",
+      (span) => span.name === "orka.client.rpc" && span.attributes["orka.method"] === "listSessions",
     );
     expect(rpcSpan?.attributes["orka.status"]).toBe("timeout");
     expect(rpcLatencyStore.getMethodStats("listSessions")).toMatchObject({
@@ -377,7 +377,7 @@ describe("WsTransport", () => {
 
     transport.disconnect();
 
-    const connectionSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.dashboard.ws");
+    const connectionSpan = exporter.getFinishedSpans().find((span) => span.name === "orka.client.ws");
     const handledEvent = connectionSpan?.events.find((event) => event.name === "push.handlers_completed");
 
     expect(connectionSpan).toBeDefined();

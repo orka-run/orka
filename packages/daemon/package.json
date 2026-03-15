@@ -5,6 +5,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
+    "@orka/client": "workspace:*",
     "@orka/core": "workspace:*",
     "@noble/ciphers": "^2.1.1",
     "@noble/hashes": "^2.0.1",

@@ -7,9 +7,9 @@ import {
   PROTOCOL_VERSION,
   PushChannelSchema,
   PushControlRequestSchema,
-  ReconnectStrategy,
   canonicalTransportOrigin,
 } from "@orka/core";
+import { ReconnectStrategy } from "@orka/client";
 import type { PushChannel, DataFrame } from "@orka/core";
 import { trace } from "@opentelemetry/api";
 import { ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";

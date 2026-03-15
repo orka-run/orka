@@ -2,7 +2,7 @@ import { propagation, trace } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { createRemoteClient } from "./remote-client";
+import { createOrkaClient } from "./orka-client";
 
 class MockWebSocket {
   static readonly CONNECTING = 0;
@@ -76,9 +76,9 @@ afterEach(async () => {
   propagation.disable();
 });
 
-describe("RemoteClient", () => {
+describe("OrkaClient", () => {
   test("includes traceparent in JSON-RPC requests", async () => {
-    const client = createRemoteClient("ws://orka.test");
+    const client = createOrkaClient("ws://orka.test");
     const resultPromise = client.listSessions();
 
     const socket = latestSocket();

@@ -19,13 +19,15 @@ import type {
   StartPairingParams,
   StartPairingResult,
 } from "@orka/core";
-import { context, propagation, trace } from "@opentelemetry/api";
-import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent, canonicalTransportOrigin } from "@orka/core";
-import { type NoiseKeyInfo } from "@orka/core/crypto";
-import { NoiseClientTransport } from "@orka/core/transport/noise-transport";
-import { withSpan } from "./tracing";
+import { trace } from "@opentelemetry/api";
+import { RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent, canonicalTransportOrigin } from "@orka/core";
+import type { NoiseKeyInfo } from "@orka/core/crypto";
+import type { NoiseClientTransport } from "@orka/core/transport/noise-transport";
+import { withSpan, injectSpanContext } from "./tracing";
+import { ReconnectStrategy } from "./reconnect";
+import { driveNoiseHandshake } from "./noise-handshake";
 
-export interface RemoteClientOptions {
+export interface OrkaClientOptions {
   /** WebSocket URL of the daemon or relay */
   url: string;
   /** Noise transport key info for the server. If provided, uses Noise NK encryption. */
@@ -43,7 +45,7 @@ interface PendingRequest {
   method: string;
 }
 
-class RemoteClient implements OrkaService {
+class OrkaClient implements OrkaService {
   private ws: WebSocket | null = null;
   private pending = new Map<string, PendingRequest>();
   private nextId = 1;
@@ -55,7 +57,7 @@ class RemoteClient implements OrkaService {
   private noiseTransport: NoiseClientTransport | null = null;
   private backoff = new ReconnectStrategy();
 
-  constructor(opts: RemoteClientOptions) {
+  constructor(opts: OrkaClientOptions) {
     this.url = opts.url;
     this.noiseServerKey = opts.noiseServerKey;
     this.nodeId = opts.nodeId;
@@ -84,7 +86,7 @@ class RemoteClient implements OrkaService {
 
           if (this.useNoise) {
             // Start Noise handshake
-            this.driveNoiseHandshake(ws).then(resolve).catch(reject);
+            this.performNoiseHandshake(ws).then(resolve).catch(reject);
           } else {
             resolve();
           }
@@ -113,11 +115,7 @@ class RemoteClient implements OrkaService {
     });
   }
 
-  /**
-   * Drive the Noise NK handshake to completion.
-   * This sends client_hello and processes server responses until SECURE state.
-   */
-  private driveNoiseHandshake(ws: WebSocket): Promise<void> {
+  private performNoiseHandshake(ws: WebSocket): Promise<void> {
     return withSpan("orka.rpc.noise_handshake", {
       "orka.transport.side": "client",
     }, async (span) => {
@@ -125,64 +123,15 @@ class RemoteClient implements OrkaService {
         throw new Error("Noise server key not configured");
       }
 
-      const transport = new NoiseClientTransport({
-        nodeId: this.nodeId ?? "",
-        expectedKeyId: this.noiseServerKey.keyId,
-        remoteStaticPubkey: this.noiseServerKey.publicKey,
-        relayOrigin: this.relayOrigin,
-      });
-      this.noiseTransport = transport;
-
       span.addEvent("noise.client_hello_sent");
 
-      return new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error("Noise handshake timeout"));
-        }, 10_000);
-        timeout.unref();
-
-        // Save original onmessage and replace with handshake handler
-        const originalOnMessage = ws.onmessage;
-
-        ws.onmessage = (event) => {
-          const raw = typeof event.data === "string" ? event.data : "";
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(raw);
-          } catch {
-            return;
-          }
-
-          // Skip non-handshake messages (e.g. push notifications like server.welcome)
-          // during the handshake phase. Handshake messages have a "t" field.
-          const msg = parsed as Record<string, unknown>;
-          if (!msg || typeof msg["t"] !== "string") {
-            return;
-          }
-
-          try {
-            const responses = transport.processMessage(parsed);
-            for (const resp of responses) {
-              ws.send(JSON.stringify(resp));
-            }
-
-            if (transport.isSecure) {
-              clearTimeout(timeout);
-              span.addEvent("noise.handshake_complete");
-              // Restore normal message handler
-              ws.onmessage = originalOnMessage;
-              resolve();
-            }
-          } catch (err) {
-            clearTimeout(timeout);
-            reject(err instanceof Error ? err : new Error(String(err)));
-          }
-        };
-
-        // Send client_hello
-        const clientHello = transport.getClientHello();
-        ws.send(JSON.stringify(clientHello));
+      this.noiseTransport = await driveNoiseHandshake(ws, {
+        nodeId: this.nodeId ?? "",
+        serverKey: this.noiseServerKey,
+        relayOrigin: this.relayOrigin,
       });
+
+      span.addEvent("noise.handshake_complete");
     });
   }
 
@@ -261,7 +210,7 @@ class RemoteClient implements OrkaService {
           ...(params !== undefined ? { params } : {}),
         };
         const traceCarrier: { traceparent?: string } = {};
-        propagation.inject(trace.setSpan(context.active(), span), traceCarrier);
+        injectSpanContext(span, traceCarrier);
         if (traceCarrier.traceparent) {
           req.traceparent = traceCarrier.traceparent;
         }
@@ -445,9 +394,9 @@ class RemoteClient implements OrkaService {
   }
 }
 
-export function createRemoteClient(urlOrOpts: string | RemoteClientOptions): RemoteClient {
+export function createOrkaClient(urlOrOpts: string | OrkaClientOptions): OrkaClient {
   const opts = typeof urlOrOpts === "string" ? { url: urlOrOpts } : urlOrOpts;
-  return new RemoteClient(opts);
+  return new OrkaClient(opts);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

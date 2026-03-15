@@ -1,6 +1,6 @@
 /**
  * Exponential backoff with jitter for WebSocket reconnection.
- * Used by both daemon (node → relay) and CLI (client → relay/daemon).
+ * Used by both daemon (node -> relay) and CLI (client -> relay/daemon).
  */
 export class ReconnectStrategy {
   private attempt = 0;

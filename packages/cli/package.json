@@ -6,6 +6,7 @@
     "orka": "src/index.ts"
   },
   "dependencies": {
+    "@orka/client": "workspace:*",
     "@orka/core": "workspace:*",
     "@orka/daemon": "workspace:*",
     "@orka/relay": "workspace:*",
