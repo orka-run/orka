@@ -242,6 +242,11 @@ export class RelayState {
     return clients;
   }
 
+  /** Get the total number of active transport bindings. */
+  getTransportBindingCount(): number {
+    return this.transportClients.size;
+  }
+
   // --- Stats ---
 
   getAccountStats(accountId: string): AccountStats {

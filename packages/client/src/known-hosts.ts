@@ -29,7 +29,13 @@ export function loadKnownHosts(orkaHome: string): Map<string, KnownHostEntry> {
   const result = new Map<string, KnownHostEntry>();
   if (!existsSync(filePath)) return result;
 
-  const content = readFileSync(filePath, "utf-8");
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch (err) {
+    console.error(`[tofu] failed to read ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    return result;
+  }
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
@@ -57,24 +63,28 @@ export function saveKnownHost(
   const pubKeyB64 = Buffer.from(publicKey).toString("base64url");
   const line = `${host} ${keyId} ${pubKeyB64}\n`;
 
-  if (!existsSync(filePath)) {
-    writeFileSync(filePath, `# orka known_hosts — TOFU key pinning\n${line}`, { mode: 0o600 });
-  } else {
-    // Remove any existing entry for this host before appending
-    const content = readFileSync(filePath, "utf-8");
-    const lines = content.split("\n");
-    const filtered = lines.filter((l) => {
-      const trimmed = l.trim();
-      if (!trimmed || trimmed.startsWith("#")) return true;
-      const parts = trimmed.split(/\s+/);
-      return parts[0] !== host;
-    });
-    // Remove trailing empty lines, then append new entry
-    while (filtered.length > 0 && filtered[filtered.length - 1] === "") {
-      filtered.pop();
+  try {
+    if (!existsSync(filePath)) {
+      writeFileSync(filePath, `# orka known_hosts — TOFU key pinning\n${line}`, { mode: 0o600 });
+    } else {
+      // Remove any existing entry for this host before appending
+      const content = readFileSync(filePath, "utf-8");
+      const lines = content.split("\n");
+      const filtered = lines.filter((l) => {
+        const trimmed = l.trim();
+        if (!trimmed || trimmed.startsWith("#")) return true;
+        const parts = trimmed.split(/\s+/);
+        return parts[0] !== host;
+      });
+      // Remove trailing empty lines, then append new entry
+      while (filtered.length > 0 && filtered[filtered.length - 1] === "") {
+        filtered.pop();
+      }
+      filtered.push(line);
+      writeFileSync(filePath, filtered.join("\n"), { mode: 0o600 });
     }
-    filtered.push(line);
-    writeFileSync(filePath, filtered.join("\n"), { mode: 0o600 });
+  } catch (err) {
+    console.error(`[tofu] failed to save known host ${host}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -85,7 +95,13 @@ export function lookupKnownHost(orkaHome: string, host: string): KnownHostEntry 
   const filePath = knownHostsPath(orkaHome);
   if (!existsSync(filePath)) return null;
 
-  const content = readFileSync(filePath, "utf-8");
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch (err) {
+    console.error(`[tofu] failed to read ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;

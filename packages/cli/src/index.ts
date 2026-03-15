@@ -385,6 +385,7 @@ async function buildRemoteClient(url: string): Promise<OrkaService> {
 
     if (knownEntry) {
       // Host is known — verify key hasn't changed by fetching from /health
+      console.error(`[tofu] host key verified: ${knownEntry.keyId.slice(0, 16)}`);
       const remoteKey = await fetchServerKeyFromHealth(url);
       if (remoteKey && remoteKey.keyId !== knownEntry.keyId) {
         // Key mismatch!

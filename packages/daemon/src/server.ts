@@ -189,6 +189,13 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
               if (payload.kind === "push_control") {
                 const controlMessage = PushControlRequestSchema.safeParse(payload.push_control);
                 if (controlMessage.success) {
+                  const activeSpan = trace.getActiveSpan();
+                  if (activeSpan) {
+                    activeSpan.addEvent("noise.push_control_decrypted", {
+                      "orka.push_control.type": controlMessage.data.type,
+                      "orka.push_control.channels": controlMessage.data.channels.length,
+                    });
+                  }
                   const knownChannels = controlMessage.data.channels.filter(
                     (ch): ch is PushChannel => PushChannelSchema.safeParse(ch).success,
                   );
@@ -241,14 +248,24 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
               // Register encoder so PushHub encrypts push messages for this client
               pushHub.setClientEncoder(ws, (payload) => {
                 const push = JSON.parse(payload) as Record<string, unknown>;
-                const encFrame = transport.encryptPush(push);
-                return JSON.stringify(encFrame);
+                try {
+                  const encFrame = transport.encryptPush(push);
+                  return JSON.stringify(encFrame);
+                } catch (err) {
+                  const tracer = getTracer();
+                  const errSpan = tracer.startSpan("orka.push.encrypt_error", {
+                    attributes: { "orka.error": err instanceof Error ? err.message : String(err) },
+                  });
+                  errSpan.end();
+                  throw err;
+                }
               });
 
               const tracer = getTracer();
               const hsSpan = tracer.startSpan("orka.noise.handshake_complete", {
                 attributes: { "orka.transport.side": "server" },
               });
+              hsSpan.addEvent("noise.push_encoder_registered");
               hsSpan.end();
               void withSpan("orka.push.welcome", {}, async () => {
                 const sessions = await svc.listSessions();
@@ -497,8 +514,16 @@ function registerWithRelay(
               protocolVersion: PROTOCOL_VERSION,
               capabilities,
             };
-            const welcomeFrame = transport.encryptPush(welcome);
-            sendBack(welcomeFrame as Record<string, unknown>);
+            try {
+              const welcomeFrame = transport.encryptPush(welcome);
+              sendBack(welcomeFrame as Record<string, unknown>);
+            } catch (err) {
+              const tracer = getTracer();
+              const errSpan = tracer.startSpan("orka.push.encrypt_error", {
+                attributes: { "orka.error": err instanceof Error ? err.message : String(err) },
+              });
+              errSpan.end();
+            }
           }
           return;
         }

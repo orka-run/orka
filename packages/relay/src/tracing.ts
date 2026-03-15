@@ -125,6 +125,7 @@ export const metrics = {
   activeConnections: new SimpleGauge(),
   registeredNodes: new SimpleGauge(),
   activeAccounts: new SimpleGauge(),
+  activeTransportSessions: new SimpleGauge(),
 };
 
 // --- File Span Exporter ---

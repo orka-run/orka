@@ -396,6 +396,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
                   clientWs.send(JSON.stringify({ t: "transport_error", code: "node_disconnected" }));
                 } catch { /* client gone */ }
                 state.removeTransportClient(clientWs);
+                metrics.activeTransportSessions.dec({ account_id: data.accountId });
               }
               // Fail pending JSON-RPC requests for this node
               const failed = state.failRequestsForNode(data.accountId, data.nodeId!);
@@ -414,6 +415,10 @@ export function startRelay(opts: RelayOptions): RelayHandle {
               meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
             } else {
               // Clean up transport binding if any
+              const clientBinding = state.getTransportBinding(ws as ServerWebSocket<SocketData>);
+              if (clientBinding) {
+                metrics.activeTransportSessions.dec({ account_id: data.accountId });
+              }
               state.removeTransportClient(ws as ServerWebSocket<SocketData>);
               state.failRequestsForClient(ws as ServerWebSocket<SocketData>);
               state.removeClient(data.accountId, ws as ServerWebSocket<SocketData>);
@@ -726,17 +731,26 @@ function handleTransportInit(
   const nodeId = parsed.node_id;
   if (!nodeId || typeof nodeId !== "string") {
     ws.send(JSON.stringify({ t: "transport_error", code: "missing_node_id" }));
+    metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_error" });
     return;
   }
 
   const node = state.getNode(data.accountId, nodeId);
   if (!node) {
     ws.send(JSON.stringify({ t: "transport_error", code: "node_not_found" }));
+    metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_error" });
     return;
   }
 
   // Create transport binding (client ↔ node)
   const relayCid = state.bindTransportClient(ws, data.accountId, nodeId);
+  metrics.activeTransportSessions.inc({ account_id: data.accountId });
+
+  withSpanSync("orka.relay.transport.bind", {
+    "orka.node.id": nodeId,
+    "orka.account.id": data.accountId,
+    "orka.relay.cid": relayCid,
+  }, () => {});
 
   // Add _rc and forward to node
   parsed._rc = relayCid;
@@ -762,6 +776,7 @@ function forwardClientTransport(
   const node = state.getNode(data.accountId, binding.nodeId);
   if (!node) {
     ws.send(JSON.stringify({ t: "transport_error", code: "node_disconnected" }));
+    metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_error" });
     return;
   }
 
