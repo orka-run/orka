@@ -178,6 +178,21 @@ async function startDaemonBackground(): Promise<void> {
     await new Promise((r) => setTimeout(r, 100));
     if (await isDaemonRunning()) return;
   }
+
+  // Read last 20 lines of daemon.log for diagnostics
+  try {
+    if (existsSync(logPath)) {
+      const logContent = readFileSync(logPath, "utf-8");
+      const lines = logContent.split("\n");
+      const tail = lines.slice(-20).join("\n").trim();
+      if (tail) {
+        console.error("\n--- daemon.log (last 20 lines) ---");
+        console.error(tail);
+        console.error("--- end daemon.log ---\n");
+      }
+    }
+  } catch { /* ignore read errors */ }
+
   throw new Error("Failed to start daemon — timed out waiting for health check. Check " + logPath);
 }
 
@@ -648,6 +663,7 @@ const spawnCmd = command({
     env: multioption({ type: array(str), long: "env", description: "Environment variable to pass through (repeatable KEY=VALUE)" }),
     reasoningEffort: option({ type: optional(str), long: "reasoning-effort", description: "Reasoning effort level (low, medium, high)" }),
     autoMerge: flag({ long: "auto-merge", description: "Auto-merge worktree on successful completion" }),
+    watch: flag({ long: "watch", short: "w", description: "Stream session output after spawn (Ctrl+C stops streaming, not the session)" }),
     tag: multioption({ type: array(str), long: "tag", description: "Tag the session (repeatable)" }),
     parent: option({ type: optional(str), long: "parent", description: "Parent session ID (creates child session)" }),
     words: restPositionals({ type: str, displayName: "prompt" }),
@@ -711,6 +727,39 @@ const spawnCmd = command({
     console.log(`  log:      ${session.logFile}`);
     if (args.tag.length > 0) {
       console.log(`  tags:     ${args.tag.join(", ")}`);
+    }
+
+    if (args.watch) {
+      console.log("");
+      console.log("streaming output (Ctrl+C to stop streaming, session continues)...");
+      console.log("");
+      let offset = 0;
+      const formatter = createLogChunkFormatter();
+      while (true) {
+        try {
+          const output = await svc.captureOutput(session.id);
+          if (output.length < offset) {
+            offset = 0;
+            formatter.reset();
+          }
+          if (output.length > offset) {
+            formatter.push(output.slice(offset));
+            offset = output.length;
+          }
+        } catch {
+          break;
+        }
+        if (!(await svc.isAlive(session.id))) break;
+        await Bun.sleep(500);
+      }
+      // Final read after session ended
+      try {
+        const output = await svc.captureOutput(session.id);
+        if (output.length > offset) {
+          formatter.push(output.slice(offset));
+        }
+      } catch { /* ignore */ }
+      formatter.flush();
     }
   }),
 });
@@ -973,14 +1022,47 @@ const logsCmd = command({
 
 const stopCmd = command({
   name: "stop",
-  description: "Stop a running session",
+  description: "Stop a running session (or all sessions with --tag)",
   args: {
     sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    tag: option({ type: optional(str), long: "tag", description: "Stop all running sessions with this tag" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
-  handler: async ({ sessionId }) => runCliCommand("stop", async () => {
+  handler: async ({ sessionId, tag }) => runCliCommand("stop", async () => {
+    if (tag) {
+      const sessions = await svc.listSessions({ tag });
+      const running = sessions.filter((s) => s.status === "running" || s.status === "preparing");
+      if (running.length === 0) {
+        console.log(`no running sessions with tag "${tag}"`);
+        return;
+      }
+
+      // Confirm before batch stop
+      process.stdout.write(`Stop ${running.length} session(s) with tag "${tag}"? [y/N] `);
+      const answer = await new Promise<string>((resolve) => {
+        process.stdin.setEncoding("utf-8");
+        process.stdin.once("data", (data) => resolve(String(data).trim().toLowerCase()));
+      });
+      if (answer !== "y" && answer !== "yes") {
+        console.log("aborted");
+        return;
+      }
+
+      for (const s of running) {
+        const children = await svc.getChildSessions(s.id);
+        const runningChildren = children.filter((c) => c.status === "running");
+        for (const child of runningChildren) {
+          await svc.stop(child.id);
+          console.log(`stopped child session ${child.id}`);
+        }
+        await svc.stop(s.id);
+        console.log(`stopped session ${s.id}`);
+      }
+      return;
+    }
+
     if (!sessionId) {
-      fail("usage: orka stop <session-id>");
+      fail("usage: orka stop <session-id> | orka stop --tag <tag>");
     }
 
     const session = await findSession(sessionId);
@@ -1175,23 +1257,25 @@ const waitCmd = command({
     { description: "Wait for specific sessions", command: "orka wait sess-abc sess-def" },
     { description: "Wait for all running sessions", command: "orka wait --all" },
     { description: "Wait for all sessions in a project", command: "orka wait --all --project myapp" },
+    { description: "Wait for all sessions with a tag", command: "orka wait --tag migration" },
   ],
   args: {
     all: flag({ long: "all", description: "Wait for all running sessions" }),
     verbose: flag({ long: "verbose", short: "v", description: "Show result preview for each session" }),
     project: option({ type: optional(str), long: "project", description: "Only wait for sessions in this project" }),
+    tag: option({ type: optional(str), long: "tag", description: "Wait for all running sessions with this tag" }),
     ids: restPositionals({ type: str, displayName: "session-id" }),
   },
-  handler: async ({ all, verbose, project, ids }) => runCliCommand("wait", async () => {
-    if (ids.length === 0 && !all) {
-      fail("usage: orka wait <session-id...> | --all [--project <name>]");
+  handler: async ({ all, verbose, project, tag, ids }) => runCliCommand("wait", async () => {
+    if (ids.length === 0 && !all && !tag) {
+      fail("usage: orka wait <session-id...> | --all [--project <name>] | --tag <tag>");
     }
 
     const terminalStatuses = new Set(["completed", "failed", "cancelled", "interrupted"]);
     let targets: string[];
 
-    if (all) {
-      let running = (await svc.listSessions()).filter((s) => !terminalStatuses.has(s.status));
+    if (all || tag) {
+      let running = (await svc.listSessions(tag ? { tag } : undefined)).filter((s) => !terminalStatuses.has(s.status));
       if (project) {
         const resolved = resolveProject(project);
         running = running.filter((s) =>
@@ -1200,7 +1284,7 @@ const waitCmd = command({
       }
       targets = running.map((s) => s.id);
       if (targets.length === 0) {
-        console.log("no running sessions to wait for");
+        console.log(tag ? `no running sessions with tag "${tag}"` : "no running sessions to wait for");
         return;
       }
     } else {
@@ -1504,12 +1588,40 @@ const mergeCmd = command({
   description: "Merge session worktree branch into current branch (auto-cleans worktree)",
   args: {
     sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    tag: option({ type: optional(str), long: "tag", description: "Merge all completed sessions with this tag" }),
     noCleanup: flag({ long: "no-cleanup", description: "Keep worktree and branch after merge" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
-  handler: async ({ sessionId, noCleanup }) => runCliCommand("merge", async () => {
+  handler: async ({ sessionId, tag, noCleanup }) => runCliCommand("merge", async () => {
+    if (tag) {
+      const sessions = await svc.listSessions({ tag });
+      const completed = sessions.filter((s) => s.status === "completed");
+      if (completed.length === 0) {
+        console.log(`no completed sessions with tag "${tag}"`);
+        return;
+      }
+
+      let merged = 0;
+      let failed = 0;
+      for (const s of completed) {
+        try {
+          const { branch, commits, cleaned } = await svc.merge(s.id, !noCleanup);
+          console.log(`merged ${commits} commit(s) from ${branch} (${s.id})`);
+          if (cleaned) {
+            console.log(`  cleaned up worktree and branch ${branch}`);
+          }
+          merged++;
+        } catch (e: any) {
+          console.error(`  failed to merge ${s.id}: ${e.message}`);
+          failed++;
+        }
+      }
+      console.log(`\n${merged} merged, ${failed} failed out of ${completed.length} session(s)`);
+      return;
+    }
+
     if (!sessionId) {
-      fail("usage: orka merge <session-id> [--no-cleanup]");
+      fail("usage: orka merge <session-id> [--no-cleanup] | orka merge --tag <tag>");
     }
 
     const session = await findSession(sessionId);
@@ -2909,15 +3021,47 @@ function sinceLabel(value: string): string {
 
 // --- Helpers ---
 
+/**
+ * Resolve session shorthands: "last", "@last", "@1", "@2", etc.
+ * Returns the resolved session ID, or the input unchanged if not a shorthand.
+ */
+async function resolveSessionId(input: string): Promise<string> {
+  const lower = input.toLowerCase();
+  if (lower === "last" || lower === "@last") {
+    const sessions = await svc.listSessions();
+    if (sessions.length === 0) {
+      fail("no sessions found");
+    }
+    return sessions[0]!.id;
+  }
+
+  const nthMatch = input.match(/^@(\d+)$/);
+  if (nthMatch) {
+    const n = parseInt(nthMatch[1]!, 10);
+    if (n < 1) {
+      fail("session index must be >= 1 (e.g. @1 for most recent)");
+    }
+    const sessions = await svc.listSessions();
+    if (n > sessions.length) {
+      fail(`only ${sessions.length} session(s) exist, requested @${n}`);
+    }
+    return sessions[n - 1]!.id;
+  }
+
+  return input;
+}
+
 async function findSession(query: string) {
-  const exact = await svc.getSession(query);
+  const resolved = await resolveSessionId(query);
+
+  const exact = await svc.getSession(resolved);
   if (exact) return exact;
 
   const all = await svc.listSessions();
-  const matches = all.filter((s) => s.id.includes(query));
+  const matches = all.filter((s) => s.id.includes(resolved));
   if (matches.length === 1) return matches[0] ?? null;
   if (matches.length > 1) {
-    console.error(`ambiguous session id "${query}", matches:`);
+    console.error(`ambiguous session id "${resolved}", matches:`);
     for (const m of matches) console.error(`  ${m.id}`);
     process.exit(1);
   }
