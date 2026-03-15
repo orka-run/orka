@@ -11,6 +11,7 @@ export type {
   ProtocolMismatchKind,
   ProtocolMismatchInfo,
   ProtocolMismatchHandler,
+  NoiseConfig,
   WsTransportOptions,
 } from "./ws-transport";
 

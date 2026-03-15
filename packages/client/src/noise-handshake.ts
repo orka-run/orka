@@ -27,7 +27,10 @@ export function driveNoiseHandshake(
     const timeout = setTimeout(() => {
       reject(new Error("Noise handshake timeout"));
     }, opts.timeoutMs ?? 10_000);
-    timeout.unref();
+    // unref() is Node/Bun only — not available in browsers
+    if (typeof timeout === "object" && typeof timeout.unref === "function") {
+      timeout.unref();
+    }
 
     const originalOnMessage = ws.onmessage;
 

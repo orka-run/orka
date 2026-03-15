@@ -1,12 +1,15 @@
 // Attribution: WsTransport design inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData } from "@orka/core";
+import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData, DataFrame } from "@orka/core";
 import { isProtocolCompatible, MethodNotFoundError, PROTOCOL_VERSION_RANGE, RPC_METHOD_NOT_FOUND } from "@orka/core";
+import type { NoiseKeyInfo } from "@orka/core/crypto";
+import type { NoiseClientTransport } from "@orka/core/transport/noise-transport";
 import type { Span } from "@opentelemetry/api";
 import {
   finishSpan,
   injectSpanContext,
   startSpan,
 } from "./tracing";
+import { driveNoiseHandshake } from "./noise-handshake";
 
 type RpcResponseEnvelope = RpcResponse;
 
@@ -46,10 +49,17 @@ export interface ProtocolMismatchInfo {
 }
 export type ProtocolMismatchHandler = (info: ProtocolMismatchInfo) => void;
 
+export interface NoiseConfig {
+  nodeId: string;
+  serverKey: NoiseKeyInfo;
+  relayOrigin?: string;
+}
+
 export interface WsTransportOptions {
   timeout?: number;
   maxReconnectDelay?: number;
   onRpcComplete?: (info: RpcCompletionInfo) => void;
+  noiseConfig?: NoiseConfig;
 }
 
 function now(): number {
@@ -75,6 +85,8 @@ export class WsTransport {
   private channelTransformers = new Map<string, PushDataTransform>();
   private serverCapabilities: ServerCapabilities | null = null;
   private shouldReconnect = false;
+  private noiseTransport: NoiseClientTransport | null = null;
+  private noiseHandshaking = false;
   private connectionSpan: Span | null = null;
   private connectionStartedAt = 0;
   private messagesSent = 0;
@@ -122,11 +134,12 @@ export class WsTransport {
         "ws.connect_duration_ms": connectDurationMs,
       });
       this.connectionSpan?.setAttribute("ws.connect_duration_ms", connectDurationMs);
-      this.reconnectDelay = 500;
-      this.reconnectAttempts = 0;
-      this.setState("connected");
-      this.syncSubscriptions();
-      this.flushOutbox();
+
+      if (this.options?.noiseConfig) {
+        this.performNoiseHandshake(ws);
+      } else {
+        this.onConnectionReady();
+      }
     };
 
     ws.onmessage = (event) => {
@@ -188,6 +201,8 @@ export class WsTransport {
     }
 
     this.outbox = [];
+    this.noiseTransport = null;
+    this.noiseHandshaking = false;
     this.rejectAllPending(new Error("Connection closed"));
     this.endConnectionSpan("disconnected");
     this.reconnectDelay = 500;
@@ -329,12 +344,60 @@ export class WsTransport {
     return this.state;
   }
 
+  private performNoiseHandshake(ws: WebSocket): void {
+    this.noiseHandshaking = true;
+    const config = this.options!.noiseConfig!;
+    this.connectionSpan?.addEvent("noise.handshake_start");
+
+    driveNoiseHandshake(ws, {
+      nodeId: config.nodeId,
+      serverKey: config.serverKey,
+      relayOrigin: config.relayOrigin ?? "",
+    }).then((transport) => {
+      if (this.ws !== ws) return; // stale connection
+      this.noiseTransport = transport;
+      this.noiseHandshaking = false;
+      this.connectionSpan?.addEvent("noise.handshake_complete");
+      this.onConnectionReady();
+    }).catch((err) => {
+      this.noiseHandshaking = false;
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.connectionSpan?.addEvent("noise.handshake_failed", {
+        "noise.error": error.message,
+      });
+      this.connectionSpan?.recordException(error);
+      ws.close();
+    });
+  }
+
+  private onConnectionReady(): void {
+    this.reconnectDelay = 500;
+    this.reconnectAttempts = 0;
+    this.setState("connected");
+    this.syncSubscriptions();
+    this.flushOutbox();
+  }
+
   private handleMessage(raw: string): void {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch {
       return;
+    }
+
+    // Noise decryption: unwrap encrypted data frames
+    if (this.noiseTransport?.isSecure) {
+      const frame = parsed as Record<string, unknown>;
+      if (frame["t"] === "data" && typeof frame["ct"] === "string") {
+        try {
+          parsed = this.noiseTransport.decryptData(frame as DataFrame);
+        } catch {
+          return;
+        }
+      } else {
+        return; // Non-data frames ignored in Noise mode
+      }
     }
 
     if (this.isPushEnvelope(parsed)) {
@@ -455,6 +518,9 @@ export class WsTransport {
   }
 
   private handleClose(): void {
+    this.noiseTransport = null;
+    this.noiseHandshaking = false;
+
     for (const [id, pending] of this.pending) {
       if (!pending.sent) {
         continue;
@@ -525,7 +591,13 @@ export class WsTransport {
     }
 
     this.messagesSent++;
-    this.ws.send(payload);
+    if (this.noiseTransport?.isSecure) {
+      const rpc = JSON.parse(payload);
+      const frame = this.noiseTransport.encryptRpc(rpc);
+      this.ws.send(JSON.stringify(frame));
+    } else {
+      this.ws.send(payload);
+    }
     const pending = this.pending.get(id);
     if (pending) {
       pending.sent = true;
@@ -539,7 +611,13 @@ export class WsTransport {
     }
 
     this.messagesSent++;
-    this.ws.send(JSON.stringify({ type, channels }));
+    const msg = { type, channels };
+    if (this.noiseTransport?.isSecure) {
+      const frame = this.noiseTransport.encryptRpc(msg);
+      this.ws.send(JSON.stringify(frame));
+    } else {
+      this.ws.send(JSON.stringify(msg));
+    }
   }
 
   private rejectAllPending(error: Error): void {
@@ -567,7 +645,7 @@ export class WsTransport {
   }
 
   private isOpen(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.ws?.readyState === WebSocket.OPEN && !this.noiseHandshaking;
   }
 
   private setState(nextState: ConnectionState): void {
