@@ -217,8 +217,9 @@ export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
 const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
 const TRACE_FILE_MAX_COMPRESSED = 5; // Keep up to 5 compressed archives
 
+// TODO: use streaming compression (Bun.file(src).stream() → zstd transform → Bun.write(dst))
+// to avoid reading entire 50MB file into memory at once
 function compressWithZstdAsync(src: string, dst: string): void {
-  // Fire-and-forget: read, compress, write, remove source — all async to avoid blocking event loop
   Bun.file(src).arrayBuffer().then((buf) =>
     Bun.zstdCompress(new Uint8Array(buf)),
   ).then((compressed) => {
