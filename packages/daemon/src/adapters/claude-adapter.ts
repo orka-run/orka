@@ -698,7 +698,10 @@ function emitClaudeEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: Pr
 }
 
 function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
-  const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json", "--permission-mode", "auto"];
+  // Background sessions run in isolated worktrees — bypass all permission checks.
+  // Interactive sessions use "auto" which still prompts for some operations.
+  const permissionMode = input.interactive ? "auto" : "bypassPermissions";
+  const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json", "--permission-mode", permissionMode];
 
   if (input.model) {
     command.push("--model", input.model);

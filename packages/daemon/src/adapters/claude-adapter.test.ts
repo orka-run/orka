@@ -192,7 +192,7 @@ describe("ClaudeCodeAdapter", () => {
       "--input-format",
       "stream-json",
       "--permission-mode",
-      "auto",
+      "bypassPermissions",
       "--model",
       "claude-sonnet-4-6",
       "--append-system-prompt",
