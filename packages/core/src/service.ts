@@ -1,4 +1,4 @@
-import type { ChatEntry, NodeInfo, Session, SessionStatus, SpawnRequest, Task } from "./types";
+import type { ChatEntry, NodeInfo, Session, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -95,6 +95,19 @@ export interface StartPairingResult {
   expiresAt: number;
 }
 
+// --- Client-side Pairing Types ---
+
+export interface PairWithNodeParams {
+  pairingCode: string;
+  relayUrl: string;
+  relayToken?: string;
+}
+
+export interface PairWithNodeResult {
+  nodeId: string;
+  nodeName: string;
+}
+
 // --- OrkaService Interface ---
 
 /**
@@ -136,6 +149,11 @@ export interface OrkaService {
 
   // --- Pairing ---
   startPairing(params: StartPairingParams): Promise<StartPairingResult>;
+  pairWithNode(params: PairWithNodeParams): Promise<PairWithNodeResult>;
+  listPairedNodes(): Promise<StoredNode[]>;
+  removePairedNode(params: { nodeId: string }): Promise<void>;
+  connectNode(params: { nodeId: string }): Promise<void>;
+  disconnectNode(params: { nodeId: string }): Promise<void>;
 
   // --- Bulk operations ---
   deleteSessions(ids: string[]): Promise<void>;

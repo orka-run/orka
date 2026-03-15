@@ -17,12 +17,15 @@ import type {
   UsageSummary,
   SpawnRequest,
   Session,
+  StoredNode,
   Task,
   ApprovalRequest,
   ApprovalDecision,
   PushChannel,
   StartPairingParams,
   StartPairingResult,
+  PairWithNodeParams,
+  PairWithNodeResult,
 } from "@orka/core";
 import { generatePairingCode } from "@orka/core/crypto/protocol";
 import { EnrollmentStore } from "./pairing/enrollment-store";
@@ -39,6 +42,7 @@ import {
 import { queryMetricSnapshot, queryTraceLog, withSpan } from "./tracing";
 import { PairingServer } from "./pairing/pairing-server";
 import type { PairMessage } from "@orka/core";
+import { performClientPairing } from "./client-pairing";
 
 export interface PairingConfig {
   /** Node ID for pairing enrollment (e.g. "fra1-gpu-01"). */
@@ -371,6 +375,32 @@ class LocalClient implements OrkaService {
         }
       };
     });
+  }
+
+  async pairWithNode(params: PairWithNodeParams): Promise<PairWithNodeResult> {
+    return performClientPairing(params, {
+      registry: this.ctx.nodeRegistry,
+      remoteNodes: this.ctx.remoteNodes,
+    });
+  }
+
+  async listPairedNodes(): Promise<StoredNode[]> {
+    return this.ctx.nodeRegistry.loadAll();
+  }
+
+  async removePairedNode(params: { nodeId: string }): Promise<void> {
+    this.ctx.remoteNodes.disconnect(params.nodeId);
+    this.ctx.nodeRegistry.remove(params.nodeId);
+  }
+
+  async connectNode(params: { nodeId: string }): Promise<void> {
+    const node = this.ctx.nodeRegistry.load(params.nodeId);
+    if (!node) throw new Error(`Node not found: ${params.nodeId}`);
+    await this.ctx.remoteNodes.connect(node);
+  }
+
+  async disconnectNode(params: { nodeId: string }): Promise<void> {
+    this.ctx.remoteNodes.disconnect(params.nodeId);
   }
 
   /** Get the enrollment store (for use by pairing server handler). */

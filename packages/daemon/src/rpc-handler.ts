@@ -146,6 +146,19 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             return null;
           case "startPairing":
             return svc.startPairing(params);
+          case "pairWithNode":
+            return svc.pairWithNode(params);
+          case "listPairedNodes":
+            return svc.listPairedNodes();
+          case "removePairedNode":
+            await svc.removePairedNode(params);
+            return null;
+          case "connectNode":
+            await svc.connectNode(params);
+            return null;
+          case "disconnectNode":
+            await svc.disconnectNode(params);
+            return null;
           case "getDiff":
             return svc.getDiff(params.sessionId);
           case "merge":
