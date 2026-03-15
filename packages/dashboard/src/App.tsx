@@ -26,6 +26,7 @@ import { loadPairedNode } from "./lib/nodeRegistry";
 import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useConnectionSettingsStore } from "./stores/connectionSettingsStore";
+import { useMode } from "./hooks/useMode";
 import { useNodeStore } from "./stores/nodeStore";
 import { SELECTED_SESSION_KEY, useSessionStore } from "./stores/sessionStore";
 
@@ -361,16 +362,26 @@ function resolveNoiseConfig(pairedNodeId: string | null): NoiseConfig | undefine
 }
 
 export function App() {
+  const { mode } = useMode();
   const endpointUrl = useConnectionSettingsStore((s) => s.endpointUrl);
   const authToken = useConnectionSettingsStore((s) => s.authToken);
   const pairedNodeId = useConnectionSettingsStore((s) => s.pairedNodeId);
-  const effectiveUrl = useMemo(() => getEffectiveUrl(endpointUrl, authToken), [endpointUrl, authToken]);
-  const noiseConfig = useMemo(() => resolveNoiseConfig(pairedNodeId), [pairedNodeId]);
 
-  const transportKey = `${effectiveUrl}::${pairedNodeId ?? ""}`;
+  // Compute transport URL and noise config based on mode
+  const effectiveUrl = useMemo(() => {
+    if (mode === "local") return DEFAULT_DAEMON_URL;
+    return getEffectiveUrl(endpointUrl, authToken);
+  }, [mode, endpointUrl, authToken]);
+
+  const noiseConfig = useMemo(() => {
+    if (mode === "local") return undefined;
+    return resolveNoiseConfig(pairedNodeId);
+  }, [mode, pairedNodeId]);
+
+  const transportKey = `${mode}::${effectiveUrl}::${mode === "hosted" ? (pairedNodeId ?? "") : ""}`;
   const transportRef = useRef<{ key: string; transport: WsTransport } | null>(null);
 
-  // Re-create transport when effective URL or paired node changes
+  // Re-create transport when mode, URL, or paired node changes
   if (!transportRef.current || transportRef.current.key !== transportKey) {
     transportRef.current?.transport.disconnect();
     transportRef.current = { key: transportKey, transport: createTransport(effectiveUrl, noiseConfig) };
