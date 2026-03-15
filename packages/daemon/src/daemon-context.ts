@@ -7,6 +7,8 @@ import { OrchestrationEngine } from "./orchestration/engine";
 import { ProviderAdapterRegistry } from "./provider-registry";
 import { ProviderService } from "./provider-service";
 import { PushHub } from "./push-hub";
+import { createNodeRegistry, type NodeRegistry } from "./node-registry";
+import { createRemoteNodeManager, type RemoteNodeManager } from "./remote-nodes";
 
 /**
  * All daemon-scoped dependencies.
@@ -21,6 +23,8 @@ export interface DaemonContext {
   providerService: ProviderService;
   orchestrationEngine: OrchestrationEngine;
   approvalManager: ApprovalManager;
+  nodeRegistry: NodeRegistry;
+  remoteNodes: RemoteNodeManager;
 }
 
 /**
@@ -49,6 +53,9 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
     getSessionTimeline: (sessionId) => db.getOrchestrationEvents(sessionId),
   });
 
+  const nodeRegistry = createNodeRegistry(home);
+  const remoteNodes = createRemoteNodeManager(nodeRegistry);
+
   return {
     orkaHome: home,
     config,
@@ -58,5 +65,7 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
     providerService,
     orchestrationEngine,
     approvalManager,
+    nodeRegistry,
+    remoteNodes,
   };
 }

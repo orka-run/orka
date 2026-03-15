@@ -22,6 +22,8 @@ export type { ProjectEntry } from "./projects";
 export { getOrkaHome } from "./db";
 export { createNodeRegistry } from "./node-registry";
 export type { NodeRegistry } from "./node-registry";
+export { createRemoteNodeManager } from "./remote-nodes";
+export type { RemoteNodeManager, RemoteNodeHandle } from "./remote-nodes";
 export { formatLog, formatEvent, parseLine } from "./log-formatter";
 export { createDrainableWorker, type DrainableWorker } from "./drainable-worker";
 export * from "./adapters";
