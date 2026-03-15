@@ -111,6 +111,7 @@ export function openRelayDb(dataDir?: string): Database {
   const dbPath = join(dir, DB_FILE);
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
   return db;

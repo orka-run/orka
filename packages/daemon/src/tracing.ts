@@ -36,7 +36,7 @@ import {
 import { ExportResultCode, W3CTraceContextPropagator, type ExportResult } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { getOrkaHome } from "./db";
 
@@ -214,12 +214,37 @@ export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
   return results;
 }
 
+const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
+const TRACE_FILE_MAX_ROTATED = 2; // Keep traces.jsonl, .1, .2
+
+function rotateTraceFileIfNeeded(logFile: string): void {
+  try {
+    const size = statSync(logFile).size;
+    if (size < TRACE_FILE_MAX_BYTES) return;
+  } catch {
+    return; // File doesn't exist yet
+  }
+
+  // Rotate: remove oldest, shift existing, rename current
+  for (let i = TRACE_FILE_MAX_ROTATED; i >= 1; i--) {
+    const src = i === 1 ? logFile : `${logFile}.${i - 1}`;
+    const dst = `${logFile}.${i}`;
+    try {
+      if (i === TRACE_FILE_MAX_ROTATED) {
+        try { unlinkSync(dst); } catch { /* doesn't exist */ }
+      }
+      renameSync(src, dst);
+    } catch { /* source doesn't exist */ }
+  }
+}
+
 function appendTraceLogEntries(entries: TraceLogEntry[]): void {
   if (entries.length === 0) {
     return;
   }
 
   const logFile = getTraceLogPath();
+  rotateTraceFileIfNeeded(logFile);
   const payload = entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
   appendFileSync(logFile, payload);
 }

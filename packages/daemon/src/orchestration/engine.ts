@@ -63,6 +63,11 @@ export class OrchestrationEngine {
 
         if (event.type === "session.exited" && derivedState) {
           emitLifecycleTimingSpan(sessionId, derivedState);
+          // Evict completed session events from in-memory log — they're already persisted to SQLite.
+          // Only evict when both persist and retrieval callbacks are available.
+          if (this.options.persistEvent && this.options.getSessionTimeline) {
+            this.evictSession(sessionId);
+          }
         }
 
         this.options.pushHub?.broadcast("orchestration.event", versionedEvent);
@@ -98,9 +103,14 @@ export class OrchestrationEngine {
   }
 
   getSessionEvents(sessionId: string): OrchestrationEvent[] {
-    return withSpanSync("orka.orchestration.get_session_events", { "orka.session.id": sessionId }, () =>
-      this.log.filter((event) => event.sessionId === sessionId),
-    );
+    return withSpanSync("orka.orchestration.get_session_events", { "orka.session.id": sessionId }, () => {
+      const inMemory = this.log.filter((event) => event.sessionId === sessionId);
+      // If evicted from memory, fall through to persisted timeline
+      if (inMemory.length === 0) {
+        return this.options.getSessionTimeline?.(sessionId) ?? [];
+      }
+      return inMemory;
+    });
   }
 
   getSessionTimeline(sessionId: string): OrchestrationEvent[] {
@@ -126,6 +136,12 @@ export class OrchestrationEngine {
     );
   }
 
+  /** Remove a completed session's events from the in-memory log. */
+  evictSession(sessionId: string): void {
+    this.log = this.log.filter((event) => event.sessionId !== sessionId);
+    this.sessionStatusCache.delete(sessionId);
+  }
+
   private projectSessionState(sessionId: string): DerivedSessionState {
     const projection: SessionProjection = {
       sessionId,
@@ -146,10 +162,10 @@ export class OrchestrationEngine {
     let firstOutputAtMs: number | null = null;
     let sessionExitedAtMs: number | null = null;
 
-    for (const event of this.log) {
-      if (event.sessionId !== sessionId) {
-        continue;
-      }
+    // Use in-memory events if available, otherwise fall through to persisted timeline
+    const events = this.getSessionEvents(sessionId);
+
+    for (const event of events) {
 
       const eventTimestampMs = toTimestampMs(event.timestamp);
 

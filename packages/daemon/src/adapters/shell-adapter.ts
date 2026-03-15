@@ -14,6 +14,7 @@ import { createEvent } from "@orka/core";
 import { buildBackendCommand, buildEnvExports } from "../backends";
 import { getOrkaHome } from "../db";
 import { withSpan } from "../tracing";
+import { buildAgentEnv } from "./env-filter";
 
 const CTRL_C = "\u0003";
 
@@ -113,6 +114,7 @@ export class ShellAdapter implements ProviderAdapter {
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
+          env: buildAgentEnv(input.env),
         });
         span.addEvent("process.spawned", { "orka.command": command });
 

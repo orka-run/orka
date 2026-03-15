@@ -9,6 +9,7 @@ import { ProviderService } from "./provider-service";
 import { PushHub } from "./push-hub";
 import { createNodeRegistry, type NodeRegistry } from "./node-registry";
 import { createRemoteNodeManager, type RemoteNodeManager } from "./remote-nodes";
+import { recoverStaleSessions } from "./orchestrator";
 
 /**
  * All daemon-scoped dependencies.
@@ -56,7 +57,7 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
   const nodeRegistry = createNodeRegistry(home);
   const remoteNodes = createRemoteNodeManager(nodeRegistry, pushHub);
 
-  return {
+  const ctx: DaemonContext = {
     orkaHome: home,
     config,
     db,
@@ -68,4 +69,9 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
     nodeRegistry,
     remoteNodes,
   };
+
+  // Recover sessions left in running/preparing from a previous daemon process
+  recoverStaleSessions(ctx);
+
+  return ctx;
 }

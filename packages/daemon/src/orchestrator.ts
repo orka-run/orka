@@ -168,6 +168,41 @@ export async function reapSessions(): Promise<number> {
   return withSpan("orka.reap", {}, async () => 0);
 }
 
+/**
+ * Detect sessions left in "running" or "preparing" status from a previous daemon
+ * process and mark them as cancelled. Called once on daemon startup.
+ */
+export function recoverStaleSessions(ctx: DaemonContext): number {
+  const staleStatuses: Array<"running" | "preparing"> = ["running", "preparing"];
+  let recovered = 0;
+  const now = new Date().toISOString();
+
+  for (const status of staleStatuses) {
+    const sessions = ctx.db.listSessions(status);
+    for (const session of sessions) {
+      // If there's already a provider handle, it's a live session (shouldn't happen on startup)
+      if (ctx.providerService.getHandle(session.id)) continue;
+
+      ctx.db.updateSessionStatus(session.id, "cancelled", { finishedAt: now });
+      ctx.orchestrationEngine.ingest(session.id, {
+        type: "session.exited",
+        threadId: session.id,
+        eventId: generateId("evt"),
+        createdAt: now,
+        provider: session.backend,
+        payload: { reason: "daemon_restart", exitKind: "error" },
+      });
+      recovered++;
+    }
+  }
+
+  if (recovered > 0) {
+    console.log(`recovered ${recovered} stale session(s) from previous daemon`);
+  }
+
+  return recovered;
+}
+
 /** Stop a session via the provider runtime. */
 export async function stopSession(ctx: DaemonContext, sessionId: string): Promise<void> {
   return withSpan("orka.stop", { "orka.session.id": sessionId }, async (span) => {

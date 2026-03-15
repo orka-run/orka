@@ -12,6 +12,7 @@ import type {
 import type { Span } from "@opentelemetry/api";
 import { createEvent, generateId } from "@orka/core";
 import { withSpan } from "../tracing";
+import { buildAgentEnv } from "./env-filter";
 
 type ClaudeProcess = ReturnType<typeof Bun.spawn>;
 type ClaudeSpawn = typeof Bun.spawn;
@@ -109,8 +110,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const rawEvents = new AsyncEventQueue<RawProviderLine>();
         const turnId = generateId("turn");
         const command = buildClaudeCommand(input);
-        // Remove CLAUDECODE env to prevent nested session detection
-        const spawnEnv = { ...globalThis.process.env, ...input.env };
+        // Filter env to safe vars only, then remove CLAUDECODE to prevent nested session detection
+        const spawnEnv = buildAgentEnv(input.env);
         delete spawnEnv["CLAUDECODE"];
 
         const process = this.spawnProcess(command, {

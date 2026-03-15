@@ -9,6 +9,7 @@ import {
   PushControlRequestSchema,
   canonicalTransportOrigin,
 } from "@orka/core";
+import { statfsSync } from "node:fs";
 import { ReconnectStrategy } from "@orka/client";
 import type { PushChannel, DataFrame, TransportPayload } from "@orka/core";
 import { trace } from "@opentelemetry/api";
@@ -81,11 +82,18 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
 
         // Health check endpoint — includes public key and key_id for client discovery
         if (url.pathname === "/health") {
+          const dbOk = checkDbHealth(ctx);
+          const activeSessions = ctx.db.listSessions("running").length;
+          const diskFree = checkDiskFree(ctx.orkaHome);
+
           const body: Record<string, unknown> = {
-            status: "ok",
+            status: dbOk ? "ok" : "degraded",
             serverVersion: daemonPackageJson.version,
             protocolVersion: PROTOCOL_VERSION,
             capabilities,
+            dbOk,
+            activeSessions,
+            diskFree,
           };
           if (noiseKeyInfo) {
             body["publicKey"] = noiseKeyInfo.publicKeyB64;
@@ -93,6 +101,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
             body["nodeId"] = nodeId;
           }
           return new Response(JSON.stringify(body), {
+            status: dbOk ? 200 : 503,
             headers: { "content-type": "application/json" },
           });
         }
@@ -374,6 +383,13 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
     const logTailer = new LogTailer(svc, pushHub);
     logTailer.start();
 
+    // Clear log tailer offsets when sessions reach terminal status
+    ctx.orchestrationEngine.onEvent((event) => {
+      if (event.type === "session.completed" || event.type === "session.failed" || event.type === "session.cancelled") {
+        logTailer.forget(event.sessionId);
+      }
+    });
+
     // Register cleanup tasks for graceful shutdown
     gracefulShutdown.onShutdown("log-tailer", async () => logTailer.stop());
     gracefulShutdown.onShutdown("notify-clients", async () => {
@@ -398,6 +414,20 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
 
     return { server, gracefulShutdown };
   });
+}
+
+function checkDbHealth(ctx: DaemonContext): boolean {
+  return ctx.db.isHealthy();
+}
+
+function checkDiskFree(orkaHome: string): boolean {
+  try {
+    const stats = statfsSync(orkaHome);
+    const freeBytes = stats.bavail * stats.bsize;
+    return freeBytes > 100 * 1024 * 1024; // > 100MB
+  } catch {
+    return true; // Assume ok if we can't check
+  }
 }
 
 /**
@@ -536,7 +566,7 @@ function registerWithRelay(
         transportSessions.clear();
         const delay = backoff.nextDelay();
         console.log(`relay connection lost, reconnecting in ${Math.round(delay / 1000)}s (attempt ${backoff.attempts})...`);
-        setTimeout(connect, delay);
+        setTimeout(connect, delay).unref();
       };
 
       ws.onerror = () => {

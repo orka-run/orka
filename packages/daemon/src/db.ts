@@ -115,6 +115,7 @@ const MIGRATIONS = [
   { version: 24, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)` },
   { version: 25, sql: `ALTER TABLE sessions ADD COLUMN archived_at TEXT` },
   { version: 26, sql: `ALTER TABLE sessions DROP COLUMN tmux_session_name` },
+  { version: 27, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_archived_at ON sessions(archived_at)` },
 ];
 
 function migrate(db: Database): void {
@@ -200,6 +201,16 @@ export class DatabaseRepository {
 
   close(): void {
     this.db.close();
+  }
+
+  /** Quick health check — runs SELECT 1 to verify DB is responsive. */
+  isHealthy(): boolean {
+    try {
+      const row = this.db.prepare("SELECT 1 AS ok").get() as { ok: number } | undefined;
+      return row?.ok === 1;
+    } catch {
+      return false;
+    }
   }
 
   // --- Task CRUD ---

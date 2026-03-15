@@ -16,6 +16,7 @@ import type { Span } from "@opentelemetry/api";
 import { createEvent } from "@orka/core";
 import { prependSystemPrompt } from "../backends";
 import { withSpan } from "../tracing";
+import { buildAgentEnv } from "./env-filter";
 
 type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/interrupt" | "thread/unsubscribe";
 type CodexClientNotificationMethod = "initialized";
@@ -208,7 +209,7 @@ export class CodexAdapter implements ProviderAdapter {
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
-          env: { ...globalThis.process.env, ...input.env },
+          env: buildAgentEnv(input.env),
         });
         span.addEvent("process.spawned", { "orka.command": command.join(" ") });
 

@@ -7,7 +7,7 @@ import {
 import { ExportResultCode } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { getRelayHome } from "./db";
 
@@ -130,6 +130,29 @@ export const metrics = {
 
 // --- File Span Exporter ---
 
+const TRACE_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50MB
+const TRACE_FILE_MAX_ROTATED = 2; // Keep traces.jsonl, .1, .2
+
+function rotateTraceFileIfNeeded(logFile: string): void {
+  try {
+    const size = statSync(logFile).size;
+    if (size < TRACE_FILE_MAX_BYTES) return;
+  } catch {
+    return;
+  }
+
+  for (let i = TRACE_FILE_MAX_ROTATED; i >= 1; i--) {
+    const src = i === 1 ? logFile : `${logFile}.${i - 1}`;
+    const dst = `${logFile}.${i}`;
+    try {
+      if (i === TRACE_FILE_MAX_ROTATED) {
+        try { unlinkSync(dst); } catch { /* doesn't exist */ }
+      }
+      renameSync(src, dst);
+    } catch { /* source doesn't exist */ }
+  }
+}
+
 class FileSpanExporter {
   private _logFile: string;
 
@@ -140,6 +163,7 @@ class FileSpanExporter {
   }
 
   export(spans: any[], resultCallback: (result: any) => void): void {
+    rotateTraceFileIfNeeded(this._logFile);
     for (const span of spans) {
       const entry = {
         traceId: span.spanContext().traceId,
