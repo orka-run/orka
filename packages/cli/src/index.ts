@@ -18,6 +18,9 @@ import {
   createDaemonContext,
   startServer,
   loadConfig,
+  loadProjectConfig,
+  mergeConfigs,
+  resolveDefaults,
   getOrkaHome,
   initTracing,
   shutdownTracing,
@@ -740,7 +743,28 @@ const spawnCmd = command({
     words: restPositionals({ type: str, displayName: "prompt" }),
   },
   handler: async (args) => runCliCommand("spawn", async () => {
-    const cfg = loadConfig(getOrkaHome()).defaults;
+    // Layer 1: user config (~/.orka/config.toml)
+    const userConfig = loadConfig(getOrkaHome());
+
+    // Resolve project path early so we can load project config
+    const projectPath = resolveProject(args.project ?? userConfig.defaults.project);
+
+    // Layer 2: project config (.orka.toml in repo root)
+    const projectConfig = loadProjectConfig(projectPath);
+    const merged = mergeConfigs(userConfig, projectConfig);
+
+    // Layer 3: env var overrides
+    const envOverrides = {
+      backend: process.env.ORKA_BACKEND,
+      model: process.env.ORKA_MODEL,
+      mode: process.env.ORKA_MODE,
+    };
+
+    // Determine backend early (CLI > env > config) so per-backend defaults apply
+    const backend = (args.backend ?? envOverrides.backend ?? merged.defaults.backend) as BackendKind;
+
+    // Layer 4: resolve with per-backend defaults + env overrides
+    const cfg = resolveDefaults(merged, backend, envOverrides);
 
     if (args.prompt && args.promptFile) {
       fail("error: cannot use both --prompt and --prompt-file");
@@ -766,21 +790,29 @@ const spawnCmd = command({
       fail("error: prompt is required (use --prompt, --prompt-file, positional args, or pipe stdin)");
     }
 
+    // CLI flags always win (layer 0)
+    const effectiveModel = args.model || cfg.model;
+    const effectiveReasoningEffort = args.reasoningEffort || cfg.reasoningEffort;
+    const effectiveSystemPrompt = args.systemPrompt || cfg.systemPrompt;
+    const effectiveTags = args.tag.length > 0
+      ? [...new Set([...cfg.tags, ...args.tag])]
+      : cfg.tags;
+
     const allowedTools = parseAllowedTools(args.allowedTools);
     const env = parseEnvAssignments(args.env);
     const spawnRequest: SpawnRequest = {
       prompt,
-      projectPath: resolveProject(args.project ?? cfg.project),
-      backend: (args.backend ?? cfg.backend) as BackendKind,
+      projectPath,
+      backend,
       mode: (args.mode ?? cfg.mode) as SessionMode,
       ...(args.title ? { title: args.title } : {}),
-      ...(args.model || cfg.model ? { model: args.model || cfg.model } : {}),
-      ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort as ReasoningEffort } : {}),
+      ...(effectiveModel ? { model: effectiveModel } : {}),
+      ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort as ReasoningEffort } : {}),
       ...(args.branch ? { branch: args.branch } : {}),
       ...(args.autoMerge ? { autoMerge: true } : {}),
-      ...(args.tag.length > 0 ? { tags: args.tag } : {}),
+      ...(effectiveTags.length > 0 ? { tags: effectiveTags } : {}),
       ...(args.parent ? { parentSessionId: args.parent } : {}),
-      ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
+      ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
       ...(allowedTools ? { allowedTools } : {}),
       ...(env ? { env } : {}),
     };

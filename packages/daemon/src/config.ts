@@ -9,7 +9,19 @@ const DefaultsSchema = z.object({
   mode: z.string().default("background"),
   model: z.string().default(""),
   project: z.string().default("."),
+  systemPrompt: z.string().default(""),
+  reasoningEffort: z.string().default(""),
+  tags: z.array(z.string()).default([]),
 });
+
+const PerBackendDefaultsSchema = z.object({
+  model: z.string().optional(),
+  reasoningEffort: z.string().optional(),
+  systemPrompt: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export type PerBackendDefaults = z.infer<typeof PerBackendDefaultsSchema>;
 
 const LimitsSchema = z.object({
   maxConcurrent: z.number().default(5),
@@ -28,9 +40,24 @@ export const ConfigSchema = z.object({
   defaults: DefaultsSchema.default(DefaultsSchema.parse({})),
   limits: LimitsSchema.default(LimitsSchema.parse({})),
   hooks: HooksSchema.default(HooksSchema.parse({})),
+  backendDefaults: z.record(z.string(), PerBackendDefaultsSchema).default({}),
 });
 
 export type OrkaConfig = z.infer<typeof ConfigSchema>;
+
+/**
+ * Resolved defaults after merging user config, project config, env vars,
+ * and per-backend overrides. All fields are concrete strings (no optionals).
+ */
+export interface ResolvedDefaults {
+  backend: string;
+  mode: string;
+  model: string;
+  project: string;
+  systemPrompt: string;
+  reasoningEffort: string;
+  tags: string[];
+}
 
 /**
  * Load configuration from orkaHome/config.toml.
@@ -39,44 +66,170 @@ export type OrkaConfig = z.infer<typeof ConfigSchema>;
  */
 export function loadConfig(orkaHome: string): OrkaConfig {
   return withSpanSync("orka.config.load", {}, () => {
-    const configPath = join(orkaHome, "config.toml");
-    if (!existsSync(configPath)) {
-      return ConfigSchema.parse({});
-    }
-
-    try {
-      const raw = readFileSync(configPath, "utf-8");
-      const toml = parse(raw);
-      const defaults = getTable(toml.defaults);
-      const limits = getTable(toml.limits);
-      const hooks = getTable(toml.hooks);
-
-      return ConfigSchema.parse({
-        defaults:
-          defaults !== undefined
-            ? {
-                backend: getString(defaults.backend),
-                mode: getString(defaults.mode),
-                model: getString(defaults.model),
-                project: getString(defaults.project),
-              }
-            : undefined,
-        limits:
-          limits !== undefined
-            ? {
-                ...(limits.max_concurrent !== undefined ? { maxConcurrent: getNumber(limits.max_concurrent) } : {}),
-                ...(limits.session_timeout_minutes !== undefined ? { sessionTimeoutMinutes: getNumber(limits.session_timeout_minutes) } : {}),
-              }
-            : undefined,
-        hooks:
-          hooks?.post_worktree_create !== undefined
-            ? { postWorktreeCreate: normalizeHookCommands(hooks.post_worktree_create) }
-            : undefined,
-      });
-    } catch {
-      return ConfigSchema.parse({});
-    }
+    return loadConfigFromFile(join(orkaHome, "config.toml"));
   });
+}
+
+/**
+ * Load project-level configuration from projectPath/.orka.toml.
+ * Returns null if the file doesn't exist (project config is optional).
+ */
+export function loadProjectConfig(projectPath: string): OrkaConfig | null {
+  return withSpanSync("orka.config.load_project", { "config.project_path": projectPath }, () => {
+    const configPath = join(projectPath, ".orka.toml");
+    if (!existsSync(configPath)) {
+      return null;
+    }
+    return loadConfigFromFile(configPath);
+  });
+}
+
+function loadConfigFromFile(configPath: string): OrkaConfig {
+  if (!existsSync(configPath)) {
+    return ConfigSchema.parse({});
+  }
+
+  try {
+    const raw = readFileSync(configPath, "utf-8");
+    const toml = parse(raw);
+    const defaults = getTable(toml.defaults);
+    const limits = getTable(toml.limits);
+    const hooks = getTable(toml.hooks);
+
+    const backendDefaults: Record<string, Record<string, unknown>> = {};
+    if (defaults) {
+      for (const [key, value] of Object.entries(defaults)) {
+        const sub = getTable(value);
+        if (sub) {
+          backendDefaults[key] = parsePerBackendDefaults(sub);
+        }
+      }
+    }
+
+    return ConfigSchema.parse({
+      defaults:
+        defaults !== undefined
+          ? {
+              backend: getString(defaults.backend),
+              mode: getString(defaults.mode),
+              model: getString(defaults.model),
+              project: getString(defaults.project),
+              systemPrompt: getString(defaults.system_prompt ?? defaults.systemPrompt),
+              reasoningEffort: getString(defaults.reasoning_effort ?? defaults.reasoningEffort),
+              tags: getStringArray(defaults.tags),
+            }
+          : undefined,
+      limits:
+        limits !== undefined
+          ? {
+              ...(limits.max_concurrent !== undefined ? { maxConcurrent: getNumber(limits.max_concurrent) } : {}),
+              ...(limits.session_timeout_minutes !== undefined ? { sessionTimeoutMinutes: getNumber(limits.session_timeout_minutes) } : {}),
+            }
+          : undefined,
+      hooks:
+        hooks?.post_worktree_create !== undefined
+          ? { postWorktreeCreate: normalizeHookCommands(hooks.post_worktree_create) }
+          : undefined,
+      backendDefaults:
+        Object.keys(backendDefaults).length > 0 ? backendDefaults : undefined,
+    });
+  } catch {
+    return ConfigSchema.parse({});
+  }
+}
+
+function parsePerBackendDefaults(table: TomlTable): Record<string, unknown> {
+  return {
+    model: getString(table.model),
+    reasoningEffort: getString(table.reasoning_effort ?? table.reasoningEffort),
+    systemPrompt: getString(table.system_prompt ?? table.systemPrompt),
+    tags: getStringArray(table.tags),
+  };
+}
+
+/**
+ * Merge two configs: project config values override user config values.
+ * Only non-default / explicitly-set values from the higher-priority config win.
+ */
+export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig | null): OrkaConfig {
+  if (!projectConfig) return userConfig;
+
+  const userDefaults = userConfig.defaults;
+  const projDefaults = projectConfig.defaults;
+  const schemaDefaults = DefaultsSchema.parse({});
+
+  return {
+    defaults: {
+      backend: pickOverride(projDefaults.backend, userDefaults.backend, schemaDefaults.backend),
+      mode: pickOverride(projDefaults.mode, userDefaults.mode, schemaDefaults.mode),
+      model: pickOverride(projDefaults.model, userDefaults.model, schemaDefaults.model),
+      project: pickOverride(projDefaults.project, userDefaults.project, schemaDefaults.project),
+      systemPrompt: pickOverride(projDefaults.systemPrompt, userDefaults.systemPrompt, schemaDefaults.systemPrompt),
+      reasoningEffort: pickOverride(projDefaults.reasoningEffort, userDefaults.reasoningEffort, schemaDefaults.reasoningEffort),
+      tags: mergeTags(userDefaults.tags, projDefaults.tags),
+    },
+    limits: {
+      maxConcurrent: projectConfig.limits.maxConcurrent !== 0
+        ? projectConfig.limits.maxConcurrent
+        : userConfig.limits.maxConcurrent,
+    },
+    hooks: {
+      postWorktreeCreate: projectConfig.hooks.postWorktreeCreate.length > 0
+        ? projectConfig.hooks.postWorktreeCreate
+        : userConfig.hooks.postWorktreeCreate,
+    },
+    backendDefaults: {
+      ...userConfig.backendDefaults,
+      ...Object.fromEntries(
+        Object.entries(projectConfig.backendDefaults).map(([key, projBd]) => {
+          const userBd = userConfig.backendDefaults[key];
+          if (!userBd) return [key, projBd];
+          return [key, {
+            model: projBd.model ?? userBd.model,
+            reasoningEffort: projBd.reasoningEffort ?? userBd.reasoningEffort,
+            systemPrompt: projBd.systemPrompt ?? userBd.systemPrompt,
+            tags: projBd.tags ?? userBd.tags,
+          }];
+        }),
+      ),
+    },
+  };
+}
+
+/**
+ * Apply per-backend defaults on top of merged defaults for the selected backend.
+ * Then apply env var overrides. Returns fully resolved defaults.
+ */
+export function resolveDefaults(
+  config: OrkaConfig,
+  backend: string,
+  envOverrides?: { backend?: string; model?: string; mode?: string },
+): ResolvedDefaults {
+  const base = { ...config.defaults };
+  const bd = config.backendDefaults[backend];
+  if (bd) {
+    if (bd.model) base.model = bd.model;
+    if (bd.reasoningEffort) base.reasoningEffort = bd.reasoningEffort;
+    if (bd.systemPrompt) base.systemPrompt = bd.systemPrompt;
+    if (bd.tags && bd.tags.length > 0) base.tags = mergeTags(base.tags, bd.tags);
+  }
+
+  if (envOverrides?.backend) base.backend = envOverrides.backend;
+  if (envOverrides?.model) base.model = envOverrides.model;
+  if (envOverrides?.mode) base.mode = envOverrides.mode;
+
+  return base;
+}
+
+function pickOverride(proj: string, user: string, schemaDefault: string): string {
+  if (proj !== schemaDefault) return proj;
+  return user;
+}
+
+function mergeTags(base: string[], overlay: string[]): string[] {
+  if (overlay.length === 0) return base;
+  if (base.length === 0) return overlay;
+  return [...new Set([...base, ...overlay])];
 }
 
 function getTable(value: TomlValue | undefined): TomlTable | undefined {
@@ -93,6 +246,13 @@ function getString(value: TomlValue | undefined): string | undefined {
 
 function getNumber(value: TomlValue | undefined): number | undefined {
   return typeof value === "number" ? value : undefined;
+}
+
+function getStringArray(value: TomlValue | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  if (value.every((item) => typeof item === "string")) return value as string[];
+  return undefined;
 }
 
 function normalizeHookCommands(value: TomlValue | undefined): string[] | undefined {
