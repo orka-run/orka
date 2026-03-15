@@ -10,7 +10,7 @@ import {
   loadNoisePublicKey,
   saveNoiseServerPublicKey,
 } from "@orka/core/crypto";
-import { createOrkaClient } from "@orka/client";
+import { createOrkaClient, lookupKnownHost, saveKnownHost } from "@orka/client";
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
@@ -102,6 +102,13 @@ const serverPubKeyIdx = process.argv.indexOf("--server-key");
 let serverPublicKey = serverPubKeyIdx !== -1 ? process.argv[serverPubKeyIdx + 1] : process.env["ORKA_SERVER_KEY"];
 if (serverPubKeyIdx !== -1) {
   process.argv.splice(serverPubKeyIdx, 2);
+}
+
+// Accept new key flag — allows connecting when a known host's key has changed
+const acceptNewKeyIdx = process.argv.indexOf("--accept-new-key");
+const acceptNewKey = acceptNewKeyIdx !== -1;
+if (acceptNewKeyIdx !== -1) {
+  process.argv.splice(acceptNewKeyIdx, 1);
 }
 
 const DEFAULT_DAEMON_PORT = 7394;
@@ -309,7 +316,48 @@ async function stopDashboard(): Promise<boolean> {
   return false;
 }
 
-function buildRemoteClient(url: string): OrkaService {
+function deriveHealthUrl(wsUrl: string): string {
+  try {
+    const u = new URL(wsUrl);
+    u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+    u.pathname = "/health";
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return wsUrl.replace(/^ws/, "http").replace(/\/$/, "") + "/health";
+  }
+}
+
+function hostKeyFromUrl(wsUrl: string): string {
+  try {
+    const u = new URL(wsUrl);
+    return u.host; // includes port
+  } catch {
+    return wsUrl;
+  }
+}
+
+async function fetchServerKeyFromHealth(wsUrl: string): Promise<{ keyId: string; publicKeyB64: string; publicKey: Uint8Array; nodeId: string } | null> {
+  try {
+    const healthUrl = deriveHealthUrl(wsUrl);
+    const resp = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
+    const body = await resp.json() as Record<string, unknown>;
+    if (typeof body["publicKey"] === "string" && typeof body["keyId"] === "string") {
+      const publicKeyB64 = body["publicKey"] as string;
+      const publicKey = new Uint8Array(Buffer.from(publicKeyB64, "base64url"));
+      return {
+        keyId: body["keyId"] as string,
+        publicKeyB64,
+        publicKey,
+        nodeId: (body["nodeId"] as string) ?? "",
+      };
+    }
+  } catch { /* server unreachable or no key exposed */ }
+  return null;
+}
+
+async function buildRemoteClient(url: string): Promise<OrkaService> {
   if (useEncrypt) {
     const orkaHome = getOrkaHome();
 
@@ -331,7 +379,82 @@ function buildRemoteClient(url: string): OrkaService {
       });
     }
 
-    // 2. Fall back to generic saved server key from ~/.orka/keys/server.noise.pub
+    // 2. TOFU — check known_hosts for this server
+    const host = hostKeyFromUrl(url);
+    const knownEntry = lookupKnownHost(orkaHome, host);
+
+    if (knownEntry) {
+      // Host is known — verify key hasn't changed by fetching from /health
+      const remoteKey = await fetchServerKeyFromHealth(url);
+      if (remoteKey && remoteKey.keyId !== knownEntry.keyId) {
+        // Key mismatch!
+        if (acceptNewKey) {
+          console.error(`Warning: accepting new key for ${host}`);
+          console.error(`Old key: ${knownEntry.keyId}`);
+          console.error(`New key: ${remoteKey.keyId}`);
+          saveKnownHost(orkaHome, host, remoteKey.keyId, remoteKey.publicKey);
+          const noiseServerKey = {
+            publicKey: remoteKey.publicKey,
+            privateKey: new Uint8Array(0),
+            keyId: remoteKey.keyId,
+            publicKeyB64: remoteKey.publicKeyB64,
+          };
+          return createOrkaClient({
+            url,
+            noiseServerKey,
+            nodeId: remoteKey.nodeId,
+            relayOrigin: remoteUrl ?? "",
+          });
+        }
+        console.error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
+        console.error("@    WARNING: REMOTE HOST KEY HAS CHANGED!    @");
+        console.error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
+        console.error(`The Noise public key for ${host} has changed.`);
+        console.error(`Old key: ${knownEntry.keyId}`);
+        console.error(`New key: ${remoteKey.keyId}`);
+        console.error("This could indicate a MITM attack or key rotation.");
+        console.error("Use --accept-new-key to accept the new key.");
+        process.exit(1);
+      }
+
+      // Key matches (or server unreachable — trust the pinned key)
+      const noiseServerKey = {
+        publicKey: knownEntry.publicKey,
+        privateKey: new Uint8Array(0),
+        keyId: knownEntry.keyId,
+        publicKeyB64: knownEntry.publicKeyB64,
+      };
+      const nodeId = process.env["ORKA_NODE_ID"] ?? "";
+      return createOrkaClient({
+        url,
+        noiseServerKey,
+        nodeId,
+        relayOrigin: remoteUrl ?? "",
+      });
+    }
+
+    // 3. Host not in known_hosts — try TOFU (fetch key, trust on first use)
+    const remoteKey = await fetchServerKeyFromHealth(url);
+    if (remoteKey) {
+      saveKnownHost(orkaHome, host, remoteKey.keyId, remoteKey.publicKey);
+      console.error(`Trusting new host ${host}`);
+      console.error(`Key fingerprint: ${remoteKey.keyId}`);
+      console.error(`Key saved to ${join(orkaHome, "known_hosts")}`);
+      const noiseServerKey = {
+        publicKey: remoteKey.publicKey,
+        privateKey: new Uint8Array(0),
+        keyId: remoteKey.keyId,
+        publicKeyB64: remoteKey.publicKeyB64,
+      };
+      return createOrkaClient({
+        url,
+        noiseServerKey,
+        nodeId: remoteKey.nodeId,
+        relayOrigin: remoteUrl ?? "",
+      });
+    }
+
+    // 4. Fall back to generic saved server key from ~/.orka/keys/server.noise.pub
     const noiseServerKey = loadNoisePublicKey(orkaHome, "server");
     if (noiseServerKey) {
       const nodeId = process.env["ORKA_NODE_ID"] ?? "";
@@ -355,10 +478,10 @@ let _svc: OrkaService | null = null;
 async function getSvc(): Promise<OrkaService> {
   if (_svc) return _svc;
   if (remoteUrl) {
-    _svc = buildRemoteClient(remoteUrl);
+    _svc = await buildRemoteClient(remoteUrl);
   } else {
     await ensureDaemon();
-    _svc = buildRemoteClient(DEFAULT_DAEMON_URL);
+    _svc = await buildRemoteClient(DEFAULT_DAEMON_URL);
   }
   return _svc;
 }
