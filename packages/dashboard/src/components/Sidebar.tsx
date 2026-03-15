@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useId, useState } from "react";
-import { Link2, MessageSquarePlus, Plus, Search, Server } from "lucide-react";
+import { Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
 import type { NodeInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
@@ -16,6 +16,7 @@ interface SidebarProps {
   onSelectDraft?: () => void;
   onSelectNode: (nodeId: string | null) => void;
   onPairNode?: () => void;
+  onManageNodes?: () => void;
 }
 
 export function Sidebar({
@@ -29,6 +30,7 @@ export function Sidebar({
   onSelectDraft,
   onSelectNode,
   onPairNode,
+  onManageNodes,
 }: SidebarProps) {
   const searchId = useId();
   const [query, setQuery] = useState("");
@@ -63,6 +65,16 @@ export function Sidebar({
               <Plus className="h-4 w-4" />
               New Session
             </button>
+            {onManageNodes && (
+              <button
+                type="button"
+                onClick={onManageNodes}
+                title="Manage Nodes"
+                className="rounded-lg border border-zinc-800 p-2 text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-100"
+              >
+                <Settings2 className="h-4 w-4" />
+              </button>
+            )}
             {onPairNode && (
               <button
                 type="button"

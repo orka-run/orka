@@ -7,6 +7,8 @@ import type {
   NodeInfo,
   OrchestrationEvent,
   OrkaService,
+  PairWithNodeParams,
+  PairWithNodeResult,
   PruneOptions,
   PruneResult,
   PushChannel,
@@ -17,6 +19,7 @@ import type {
   SpawnRequest,
   StartPairingParams,
   StartPairingResult,
+  StoredNode,
   Task,
   UsageSummary,
 } from "@orka/core";
@@ -485,6 +488,26 @@ export function createAggregatingClient(
       params: StartPairingParams,
     ): Promise<StartPairingResult> {
       return localClient.startPairing(params);
+    },
+
+    async pairWithNode(params: PairWithNodeParams): Promise<PairWithNodeResult> {
+      return localClient.pairWithNode(params);
+    },
+
+    async listPairedNodes(): Promise<StoredNode[]> {
+      return localClient.listPairedNodes();
+    },
+
+    async removePairedNode(params: { nodeId: string }): Promise<void> {
+      return localClient.removePairedNode(params);
+    },
+
+    async connectNode(params: { nodeId: string }): Promise<void> {
+      return localClient.connectNode(params);
+    },
+
+    async disconnectNode(params: { nodeId: string }): Promise<void> {
+      return localClient.disconnectNode(params);
     },
 
     // --- Approvals ---

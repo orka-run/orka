@@ -15,6 +15,7 @@ import { DevOverlay } from "./components/DevOverlay";
 import { DraftChatView, type DraftSettings } from "./components/DraftChatView";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { NewSessionDialog } from "./components/NewSessionDialog";
+import { NodeManagementDialog } from "./components/NodeManagementDialog";
 import { PairNodeDialog } from "./components/PairNodeDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
@@ -67,12 +68,14 @@ interface AppShellProps {
 }
 
 function AppShell({ transport }: AppShellProps) {
+  const { mode } = useMode();
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
   const hasRestoredRef = useRef(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
   const [isPairNodeOpen, setIsPairNodeOpen] = useState(false);
+  const [isNodeManagementOpen, setIsNodeManagementOpen] = useState(false);
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
@@ -82,9 +85,12 @@ function AppShell({ transport }: AppShellProps) {
   const handleSessionUpdated = useSessionStore((state) => state.handleSessionUpdated);
   const handleSessionDeleted = useSessionStore((state) => state.handleSessionDeleted);
   const nodes = useNodeStore((state) => state.nodes);
+  const pairedNodes = useNodeStore((state) => state.pairedNodes);
   const selectedNodeId = useNodeStore((state) => state.selectedNodeId);
   const fetchNodes = useNodeStore((state) => state.fetchNodes);
+  const fetchPairedNodes = useNodeStore((state) => state.fetchPairedNodes);
   const selectNode = useNodeStore((state) => state.selectNode);
+  const updateNodeStatus = useNodeStore((state) => state.updateNodeStatus);
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
   const setProtocolMismatch = useConnectionStore((state) => state.setProtocolMismatch);
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
@@ -239,15 +245,30 @@ function AppShell({ transport }: AppShellProps) {
       handleSessionDeleted(data as SessionDeletedData);
     });
 
+    // Subscribe to fleet.nodeUpdated for real-time node status
+    const unsubscribeNodeUpdated = transport.subscribe("fleet.nodeUpdated", (data) => {
+      const update = data as { nodeId: string; status: "online" | "offline" | "error" };
+      if (update.nodeId && update.status) {
+        updateNodeStatus(update.nodeId, update.status);
+        // Refresh full node list on status changes
+        void fetchNodes(transport);
+      }
+    });
+
     // Initial fetch: nodes first, then sessions
     void fetchNodes(transport).then(() => {
       fetchSessionsWithNodes();
     });
 
-    // Periodically refresh node list (every 30s)
+    // Fetch paired nodes in local mode
+    if (mode === "local") {
+      void fetchPairedNodes(transport);
+    }
+
+    // Periodically refresh node list (every 10s for fresher status)
     const nodeRefreshTimer = setInterval(() => {
       void fetchNodes(transport);
-    }, 30_000);
+    }, 10_000);
 
     return () => {
       clearInterval(nodeRefreshTimer);
@@ -259,6 +280,7 @@ function AppShell({ transport }: AppShellProps) {
         selectionSpanRef.current = null;
       }
 
+      unsubscribeNodeUpdated();
       unsubscribeDeleted();
       unsubscribeEvent();
       unsubscribeUpdated();
@@ -267,7 +289,7 @@ function AppShell({ transport }: AppShellProps) {
       unsubscribeState();
       transport.disconnect();
     };
-  }, [transport, fetchSessions, fetchNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch]);
+  }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus]);
 
   return (
     <TransportContext.Provider value={transport}>
@@ -288,6 +310,7 @@ function AppShell({ transport }: AppShellProps) {
             onNewSession={activateDraft}
             onSelectNode={selectNode}
             onPairNode={() => setIsPairNodeOpen(true)}
+            onManageNodes={mode === "local" && pairedNodes.length > 0 ? () => setIsNodeManagementOpen(true) : undefined}
           />
           <main className="flex-1 overflow-hidden">
             {selectedId ? (
@@ -336,8 +359,32 @@ function AppShell({ transport }: AppShellProps) {
         />
         <PairNodeDialog
           open={isPairNodeOpen}
-          onClose={() => setIsPairNodeOpen(false)}
+          onClose={() => {
+            setIsPairNodeOpen(false);
+            // Refresh paired nodes after pairing dialog closes (new node may have been paired)
+            if (mode === "local") void fetchPairedNodes(transport);
+          }}
         />
+        {mode === "local" && (
+          <NodeManagementDialog
+            open={isNodeManagementOpen}
+            onClose={() => setIsNodeManagementOpen(false)}
+            pairedNodes={pairedNodes}
+            liveNodes={nodes}
+            onRemoveNode={async (nodeId) => {
+              await useNodeStore.getState().removeNode(transport, nodeId);
+              void fetchNodes(transport);
+            }}
+            onConnectNode={async (nodeId) => {
+              await useNodeStore.getState().connectNode(transport, nodeId);
+              void fetchNodes(transport);
+            }}
+            onDisconnectNode={async (nodeId) => {
+              await useNodeStore.getState().disconnectNode(transport, nodeId);
+              void fetchNodes(transport);
+            }}
+          />
+        )}
       </div>
     </TransportContext.Provider>
   );
