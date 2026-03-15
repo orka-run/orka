@@ -168,11 +168,17 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
       reasoningEffort: pickOverride(projDefaults.reasoningEffort, userDefaults.reasoningEffort, schemaDefaults.reasoningEffort),
       tags: mergeTags(userDefaults.tags, projDefaults.tags),
     },
-    limits: {
-      maxConcurrent: projectConfig.limits.maxConcurrent !== 0
-        ? projectConfig.limits.maxConcurrent
-        : userConfig.limits.maxConcurrent,
-    },
+    limits: (() => {
+      const ld = LimitsSchema.parse({});
+      return {
+        maxConcurrent: projectConfig.limits.maxConcurrent !== ld.maxConcurrent
+          ? projectConfig.limits.maxConcurrent
+          : userConfig.limits.maxConcurrent,
+        sessionTimeoutMinutes: projectConfig.limits.sessionTimeoutMinutes !== ld.sessionTimeoutMinutes
+          ? projectConfig.limits.sessionTimeoutMinutes
+          : userConfig.limits.sessionTimeoutMinutes,
+      };
+    })(),
     hooks: {
       postWorktreeCreate: projectConfig.hooks.postWorktreeCreate.length > 0
         ? projectConfig.hooks.postWorktreeCreate

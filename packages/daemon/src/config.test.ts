@@ -18,7 +18,7 @@ describe("ConfigSchema", () => {
     expect(config.defaults.mode).toBe("background");
     expect(config.defaults.model).toBe("");
     expect(config.defaults.project).toBe(".");
-    expect(config.limits.maxConcurrent).toBe(0);
+    expect(config.limits.maxConcurrent).toBe(5);
     expect(config.hooks.postWorktreeCreate).toEqual([]);
   });
 
@@ -50,7 +50,7 @@ describe("loadConfig", () => {
       const config = loadConfig(tempDir);
       expect(config.defaults.backend).toBe("claude-code");
       expect(config.defaults.mode).toBe("background");
-      expect(config.limits.maxConcurrent).toBe(0);
+      expect(config.limits.maxConcurrent).toBe(5);
       expect(config.hooks.postWorktreeCreate).toEqual([]);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -403,7 +403,7 @@ describe("mergeConfigs", () => {
     expect(merged.limits.maxConcurrent).toBe(3);
   });
 
-  test("user limits kept when project limits are default (0)", () => {
+  test("user limits kept when project limits are schema defaults", () => {
     const user = emptyConfig();
     user.limits.maxConcurrent = 10;
 
