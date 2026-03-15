@@ -10,7 +10,8 @@ import {
   loadNoisePublicKey,
   saveNoiseServerPublicKey,
 } from "@orka/core/crypto";
-import { createOrkaClient, lookupKnownHost, saveKnownHost } from "@orka/client";
+import { createOrkaClient } from "@orka/client";
+import { lookupKnownHost, saveKnownHost } from "@orka/client/known-hosts";
 import { startRelay } from "@orka/relay";
 import {
   createLocalClient,
