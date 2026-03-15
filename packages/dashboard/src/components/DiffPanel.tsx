@@ -121,7 +121,7 @@ export function DiffPanel({ sessionId, onSelectionLoadSettled }: DiffPanelProps)
                     [key]: !isCollapsed,
                   }))
                 }
-                className="flex w-full items-center justify-between gap-4 border-b border-zinc-800 px-4 py-3 text-left"
+                className="flex w-full items-center justify-between gap-4 border-b border-zinc-800 px-3 py-3.5 text-left md:px-4 md:py-3"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   {isCollapsed ? (
@@ -223,15 +223,15 @@ function DiffLineRow({ line }: { line: DiffLine }) {
   const marker = line.type === "add" ? "+" : line.type === "remove" ? "-" : " ";
 
   return (
-    <div className={`grid min-w-full grid-cols-[4rem_4rem_1.5rem_minmax(0,1fr)] ${lineClassName}`}>
-      <span className="border-r border-zinc-900/80 px-2 py-1 text-right text-zinc-500">
+    <div className={`grid min-w-full grid-cols-[2.5rem_2.5rem_1.25rem_minmax(0,1fr)] md:grid-cols-[4rem_4rem_1.5rem_minmax(0,1fr)] ${lineClassName}`}>
+      <span className="border-r border-zinc-900/80 px-1 py-1 text-right text-xs text-zinc-500 md:px-2 md:text-sm">
         {line.oldLineNumber ?? ""}
       </span>
-      <span className="border-r border-zinc-900/80 px-2 py-1 text-right text-zinc-500">
+      <span className="border-r border-zinc-900/80 px-1 py-1 text-right text-xs text-zinc-500 md:px-2 md:text-sm">
         {line.newLineNumber ?? ""}
       </span>
-      <span className="border-r border-zinc-900/80 px-2 py-1 text-center text-zinc-500">{marker}</span>
-      <span className="px-3 py-1 whitespace-pre-wrap break-all text-zinc-100">{line.content}</span>
+      <span className="border-r border-zinc-900/80 px-1 py-1 text-center text-xs text-zinc-500 md:px-2 md:text-sm">{marker}</span>
+      <span className="px-2 py-1 whitespace-pre-wrap break-all text-zinc-100 md:px-3">{line.content}</span>
     </div>
   );
 }

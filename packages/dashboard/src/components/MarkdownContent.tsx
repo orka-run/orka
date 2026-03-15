@@ -56,7 +56,7 @@ function MarkdownCode({ className, children, node, ...props }: CodeProps) {
 
 export function MarkdownContent({ content }: MarkdownContentProps) {
   return (
-    <div className="max-w-none text-sm leading-6 text-zinc-100">
+    <div className="min-w-0 max-w-none text-sm leading-6 text-zinc-100">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
@@ -94,8 +94,12 @@ export function MarkdownContent({ content }: MarkdownContentProps) {
           tbody: ({ children }) => <tbody className="divide-y divide-zinc-800">{children}</tbody>,
           th: ({ children }) => <th className="px-3 py-2 font-medium">{children}</th>,
           td: ({ children }) => <td className="px-3 py-2 align-top text-zinc-300">{children}</td>,
+          img: (props) => (
+            // eslint-disable-next-line jsx-a11y/alt-text
+            <img className="max-w-full h-auto" {...props} />
+          ),
           pre: ({ children }) => (
-            <pre className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-[13px] leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] whitespace-pre-wrap break-all [overflow-wrap:anywhere]">
+            <pre className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-[13px] leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] [-webkit-overflow-scrolling:touch] md:whitespace-pre-wrap md:break-all md:[overflow-wrap:anywhere]">
               {children}
             </pre>
           ),

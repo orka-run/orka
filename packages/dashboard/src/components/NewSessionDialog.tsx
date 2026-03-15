@@ -177,9 +177,9 @@ export function NewSessionDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-800 px-6 py-5">
+    <div className="fixed inset-0 z-50 flex bg-black/70 backdrop-blur-sm md:items-center md:justify-center md:px-4 md:py-8">
+      <div className="flex w-full flex-col overflow-hidden bg-zinc-950 max-md:h-full md:max-w-2xl md:rounded-2xl md:border md:border-zinc-800 md:shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-800 px-4 py-4 md:px-6 md:py-5">
           <div>
             <h2 className="text-lg font-semibold text-zinc-100">New Session</h2>
             <p className="mt-1 text-sm text-zinc-500">
@@ -195,7 +195,7 @@ export function NewSessionDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} data-spawn-form className="space-y-5 px-6 py-5">
+        <form onSubmit={handleSubmit} data-spawn-form className="flex-1 space-y-5 overflow-y-auto px-4 py-4 md:px-6 md:py-5">
           <div>
             <label htmlFor={promptId} className="mb-2 block text-sm font-medium text-zinc-200">
               Prompt

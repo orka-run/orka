@@ -831,7 +831,7 @@ function TimelineEntry({
         <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
           <Bot className="h-4 w-4" />
         </div>
-        <div className="min-w-0 max-w-3xl rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-900 px-4 py-3 [overflow-wrap:anywhere]">
+        <div className="min-w-0 max-w-full rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-900 px-4 py-3 lg:max-w-3xl [overflow-wrap:anywhere]">
           <MarkdownContent content={entry.body} />
           <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
         </div>
@@ -842,8 +842,8 @@ function TimelineEntry({
   if (entry.type === "user") {
     return (
       <div className="flex justify-end">
-        <div className="flex max-w-3xl items-start gap-3">
-          <div className="min-w-0 max-w-3xl rounded-2xl rounded-tr-md border border-indigo-900/50 bg-zinc-900 px-4 py-3 [overflow-wrap:anywhere]">
+        <div className="flex max-w-full items-start gap-3 lg:max-w-3xl">
+          <div className="min-w-0 rounded-2xl rounded-tr-md border border-indigo-900/50 bg-zinc-900 px-4 py-3 [overflow-wrap:anywhere]">
             <MarkdownContent content={entry.body} />
             <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
           </div>

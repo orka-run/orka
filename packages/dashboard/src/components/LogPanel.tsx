@@ -223,7 +223,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
           onScroll={handleScroll}
           className="h-full overflow-y-auto bg-zinc-950 p-4"
         >
-          <pre className="font-mono text-xs leading-5 text-zinc-300">
+          <pre className="overflow-x-auto font-mono text-xs leading-5 text-zinc-300 [-webkit-overflow-scrolling:touch]">
             {spans.length > 0 ? (
               spans.map((span, i) => (
                 <span key={i} style={span.style}>
