@@ -1,4 +1,4 @@
-import type { StoredNode } from "@orka/core";
+import type { StoredNode, PushChannel } from "@orka/core";
 import {
   WsTransport,
   appendAuthToken,
@@ -8,8 +8,15 @@ import {
   type WsTransportOptions,
 } from "@orka/client";
 import type { NodeRegistry } from "./node-registry";
+import type { PushHub } from "./push-hub";
 
 export type TransportFactory = (url: string, options?: WsTransportOptions) => WsTransport;
+
+const FORWARDED_CHANNELS: PushChannel[] = [
+  "orchestration.event",
+  "orchestration.sessionUpdated",
+  "orchestration.sessionDeleted",
+];
 
 export interface RemoteNodeHandle {
   nodeId: string;
@@ -39,10 +46,12 @@ const defaultTransportFactory: TransportFactory = (url, options) => new WsTransp
 
 export function createRemoteNodeManager(
   registry: NodeRegistry,
+  pushHub: PushHub,
   transportFactory: TransportFactory = defaultTransportFactory,
 ): RemoteNodeManager {
   const handles = new Map<string, RemoteNodeHandle>();
   const stateUnsubs = new Map<string, () => void>();
+  const pushUnsubs = new Map<string, (() => void)[]>();
 
   function buildUrl(node: StoredNode): string {
     const base = node.nodePaths[0];
@@ -97,7 +106,21 @@ export function createRemoteNodeManager(
 
     handles.set(node.nodeId, handle);
 
-    const unsub = transport.onStateChange((snapshot) => {
+    // Subscribe to push channels from remote node and forward to local dashboard clients
+    const unsubs: (() => void)[] = [];
+    for (const channel of FORWARDED_CHANNELS) {
+      const unsub = transport.subscribe(channel, (data: unknown) => {
+        const forwarded =
+          data && typeof data === "object"
+            ? { ...(data as Record<string, unknown>), nodeId: node.nodeId }
+            : data;
+        pushHub.broadcast(channel, forwarded);
+      });
+      unsubs.push(unsub);
+    }
+    pushUnsubs.set(node.nodeId, unsubs);
+
+    const stateUnsub = transport.onStateChange((snapshot) => {
       const h = handles.get(node.nodeId);
       if (!h) return;
 
@@ -109,13 +132,21 @@ export function createRemoteNodeManager(
         console.error(
           `[remote-nodes] remote node ${node.nodeId} connected`,
         );
+        pushHub.broadcast("fleet.nodeUpdated", {
+          nodeId: node.nodeId,
+          status: "online",
+        });
       } else if (snapshot.state === "disconnected") {
         console.error(
           `[remote-nodes] remote node ${node.nodeId} disconnected`,
         );
+        pushHub.broadcast("fleet.nodeUpdated", {
+          nodeId: node.nodeId,
+          status: "offline",
+        });
       }
     });
-    stateUnsubs.set(node.nodeId, unsub);
+    stateUnsubs.set(node.nodeId, stateUnsub);
 
     transport.connect();
   }
@@ -123,6 +154,12 @@ export function createRemoteNodeManager(
   function disconnect(nodeId: string): void {
     const handle = handles.get(nodeId);
     if (!handle) return;
+
+    const pUnsubs = pushUnsubs.get(nodeId);
+    if (pUnsubs) {
+      for (const unsub of pUnsubs) unsub();
+      pushUnsubs.delete(nodeId);
+    }
 
     const unsub = stateUnsubs.get(nodeId);
     if (unsub) {
@@ -184,6 +221,11 @@ export function createRemoteNodeManager(
       if (h) {
         h.lastError = String(err);
       }
+      pushHub.broadcast("fleet.nodeUpdated", {
+        nodeId: node.nodeId,
+        status: "error",
+        error: String(err),
+      });
     });
   }
 

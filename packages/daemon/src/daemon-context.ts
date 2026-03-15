@@ -54,7 +54,7 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
   });
 
   const nodeRegistry = createNodeRegistry(home);
-  const remoteNodes = createRemoteNodeManager(nodeRegistry);
+  const remoteNodes = createRemoteNodeManager(nodeRegistry, pushHub);
 
   return {
     orkaHome: home,

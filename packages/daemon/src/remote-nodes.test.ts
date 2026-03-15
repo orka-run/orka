@@ -1,6 +1,7 @@
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import type { StoredNode } from "@orka/core";
 import type { NodeRegistry } from "./node-registry";
+import type { PushHub } from "./push-hub";
 import { createRemoteNodeManager, type TransportFactory } from "./remote-nodes";
 
 const mockConnect = mock(() => {});
@@ -53,6 +54,12 @@ function makeRegistry(nodes: StoredNode[] = []): NodeRegistry {
   };
 }
 
+const mockBroadcast = mock(() => {});
+
+function makePushHub(): PushHub {
+  return { broadcast: mockBroadcast } as unknown as PushHub;
+}
+
 describe("RemoteNodeManager", () => {
   beforeEach(() => {
     transportConstructions = [];
@@ -61,17 +68,18 @@ describe("RemoteNodeManager", () => {
     mockRequest.mockClear();
     mockSubscribe.mockClear();
     mockOnStateChange.mockClear();
+    mockBroadcast.mockClear();
     capturedStateListener = null;
   });
 
   it("empty registry → listHandles returns []", () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     expect(mgr.listHandles()).toEqual([]);
     mgr.shutdown();
   });
 
   it("connect() creates a handle with status tracking", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     const node = makeNode();
 
     await mgr.connect(node);
@@ -91,7 +99,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("connect() appends relay token when present", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     const node = makeNode({ relayToken: "secret123" });
 
     await mgr.connect(node);
@@ -103,7 +111,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("connect() is idempotent for same node", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     const node = makeNode();
 
     await mgr.connect(node);
@@ -115,7 +123,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("disconnect() removes handle", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     expect(mgr.getHandle("node-test")).not.toBeNull();
@@ -130,19 +138,19 @@ describe("RemoteNodeManager", () => {
   });
 
   it("disconnect() is safe for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     expect(() => mgr.disconnect("nonexistent")).not.toThrow();
     mgr.shutdown();
   });
 
   it("getHandle() returns null for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     expect(mgr.getHandle("unknown")).toBeNull();
     mgr.shutdown();
   });
 
   it("shutdown() disconnects all handles", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode({ nodeId: "node-1" }));
     await mgr.connect(makeNode({ nodeId: "node-2" }));
 
@@ -155,7 +163,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("request() delegates to transport", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     mockRequest.mockResolvedValueOnce({ sessions: [] });
@@ -168,13 +176,13 @@ describe("RemoteNodeManager", () => {
   });
 
   it("request() throws for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     expect(() => mgr.request("unknown", "test")).toThrow("No connection to node unknown");
     mgr.shutdown();
   });
 
   it("subscribePush() delegates to transport", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     const handler = mock(() => {});
@@ -186,7 +194,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("subscribePush() throws for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     expect(() => mgr.subscribePush("unknown", "ch", () => {})).toThrow(
       "No connection to node unknown",
     );
@@ -199,7 +207,7 @@ describe("RemoteNodeManager", () => {
       makeNode({ nodeId: "no-auto", autoConnect: false }),
       makeNode({ nodeId: "auto-2", autoConnect: true }),
     ];
-    const mgr = createRemoteNodeManager(makeRegistry(nodes), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(nodes), makePushHub(), mockTransportFactory);
 
     expect(transportConstructions).toHaveLength(2);
 
@@ -207,7 +215,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("state change to disconnected updates handle", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     const handle = mgr.getHandle("node-test")!;
@@ -216,6 +224,81 @@ describe("RemoteNodeManager", () => {
 
     capturedStateListener?.({ state: "disconnected", reconnectAttempts: 0 });
     expect(handle.status).toBe("disconnected");
+
+    mgr.shutdown();
+  });
+
+  it("broadcasts fleet.nodeUpdated on connect/disconnect", async () => {
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
+    await mgr.connect(makeNode());
+
+    capturedStateListener?.({ state: "connected", reconnectAttempts: 0 });
+    expect(mockBroadcast).toHaveBeenCalledWith("fleet.nodeUpdated", {
+      nodeId: "node-test",
+      status: "online",
+    });
+
+    mockBroadcast.mockClear();
+    capturedStateListener?.({ state: "disconnected", reconnectAttempts: 0 });
+    expect(mockBroadcast).toHaveBeenCalledWith("fleet.nodeUpdated", {
+      nodeId: "node-test",
+      status: "offline",
+    });
+
+    mgr.shutdown();
+  });
+
+  it("subscribes to forwarded push channels on connect", async () => {
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
+    await mgr.connect(makeNode());
+
+    // 3 forwarded channels + the explicit subscribePush calls if any
+    const subscribedChannels = mockSubscribe.mock.calls.map((c) => c[0]);
+    expect(subscribedChannels).toContain("orchestration.event");
+    expect(subscribedChannels).toContain("orchestration.sessionUpdated");
+    expect(subscribedChannels).toContain("orchestration.sessionDeleted");
+
+    mgr.shutdown();
+  });
+
+  it("forwards push events with nodeId attached", async () => {
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
+    await mgr.connect(makeNode());
+
+    // Find the handler registered for orchestration.event
+    const eventCall = mockSubscribe.mock.calls.find(
+      (c) => c[0] === "orchestration.event",
+    );
+    expect(eventCall).toBeTruthy();
+    const handler = eventCall![1];
+
+    // Simulate a push event from remote node
+    handler({ sessionId: "sess-123", type: "started" });
+
+    expect(mockBroadcast).toHaveBeenCalledWith("orchestration.event", {
+      sessionId: "sess-123",
+      type: "started",
+      nodeId: "node-test",
+    });
+
+    mgr.shutdown();
+  });
+
+  it("forwards non-object push data without nodeId", async () => {
+    const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
+    await mgr.connect(makeNode());
+
+    const eventCall = mockSubscribe.mock.calls.find(
+      (c) => c[0] === "orchestration.event",
+    );
+    const handler = eventCall![1];
+
+    handler("plain-string");
+
+    expect(mockBroadcast).toHaveBeenCalledWith(
+      "orchestration.event",
+      "plain-string",
+    );
 
     mgr.shutdown();
   });
