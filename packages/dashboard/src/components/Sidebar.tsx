@@ -11,6 +11,7 @@ interface SidebarProps {
   isDraftActive?: boolean;
   nodes: NodeInfo[];
   selectedNodeId: string | null;
+  className?: string;
   onSelect: (id: string) => void;
   onNewSession: () => void;
   onSelectDraft?: () => void;
@@ -25,6 +26,7 @@ export function Sidebar({
   isDraftActive,
   nodes,
   selectedNodeId,
+  className,
   onSelect,
   onNewSession,
   onSelectDraft,
@@ -47,7 +49,7 @@ export function Sidebar({
   const filteredSessions = nodeFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
+    <aside className={className ?? "flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950"}>
       <div className="border-b border-zinc-800 px-4 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
