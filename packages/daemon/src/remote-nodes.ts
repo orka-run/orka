@@ -5,8 +5,11 @@ import {
   type NoiseConfig,
   type ConnectionState,
   type PushHandler,
+  type WsTransportOptions,
 } from "@orka/client";
 import type { NodeRegistry } from "./node-registry";
+
+export type TransportFactory = (url: string, options?: WsTransportOptions) => WsTransport;
 
 export interface RemoteNodeHandle {
   nodeId: string;
@@ -32,8 +35,11 @@ export interface RemoteNodeManager {
   shutdown(): void;
 }
 
+const defaultTransportFactory: TransportFactory = (url, options) => new WsTransport(url, options);
+
 export function createRemoteNodeManager(
   registry: NodeRegistry,
+  transportFactory: TransportFactory = defaultTransportFactory,
 ): RemoteNodeManager {
   const handles = new Map<string, RemoteNodeHandle>();
   const stateUnsubs = new Map<string, () => void>();
@@ -79,7 +85,7 @@ export function createRemoteNodeManager(
       `[remote-nodes] connecting to remote node ${node.nodeId} at ${node.nodePaths[0]}`,
     );
 
-    const transport = new WsTransport(url, { noiseConfig });
+    const transport = transportFactory(url, { noiseConfig });
 
     const handle: RemoteNodeHandle = {
       nodeId: node.nodeId,

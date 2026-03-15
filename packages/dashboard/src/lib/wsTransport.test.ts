@@ -3,7 +3,8 @@ import { propagation, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { rpcLatencyStore } from "./rpcLatencyStore";
-import { WsTransport } from "./wsTransport";
+import { WsTransport } from "@orka/client";
+import { createDashboardTransport } from "./wsTransport";
 
 class MockWebSocket {
   static readonly CONNECTING = 0;
@@ -125,7 +126,7 @@ afterEach(async () => {
 
 describe("WsTransport", () => {
   test("request() sends JSON-RPC and resolves on response", async () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     transport.connect();
 
     const socket = latestSocket();
@@ -173,7 +174,7 @@ describe("WsTransport", () => {
   });
 
   test("request() rejects on timeout", async () => {
-    const transport = new WsTransport("ws://orka.test", { timeout: 5 });
+    const transport = createDashboardTransport("ws://orka.test", { timeout: 5 });
     transport.connect();
 
     const socket = latestSocket();
@@ -212,7 +213,7 @@ describe("WsTransport", () => {
   });
 
   test("records latency stats for error responses", async () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     transport.connect();
 
     const socket = latestSocket();
@@ -241,7 +242,7 @@ describe("WsTransport", () => {
   });
 
   test("tracks per-method latency stats across successful and failed responses", async () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     transport.connect();
 
     const socket = latestSocket();
@@ -291,7 +292,7 @@ describe("WsTransport", () => {
   });
 
   test("subscribe() registers handler and receives push messages", () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     const received: Array<{ data: unknown; sequence: number }> = [];
 
     transport.connect();
@@ -325,7 +326,7 @@ describe("WsTransport", () => {
   });
 
   test("reports push sequence gaps over RPC", () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
 
     transport.connect();
     const socket = latestSocket();
@@ -361,7 +362,7 @@ describe("WsTransport", () => {
   });
 
   test("records push handler latency on the connection span", () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
 
     transport.connect();
     const socket = latestSocket();
@@ -389,7 +390,7 @@ describe("WsTransport", () => {
   });
 
   test("subscribe() replays latest cached value for new subscribers", () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     transport.connect();
 
     const socket = latestSocket();
@@ -439,7 +440,7 @@ describe("WsTransport", () => {
   });
 
   test("reconnects on close with exponential backoff", () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     transport.connect();
 
     const firstSocket = latestSocket();
@@ -459,7 +460,7 @@ describe("WsTransport", () => {
   });
 
   test("reports reconnect attempt counts to state listeners", () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     const updates: Array<{ state: string; reconnectAttempts: number }> = [];
 
     transport.onStateChange((snapshot) => {
@@ -486,7 +487,7 @@ describe("WsTransport", () => {
   });
 
   test("outbox messages queued while disconnected are sent on reconnect", async () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     transport.connect();
 
     const firstSocket = latestSocket();
@@ -518,7 +519,7 @@ describe("WsTransport", () => {
   });
 
   test("unsubscribe() removes handler", () => {
-    const transport = new WsTransport("ws://orka.test");
+    const transport = createDashboardTransport("ws://orka.test");
     const received: Array<{ data: unknown; sequence: number }> = [];
 
     transport.connect();

@@ -1,15 +1,15 @@
-// Re-export WsTransport from @orka/client with dashboard-specific rpcLatencyStore integration.
-import { WsTransport as ClientWsTransport, type WsTransportOptions } from "@orka/client";
+// Re-export WsTransport from @orka/client with dashboard-specific defaults.
+import { WsTransport, type WsTransportOptions } from "@orka/client";
 import { rpcLatencyStore } from "./rpcLatencyStore";
 
-export class WsTransport extends ClientWsTransport {
-  constructor(url: string, options?: WsTransportOptions) {
-    super(url, {
-      ...options,
-      onRpcComplete: options?.onRpcComplete ?? rpcLatencyStore.onRpcComplete,
-    });
-  }
+export function createDashboardTransport(url: string, options?: WsTransportOptions): WsTransport {
+  return new WsTransport(url, {
+    ...options,
+    onRpcComplete: options?.onRpcComplete ?? rpcLatencyStore.onRpcComplete,
+  });
 }
+
+export { WsTransport };
 
 export type {
   RpcCompletionInfo,

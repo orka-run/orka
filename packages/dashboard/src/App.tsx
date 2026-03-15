@@ -23,7 +23,7 @@ import { getTracer, initDashboardTracing } from "./lib/tracing";
 import { TransportContext } from "./lib/transportContext";
 import { loadNoiseKey, hexToBytes } from "./lib/noiseKeys";
 import { loadPairedNode } from "./lib/nodeRegistry";
-import { WsTransport } from "./lib/wsTransport";
+import { createDashboardTransport, type WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useConnectionSettingsStore } from "./stores/connectionSettingsStore";
 import { useMode } from "./hooks/useMode";
@@ -344,7 +344,7 @@ function AppShell({ transport }: AppShellProps) {
 }
 
 function createTransport(url: string, noiseConfig?: NoiseConfig): WsTransport {
-  const t = new WsTransport(url, noiseConfig ? { noiseConfig } : undefined);
+  const t = createDashboardTransport(url, noiseConfig ? { noiseConfig } : undefined);
   t.registerChannelTransform("orchestration.event", (data) => parseWireEvent(data));
   return t;
 }

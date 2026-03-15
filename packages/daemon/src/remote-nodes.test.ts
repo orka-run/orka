@@ -1,8 +1,8 @@
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 import type { StoredNode } from "@orka/core";
 import type { NodeRegistry } from "./node-registry";
+import { createRemoteNodeManager, type TransportFactory } from "./remote-nodes";
 
-// Mock WsTransport before importing module under test
 const mockConnect = mock(() => {});
 const mockDisconnect = mock(() => {});
 const mockRequest = mock(() => Promise.resolve("result"));
@@ -13,22 +13,22 @@ const mockOnStateChange = mock((listener: any) => {
   return () => { capturedStateListener = null; };
 });
 
-const MockWsTransport = mock(function (this: any, _url: string, _opts?: any) {
-  this.connect = mockConnect;
-  this.disconnect = mockDisconnect;
-  this.request = mockRequest;
-  this.subscribe = mockSubscribe;
-  this.onStateChange = mockOnStateChange;
-  return this;
-} as any);
+let transportConstructions: Array<{ url: string; opts: any }> = [];
 
-mock.module("@orka/client", () => ({
-  WsTransport: MockWsTransport,
-  appendAuthToken: (url: string, token: string) => `${url}?token=${encodeURIComponent(token)}`,
-}));
-
-// Import after mock setup
-const { createRemoteNodeManager } = await import("./remote-nodes");
+const mockTransportFactory: TransportFactory = (url, opts) => {
+  transportConstructions.push({ url, opts });
+  return {
+    connect: mockConnect,
+    disconnect: mockDisconnect,
+    request: mockRequest,
+    subscribe: mockSubscribe,
+    onStateChange: mockOnStateChange,
+    registerChannelTransform: mock(() => () => {}),
+    onProtocolMismatch: mock(() => () => {}),
+    getServerCapabilities: mock(() => null),
+    get connectionState() { return "disconnected" as const; },
+  } as any;
+};
 
 function makeNode(overrides: Partial<StoredNode> = {}): StoredNode {
   return {
@@ -55,7 +55,7 @@ function makeRegistry(nodes: StoredNode[] = []): NodeRegistry {
 
 describe("RemoteNodeManager", () => {
   beforeEach(() => {
-    MockWsTransport.mockClear();
+    transportConstructions = [];
     mockConnect.mockClear();
     mockDisconnect.mockClear();
     mockRequest.mockClear();
@@ -65,13 +65,13 @@ describe("RemoteNodeManager", () => {
   });
 
   it("empty registry → listHandles returns []", () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     expect(mgr.listHandles()).toEqual([]);
     mgr.shutdown();
   });
 
   it("connect() creates a handle with status tracking", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     const node = makeNode();
 
     await mgr.connect(node);
@@ -91,32 +91,31 @@ describe("RemoteNodeManager", () => {
   });
 
   it("connect() appends relay token when present", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     const node = makeNode({ relayToken: "secret123" });
 
     await mgr.connect(node);
 
-    expect(MockWsTransport).toHaveBeenCalledTimes(1);
-    const calledUrl = MockWsTransport.mock.calls[0][0];
-    expect(calledUrl).toContain("?token=secret123");
+    expect(transportConstructions).toHaveLength(1);
+    expect(transportConstructions[0].url).toContain("?token=secret123");
 
     mgr.shutdown();
   });
 
   it("connect() is idempotent for same node", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     const node = makeNode();
 
     await mgr.connect(node);
     await mgr.connect(node);
 
-    expect(MockWsTransport).toHaveBeenCalledTimes(1);
+    expect(transportConstructions).toHaveLength(1);
 
     mgr.shutdown();
   });
 
   it("disconnect() removes handle", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     expect(mgr.getHandle("node-test")).not.toBeNull();
@@ -131,19 +130,19 @@ describe("RemoteNodeManager", () => {
   });
 
   it("disconnect() is safe for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     expect(() => mgr.disconnect("nonexistent")).not.toThrow();
     mgr.shutdown();
   });
 
   it("getHandle() returns null for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     expect(mgr.getHandle("unknown")).toBeNull();
     mgr.shutdown();
   });
 
   it("shutdown() disconnects all handles", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     await mgr.connect(makeNode({ nodeId: "node-1" }));
     await mgr.connect(makeNode({ nodeId: "node-2" }));
 
@@ -156,7 +155,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("request() delegates to transport", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     mockRequest.mockResolvedValueOnce({ sessions: [] });
@@ -169,13 +168,13 @@ describe("RemoteNodeManager", () => {
   });
 
   it("request() throws for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     expect(() => mgr.request("unknown", "test")).toThrow("No connection to node unknown");
     mgr.shutdown();
   });
 
   it("subscribePush() delegates to transport", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     const handler = mock(() => {});
@@ -187,7 +186,7 @@ describe("RemoteNodeManager", () => {
   });
 
   it("subscribePush() throws for unknown node", () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     expect(() => mgr.subscribePush("unknown", "ch", () => {})).toThrow(
       "No connection to node unknown",
     );
@@ -200,17 +199,15 @@ describe("RemoteNodeManager", () => {
       makeNode({ nodeId: "no-auto", autoConnect: false }),
       makeNode({ nodeId: "auto-2", autoConnect: true }),
     ];
-    const mgr = createRemoteNodeManager(makeRegistry(nodes));
+    const mgr = createRemoteNodeManager(makeRegistry(nodes), mockTransportFactory);
 
-    // auto-connect is async but fires immediately
-    // WsTransport should have been constructed for the 2 autoConnect nodes
-    expect(MockWsTransport).toHaveBeenCalledTimes(2);
+    expect(transportConstructions).toHaveLength(2);
 
     mgr.shutdown();
   });
 
   it("state change to disconnected updates handle", async () => {
-    const mgr = createRemoteNodeManager(makeRegistry());
+    const mgr = createRemoteNodeManager(makeRegistry(), mockTransportFactory);
     await mgr.connect(makeNode());
 
     const handle = mgr.getHandle("node-test")!;
