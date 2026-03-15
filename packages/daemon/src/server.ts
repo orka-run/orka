@@ -9,7 +9,8 @@ import {
   PushControlRequestSchema,
   canonicalTransportOrigin,
 } from "@orka/core";
-import { statfsSync } from "node:fs";
+import { statfsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { ReconnectStrategy } from "@orka/client";
 import type { PushChannel, DataFrame, TransportPayload } from "@orka/core";
 import { trace } from "@opentelemetry/api";
@@ -402,6 +403,8 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
     // Handle signals for graceful shutdown
     const onSignal = () => {
       console.log("Received shutdown signal, shutting down gracefully...");
+      // Delete PID file before exiting so CLI doesn't find a stale PID
+      try { unlinkSync(join(ctx.orkaHome, "daemon.pid")); } catch { /* already gone */ }
       gracefulShutdown.shutdown({ timeout: 5_000 }).then(() => process.exit(0));
     };
     process.on("SIGTERM", onSignal);

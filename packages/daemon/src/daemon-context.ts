@@ -9,7 +9,7 @@ import { ProviderService } from "./provider-service";
 import { PushHub } from "./push-hub";
 import { createNodeRegistry, type NodeRegistry } from "./node-registry";
 import { createRemoteNodeManager, type RemoteNodeManager } from "./remote-nodes";
-import { recoverStaleSessions } from "./orchestrator";
+import { recoverStaleSessions, cleanupOrphanedWorktrees } from "./orchestrator";
 
 /**
  * All daemon-scoped dependencies.
@@ -72,6 +72,11 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
 
   // Recover sessions left in running/preparing from a previous daemon process
   recoverStaleSessions(ctx);
+
+  // Clean up orphaned worktrees in the background (don't block startup)
+  void cleanupOrphanedWorktrees(ctx).then((cleaned) => {
+    if (cleaned > 0) console.log(`cleaned ${cleaned} orphaned worktree(s)`);
+  }).catch(() => { /* non-fatal */ });
 
   return ctx;
 }

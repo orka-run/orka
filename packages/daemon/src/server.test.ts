@@ -118,7 +118,7 @@ describe("startServer", () => {
           encryption: false,
           multiTurn: true,
           adapters: ["claude-code", "codex", "shell"],
-          maxConcurrent: 0,
+          maxConcurrent: 5,
           terminal: true,
         },
       },

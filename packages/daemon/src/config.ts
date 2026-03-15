@@ -12,7 +12,8 @@ const DefaultsSchema = z.object({
 });
 
 const LimitsSchema = z.object({
-  maxConcurrent: z.number().default(0),
+  maxConcurrent: z.number().default(5),
+  sessionTimeoutMinutes: z.number().default(60),
 });
 
 const HookCommandSchema = z.object({
@@ -61,8 +62,11 @@ export function loadConfig(orkaHome: string): OrkaConfig {
               }
             : undefined,
         limits:
-          limits?.max_concurrent !== undefined
-            ? { maxConcurrent: getNumber(limits.max_concurrent) }
+          limits !== undefined
+            ? {
+                ...(limits.max_concurrent !== undefined ? { maxConcurrent: getNumber(limits.max_concurrent) } : {}),
+                ...(limits.session_timeout_minutes !== undefined ? { sessionTimeoutMinutes: getNumber(limits.session_timeout_minutes) } : {}),
+              }
             : undefined,
         hooks:
           hooks?.post_worktree_create !== undefined

@@ -6,7 +6,7 @@
  * Run with: bun test tests/e2e/daemon.e2e.test.ts
  */
 
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
@@ -15,6 +15,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 // Isolated ORKA_HOME — must be set BEFORE importing daemon (lazy DB init)
 const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-daemon-"));
 process.env["ORKA_HOME"] = testHome;
+// Unlimited concurrency for E2E tests
+writeFileSync(join(testHome, "config.toml"), "[limits]\nmax_concurrent = 0\n");
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, Session } from "@orka/core";

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
 import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
@@ -152,12 +152,56 @@ async function isDaemonRunning(): Promise<boolean> {
   }
 }
 
+const DAEMON_LOG_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+const DAEMON_LOG_MAX_ROTATED = 3;
+
+function rotateDaemonLog(logPath: string): void {
+  try {
+    const size = statSync(logPath).size;
+    if (size < DAEMON_LOG_MAX_BYTES) return;
+  } catch {
+    return; // File doesn't exist
+  }
+
+  // Remove oldest rotated file
+  for (const ext of [".zst", ""]) {
+    try { unlinkSync(`${logPath}.${DAEMON_LOG_MAX_ROTATED}${ext}`); break; } catch { /* doesn't exist */ }
+  }
+
+  // Shift existing rotated files
+  for (let i = DAEMON_LOG_MAX_ROTATED; i >= 2; i--) {
+    for (const ext of [".zst", ""]) {
+      try { renameSync(`${logPath}.${i - 1}${ext}`, `${logPath}.${i}${ext}`); break; } catch { /* doesn't exist */ }
+    }
+  }
+
+  // Rotate current to .1 and compress async
+  const rotatingPath = `${logPath}.rotating`;
+  try {
+    renameSync(logPath, rotatingPath);
+    Bun.file(rotatingPath).arrayBuffer().then((buf) =>
+      Bun.zstdCompress(new Uint8Array(buf)),
+    ).then((compressed) => {
+      writeFileSync(`${logPath}.1.zst`, compressed);
+      try { unlinkSync(rotatingPath); } catch { /* ignore */ }
+    }).catch(() => {
+      // Compression failed — keep as uncompressed fallback
+      try { renameSync(rotatingPath, `${logPath}.1`); } catch { /* ignore */ }
+    });
+  } catch {
+    // Rotation failed — proceed without rotating
+  }
+}
+
 async function startDaemonBackground(): Promise<void> {
   const cliPath = new URL(import.meta.url).pathname;
   const logsDir = join(getOrkaHome(), "logs");
   mkdirSync(logsDir, { recursive: true });
   const logPath = join(logsDir, "daemon.log");
   const pidPath = join(getOrkaHome(), "daemon.pid");
+
+  // Rotate daemon.log if it exceeds 10MB
+  rotateDaemonLog(logPath);
 
   // Use setsid to create a new session so daemon survives parent exit
   const proc = Bun.spawn(
@@ -201,11 +245,38 @@ async function ensureDaemon(): Promise<void> {
   await startDaemonBackground();
 }
 
+/**
+ * Check if a PID belongs to an orka daemon process by inspecting /proc/<pid>/cmdline.
+ * Returns false if process doesn't exist or cmdline doesn't contain "orka".
+ */
+function isOrkaDaemonPid(pid: number): boolean {
+  try {
+    // Check process exists first
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    // Validate cmdline contains "orka" to avoid killing unrelated processes
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf-8");
+    return cmdline.includes("orka");
+  } catch {
+    // /proc not available (non-Linux) — fall back to "process exists" check
+    return true;
+  }
+}
+
 async function stopDaemon(): Promise<boolean> {
   const pidPath = join(getOrkaHome(), "daemon.pid");
   if (existsSync(pidPath)) {
     const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
-    if (pid) {
+    if (!Number.isFinite(pid) || pid <= 0) {
+      // Malformed PID file — remove it
+      try { unlinkSync(pidPath); } catch { /* ignore */ }
+    } else if (!isOrkaDaemonPid(pid)) {
+      // PID doesn't exist or isn't an orka process — stale PID file
+      try { unlinkSync(pidPath); } catch { /* ignore */ }
+    } else {
       try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
     }
   }
