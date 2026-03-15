@@ -381,4 +381,113 @@ describe("Noise NK through Relay", () => {
       ws.close();
     }
   }, 15_000);
+
+  // ---- Test 6: Noise NK handshake and RPC through relay ----
+
+  test("Noise NK handshake and encrypted RPC through relay", async () => {
+    const relayUrl = `ws://127.0.0.1:${relayPort}`;
+    // Connect to relay (not daemon directly) — relay forwards transport messages
+    const ws = new WebSocket(`${relayUrl}/ws?token=${clientApiKey}`);
+    await waitForOpen(ws);
+    try {
+      const transport = await doNoiseHandshake(ws, noiseKeyA, "node-A", relayUrl);
+      expect(transport.isSecure).toBe(true);
+      expect(transport.sessionId).not.toBeNull();
+
+      const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
+      expect(resp["error"]).toBeUndefined();
+      expect(resp["result"]).toBeInstanceOf(Array);
+    } finally {
+      ws.close();
+    }
+  });
+
+  // ---- Test 7: Multi-node Noise routing through relay ----
+
+  test("multi-node: relay routes Noise to correct node via transport", async () => {
+    const relayUrl = `ws://127.0.0.1:${relayPort}`;
+
+    // Handshake with node-A through relay
+    const wsA = new WebSocket(`${relayUrl}/ws?token=${clientApiKey}`);
+    await waitForOpen(wsA);
+    try {
+      const transportA = await doNoiseHandshake(wsA, noiseKeyA, "node-A", relayUrl);
+      expect(transportA.isSecure).toBe(true);
+      const respA = await encryptedRpc(transportA, wsA, "listSessions", { filters: {} });
+      expect(respA["error"]).toBeUndefined();
+    } finally {
+      wsA.close();
+    }
+
+    // Handshake with node-B through relay
+    const wsB = new WebSocket(`${relayUrl}/ws?token=${clientApiKey}`);
+    await waitForOpen(wsB);
+    try {
+      const transportB = await doNoiseHandshake(wsB, noiseKeyB, "node-B", relayUrl);
+      expect(transportB.isSecure).toBe(true);
+      const respB = await encryptedRpc(transportB, wsB, "listSessions", { filters: {} });
+      expect(respB["error"]).toBeUndefined();
+    } finally {
+      wsB.close();
+    }
+  });
+
+  // ---- Test 8: Multiple encrypted RPCs through relay ----
+
+  test("multiple encrypted RPCs on same connection through relay", async () => {
+    const relayUrl = `ws://127.0.0.1:${relayPort}`;
+    const ws = new WebSocket(`${relayUrl}/ws?token=${clientApiKey}`);
+    await waitForOpen(ws);
+    try {
+      const transport = await doNoiseHandshake(ws, noiseKeyA, "node-A", relayUrl);
+      expect(transport.isSecure).toBe(true);
+
+      // Send multiple RPCs sequentially to verify nonce sync through relay
+      for (let i = 0; i < 5; i++) {
+        const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} }, { id: `multi-${i}` });
+        expect(resp["error"]).toBeUndefined();
+        expect(resp["result"]).toBeInstanceOf(Array);
+      }
+    } finally {
+      ws.close();
+    }
+  });
+
+  // ---- Test 9: Transport error for unknown node ----
+
+  test("transport error when node_id not found", async () => {
+    const relayUrl = `ws://127.0.0.1:${relayPort}`;
+    const ws = new WebSocket(`${relayUrl}/ws?token=${clientApiKey}`);
+    await waitForOpen(ws);
+    try {
+      // Send client_hello with a non-existent node_id
+      const errorPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("timeout")), 5000);
+        ws.addEventListener("message", (event) => {
+          try {
+            const msg = JSON.parse(String(event.data));
+            if (msg.t === "transport_error") {
+              clearTimeout(timer);
+              resolve(msg);
+            }
+          } catch {}
+        });
+      });
+
+      ws.send(JSON.stringify({
+        t: "client_hello",
+        v: 1,
+        noise_suites: ["Noise_NK_25519_ChaChaPoly_SHA256"],
+        node_id: "nonexistent-node",
+        expected_key_id: "sha256:fake",
+        app_protocols: ["jsonrpc-2.0"],
+        features: [],
+      }));
+
+      const err = await errorPromise;
+      expect(err["code"]).toBe("node_not_found");
+    } finally {
+      ws.close();
+    }
+  });
 });

@@ -377,7 +377,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
 
     // Register with relay if configured
     if (opts.relayUrl) {
-      registerWithRelay(ctx, svc, opts.relayUrl, nodeId, opts.relayToken);
+      registerWithRelay(ctx, svc, opts.relayUrl, nodeId, opts.relayToken, noiseKeyInfo);
     }
 
     return server;
@@ -387,8 +387,19 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
 /**
  * Connect to relay as a node. Relay forwards client requests to us,
  * we process them and send responses back through the relay.
+ *
+ * When Noise encryption is enabled (`noiseKeyInfo`), the relay multiplexes
+ * multiple client transport sessions over this single WS using a `_rc`
+ * (relay client ID) field. Each `_rc` maps to an independent NoiseServerTransport.
  */
-function registerWithRelay(ctx: DaemonContext, svc: OrkaService, relayUrl: string, nodeId: string, token?: string) {
+function registerWithRelay(
+  ctx: DaemonContext,
+  svc: OrkaService,
+  relayUrl: string,
+  nodeId: string,
+  token?: string,
+  noiseKeyInfo?: NoiseKeyInfo,
+) {
   void withSpan("orka.server.register_relay", {}, async () => {
     let url = `${relayUrl}/register?node=${encodeURIComponent(nodeId)}`;
     if (token) url += `&token=${encodeURIComponent(token)}`;
@@ -396,6 +407,10 @@ function registerWithRelay(ctx: DaemonContext, svc: OrkaService, relayUrl: strin
     const backoff = new ReconnectStrategy();
 
     function connect() {
+      // Per-client Noise transport sessions, keyed by relay client ID (_rc).
+      // Cleared on reconnect since the relay won't know about old sessions.
+      const transportSessions = new Map<string, NoiseServerTransport>();
+
       const ws = new WebSocket(url);
 
       ws.onopen = () => {
@@ -405,11 +420,96 @@ function registerWithRelay(ctx: DaemonContext, svc: OrkaService, relayUrl: strin
 
       ws.onmessage = async (event) => {
         const raw = typeof event.data === "string" ? event.data : "";
+        let parsed: any;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return;
+        }
+
+        // --- Transport message from relay (has _rc field) ---
+        if (parsed && typeof parsed._rc === "string" && typeof parsed.t === "string") {
+          const relayCid: string = parsed._rc;
+
+          // Helper: send response back through relay with _rc attached.
+          // IMPORTANT: spread to avoid mutating the original object (e.g. stored serverHello).
+          const sendBack = (msg: Record<string, unknown>) => {
+            ws.send(JSON.stringify({ ...msg, _rc: relayCid }));
+          };
+
+          // Strip _rc before processing
+          const { _rc, ...msg } = parsed;
+
+          let transport = transportSessions.get(relayCid);
+
+          // New client_hello → create Noise transport session
+          if (!transport && msg.t === "client_hello" && noiseKeyInfo) {
+            transport = new NoiseServerTransport({
+              nodeId,
+              keyId: noiseKeyInfo.keyId,
+              staticKeypair: {
+                publicKey: noiseKeyInfo.publicKey,
+                privateKey: noiseKeyInfo.privateKey,
+              },
+              relayOrigin: canonicalTransportOrigin(relayUrl),
+            });
+            transportSessions.set(relayCid, transport);
+          }
+
+          if (!transport) {
+            sendBack({ t: "transport_error", code: "no_transport_session" });
+            return;
+          }
+
+          // SECURE state: decrypt data frame, handle RPC
+          if (transport.isSecure) {
+            if (msg.t !== "data" || typeof msg.ct !== "string") return;
+            let payload: TransportPayload;
+            try {
+              payload = transport.decryptFrame(msg as DataFrame);
+            } catch {
+              sendBack({ t: "transport_error", code: "decrypt_error" });
+              return;
+            }
+            if (payload.kind === "rpc") {
+              const responseStr = await handleRpcRequest(ctx, svc, JSON.stringify(payload.rpc));
+              const responseObj = JSON.parse(responseStr) as Record<string, unknown>;
+              const encFrame = transport.encryptRpc(responseObj);
+              sendBack(encFrame as Record<string, unknown>);
+            }
+            // push_control not supported through relay transport yet
+            return;
+          }
+
+          // Handshake in progress
+          const responses = transport.processMessage(msg);
+          for (const resp of responses) {
+            sendBack(resp as Record<string, unknown>);
+          }
+
+          // Just reached SECURE → send encrypted welcome
+          if (transport.isSecure) {
+            const capabilities = buildCapabilities(ctx, true);
+            const sessions = await svc.listSessions();
+            const welcome: ServerWelcomeData = {
+              serverVersion: daemonPackageJson.version,
+              sessionCount: sessions.length,
+              protocolVersion: PROTOCOL_VERSION,
+              capabilities,
+            };
+            const welcomeFrame = transport.encryptPush(welcome);
+            sendBack(welcomeFrame as Record<string, unknown>);
+          }
+          return;
+        }
+
+        // --- Regular JSON-RPC from relay ---
         const response = await handleRpcRequest(ctx, svc, raw);
         ws.send(response);
       };
 
       ws.onclose = () => {
+        transportSessions.clear();
         const delay = backoff.nextDelay();
         console.log(`relay connection lost, reconnecting in ${Math.round(delay / 1000)}s (attempt ${backoff.attempts})...`);
         setTimeout(connect, delay);

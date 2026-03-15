@@ -18,7 +18,7 @@
  */
 
 import type { ServerWebSocket, Server } from "bun";
-import { RelayState, type SocketData, type AnySocketData } from "./state";
+import { RelayState, type SocketData, type AnySocketData, type TransportBinding } from "./state";
 import { AuthManager, extractApiKey } from "./auth";
 import { handleApiRequest, SignupRateLimiter } from "./api";
 import { RateLimiter, GlobalRateLimiter } from "./rate-limiter";
@@ -348,6 +348,24 @@ export function startRelay(opts: RelayOptions): RelayHandle {
           data.bytesIn += bytes;
 
           if (data.role === "client") {
+            // Fast path: client already bound in transport mode → forward all messages
+            const binding = state.getTransportBinding(ws as ServerWebSocket<SocketData>);
+            if (binding) {
+              forwardClientTransport(ws as ServerWebSocket<SocketData>, raw, bytes, data, binding, state, meter);
+              return;
+            }
+
+            // Detect transport init (client_hello) — avoid full JSON parse for most messages
+            if (raw.includes('"client_hello"')) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed?.t === "client_hello") {
+                  handleTransportInit(ws as ServerWebSocket<SocketData>, parsed, bytes, data, state, rateLimiter, globalLimiter, config, meter);
+                  return;
+                }
+              } catch { /* fall through to JSON-RPC */ }
+            }
+
             handleClientMessage(ws as ServerWebSocket<SocketData>, raw, bytes, data, state, rateLimiter, globalLimiter, config, meter);
           } else if (data.role === "node") {
             handleNodeMessage(ws as ServerWebSocket<SocketData>, raw, bytes, data, state, meter);
@@ -369,7 +387,15 @@ export function startRelay(opts: RelayOptions): RelayHandle {
             "orka.node.id": data.nodeId ?? "",
           }, () => {
             if (data.role === "node") {
-              // Fail pending requests for this node
+              // Notify and clean up transport clients bound to this node
+              const transportClients = state.getTransportClientsForNode(data.accountId, data.nodeId!);
+              for (const clientWs of transportClients) {
+                try {
+                  clientWs.send(JSON.stringify({ t: "transport_error", code: "node_disconnected" }));
+                } catch { /* client gone */ }
+                state.removeTransportClient(clientWs);
+              }
+              // Fail pending JSON-RPC requests for this node
               const failed = state.failRequestsForNode(data.accountId, data.nodeId!);
               for (const pr of failed) {
                 try {
@@ -385,6 +411,8 @@ export function startRelay(opts: RelayOptions): RelayHandle {
               metrics.registeredNodes.dec({ account_id: data.accountId });
               meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
             } else {
+              // Clean up transport binding if any
+              state.removeTransportClient(ws as ServerWebSocket<SocketData>);
               state.failRequestsForClient(ws as ServerWebSocket<SocketData>);
               state.removeClient(data.accountId, ws as ServerWebSocket<SocketData>);
               metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
@@ -586,15 +614,30 @@ function handleNodeMessage(
   state: RelayState,
   meter: UsageMeter,
 ): void {
-  // Parse response ID — accept string or number per JSON-RPC spec
-  let responseId: string | number | undefined;
+  let envelope: any;
   try {
-    const envelope = JSON.parse(raw);
-    responseId = envelope.id;
+    envelope = JSON.parse(raw);
   } catch {
     return; // Can't route unparseable response
   }
 
+  // --- Transport message from node (has _rc field) → route to bound client ---
+  if (envelope && typeof envelope._rc === "string" && typeof envelope.t === "string") {
+    const relayCid: string = envelope._rc;
+    const clientWs = state.getTransportClientWs(data.accountId, relayCid);
+    if (!clientWs) return;
+
+    // Strip _rc before forwarding to client
+    const { _rc, ...clientMsg } = envelope;
+    try {
+      clientWs.send(JSON.stringify(clientMsg));
+    } catch { /* client gone */ }
+    metrics.bytesOut.inc({ account_id: data.accountId, direction: "node" }, bytes);
+    return;
+  }
+
+  // --- JSON-RPC response ---
+  const responseId: string | number | undefined = envelope.id;
   if (responseId === undefined || responseId === null) return;
 
   withSpanSync("orka.relay.node_message", {
@@ -621,6 +664,101 @@ function handleNodeMessage(
     metrics.bytesOut.inc({ account_id: data.accountId, direction: "node" }, bytes);
     meter.recordResponse(data.accountId, bytes, data.nodeId);
   });
+}
+
+// --- Transport Message Handlers ---
+
+/**
+ * Handle client_hello: extract node_id, find node, create transport binding,
+ * add _rc (relay client ID), and forward to node.
+ */
+function handleTransportInit(
+  ws: ServerWebSocket<SocketData>,
+  parsed: any,
+  bytes: number,
+  data: SocketData,
+  state: RelayState,
+  rateLimiter: RateLimiter,
+  globalLimiter: GlobalRateLimiter,
+  config: any,
+  meter: UsageMeter,
+): void {
+  // Rate limiting (same checks as JSON-RPC)
+  if (!globalLimiter.check()) {
+    ws.send(JSON.stringify({ t: "transport_error", code: "rate_limited" }));
+    return;
+  }
+  const limits = config.rateLimits;
+  const accountLimits = {
+    accountId: data.accountId,
+    requestsPerMinute: limits.defaultRequestsPerMinute,
+    requestsPerHour: limits.defaultRequestsPerHour,
+    concurrentConnections: limits.defaultConcurrentConnections,
+    maxMessageBytes: limits.defaultMaxMessageBytes,
+  };
+  if (!rateLimiter.checkMessageSize(accountLimits, bytes)) {
+    ws.send(JSON.stringify({ t: "transport_error", code: "message_too_large" }));
+    return;
+  }
+  const rateResult = rateLimiter.check(data.accountId, accountLimits);
+  if (!rateResult.allowed) {
+    ws.send(JSON.stringify({ t: "transport_error", code: "rate_limited" }));
+    return;
+  }
+
+  // Extract target node from client_hello
+  const nodeId = parsed.node_id;
+  if (!nodeId || typeof nodeId !== "string") {
+    ws.send(JSON.stringify({ t: "transport_error", code: "missing_node_id" }));
+    return;
+  }
+
+  const node = state.getNode(data.accountId, nodeId);
+  if (!node) {
+    ws.send(JSON.stringify({ t: "transport_error", code: "node_not_found" }));
+    return;
+  }
+
+  // Create transport binding (client ↔ node)
+  const relayCid = state.bindTransportClient(ws, data.accountId, nodeId);
+
+  // Add _rc and forward to node
+  parsed._rc = relayCid;
+  node.ws.send(JSON.stringify(parsed));
+
+  metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_init" });
+  meter.recordRequest(data.accountId, "transport_init", bytes, nodeId);
+}
+
+/**
+ * Forward a transport-mode client message to the bound node.
+ * Adds _rc so the node can route the response back.
+ */
+function forwardClientTransport(
+  ws: ServerWebSocket<SocketData>,
+  raw: string,
+  bytes: number,
+  data: SocketData,
+  binding: TransportBinding,
+  state: RelayState,
+  meter: UsageMeter,
+): void {
+  const node = state.getNode(data.accountId, binding.nodeId);
+  if (!node) {
+    ws.send(JSON.stringify({ t: "transport_error", code: "node_disconnected" }));
+    return;
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  parsed._rc = binding.relayCid;
+  node.ws.send(JSON.stringify(parsed));
+
+  metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
 }
 
 // --- Helpers ---

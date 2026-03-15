@@ -43,6 +43,12 @@ export interface PendingRequest {
   startedAt: number;
 }
 
+export interface TransportBinding {
+  nodeId: string;
+  relayCid: string;
+  accountId: string;
+}
+
 export interface AccountStats {
   nodes: number;
   clients: number;
@@ -65,6 +71,10 @@ export class RelayState {
   private pending = new Map<string, PendingRequest>();
   /** Account → Set<WebSocket> (active client connections) */
   private clientsByAccount = new Map<string, Set<ServerWebSocket<SocketData>>>();
+  /** Client WS → TransportBinding (client is in Noise transport mode) */
+  private transportClients = new Map<ServerWebSocket<SocketData>, TransportBinding>();
+  /** "accountId:relayCid" → client WS (reverse lookup for node→client routing) */
+  private transportCidToClient = new Map<string, ServerWebSocket<SocketData>>();
 
   // --- Node Management ---
 
@@ -189,6 +199,47 @@ export class RelayState {
       }
     }
     return removedIds;
+  }
+
+  // --- Transport Bindings (Noise through relay) ---
+
+  /** Bind a client WS to a node for Noise transport. Returns a unique relay client ID. */
+  bindTransportClient(clientWs: ServerWebSocket<SocketData>, accountId: string, nodeId: string): string {
+    const relayCid = Math.random().toString(36).slice(2, 14);
+    const binding: TransportBinding = { nodeId, relayCid, accountId };
+    this.transportClients.set(clientWs, binding);
+    this.transportCidToClient.set(`${accountId}:${relayCid}`, clientWs);
+    return relayCid;
+  }
+
+  /** Get transport binding for a client WS (null if not in transport mode). */
+  getTransportBinding(clientWs: ServerWebSocket<SocketData>): TransportBinding | null {
+    return this.transportClients.get(clientWs) ?? null;
+  }
+
+  /** Look up the client WS for a relay client ID (for node→client routing). */
+  getTransportClientWs(accountId: string, relayCid: string): ServerWebSocket<SocketData> | null {
+    return this.transportCidToClient.get(`${accountId}:${relayCid}`) ?? null;
+  }
+
+  /** Remove a client's transport binding. */
+  removeTransportClient(clientWs: ServerWebSocket<SocketData>): void {
+    const binding = this.transportClients.get(clientWs);
+    if (binding) {
+      this.transportCidToClient.delete(`${binding.accountId}:${binding.relayCid}`);
+      this.transportClients.delete(clientWs);
+    }
+  }
+
+  /** Get all transport-mode clients bound to a specific node (for cleanup on node disconnect). */
+  getTransportClientsForNode(accountId: string, nodeId: string): ServerWebSocket<SocketData>[] {
+    const clients: ServerWebSocket<SocketData>[] = [];
+    for (const [ws, binding] of this.transportClients) {
+      if (binding.accountId === accountId && binding.nodeId === nodeId) {
+        clients.push(ws);
+      }
+    }
+    return clients;
   }
 
   // --- Stats ---
