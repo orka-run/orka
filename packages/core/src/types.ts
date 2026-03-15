@@ -78,6 +78,17 @@ export interface Session {
   archivedAt?: string;
 }
 
+// --- Session Summary (for aggregation cache) ---
+
+export interface SessionSummary {
+  id: SessionId;
+  status: SessionStatus;
+  backend: BackendKind;
+  title: string;
+  createdAt: string;
+  nodeId: string | null;
+}
+
 // --- Node Info ---
 
 export interface NodeInfo {
