@@ -55,6 +55,11 @@ export interface NoiseConfig {
   relayOrigin?: string;
 }
 
+export interface RequestOptions {
+  /** Route this request to a specific relay node. */
+  node?: string;
+}
+
 export interface WsTransportOptions {
   timeout?: number;
   maxReconnectDelay?: number;
@@ -210,10 +215,11 @@ export class WsTransport {
     this.setState("disconnected");
   }
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown, options?: RequestOptions): Promise<T> {
     const id = ++this.requestId;
     const { span, startedAt } = startSpan("orka.client.rpc", {
       "orka.method": method,
+      ...(options?.node ? { "orka.node": options.node } : {}),
     });
     const createdAt = Date.now();
     const traceCarrier: { traceparent?: string } = {};
@@ -224,6 +230,7 @@ export class WsTransport {
       id,
       method,
       ...(params !== undefined ? { params } : {}),
+      ...(options?.node ? { node: options.node } : {}),
       ...(traceCarrier.traceparent ? { traceparent: traceCarrier.traceparent } : {}),
     };
     const payload = JSON.stringify(request);

@@ -1,6 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useId, useState } from "react";
-import { MessageSquarePlus, Plus, Search } from "lucide-react";
+import { MessageSquarePlus, Plus, Search, Server } from "lucide-react";
+import type { NodeInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
 
@@ -8,18 +9,38 @@ interface SidebarProps {
   sessions: SessionSummary[];
   selectedId: string | null;
   isDraftActive?: boolean;
+  nodes: NodeInfo[];
+  selectedNodeId: string | null;
   onSelect: (id: string) => void;
   onNewSession: () => void;
   onSelectDraft?: () => void;
+  onSelectNode: (nodeId: string | null) => void;
 }
 
-export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSession, onSelectDraft }: SidebarProps) {
+export function Sidebar({
+  sessions,
+  selectedId,
+  isDraftActive,
+  nodes,
+  selectedNodeId,
+  onSelect,
+  onNewSession,
+  onSelectDraft,
+  onSelectNode,
+}: SidebarProps) {
   const searchId = useId();
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
   const now = Date.now();
-  const runningCount = sessions.filter((session) => isActive(session.status)).length;
-  const filteredSessions = sessions.filter((session) => matchesQuery(session, normalizedQuery));
+  const showNodeSelector = nodes.length > 1;
+
+  // Filter by selected node
+  const nodeFilteredSessions = selectedNodeId
+    ? sessions.filter((s) => s.nodeId === selectedNodeId)
+    : sessions;
+
+  const runningCount = nodeFilteredSessions.filter((session) => isActive(session.status)).length;
+  const filteredSessions = nodeFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
 
   return (
     <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
@@ -28,7 +49,7 @@ export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSe
           <div>
             <h1 className="text-lg font-semibold text-zinc-100">orka</h1>
             <p className="mt-1 text-xs text-zinc-500">
-              {runningCount} active / {sessions.length} total
+              {runningCount} active / {nodeFilteredSessions.length} total
             </p>
           </div>
           <button
@@ -40,6 +61,13 @@ export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSe
             New Session
           </button>
         </div>
+        {showNodeSelector ? (
+          <NodeSelector
+            nodes={nodes}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={onSelectNode}
+          />
+        ) : null}
         <div className="relative mt-4">
           <label htmlFor={searchId} className="sr-only">
             Search sessions
@@ -107,6 +135,9 @@ export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSe
                           {session.backend}
                         </span>
                         <StatusPill status={session.status} />
+                        {session.nodeId && showNodeSelector ? (
+                          <NodeBadge nodeId={session.nodeId} />
+                        ) : null}
                       </div>
                     </div>
                   </button>
@@ -120,6 +151,63 @@ export function Sidebar({ sessions, selectedId, isDraftActive, onSelect, onNewSe
   );
 }
 
+function NodeSelector({
+  nodes,
+  selectedNodeId,
+  onSelectNode,
+}: {
+  nodes: NodeInfo[];
+  selectedNodeId: string | null;
+  onSelectNode: (nodeId: string | null) => void;
+}) {
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <Server className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+      <div className="flex flex-1 flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => onSelectNode(null)}
+          className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+            selectedNodeId === null
+              ? "bg-zinc-100 text-zinc-950"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          All nodes
+        </button>
+        {nodes.map((node) => (
+          <button
+            key={node.id}
+            type="button"
+            onClick={() => onSelectNode(node.id)}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+              selectedNodeId === node.id
+                ? "bg-zinc-100 text-zinc-950"
+                : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                node.status === "online" ? "bg-emerald-400" : "bg-zinc-600"
+              }`}
+            />
+            {node.id}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NodeBadge({ nodeId }: { nodeId: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/50 px-1.5 py-0.5 text-[10px] text-zinc-500">
+      <Server className="h-2.5 w-2.5" />
+      {nodeId}
+    </span>
+  );
+}
+
 function isActive(status: SessionSummary["status"]): boolean {
   return status === "running" || status === "queued" || status === "preparing";
 }
@@ -129,7 +217,7 @@ function matchesQuery(session: SessionSummary, query: string): boolean {
     return true;
   }
 
-  const haystack = [session.id, session.title, session.backend, session.status, session.model ?? ""]
+  const haystack = [session.id, session.title, session.backend, session.status, session.model ?? "", session.nodeId ?? ""]
     .join(" ")
     .toLowerCase();
   return haystack.includes(query);

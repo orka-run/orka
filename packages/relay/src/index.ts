@@ -58,6 +58,8 @@ const ALLOWED_METHODS = new Set([
   "terminalOpen", "terminalWrite", "terminalResize", "terminalClose", "terminalList",
   // Client error reporting
   "reportClientError", "listClientErrors",
+  // Fleet
+  "listNodes",
 ]);
 
 // --- Relay Options ---
@@ -563,6 +565,20 @@ function handleClientMessage(
         }));
         return;
       }
+    }
+
+    // Relay-intercepted methods: respond directly without forwarding to a node
+    if (method === "listNodes") {
+      const nodes = state.getAccountNodes(data.accountId).map((n) => ({
+        ...n,
+        status: "online" as const,
+      }));
+      ws.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id: requestId,
+        result: nodes,
+      }));
+      return;
     }
 
     // Pick node within account scope

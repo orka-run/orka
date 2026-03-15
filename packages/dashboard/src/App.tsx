@@ -23,6 +23,7 @@ import { TransportContext } from "./lib/transportContext";
 import { WsTransport } from "./lib/wsTransport";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useConnectionSettingsStore } from "./stores/connectionSettingsStore";
+import { useNodeStore } from "./stores/nodeStore";
 import { SELECTED_SESSION_KEY, useSessionStore } from "./stores/sessionStore";
 
 initDashboardTracing();
@@ -75,6 +76,10 @@ function AppShell({ transport }: AppShellProps) {
   const fetchSessions = useSessionStore((state) => state.fetchSessions);
   const handleSessionUpdated = useSessionStore((state) => state.handleSessionUpdated);
   const handleSessionDeleted = useSessionStore((state) => state.handleSessionDeleted);
+  const nodes = useNodeStore((state) => state.nodes);
+  const selectedNodeId = useNodeStore((state) => state.selectedNodeId);
+  const fetchNodes = useNodeStore((state) => state.fetchNodes);
+  const selectNode = useNodeStore((state) => state.selectNode);
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
   const setProtocolMismatch = useConnectionStore((state) => state.setProtocolMismatch);
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
@@ -183,6 +188,13 @@ function AppShell({ transport }: AppShellProps) {
     return () => { window.removeEventListener("keydown", handleGlobalKeyDown); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Helper: fetch sessions using current node list
+  const fetchSessionsWithNodes = useEffectEvent(() => {
+    const currentNodes = useNodeStore.getState().nodes;
+    const nodeIds = currentNodes.length > 1 ? currentNodes.map((n) => n.id) : undefined;
+    void fetchSessions(transport, nodeIds);
+  });
+
   useEffect(() => {
     const unsubscribeState = transport.onStateChange((connection) => {
       setConnectionStatus(connection.state, connection.reconnectAttempts);
@@ -205,7 +217,7 @@ function AppShell({ transport }: AppShellProps) {
         return;
       }
 
-      void fetchSessions(transport);
+      fetchSessionsWithNodes();
     });
     const unsubscribeEvent = transport.subscribe("orchestration.event", (data) => {
       const typedData = data as OrchestrationEvent;
@@ -215,16 +227,25 @@ function AppShell({ transport }: AppShellProps) {
         .some((session) => session.id === typedData.sessionId);
 
       if (!known) {
-        void fetchSessions(transport);
+        fetchSessionsWithNodes();
       }
     });
     const unsubscribeDeleted = transport.subscribe("orchestration.sessionDeleted", (data) => {
       handleSessionDeleted(data as SessionDeletedData);
     });
 
-    void fetchSessions(transport);
+    // Initial fetch: nodes first, then sessions
+    void fetchNodes(transport).then(() => {
+      fetchSessionsWithNodes();
+    });
+
+    // Periodically refresh node list (every 30s)
+    const nodeRefreshTimer = setInterval(() => {
+      void fetchNodes(transport);
+    }, 30_000);
 
     return () => {
+      clearInterval(nodeRefreshTimer);
       const pendingSelection = selectionSpanRef.current;
       if (pendingSelection) {
         pendingSelection.span.setAttribute("orka.status", "cancelled");
@@ -241,7 +262,7 @@ function AppShell({ transport }: AppShellProps) {
       unsubscribeState();
       transport.disconnect();
     };
-  }, [transport, fetchSessions, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch]);
+  }, [transport, fetchSessions, fetchNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch]);
 
   return (
     <TransportContext.Provider value={transport}>
@@ -252,12 +273,15 @@ function AppShell({ transport }: AppShellProps) {
             sessions={sessions}
             selectedId={selectedId}
             isDraftActive={isDraftActive}
+            nodes={nodes}
+            selectedNodeId={selectedNodeId}
             onSelect={(id) => {
               handleSelectSession(id);
               // Keep draft in sidebar but show the selected session
             }}
             onSelectDraft={activateDraft}
             onNewSession={activateDraft}
+            onSelectNode={selectNode}
           />
           <main className="flex-1 overflow-hidden">
             {selectedId ? (
@@ -287,6 +311,7 @@ function AppShell({ transport }: AppShellProps) {
           open={isNewSessionOpen}
           transport={transport}
           defaultProjectPath={defaultProjectPath}
+          nodes={nodes}
           onClose={() => {
             setIsNewSessionOpen(false);
             setAdvancedDefaults(null);

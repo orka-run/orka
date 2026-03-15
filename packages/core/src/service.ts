@@ -1,4 +1,4 @@
-import type { ChatEntry, Session, SessionStatus, SpawnRequest, Task } from "./types";
+import type { ChatEntry, NodeInfo, Session, SessionStatus, SpawnRequest, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -152,6 +152,9 @@ export interface OrkaService {
 
   // --- Backfill ---
   backfillSession(sessionId: string): Promise<{ eventsReplayed: number }>;
+
+  // --- Fleet ---
+  listNodes(): Promise<NodeInfo[]>;
 
   // --- Metrics & Observability ---
   getMetrics(): Promise<Record<string, unknown> | null>;

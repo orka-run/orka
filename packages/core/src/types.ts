@@ -78,6 +78,15 @@ export interface Session {
   archivedAt?: string;
 }
 
+// --- Node Info ---
+
+export interface NodeInfo {
+  id: string;
+  status: "online" | "offline";
+  activeRequests: number;
+  registeredAt: number;
+}
+
 export interface SessionProjection {
   sessionId: string;
   status: SessionStatus;
@@ -124,4 +133,6 @@ export interface SpawnRequest {
   systemPrompt?: string;
   allowedTools?: string[];
   env?: Record<string, string>;
+  /** Target node ID for relay routing. Omit for least-loaded scheduling. */
+  nodeId?: string;
 }

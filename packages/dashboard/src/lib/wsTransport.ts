@@ -21,5 +21,6 @@ export type {
   ProtocolMismatchInfo,
   ProtocolMismatchHandler,
   NoiseConfig,
+  RequestOptions,
   WsTransportOptions,
 } from "@orka/client";

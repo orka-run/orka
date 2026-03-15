@@ -102,6 +102,7 @@ describe("sessionStore", () => {
         kept: false,
         autoMerge: false,
         prompt: "Build the dashboard session store",
+        nodeId: null,
       },
     ]);
     expect(store.getState().isLoading).toBe(false);
@@ -226,6 +227,7 @@ describe("sessionStore", () => {
         kept: false,
         autoMerge: true,
         prompt: null,
+        nodeId: null,
       },
     ]);
     expect(store.getState().selectedId).toBe("sess-2");

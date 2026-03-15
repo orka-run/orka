@@ -1,6 +1,7 @@
 import type { Session, SpawnRequest, Task } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
+import type { RequestOptions } from "../lib/wsTransport";
 import { WsTransport } from "../lib/wsTransport";
 
 const FALLBACK_TITLE_LENGTH = 80;
@@ -23,6 +24,7 @@ export interface SessionSummary {
   kept: boolean;
   autoMerge: boolean;
   prompt: string | null;
+  nodeId: string | null;
 }
 
 export interface SessionState {
@@ -31,7 +33,8 @@ export interface SessionState {
   isLoading: boolean;
   error: string | null;
   selectSession: (id: string | null) => void;
-  fetchSessions: (transport: WsTransport) => Promise<void>;
+  /** Fetch sessions. If nodeIds provided, fetches from each node in parallel and tags results. */
+  fetchSessions: (transport: WsTransport, nodeIds?: string[]) => Promise<void>;
   spawnSession: (transport: WsTransport, request: SpawnRequest) => Promise<string>;
   stopSession: (transport: WsTransport, sessionId: string) => Promise<void>;
   deleteSession: (transport: WsTransport, sessionId: string) => Promise<void>;
@@ -45,9 +48,9 @@ interface TaskDetails {
   prompt: string | null;
 }
 
-async function getTaskDetails(transport: WsTransport, taskId: string): Promise<TaskDetails> {
+async function getTaskDetails(transport: WsTransport, taskId: string, reqOpts?: RequestOptions): Promise<TaskDetails> {
   try {
-    const task = await transport.request<Task | null>("getTask", { id: taskId });
+    const task = await transport.request<Task | null>("getTask", { id: taskId }, reqOpts);
     return {
       title: task?.title ?? null,
       model: task?.model ?? null,
@@ -65,10 +68,11 @@ async function getTaskDetails(transport: WsTransport, taskId: string): Promise<T
 async function toSessionSummary(
   transport: WsTransport,
   session: Session,
-  fallbackTitle?: string,
+  options?: { fallbackTitle?: string; nodeId?: string },
 ): Promise<SessionSummary> {
-  const taskDetails = await getTaskDetails(transport, session.taskId);
-  const title = fallbackTitle ?? taskDetails.title ?? session.id;
+  const reqOpts: RequestOptions | undefined = options?.nodeId ? { node: options.nodeId } : undefined;
+  const taskDetails = await getTaskDetails(transport, session.taskId, reqOpts);
+  const title = options?.fallbackTitle ?? taskDetails.title ?? session.id;
 
   return {
     id: session.id,
@@ -87,6 +91,7 @@ async function toSessionSummary(
     kept: session.kept,
     autoMerge: session.autoMerge,
     prompt: taskDetails.prompt,
+    nodeId: options?.nodeId ?? null,
   };
 }
 
@@ -139,18 +144,36 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
         // localStorage unavailable
       }
     },
-    fetchSessions: async (transport) => {
+    fetchSessions: async (transport, nodeIds?) => {
       set({ isLoading: true, error: null });
 
       try {
-        const sessions = await transport.request<Session[]>("listSessions");
-        const summaries = await Promise.all(
-          sessions.map((session) => toSessionSummary(transport, session)),
-        );
+        let allSummaries: SessionSummary[];
+
+        if (nodeIds && nodeIds.length > 0) {
+          // Multi-node: fetch from each node in parallel, tag with nodeId
+          const results = await Promise.all(
+            nodeIds.map(async (nodeId) => {
+              const reqOpts: RequestOptions = { node: nodeId };
+              const sessions = await transport.request<Session[]>("listSessions", undefined, reqOpts);
+              return Promise.all(
+                sessions.map((session) => toSessionSummary(transport, session, { nodeId })),
+              );
+            }),
+          );
+          allSummaries = results.flat();
+        } else {
+          // Direct daemon (no relay) or single node
+          const sessions = await transport.request<Session[]>("listSessions");
+          const summaries = await Promise.all(
+            sessions.map((session) => toSessionSummary(transport, session)),
+          );
+          allSummaries = summaries;
+        }
 
         set((state) => ({
-          sessions: sortSessions(summaries),
-          selectedId: state.selectedId && summaries.some((session) => session.id === state.selectedId)
+          sessions: sortSessions(allSummaries),
+          selectedId: state.selectedId && allSummaries.some((session) => session.id === state.selectedId)
             ? state.selectedId
             : null,
           isLoading: false,
@@ -167,11 +190,12 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       set({ error: null });
 
       try {
-        const session = await transport.request<Session>("spawn", request);
+        const reqOpts: RequestOptions | undefined = request.nodeId ? { node: request.nodeId } : undefined;
+        const session = await transport.request<Session>("spawn", request, reqOpts);
         const summary = await toSessionSummary(
           transport,
           session,
-          fallbackTitleFromRequest(request),
+          { fallbackTitle: fallbackTitleFromRequest(request), nodeId: request.nodeId },
         );
 
         set((state) => ({

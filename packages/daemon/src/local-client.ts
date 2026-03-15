@@ -4,6 +4,7 @@ import { $ } from "bun";
 import { generateId } from "@orka/core";
 import type {
   ChatEntry,
+  NodeInfo,
   OrchestrationEvent,
   OrkaService,
   RawProviderLine,
@@ -637,6 +638,15 @@ class LocalClient implements OrkaService {
       cols: t.cols,
       rows: t.rows,
     }));
+  }
+
+  async listNodes(): Promise<NodeInfo[]> {
+    return [{
+      id: "local",
+      status: "online",
+      activeRequests: 0,
+      registeredAt: Date.now(),
+    }];
   }
 }
 

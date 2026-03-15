@@ -1,5 +1,6 @@
 import type {
   ChatEntry,
+  NodeInfo,
   OrchestrationEvent,
   OrkaService,
   Session,
@@ -391,6 +392,10 @@ class OrkaClient implements OrkaService {
 
   async terminalList(sessionId: string): Promise<Array<{ id: string; cols: number; rows: number }>> {
     return this.call("terminalList", { sessionId });
+  }
+
+  async listNodes(): Promise<NodeInfo[]> {
+    return this.call("listNodes");
   }
 }
 

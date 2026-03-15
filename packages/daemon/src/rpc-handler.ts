@@ -223,6 +223,8 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             return null;
           case "listClientErrors":
             return ctx.db.listClientErrors(params.limit ?? 50);
+          case "listNodes":
+            return svc.listNodes();
           case "getMetrics":
             return svc.getMetrics();
           case "queryTraces":

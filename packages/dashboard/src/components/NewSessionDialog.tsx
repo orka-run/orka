@@ -2,7 +2,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useId, useState } from "react";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
-import type { BackendKind, SessionMode, SpawnRequest } from "@orka/core";
+import type { BackendKind, NodeInfo, SessionMode, SpawnRequest } from "@orka/core";
 import { withDashboardSpan } from "../lib/tracing";
 import type { WsTransport } from "../lib/wsTransport";
 import { useSessionStore } from "../stores/sessionStore";
@@ -11,6 +11,7 @@ interface NewSessionDialogProps {
   open: boolean;
   transport: WsTransport;
   defaultProjectPath: string;
+  nodes: NodeInfo[];
   onClose: () => void;
   onSpawned?: () => void;
   initialValues?: {
@@ -24,6 +25,7 @@ export function NewSessionDialog({
   open,
   transport,
   defaultProjectPath,
+  nodes,
   onClose,
   onSpawned,
   initialValues,
@@ -46,9 +48,11 @@ export function NewSessionDialog({
   const [tags, setTags] = useState("");
   const [autoMerge, setAutoMerge] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [targetNode, setTargetNode] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const showNodeSelector = nodes.length > 1;
 
   useEffect(() => {
     if (!open) {
@@ -146,6 +150,7 @@ export function NewSessionDialog({
             ...(trimmedModel ? { model: trimmedModel } : {}),
             ...(parsedTags ? { tags: parsedTags } : {}),
             ...(trimmedSystemPrompt ? { systemPrompt: trimmedSystemPrompt } : {}),
+            ...(targetNode ? { nodeId: targetNode } : {}),
           };
 
           await spawnSession(transport, request);
@@ -160,6 +165,7 @@ export function NewSessionDialog({
       setTags("");
       setAutoMerge(false);
       setSystemPrompt("");
+      setTargetNode("");
       setShowAdvanced(false);
       onSpawned?.();
       onClose();
@@ -277,6 +283,27 @@ export function NewSessionDialog({
               </div>
             </div>
           </div>
+
+          {showNodeSelector ? (
+            <div>
+              <p className="mb-2 text-sm font-medium text-zinc-200">Target Node</p>
+              <div className="flex flex-wrap gap-2">
+                <ToggleButton
+                  active={targetNode === ""}
+                  label="auto"
+                  onClick={() => setTargetNode("")}
+                />
+                {nodes.map((node) => (
+                  <ToggleButton
+                    key={node.id}
+                    active={targetNode === node.id}
+                    label={node.id}
+                    onClick={() => setTargetNode(node.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <label
             htmlFor={autoMergeId}
