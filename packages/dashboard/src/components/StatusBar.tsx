@@ -3,6 +3,7 @@ import { useRpcLatency } from "../lib/rpcLatencyStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
 import { useMode } from "../hooks/useMode";
+import { NotificationIndicator, SoundToggle } from "./NotificationBanner";
 
 interface StatusBarProps {
   sessionCount: number;
@@ -72,6 +73,8 @@ export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConne
         </span>
       </div>
       <div className="flex items-center gap-2">
+        <NotificationIndicator />
+        <SoundToggle />
         <span>orka dashboard</span>
         {onToggleDevOverlay && (
           <button

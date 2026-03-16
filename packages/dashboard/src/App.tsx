@@ -19,6 +19,7 @@ import { MobileSidebarDrawer } from "./components/MobileSidebarDrawer";
 import { MobileTabBar, type MobileSessionTab } from "./components/MobileTabBar";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { NodeManagementDialog } from "./components/NodeManagementDialog";
+import { NotificationPermissionBanner, PendingApprovalBanner } from "./components/NotificationBanner";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { PairNodeDialog } from "./components/PairNodeDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -34,8 +35,15 @@ import { useConnectionStore } from "./stores/connectionStore";
 import { useConnectionSettingsStore } from "./stores/connectionSettingsStore";
 import { useMode } from "./hooks/useMode";
 import { useNodeStore } from "./stores/nodeStore";
+import { useNotificationStore } from "./stores/notificationStore";
 import { SELECTED_SESSION_KEY, useSessionStore } from "./stores/sessionStore";
 import { useTimelineCache } from "./lib/timelineCache";
+import {
+  captureBaseTitle,
+  playNotificationSound,
+  sendApprovalNotification,
+  updateTitleBadge,
+} from "./lib/notificationService";
 
 initDashboardTracing();
 
@@ -107,6 +115,8 @@ function AppShell({ transport }: AppShellProps) {
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
   const setProtocolMismatch = useConnectionStore((state) => state.setProtocolMismatch);
   const prefetchTimeline = useTimelineCache((s) => s.prefetch);
+  const incrementPending = useNotificationStore((s) => s.incrementPending);
+  const decrementPending = useNotificationStore((s) => s.decrementPending);
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
   const defaultProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
 
@@ -226,6 +236,16 @@ function AppShell({ transport }: AppShellProps) {
     return () => { window.removeEventListener("keydown", handleGlobalKeyDown); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Capture base page title once, update badge on pending count changes
+  const pendingCount = useNotificationStore((s) => s.pendingCount);
+  useEffect(() => {
+    captureBaseTitle();
+  }, []);
+  useEffect(() => {
+    updateTitleBadge(pendingCount);
+    return () => { updateTitleBadge(0); };
+  }, [pendingCount]);
+
   // Helper: fetch sessions using current node list
   const fetchSessionsWithNodes = useEffectEvent(() => {
     const currentNodes = useNodeStore.getState().nodes;
@@ -266,6 +286,28 @@ function AppShell({ transport }: AppShellProps) {
 
       if (!known) {
         fetchSessionsWithNodes();
+      }
+
+      // Track approval events for notifications
+      if (typedData.type === "request.opened") {
+        incrementPending();
+
+        // Play sound if enabled
+        if (useNotificationStore.getState().soundEnabled) {
+          playNotificationSound();
+        }
+
+        // Send browser notification if page is hidden
+        const session = useSessionStore.getState().sessions.find((s) => s.id === typedData.sessionId);
+        sendApprovalNotification({
+          requestId: typedData.requestId,
+          requestType: typedData.requestType,
+          detail: typedData.detail,
+          sessionTitle: session?.title,
+          sessionId: typedData.sessionId,
+        });
+      } else if (typedData.type === "request.resolved") {
+        decrementPending();
       }
     });
     const unsubscribeDeleted = transport.subscribe("orchestration.sessionDeleted", (data) => {
@@ -324,7 +366,7 @@ function AppShell({ transport }: AppShellProps) {
       unsubscribeState();
       transport.disconnect();
     };
-  }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus]);
+  }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus, incrementPending, decrementPending]);
 
   const handleOnboardingComplete = useCallback(() => {
     setShowOnboarding(false);
@@ -442,6 +484,8 @@ function AppShell({ transport }: AppShellProps) {
     <TransportContext.Provider value={transport}>
       <div className="flex h-dvh flex-col">
         <ConnectionBanner />
+        <NotificationPermissionBanner />
+        <PendingApprovalBanner />
         {isMobile ? (
           <>
             <MobileHeader title={mobileHeaderTitle} />
