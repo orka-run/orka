@@ -10,8 +10,14 @@ export function deriveInputState(
   events: OrchestrationEvent[],
   sessionStatus: string,
   backend: string,
+  mode?: string,
 ): InputState {
   void backend;
+
+  // Background sessions never accept input
+  if (mode === "background") {
+    return "disabled";
+  }
 
   if (TERMINAL_SESSION_STATUSES.has(sessionStatus)) {
     return "disabled";
@@ -63,6 +69,7 @@ export function useInputState(
   events: OrchestrationEvent[],
   sessionStatus: string,
   backend: string,
+  mode?: string,
 ): InputState {
-  return deriveInputState(events, sessionStatus, backend);
+  return deriveInputState(events, sessionStatus, backend, mode);
 }
