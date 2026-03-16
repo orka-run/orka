@@ -2,9 +2,25 @@
 
 Audit of type sharing anti-patterns across DB, domain, API, and dashboard layers.
 
-## Executive Summary
+## Verification (2026-03-16) — All Findings Resolved
 
-The `Session` type is the central offender — it serves as DB row output, domain model, API response, and dashboard input simultaneously. This causes: oversized API payloads, leaked server internals (file paths), a type-safety hole where the interface lies about return types, and tight coupling that makes it hard to evolve any layer independently.
+All 7 findings have been addressed across commits `167ec27` through `211d25c`:
+
+| Finding | Status | Resolution |
+|---------|--------|------------|
+| 1. listSessions() type lie | **Fixed** | Returns `SessionListResponse[]` DTO; tag path uses JOIN query |
+| 2. Session exposes internals | **Fixed** | `SessionDetailResponse` / `SessionListResponse` DTOs omit env, logFile, rawLogFile, workspaceId, taskId |
+| 3. Session spans all layers | **Fixed** | Four-layer type system: DB rows (db.ts) → Domain (types.ts) → DTOs (service.ts) → Dashboard (sessionStore.ts) |
+| 4. OrchestrationEvent wire format | **Fixed** | `getSessionTimeline()` returns paginated `TimelineResponse` DTO (offset/limit/total) |
+| 5. spawn() returns full Session | **Fixed** | Returns `SpawnResult { id, status, title }` |
+| 6. getChildSessions() N+1 | **Fixed** | Uses `listChildSessionItems()` with JOIN + batch tag fetch |
+| 7. Dashboard strips API fields | **Fixed** | API returns right-sized DTOs; `toSessionSummary()` is now a thin mapper |
+
+**Verification scope**: OrkaService interface, all 4 implementations (LocalClient, AggregatingClient, OrkaClient, RPC handler), dashboard store + components, CLI, DB layer.
+
+---
+
+## Original Audit (Pre-Fix)
 
 **Severity**: 7 findings, 3 high-impact, 2 medium, 2 low.
 
