@@ -698,14 +698,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-sm border border-border bg-surface">
-      {!isMobile && (
-        <div className="border-b border-border px-2 py-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Chat Timeline</p>
-          <p className="mt-0.5 text-[11px] text-ink-muted">
-            {isRunning(activeSession.status) ? "Streaming live events…" : `${String(entries.length)} events`}
-          </p>
-        </div>
-      )}
       <div className="relative flex-1 overflow-hidden">
         <div
           ref={scrollRef}
@@ -743,38 +735,16 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
         ) : null}
       </div>
       <div className="border-t border-border">
-        {(isRunning(activeSession.status) || isTerminal(activeSession.status)) && (
-          <div className="flex items-center gap-1 px-2 py-1">
-            {isRunning(activeSession.status) && (
-              <button
-                type="button"
-                onClick={() => { void handleStop(); }}
-                disabled={stopping}
-                className="flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition hover:bg-status-error/20 disabled:opacity-50"
-              >
-                {stopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-                Stop
-              </button>
-            )}
-            {isTerminal(activeSession.status) && (
-              <button
-                type="button"
-                onClick={() => { void handleRetry(); }}
-                disabled={retrying}
-                className="flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:bg-surface-hover disabled:opacity-50"
-              >
-                {retrying ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-                Retry
-              </button>
-            )}
-          </div>
-        )}
         <ChatInputComposer
           sessionId={sessionId}
           inputState={inputState}
           onSend={handleSend}
           sendError={sendError}
           onClearError={() => { setSendError(null); }}
+          onStop={isRunning(activeSession.status) ? () => { void handleStop(); } : undefined}
+          onRetry={isTerminal(activeSession.status) ? () => { void handleRetry(); } : undefined}
+          isStopping={stopping}
+          isRetrying={retrying}
         />
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { LoaderCircle, ArrowUp } from "lucide-react";
+import { LoaderCircle, ArrowUp, Square, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { InputState } from "../hooks/useInputState";
 
@@ -10,6 +10,10 @@ interface ChatInputComposerProps {
   onClearError?: () => void;
   placeholder?: string;
   autoFocus?: boolean;
+  onRetry?: () => void;
+  onStop?: () => void;
+  isRetrying?: boolean;
+  isStopping?: boolean;
 }
 
 const MAX_TEXTAREA_HEIGHT = 200;
@@ -27,7 +31,7 @@ const STATE_MESSAGES: Record<Exclude<InputState, "waiting">, string> = {
   not_started: "Session is starting...",
 };
 
-export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus }: ChatInputComposerProps) {
+export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onStop, isRetrying, isStopping }: ChatInputComposerProps) {
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -132,12 +136,34 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
           />
           {sendError ? (
             <p className="mt-1 text-[11px] text-status-error">{sendError}</p>
-          ) : inputState !== "waiting" ? (
-            <p className={`mt-1 text-[11px] ${inputState === "busy" ? "animate-pulse text-accent-strong" : "text-ink-muted"}`}>
-              {STATE_MESSAGES[inputState]}
+          ) : inputState === "busy" ? (
+            <p className="mt-1 animate-pulse text-[11px] text-accent-strong">
+              {STATE_MESSAGES.busy}
             </p>
           ) : null}
         </div>
+        {onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={isStopping}
+            aria-label="Stop session"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-status-error/30 bg-status-error/10 text-status-error transition hover:bg-status-error/20 disabled:opacity-50"
+          >
+            {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+          </button>
+        )}
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={isRetrying}
+            aria-label="Retry session"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-border bg-surface-alt text-ink-secondary transition hover:bg-surface-hover disabled:opacity-50"
+          >
+            {isRetrying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void submit()}

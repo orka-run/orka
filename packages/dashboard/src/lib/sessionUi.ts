@@ -15,32 +15,26 @@ export function getSessionGroup(status: SessionSummary["status"]): SessionGroupK
 }
 
 export function formatRelativeTime(value: string, now = Date.now()): string {
-  const timestamp = new Date(value).getTime();
-  const diffMs = now - timestamp;
+  const date = new Date(value);
+  const timestamp = date.getTime();
 
   if (!Number.isFinite(timestamp)) {
     return "unknown";
   }
 
-  if (Math.abs(diffMs) < 60_000) {
-    return "just now";
+  const today = new Date(now);
+  const isToday = date.getDate() === today.getDate()
+    && date.getMonth() === today.getMonth()
+    && date.getFullYear() === today.getFullYear();
+
+  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+
+  if (isToday) {
+    return time;
   }
 
-  const units: Array<{ amount: number; unit: Intl.RelativeTimeFormatUnit }> = [
-    { amount: 60_000, unit: "minute" },
-    { amount: 3_600_000, unit: "hour" },
-    { amount: 86_400_000, unit: "day" },
-  ];
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
-  for (let index = units.length - 1; index >= 0; index -= 1) {
-    const { amount, unit } = units[index]!;
-    if (Math.abs(diffMs) >= amount || index === 0) {
-      return formatter.format(-Math.round(diffMs / amount), unit);
-    }
-  }
-
-  return "just now";
+  const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${dateStr} ${time}`;
 }
 
 export function formatDateTime(value: string | null): string {
