@@ -381,14 +381,11 @@ function AppShell({ transport }: AppShellProps) {
 
   return (
     <TransportContext.Provider value={transport}>
-      <div className="flex h-screen flex-col">
+      <div className="flex h-dvh flex-col">
         <ConnectionBanner />
         {isMobile ? (
           <>
-            <MobileHeader
-              title={mobileHeaderTitle}
-              onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
-            />
+            <MobileHeader title={mobileHeaderTitle} />
             <main className="flex-1 overflow-hidden">{mobileMainContent}</main>
             <MobileTabBar
               hasSelectedSession={!!selectedId}

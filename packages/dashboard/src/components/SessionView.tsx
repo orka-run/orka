@@ -220,14 +220,12 @@ export function SessionView({
     </div>
   ) : null;
 
-  const contentPadding = isMobile ? "p-2" : "p-3";
-
   return (
     <div className="flex h-full flex-col">
       {header}
       {mobileActionBar}
       <div className="flex-1 overflow-hidden">
-        <div className={`h-full ${contentPadding} ${activeTab === "chat" ? "" : "hidden"}`}>
+        <div className={`h-full ${activeTab === "chat" ? "" : "hidden"} ${isMobile ? "" : "p-3"}`}>
           <ChatView
             sessionId={sessionId}
             {...(activeSession.prompt ? { initialPrompt: activeSession.prompt } : {})}
@@ -236,7 +234,7 @@ export function SessionView({
           />
         </div>
         {activeTab !== "chat" && (
-          <div className={`h-full ${contentPadding} ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
+          <div className={`h-full ${isMobile ? "p-1" : "p-3"} ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
             {activeTab === "logs" ? (
               <LogPanel
                 sessionId={sessionId}

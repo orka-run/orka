@@ -713,12 +713,12 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-sm border border-border bg-surface">
+    <div className={`flex h-full flex-col overflow-hidden ${isMobile ? "bg-surface" : "rounded-sm border border-border bg-surface"}`}>
       <div className="relative flex-1 overflow-hidden">
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-full flex-1 overflow-y-auto overflow-x-hidden px-2 py-2"
+          className={`h-full flex-1 overflow-y-auto overflow-x-hidden ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}
         >
           <div className="min-w-0 space-y-2">
             {entries.length === 0 ? (
