@@ -509,14 +509,18 @@ export function App() {
   }
   const transport = transportRef.current.transport;
 
-  const lastReportedAt = useRef(0);
+  const reportedErrors = useRef(new Map<string, number>());
   const reportError = async (report: ClientErrorReport): Promise<void> => {
-    // Skip Vite HMR internal errors
+    // Skip Vite HMR internal errors (dev only)
     if (report.stack?.includes("@vite/client")) return;
-    // Rate limit: max 1 report per 5 seconds
+    // Deduplicate: same error message reported at most once per 60s
+    const key = report.error ?? "";
     const now = Date.now();
-    if (now - lastReportedAt.current < 5_000) return;
-    lastReportedAt.current = now;
+    const lastSeen = reportedErrors.current.get(key);
+    if (lastSeen && now - lastSeen < 60_000) return;
+    // Hard cap: max 10 unique errors tracked (prevent unbounded map growth)
+    if (reportedErrors.current.size >= 10 && !lastSeen) return;
+    reportedErrors.current.set(key, now);
     await transport.request("reportClientError", report).catch(() => undefined);
   };
 
