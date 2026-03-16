@@ -1,4 +1,4 @@
-import type { Session, SpawnRequest, Task } from "@orka/core";
+import type { Session, SpawnRequest } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RequestOptions } from "../lib/wsTransport";
@@ -42,37 +42,11 @@ export interface SessionState {
   handleSessionDeleted: (data: SessionDeletedData) => void;
 }
 
-interface TaskDetails {
-  title: string | null;
-  model: string | null;
-  prompt: string | null;
-}
-
-async function getTaskDetails(transport: WsTransport, taskId: string, reqOpts?: RequestOptions): Promise<TaskDetails> {
-  try {
-    const task = await transport.request<Task | null>("getTask", { id: taskId }, reqOpts);
-    return {
-      title: task?.title ?? null,
-      model: task?.model ?? null,
-      prompt: task?.prompt ?? null,
-    };
-  } catch {
-    return {
-      title: null,
-      model: null,
-      prompt: null,
-    };
-  }
-}
-
-async function toSessionSummary(
-  transport: WsTransport,
-  session: Session,
+function toSessionSummary(
+  session: Session & { title?: string; model?: string | null; prompt?: string },
   options?: { fallbackTitle?: string; nodeId?: string },
-): Promise<SessionSummary> {
-  const reqOpts: RequestOptions | undefined = options?.nodeId ? { node: options.nodeId } : undefined;
-  const taskDetails = await getTaskDetails(transport, session.taskId, reqOpts);
-  const title = options?.fallbackTitle ?? taskDetails.title ?? session.id;
+): SessionSummary {
+  const title = options?.fallbackTitle ?? session.title ?? session.id;
 
   return {
     id: session.id,
@@ -81,7 +55,7 @@ async function toSessionSummary(
     backend: session.backend,
     mode: session.mode,
     title,
-    model: taskDetails.model,
+    model: session.model ?? null,
     createdAt: session.createdAt,
     startedAt: session.startedAt,
     finishedAt: session.finishedAt,
@@ -90,7 +64,7 @@ async function toSessionSummary(
     workingDir: session.workingDir,
     kept: session.kept,
     autoMerge: session.autoMerge,
-    prompt: taskDetails.prompt,
+    prompt: session.prompt ?? null,
     nodeId: options?.nodeId ?? null,
   };
 }
@@ -156,19 +130,13 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
             nodeIds.map(async (nodeId) => {
               const reqOpts: RequestOptions = { node: nodeId };
               const sessions = await transport.request<Session[]>("listSessions", undefined, reqOpts);
-              return Promise.all(
-                sessions.map((session) => toSessionSummary(transport, session, { nodeId })),
-              );
+              return sessions.map((session) => toSessionSummary(session, { nodeId }));
             }),
           );
           allSummaries = results.flat();
         } else {
-          // Direct daemon (no relay) or single node
           const sessions = await transport.request<Session[]>("listSessions");
-          const summaries = await Promise.all(
-            sessions.map((session) => toSessionSummary(transport, session)),
-          );
-          allSummaries = summaries;
+          allSummaries = sessions.map((session) => toSessionSummary(session));
         }
 
         set((state) => ({
@@ -192,8 +160,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       try {
         const reqOpts: RequestOptions | undefined = request.nodeId ? { node: request.nodeId } : undefined;
         const session = await transport.request<Session>("spawn", request, reqOpts);
-        const summary = await toSessionSummary(
-          transport,
+        const summary = toSessionSummary(
           session,
           { fallbackTitle: fallbackTitleFromRequest(request), nodeId: request.nodeId },
         );

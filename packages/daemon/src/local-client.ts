@@ -99,6 +99,7 @@ class LocalClient implements OrkaService {
   async listSessions(filters?: SessionFilters): Promise<Session[]> {
     const includeArchived = filters?.includeArchived ?? false;
     if (filters?.tag) {
+      // Tag query still uses old path — TODO: add listSessionItemsByTag
       let sessions = this.ctx.db.listSessionsByTag(filters.tag);
       if (filters.status) {
         sessions = sessions.filter((s) => s.status === filters.status);
@@ -108,7 +109,7 @@ class LocalClient implements OrkaService {
       }
       return sessions;
     }
-    return this.ctx.db.listSessions(filters?.status, includeArchived);
+    return this.ctx.db.listSessionItems(filters?.status, includeArchived);
   }
 
   async getChildSessions(sessionId: string): Promise<Session[]> {

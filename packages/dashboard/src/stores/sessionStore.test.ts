@@ -41,7 +41,7 @@ function asTransport(transport: MockWsTransport): WsTransport {
   return transport as unknown as WsTransport;
 }
 
-function makeSession(overrides: Partial<Session> = {}): Session {
+function makeSession(overrides: Partial<Session & { title?: string; model?: string | null; prompt?: string }> = {}): Session & { title?: string; model?: string | null; prompt?: string } {
   return {
     id: "sess-1",
     taskId: "task-1",
@@ -79,8 +79,7 @@ describe("sessionStore", () => {
   test("fetchSessions populates store", async () => {
     const store = createSessionStore();
     const transport = new MockWsTransport();
-    transport.sessions = [makeSession()];
-    transport.tasks.set("task-1", makeTask({ title: "First session" }));
+    transport.sessions = [makeSession({ title: "First session", model: "gpt-5", prompt: "Build the dashboard session store" })];
 
     await store.getState().fetchSessions(asTransport(transport));
 

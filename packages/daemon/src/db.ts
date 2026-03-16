@@ -6,6 +6,7 @@ import type {
   OrchestrationEvent,
   PersistedOrchestrationEvent,
   Session,
+  SessionListItem,
   SessionStatus,
   Task,
   UsageRecord,
@@ -360,6 +361,20 @@ export class DatabaseRepository {
             .prepare(`SELECT * FROM sessions WHERE 1=1${archiveFilter} ORDER BY created_at DESC`)
             .all() as any[]);
       return rows.map(rowToSession);
+    });
+  }
+
+  /** List sessions with task fields inlined (avoids N+1 getTask calls). */
+  listSessionItems(status?: SessionStatus, includeArchived = false): SessionListItem[] {
+    return withSpanSync("orka.db.listSessionItems", {}, () => {
+      const archiveFilter = includeArchived ? "" : " AND s.archived_at IS NULL";
+      const query = status
+        ? `SELECT s.*, t.title, t.model, t.prompt FROM sessions s LEFT JOIN tasks t ON s.task_id = t.id WHERE s.status = ?${archiveFilter} ORDER BY s.created_at DESC`
+        : `SELECT s.*, t.title, t.model, t.prompt FROM sessions s LEFT JOIN tasks t ON s.task_id = t.id WHERE 1=1${archiveFilter} ORDER BY s.created_at DESC`;
+      const rows = status
+        ? (this.db.prepare(query).all(status) as any[])
+        : (this.db.prepare(query).all() as any[]);
+      return rows.map(rowToSessionListItem);
     });
   }
 
@@ -729,6 +744,17 @@ function rowToSession(row: unknown): Session {
     ...(data.allowed_tools ? { allowedTools: JSON.parse(data.allowed_tools) as string[] } : {}),
     ...(data.env_json ? { env: JSON.parse(data.env_json) as Record<string, string> } : {}),
     ...(data.archived_at ? { archivedAt: data.archived_at } : {}),
+  };
+}
+
+function rowToSessionListItem(row: unknown): SessionListItem {
+  const data = row as Record<string, unknown>;
+  const session = rowToSession(row);
+  return {
+    ...session,
+    title: (data["title"] as string) ?? session.id,
+    model: (data["model"] as string | null) ?? null,
+    prompt: (data["prompt"] as string) ?? "",
   };
 }
 

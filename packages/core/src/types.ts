@@ -54,6 +54,7 @@ export interface Workspace {
   worktreePath: string | null;
 }
 
+/** Normalized session entity (matches DB schema). */
 export interface Session {
   id: SessionId;
   taskId: TaskId;
@@ -76,6 +77,14 @@ export interface Session {
   allowedTools?: string[];
   env?: Record<string, string>;
   archivedAt?: string;
+}
+
+/** Denormalized session with task fields inlined. Returned by listSessions API
+ *  to avoid N+1 getTask calls. Dashboard uses this for session lists. */
+export interface SessionListItem extends Session {
+  title: string;
+  model: string | null;
+  prompt: string;
 }
 
 // --- Session Summary (for aggregation cache) ---
