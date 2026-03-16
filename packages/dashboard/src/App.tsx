@@ -509,7 +509,14 @@ export function App() {
   }
   const transport = transportRef.current.transport;
 
+  const lastReportedAt = useRef(0);
   const reportError = async (report: ClientErrorReport): Promise<void> => {
+    // Skip Vite HMR internal errors
+    if (report.stack?.includes("@vite/client")) return;
+    // Rate limit: max 1 report per 5 seconds
+    const now = Date.now();
+    if (now - lastReportedAt.current < 5_000) return;
+    lastReportedAt.current = now;
     await transport.request("reportClientError", report).catch(() => undefined);
   };
 
