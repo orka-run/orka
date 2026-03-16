@@ -11,6 +11,7 @@ import { ChatInputComposer } from "./ChatInputComposer";
 import { useInputState } from "../hooks/useInputState";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
+import { useTimelineCache } from "../lib/timelineCache";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
 
 type ToolIcon = "command" | "file" | "read" | "search" | "web" | "agent";
@@ -532,15 +533,31 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const onSelectionLoadSettledRef = useRef(onSelectionLoadSettled);
   onSelectionLoadSettledRef.current = onSelectionLoadSettled;
 
+  const getCachedTimeline = useTimelineCache((s) => s.get);
+  const setCachedTimeline = useTimelineCache((s) => s.set);
+
   // Fetch initial timeline — only re-runs when sessionId changes
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    setError(null);
-    setEvents([]);
-    setEntries([]);
     eventsRef.current = [];
 
+    // Check prefetch cache for instant display
+    const cached = getCachedTimeline(sessionId);
+    if (cached) {
+      const filtered = cached.filter((e) => e.sessionId === sessionId);
+      eventsRef.current = filtered;
+      setEvents(filtered);
+      setEntries(eventsToEntries(filtered, initialPromptRef.current, session?.workingDir));
+      setIsLoading(false);
+      onSelectionLoadSettledRef.current?.("ok");
+    } else {
+      setIsLoading(true);
+      setError(null);
+      setEvents([]);
+      setEntries([]);
+    }
+
+    // Always fetch fresh data (stale-while-revalidate for running sessions)
     async function load() {
       try {
         const timeline = await transport.request<OrchestrationEvent[]>(
@@ -553,11 +570,15 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
         eventsRef.current = filtered;
         setEvents(filtered);
         setEntries(eventsToEntries(filtered, initialPromptRef.current, session?.workingDir));
+        setCachedTimeline(sessionId, timeline);
         onSelectionLoadSettledRef.current?.("ok");
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Failed to load chat timeline");
-        onSelectionLoadSettledRef.current?.("error", e);
+        // Only show error if we have no cached data
+        if (!cached) {
+          setError(e instanceof Error ? e.message : "Failed to load chat timeline");
+          onSelectionLoadSettledRef.current?.("error", e);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -565,7 +586,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
     void load();
     return () => { cancelled = true; };
-  }, [sessionId, transport]);
+  }, [sessionId, transport]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to real-time orchestration events
   useEffect(() => {

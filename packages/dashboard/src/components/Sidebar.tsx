@@ -1,9 +1,10 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
 import type { NodeInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
+import { useVirtualList, ITEM_HEIGHT, GAP } from "../hooks/useVirtualList";
 
 interface SidebarProps {
   sessions: SessionSummary[];
@@ -13,6 +14,7 @@ interface SidebarProps {
   selectedNodeId: string | null;
   fullWidth?: boolean;
   onSelect: (id: string) => void;
+  onHover?: (id: string) => void;
   onNewSession: () => void;
   onSelectDraft?: () => void;
   onSelectNode: (nodeId: string | null) => void;
@@ -28,6 +30,7 @@ export function Sidebar({
   selectedNodeId,
   fullWidth,
   onSelect,
+  onHover,
   onNewSession,
   onSelectDraft,
   onSelectNode,
@@ -39,6 +42,7 @@ export function Sidebar({
   const normalizedQuery = query.trim().toLowerCase();
   const now = Date.now();
   const showNodeSelector = nodes.length > 1;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Filter by selected node
   const nodeFilteredSessions = selectedNodeId
@@ -47,6 +51,16 @@ export function Sidebar({
 
   const runningCount = nodeFilteredSessions.filter((session) => isActive(session.status)).length;
   const filteredSessions = nodeFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
+
+  const { visibleItems, totalHeight, offsetY, onScroll, scrollToIndex } =
+    useVirtualList(filteredSessions, scrollRef);
+
+  // Scroll selected session into view when selection changes
+  useEffect(() => {
+    if (!selectedId) return;
+    const idx = filteredSessions.findIndex((s) => s.id === selectedId);
+    if (idx >= 0) scrollToIndex(idx);
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <aside className={`flex shrink-0 flex-col border-r border-border bg-surface ${fullWidth ? "w-full" : "w-80"}`}>
@@ -111,7 +125,7 @@ export function Sidebar({
           />
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-2 py-2">
         {isDraftActive ? (
           <button
             type="button"
@@ -134,45 +148,47 @@ export function Sidebar({
             </p>
           </div>
         ) : (
-          <ul className="space-y-1">
-            {filteredSessions.map((session) => {
-              const isSelected = selectedId === session.id;
-
-              return (
-                <li key={session.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(session.id)}
-                    className={`w-full rounded-sm border px-2 py-1 text-left transition ${
-                      isSelected
-                        ? "border-border bg-surface-alt"
-                        : "border-transparent bg-surface hover:border-border hover:bg-surface-alt"
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="truncate text-[11px] font-medium text-ink">
-                          {session.title || session.id}
-                        </p>
-                        <span className="shrink-0 text-[10px] text-ink-muted">
-                          {formatRelativeTime(session.createdAt, now)}
-                        </span>
+          <div style={{ height: totalHeight, position: "relative" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${offsetY}px)` }}>
+              {visibleItems.map(({ item: session }) => {
+                const isSelected = selectedId === session.id;
+                return (
+                  <div key={session.id} style={{ height: ITEM_HEIGHT, marginBottom: GAP }}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(session.id)}
+                      onMouseEnter={() => onHover?.(session.id)}
+                      className={`h-full w-full overflow-hidden rounded-sm border px-2 py-1 text-left transition ${
+                        isSelected
+                          ? "border-border bg-surface-alt"
+                          : "border-transparent bg-surface hover:border-border hover:bg-surface-alt"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="truncate text-[11px] font-medium text-ink">
+                            {session.title || session.id}
+                          </p>
+                          <span className="shrink-0 text-[10px] text-ink-muted">
+                            {formatRelativeTime(session.createdAt, now)}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1">
+                          <span className="rounded-sm border border-border bg-surface-alt px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-secondary">
+                            {session.backend}
+                          </span>
+                          <StatusPill status={session.status} />
+                          {session.nodeId && showNodeSelector ? (
+                            <NodeBadge nodeId={session.nodeId} />
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="mt-1 flex items-center gap-1">
-                        <span className="rounded-sm border border-border bg-surface-alt px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-secondary">
-                          {session.backend}
-                        </span>
-                        <StatusPill status={session.status} />
-                        {session.nodeId && showNodeSelector ? (
-                          <NodeBadge nodeId={session.nodeId} />
-                        ) : null}
-                      </div>
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
     </aside>

@@ -119,7 +119,8 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       }
     },
     fetchSessions: async (transport, nodeIds?) => {
-      set({ isLoading: true, error: null });
+      // Only show loading spinner when there are no cached sessions (stale-while-revalidate)
+      set((state) => ({ isLoading: state.sessions.length === 0, error: null }));
 
       try {
         let allSummaries: SessionSummary[];

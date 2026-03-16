@@ -34,6 +34,7 @@ import { useConnectionSettingsStore } from "./stores/connectionSettingsStore";
 import { useMode } from "./hooks/useMode";
 import { useNodeStore } from "./stores/nodeStore";
 import { SELECTED_SESSION_KEY, useSessionStore } from "./stores/sessionStore";
+import { useTimelineCache } from "./lib/timelineCache";
 
 initDashboardTracing();
 
@@ -101,6 +102,7 @@ function AppShell({ transport }: AppShellProps) {
   const updateNodeStatus = useNodeStore((state) => state.updateNodeStatus);
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
   const setProtocolMismatch = useConnectionStore((state) => state.setProtocolMismatch);
+  const prefetchTimeline = useTimelineCache((s) => s.prefetch);
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
   const defaultProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
 
@@ -267,9 +269,15 @@ function AppShell({ transport }: AppShellProps) {
       }
     });
 
-    // Initial fetch: nodes first, then sessions
+    // Fire sessions fetch immediately for faster first paint
+    void fetchSessions(transport);
+
+    // Fetch nodes in parallel; re-fetch sessions with node IDs if multi-node
     void fetchNodes(transport).then(() => {
-      fetchSessionsWithNodes();
+      const currentNodes = useNodeStore.getState().nodes;
+      if (currentNodes.length > 1) {
+        fetchSessionsWithNodes();
+      }
     });
 
     // Fetch paired nodes in local mode
@@ -311,6 +319,9 @@ function AppShell({ transport }: AppShellProps) {
     selectedNodeId,
     onSelect: (id: string) => {
       handleSelectSession(id);
+    },
+    onHover: (id: string) => {
+      prefetchTimeline(transport, id);
     },
     onSelectDraft: activateDraft,
     onNewSession: activateDraft,
