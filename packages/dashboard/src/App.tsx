@@ -83,6 +83,7 @@ function AppShell({ transport }: AppShellProps) {
   const [isNodeManagementOpen, setIsNodeManagementOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [mobileActiveTab, setMobileActiveTab] = useState<MobileSessionTab>("chat");
+  const [isDevOverlayOpen, setIsDevOverlayOpen] = useState(false);
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
@@ -408,11 +409,16 @@ function AppShell({ transport }: AppShellProps) {
               <Sidebar {...sidebarProps} />
               <main className="flex-1 overflow-hidden">{desktopMainContent}</main>
             </div>
-            <StatusBar
-              sessionCount={sessions.length}
-              serverSessionCount={serverSessionCount}
-              onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
-            />
+            <div className="relative">
+              <DevOverlay open={isDevOverlayOpen} onClose={() => setIsDevOverlayOpen(false)} />
+              <StatusBar
+                sessionCount={sessions.length}
+                serverSessionCount={serverSessionCount}
+                onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
+                onToggleDevOverlay={() => setIsDevOverlayOpen((v) => !v)}
+                isDevOverlayOpen={isDevOverlayOpen}
+              />
+            </div>
           </>
         )}
         <NewSessionDialog
@@ -527,7 +533,6 @@ export function App() {
   return (
     <ErrorBoundary reportError={reportError}>
       <AppShell key={transportKey} transport={transport} />
-      <DevOverlay />
     </ErrorBoundary>
   );
 }

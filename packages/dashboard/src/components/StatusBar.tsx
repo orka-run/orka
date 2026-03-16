@@ -1,4 +1,4 @@
-import { Settings } from "lucide-react";
+import { Activity, Settings } from "lucide-react";
 import { useRpcLatency } from "../lib/rpcLatencyStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
@@ -8,6 +8,8 @@ interface StatusBarProps {
   sessionCount: number;
   serverSessionCount?: number | null;
   onOpenConnectionSettings?: () => void;
+  onToggleDevOverlay?: () => void;
+  isDevOverlayOpen?: boolean;
 }
 
 function getConnectionIndicator(status: ReturnType<typeof useConnectionStore.getState>["status"]) {
@@ -31,7 +33,7 @@ function getConnectionIndicator(status: ReturnType<typeof useConnectionStore.get
   };
 }
 
-export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConnectionSettings }: StatusBarProps) {
+export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConnectionSettings, onToggleDevOverlay, isDevOverlayOpen }: StatusBarProps) {
   const status = useConnectionStore((state) => state.status);
   const reconnectAttempts = useConnectionStore((state) => state.reconnectAttempts);
   const endpointUrl = useConnectionSettingsStore((s) => s.endpointUrl);
@@ -69,7 +71,19 @@ export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConne
           {displayedSessionCount} session{displayedSessionCount !== 1 ? "s" : ""}
         </span>
       </div>
-      <span>orka dashboard</span>
+      <div className="flex items-center gap-2">
+        <span>orka dashboard</span>
+        {onToggleDevOverlay && (
+          <button
+            type="button"
+            onClick={onToggleDevOverlay}
+            className={`inline-flex items-center gap-1 transition hover:text-ink ${isDevOverlayOpen ? "text-accent-strong" : ""}`}
+            title="Dev overlay (Ctrl+Shift+D)"
+          >
+            <Activity className="h-3 w-3" />
+          </button>
+        )}
+      </div>
     </footer>
   );
 }

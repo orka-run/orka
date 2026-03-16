@@ -1,10 +1,8 @@
-import { Activity, ChevronDown, ChevronUp, RefreshCw, Wifi, WifiOff, X } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { Activity, ChevronUp, RefreshCw, Wifi, WifiOff, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { useRpcLatency } from "../lib/rpcLatencyStore";
 import { useConnectionStore } from "../stores/connectionStore";
 
-const OVERLAY_ENABLED_STORAGE_KEY = "orka.dashboard.devOverlay.enabled";
-const OVERLAY_COLLAPSED_STORAGE_KEY = "orka.dashboard.devOverlay.collapsed";
 const RECENT_CALL_LIMIT = 20;
 
 const timestampFormatter = new Intl.DateTimeFormat(undefined, {
@@ -12,38 +10,6 @@ const timestampFormatter = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
   second: "2-digit",
 });
-
-function readStoredBoolean(key: string, fallback: boolean): boolean {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-
-  try {
-    const value = window.localStorage.getItem(key);
-    if (value === "1") {
-      return true;
-    }
-    if (value === "0") {
-      return false;
-    }
-  } catch {
-    return fallback;
-  }
-
-  return fallback;
-}
-
-function writeStoredBoolean(key: string, value: boolean): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(key, value ? "1" : "0");
-  } catch {
-    // Ignore storage failures; the overlay is a dev-only diagnostic surface.
-  }
-}
 
 function formatDuration(duration: number | null): string {
   if (duration === null) {
@@ -121,102 +87,46 @@ function computeOverallAverage(stats: Record<string, { avg: number; count: numbe
 
 type ConnectionState = ReturnType<typeof useConnectionStore.getState>["status"];
 
-export function DevOverlay() {
+interface DevOverlayProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function DevOverlay({ open, onClose }: DevOverlayProps) {
   const { recent, stats, totalCount } = useRpcLatency();
   const connectionState = useConnectionStore((state) => state.status);
-  const [isEnabled, setIsEnabled] = useState(() =>
-    readStoredBoolean(OVERLAY_ENABLED_STORAGE_KEY, !!import.meta.env["DEV"]),
-  );
-  const [isCollapsed, setIsCollapsed] = useState(() =>
-    readStoredBoolean(OVERLAY_COLLAPSED_STORAGE_KEY, false),
-  );
   const recentCallsRef = useRef<HTMLDivElement | null>(null);
   const recentCalls = recent.slice(-RECENT_CALL_LIMIT);
   const overallAverage = computeOverallAverage(stats);
   const connectionIcon = getConnectionIcon(connectionState);
   const orderedStats = Object.entries(stats).sort(
-    ([leftMethod, left], [rightMethod, right]) =>
-      right.count - left.count || leftMethod.localeCompare(rightMethod),
+    ([leftMethod, _left], [rightMethod, right]) =>
+      right.count - stats[leftMethod]!.count || leftMethod.localeCompare(rightMethod),
   );
 
-  const toggleOverlay = useEffectEvent(() => {
-    setIsEnabled((current) => {
-      const next = !current;
-      writeStoredBoolean(OVERLAY_ENABLED_STORAGE_KEY, next);
-      if (!next) {
-        writeStoredBoolean(OVERLAY_COLLAPSED_STORAGE_KEY, false);
-        setIsCollapsed(false);
-      }
-      return next;
-    });
-  });
-
-  const closeOverlay = useEffectEvent(() => {
-    writeStoredBoolean(OVERLAY_ENABLED_STORAGE_KEY, false);
-    writeStoredBoolean(OVERLAY_COLLAPSED_STORAGE_KEY, false);
-    setIsCollapsed(false);
-    setIsEnabled(false);
-  });
-
-  const toggleCollapsed = useEffectEvent(() => {
-    setIsCollapsed((current) => {
-      const next = !current;
-      writeStoredBoolean(OVERLAY_COLLAPSED_STORAGE_KEY, next);
-      return next;
-    });
-  });
+  useEffect(() => {
+    if (!open) return;
+    const element = recentCallsRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+  }, [open, recentCalls.length]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== "d") {
-        return;
-      }
-
+      if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== "d") return;
       event.preventDefault();
-      toggleOverlay();
+      onClose();
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggleOverlay]);
+  }, [onClose]);
 
-  useEffect(() => {
-    if (!isEnabled || isCollapsed) {
-      return;
-    }
-
-    const element = recentCallsRef.current;
-    if (!element) {
-      return;
-    }
-
-    element.scrollTop = element.scrollHeight;
-  }, [isCollapsed, isEnabled, recentCalls.length]);
-
-  if (!isEnabled) {
-    return null;
-  }
-
-  if (isCollapsed) {
-    const ConnectionIcon = connectionIcon;
-
-    return (
-      <button
-        type="button"
-        onClick={toggleCollapsed}
-        className="fixed bottom-14 right-2 z-50 flex max-w-[calc(100vw-1rem)] items-center gap-2 rounded-sm border border-border bg-surface px-2 py-1.5 text-[11px] text-ink backdrop-blur sm:bottom-4 sm:right-4"
-      >
-        <Activity className="h-3.5 w-3.5 text-ink-muted" />
-        <span className="font-medium">RPC: {formatDuration(overallAverage)} avg</span>
-        <ConnectionIcon className={`h-3.5 w-3.5 ${connectionState === "reconnecting" ? "animate-spin" : ""}`} />
-      </button>
-    );
-  }
+  if (!open) return null;
 
   const ConnectionIcon = connectionIcon;
 
   return (
-    <section className="fixed bottom-14 left-2 right-2 z-50 max-h-[min(60vh,34rem)] overflow-hidden rounded-sm border border-border bg-surface/95 text-ink backdrop-blur sm:bottom-4 sm:left-auto sm:right-4 sm:w-[30rem]">
+    <section className="absolute bottom-full left-0 right-0 z-50 max-h-[min(60vh,34rem)] overflow-hidden border-t border-border bg-surface/95 text-ink backdrop-blur">
       <header className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -238,15 +148,7 @@ export function DevOverlay() {
           </span>
           <button
             type="button"
-            onClick={toggleCollapsed}
-            className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink"
-            aria-label="Collapse dev overlay"
-          >
-            <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={closeOverlay}
+            onClick={onClose}
             className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink"
             aria-label="Close dev overlay"
           >
@@ -308,10 +210,10 @@ export function DevOverlay() {
             </h3>
             <button
               type="button"
-              onClick={toggleCollapsed}
+              onClick={onClose}
               className="inline-flex items-center gap-1 text-[10px] text-ink-muted transition hover:text-ink-secondary"
             >
-              Minimize
+              Close
               <ChevronUp className="h-3 w-3" />
             </button>
           </div>
