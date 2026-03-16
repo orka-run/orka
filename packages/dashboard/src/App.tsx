@@ -97,7 +97,9 @@ function AppShell({ transport }: AppShellProps) {
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try { return localStorage.getItem("orka-onboarding-dismissed") === "1"; } catch { return false; }
+  });
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const sessions = useSessionStore((state) => state.sessions);
   const selectedId = useSessionStore((state) => state.selectedId);
@@ -371,7 +373,7 @@ function AppShell({ transport }: AppShellProps) {
   const handleOnboardingComplete = useCallback(() => {
     setShowOnboarding(false);
     setOnboardingDismissed(true);
-    // Refresh sessions and nodes after wizard completes
+    try { localStorage.setItem("orka-onboarding-dismissed", "1"); } catch { /* ignore */ }
     void fetchSessions(transport);
     void fetchNodes(transport);
     if (mode === "local") void fetchPairedNodes(transport);
@@ -380,10 +382,12 @@ function AppShell({ transport }: AppShellProps) {
   const handleOnboardingSkip = useCallback(() => {
     setShowOnboarding(false);
     setOnboardingDismissed(true);
+    try { localStorage.setItem("orka-onboarding-dismissed", "1"); } catch { /* ignore */ }
   }, []);
 
   const handleRerunWizard = useCallback(() => {
     setOnboardingDismissed(false);
+    try { localStorage.removeItem("orka-onboarding-dismissed"); } catch { /* ignore */ }
     setShowOnboarding(true);
   }, []);
 

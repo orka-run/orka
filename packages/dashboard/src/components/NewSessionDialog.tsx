@@ -2,7 +2,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useId, useState } from "react";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
-import type { BackendKind, NodeInfo, SessionMode, SpawnRequest } from "@orka/core";
+import type { BackendKind, NodeInfo, PermissionMode, SessionMode, SpawnRequest } from "@orka/core";
 import { withDashboardSpan } from "../lib/tracing";
 import type { WsTransport } from "../lib/wsTransport";
 import { useSessionStore } from "../stores/sessionStore";
@@ -49,6 +49,7 @@ export function NewSessionDialog({
   const [autoMerge, setAutoMerge] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [targetNode, setTargetNode] = useState("");
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("bypass");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -151,6 +152,7 @@ export function NewSessionDialog({
             ...(parsedTags ? { tags: parsedTags } : {}),
             ...(trimmedSystemPrompt ? { systemPrompt: trimmedSystemPrompt } : {}),
             ...(targetNode ? { nodeId: targetNode } : {}),
+            ...(permissionMode !== "bypass" ? { permissionMode } : {}),
           };
 
           await spawnSession(transport, request);
@@ -373,6 +375,33 @@ export function NewSessionDialog({
                     placeholder="Optional"
                     className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
                   />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-ink-secondary">
+                    Permissions
+                  </label>
+                  <div className="flex gap-1">
+                    {(["bypass", "supervised", "auto"] as const).map((pm) => (
+                      <button
+                        key={pm}
+                        type="button"
+                        onClick={() => setPermissionMode(pm)}
+                        className={`rounded-sm px-2 py-1 text-[11px] transition ${
+                          permissionMode === pm
+                            ? "bg-surface-hover text-ink font-medium"
+                            : "text-ink-muted hover:text-ink-secondary"
+                        }`}
+                      >
+                        {pm === "bypass" ? "Bypass" : pm === "supervised" ? "Supervised" : "Auto"}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-0.5 text-[10px] text-ink-muted">
+                    {permissionMode === "bypass" && "Agent runs without permission checks"}
+                    {permissionMode === "supervised" && "Approve agent actions from dashboard"}
+                    {permissionMode === "auto" && "Agent auto-approves safe operations"}
+                  </p>
                 </div>
               </div>
             ) : null}
