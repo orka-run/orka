@@ -191,29 +191,17 @@ export function SessionView({
     </header>
   );
 
-  // On mobile, floating action button in bottom-right corner (above tab bar)
-  const mobileFab = isMobile && (isStoppable || isRetryable) ? (
+  // On mobile, show floating stop button only for running sessions (retry available via desktop header only)
+  const mobileFab = isMobile && isStoppable ? (
     <div className="absolute bottom-2 right-2 z-10">
-      {isStoppable && (
-        <button
-          type="button"
-          onClick={() => void handleStopSession()}
-          disabled={isStopping}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-status-error/30 bg-surface/90 text-status-error shadow-sm backdrop-blur transition active:bg-status-error/10 disabled:opacity-50"
-        >
-          {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
-        </button>
-      )}
-      {isRetryable && (
-        <button
-          type="button"
-          onClick={() => void handleRetrySession()}
-          disabled={isRetrying}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface/90 text-ink-secondary shadow-sm backdrop-blur transition active:bg-surface-hover disabled:opacity-50"
-        >
-          {isRetrying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => void handleStopSession()}
+        disabled={isStopping}
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-status-error/30 bg-surface/90 text-status-error shadow-sm backdrop-blur transition active:bg-status-error/10 disabled:opacity-50"
+      >
+        {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+      </button>
     </div>
   ) : null;
 
