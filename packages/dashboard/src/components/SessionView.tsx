@@ -10,12 +10,16 @@ import { withDashboardSpan } from "../lib/tracing";
 import { formatDateTime, formatDuration } from "../lib/sessionUi";
 import { useSessionStore, type SessionSummary } from "../stores/sessionStore";
 import type { WsTransport } from "../lib/wsTransport";
+import type { MobileSessionTab } from "./MobileTabBar";
 
 interface SessionViewProps {
   sessionId: string;
   transport: WsTransport;
   onSelectionLoadSettled: (sessionId: string, status: "ok" | "error", error?: unknown) => void;
   isMobile?: boolean;
+  /** On mobile, the active tab is owned by App and driven via MobileTabBar */
+  mobileActiveTab?: MobileSessionTab;
+  onMobileTabChange?: (tab: MobileSessionTab) => void;
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -58,13 +62,23 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   diff: <FileCode className="h-4 w-4" />,
 };
 
-export function SessionView({ sessionId, transport, onSelectionLoadSettled, isMobile = false }: SessionViewProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "chat" | "logs" | "diff">("chat");
+export function SessionView({
+  sessionId,
+  transport,
+  onSelectionLoadSettled,
+  isMobile = false,
+  mobileActiveTab,
+  onMobileTabChange: _onMobileTabChange,
+}: SessionViewProps) {
+  // Desktop uses its own local tab state; mobile tab is driven externally via MobileTabBar
+  const [desktopTab, setDesktopTab] = useState<"overview" | "chat" | "logs" | "diff">("chat");
   const [isStopping, setIsStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const notifiedSessionRef = useRef<string | null>(null);
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const stopSession = useSessionStore((state) => state.stopSession);
+
+  const activeTab = isMobile ? (mobileActiveTab ?? "chat") : desktopTab;
 
   useEffect(() => {
     notifiedSessionRef.current = null;
@@ -75,7 +89,6 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled, isMo
     if (notifiedSessionRef.current === sessionId) {
       return;
     }
-
     notifiedSessionRef.current = sessionId;
     onSelectionLoadSettled(sessionId, status, error);
   });
@@ -92,19 +105,13 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled, isMo
   const isStoppable = ACTIVE_STATUSES.has(activeSession.status);
 
   async function handleStopSession() {
-    if (!isStoppable || isStopping) {
-      return;
-    }
-
+    if (!isStoppable || isStopping) return;
     setIsStopping(true);
     setStopError(null);
-
     try {
       await withDashboardSpan(
         "orka.dashboard.session.stop",
-        {
-          "orka.session.id": activeSession.id,
-        },
+        { "orka.session.id": activeSession.id },
         async (span) => {
           span.addEvent("session.stop_clicked");
           await stopSession(transport, activeSession.id);
@@ -118,59 +125,82 @@ export function SessionView({ sessionId, transport, onSelectionLoadSettled, isMo
     }
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      <header className={`border-b border-zinc-800 ${isMobile ? "px-3 py-2" : "px-6 py-3"}`}>
-        <div className={`flex items-center justify-between gap-4 ${isMobile ? "gap-2" : ""}`}>
-          <div className="min-w-0 flex-1">
-            <p className={`truncate font-semibold text-zinc-100 ${isMobile ? "text-sm" : "text-lg"}`}>{activeSession.title}</p>
-            {!isMobile && <p className="mt-1 text-sm font-mono text-zinc-500">{sessionId}</p>}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {isStoppable ? (
+  // On mobile: no internal header — MobileHeader and MobileTabBar handle navigation.
+  // On desktop: render full header with tab switcher.
+  const header = isMobile ? null : (
+    <header className="border-b border-zinc-800 px-6 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-lg font-semibold text-zinc-100">{activeSession.title}</p>
+          <p className="mt-1 font-mono text-sm text-zinc-500">{sessionId}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {isStoppable ? (
+            <button
+              type="button"
+              onClick={() => void handleStopSession()}
+              disabled={isStopping}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-200 transition hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+              Stop Session
+            </button>
+          ) : null}
+          <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
+            {(["overview", "chat", "logs", "diff"] as const).map((tab) => (
               <button
+                key={tab}
                 type="button"
-                onClick={() => void handleStopSession()}
-                disabled={isStopping}
-                className={`inline-flex items-center gap-2 rounded-lg border border-red-900/70 bg-red-950/40 text-sm font-medium text-red-200 transition hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-50 ${isMobile ? "p-2" : "px-3 py-2"}`}
+                onClick={() => setDesktopTab(tab)}
+                className={`rounded-md px-3 py-1.5 text-sm ${
+                  activeTab === tab
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 transition hover:text-zinc-200"
+                }`}
               >
-                {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
-                {!isMobile && (isStopping ? "Stopping..." : "Stop Session")}
+                {TAB_ICONS[tab]}
               </button>
-            ) : null}
-            <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
-              {(["overview", "chat", "logs", "diff"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => { setActiveTab(tab); }}
-                  className={`rounded-md ${isMobile ? "p-1.5" : "px-3 py-1.5"} text-sm ${
-                    activeTab === tab
-                      ? "bg-zinc-800 text-zinc-100"
-                      : "text-zinc-500 transition hover:text-zinc-200"
-                  }`}
-                  title={tab.charAt(0).toUpperCase() + tab.slice(1)}
-                >
-                  {isMobile ? TAB_ICONS[tab] : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </button>
-              ))}
-            </div>
+            ))}
           </div>
         </div>
-        {stopError ? (
-          <p className="mt-3 text-sm text-red-300">{stopError}</p>
-        ) : null}
-      </header>
+      </div>
+      {stopError ? <p className="mt-3 text-sm text-red-300">{stopError}</p> : null}
+    </header>
+  );
+
+  // On mobile, show a slim stop-session bar if the session is stoppable
+  const mobileStopBar = isMobile && isStoppable ? (
+    <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
+      <button
+        type="button"
+        onClick={() => void handleStopSession()}
+        disabled={isStopping}
+        className="flex items-center gap-1.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-300 transition active:bg-red-950/50 disabled:opacity-50"
+      >
+        {isStopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+        Stop
+      </button>
+      {stopError ? <p className="text-xs text-red-300">{stopError}</p> : null}
+    </div>
+  ) : null;
+
+  const contentPadding = isMobile ? "p-3" : "p-6";
+
+  return (
+    <div className="flex h-full flex-col">
+      {header}
+      {mobileStopBar}
       <div className="flex-1 overflow-hidden">
-        <div className={`h-full p-6 ${activeTab === "chat" ? "" : "hidden"}`}>
+        <div className={`h-full ${contentPadding} ${activeTab === "chat" ? "" : "hidden"}`}>
           <ChatView
             sessionId={sessionId}
             {...(activeSession.prompt ? { initialPrompt: activeSession.prompt } : {})}
             onSelectionLoadSettled={reportSelectionLoad}
+            isMobile={isMobile}
           />
         </div>
         {activeTab !== "chat" && (
-          <div className={`h-full p-6 ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
+          <div className={`h-full ${contentPadding} ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
             {activeTab === "logs" ? (
               <LogPanel
                 sessionId={sessionId}
@@ -218,7 +248,6 @@ function OverviewTab({
       onSelectionLoadSettled("ok");
       return;
     }
-
     if (resultQuery.isSuccess) {
       onSelectionLoadSettled("ok");
     } else if (resultQuery.isError) {
@@ -248,7 +277,7 @@ function OverviewTab({
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Exit Code</dt>
                 <dd className="mt-2">
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-mono font-medium ${
+                  <span className={`inline-flex rounded-full px-2 py-0.5 font-mono text-xs font-medium ${
                     session.exitCode === 0
                       ? "bg-emerald-950/60 text-emerald-300"
                       : "bg-red-950/60 text-red-300"
@@ -303,7 +332,7 @@ function OverviewTab({
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
           <button
             type="button"
-            onClick={() => { setPromptExpanded(!promptExpanded); }}
+            onClick={() => setPromptExpanded(!promptExpanded)}
             className="flex w-full items-center gap-2 text-left"
           >
             {promptExpanded ? (
@@ -336,7 +365,7 @@ function MetadataItem({
   return (
     <div>
       <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</dt>
-      <dd className={`mt-2 text-sm text-zinc-100 ${mono ? "font-mono break-all" : ""}`}>{value}</dd>
+      <dd className={`mt-2 text-sm text-zinc-100 ${mono ? "break-all font-mono" : ""}`}>{value}</dd>
     </div>
   );
 }

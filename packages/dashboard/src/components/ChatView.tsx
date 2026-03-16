@@ -65,6 +65,7 @@ interface ChatViewProps {
   sessionId: string;
   initialPrompt?: string;
   onSelectionLoadSettled?: (status: "ok" | "error", error?: unknown) => void;
+  isMobile?: boolean;
 }
 
 function isRunning(status: SessionSummary["status"]): boolean {
@@ -482,7 +483,7 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
   return entries;
 }
 
-export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: ChatViewProps) {
+export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const transport = useTransport();
 
@@ -697,12 +698,14 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled }: C
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/70">
-      <div className="border-b border-zinc-800 px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Chat Timeline</p>
-        <p className="mt-1 text-sm text-zinc-400">
-          {isRunning(activeSession.status) ? "Streaming live events…" : `${String(entries.length)} events`}
-        </p>
-      </div>
+      {!isMobile && (
+        <div className="border-b border-zinc-800 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Chat Timeline</p>
+          <p className="mt-1 text-sm text-zinc-400">
+            {isRunning(activeSession.status) ? "Streaming live events…" : `${String(entries.length)} events`}
+          </p>
+        </div>
+      )}
       <div className="relative flex-1 overflow-hidden">
         <div
           ref={scrollRef}

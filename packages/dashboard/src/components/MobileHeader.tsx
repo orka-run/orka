@@ -2,8 +2,8 @@ import { Menu } from "lucide-react";
 import { useConnectionStore } from "../stores/connectionStore";
 
 interface MobileHeaderProps {
-  title: string | null;
-  onOpenSidebar: () => void;
+  title?: string | null;
+  onToggleSidebar: () => void;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -13,7 +13,7 @@ const STATUS_DOT: Record<string, string> = {
   disconnected: "bg-red-400",
 };
 
-export function MobileHeader({ title, onOpenSidebar }: MobileHeaderProps) {
+export function MobileHeader({ title, onToggleSidebar }: MobileHeaderProps) {
   const status = useConnectionStore((s) => s.status);
   const dotClass = STATUS_DOT[status] ?? "bg-zinc-500";
 
@@ -21,8 +21,9 @@ export function MobileHeader({ title, onOpenSidebar }: MobileHeaderProps) {
     <header className="flex items-center gap-3 border-b border-zinc-800 bg-zinc-950 px-3 py-2 safe-area-top">
       <button
         type="button"
-        onClick={onOpenSidebar}
+        onClick={onToggleSidebar}
         className="tap-target inline-flex items-center justify-center rounded-lg text-zinc-400 transition hover:text-zinc-100"
+        aria-label="Open sessions sidebar"
       >
         <Menu className="h-5 w-5" />
       </button>

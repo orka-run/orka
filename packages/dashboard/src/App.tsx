@@ -16,7 +16,7 @@ import { DraftChatView, type DraftSettings } from "./components/DraftChatView";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { MobileHeader } from "./components/MobileHeader";
 import { MobileSidebarDrawer } from "./components/MobileSidebarDrawer";
-import { MobileTabBar } from "./components/MobileTabBar";
+import { MobileTabBar, type MobileSessionTab } from "./components/MobileTabBar";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { NodeManagementDialog } from "./components/NodeManagementDialog";
 import { PairNodeDialog } from "./components/PairNodeDialog";
@@ -73,7 +73,7 @@ interface AppShellProps {
 
 function AppShell({ transport }: AppShellProps) {
   const { mode } = useMode();
-  const isMobile = useMobileBreakpoint();
+  const { isMobile } = useMobileBreakpoint();
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
   const hasRestoredRef = useRef(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
@@ -82,6 +82,7 @@ function AppShell({ transport }: AppShellProps) {
   const [isPairNodeOpen, setIsPairNodeOpen] = useState(false);
   const [isNodeManagementOpen, setIsNodeManagementOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [mobileActiveTab, setMobileActiveTab] = useState<MobileSessionTab>("chat");
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
@@ -122,6 +123,8 @@ function AppShell({ transport }: AppShellProps) {
 
     selectSession(id);
     setIsMobileSidebarOpen(false);
+    // When selecting a session on mobile, go to chat tab
+    setMobileActiveTab("chat");
   };
 
   const handleSelectionLoadSettled = useEffectEvent((sessionId: string, status: "ok" | "error", error?: unknown) => {
@@ -307,7 +310,6 @@ function AppShell({ transport }: AppShellProps) {
     selectedNodeId,
     onSelect: (id: string) => {
       handleSelectSession(id);
-      // Keep draft in sidebar but show the selected session
     },
     onSelectDraft: activateDraft,
     onNewSession: activateDraft,
@@ -316,12 +318,15 @@ function AppShell({ transport }: AppShellProps) {
     onManageNodes: mode === "local" && pairedNodes.length > 0 ? () => setIsNodeManagementOpen(true) : undefined,
   };
 
-  const mainContent = selectedId ? (
+  // Mobile main content: show SessionView, DraftChatView, or empty state
+  const mobileMainContent = selectedId ? (
     <SessionView
       sessionId={selectedId}
       transport={transport}
       onSelectionLoadSettled={handleSelectionLoadSettled}
-      isMobile={isMobile}
+      isMobile
+      mobileActiveTab={mobileActiveTab}
+      onMobileTabChange={setMobileActiveTab}
     />
   ) : isDraftActive ? (
     <DraftChatView
@@ -329,7 +334,7 @@ function AppShell({ transport }: AppShellProps) {
       onSpawned={handleDraftSpawned}
       onOpenAdvanced={handleOpenAdvanced}
     />
-  ) : isMobile ? (
+  ) : (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
       <div className="rounded-full bg-zinc-800 p-4">
         <svg className="h-8 w-8 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -345,15 +350,33 @@ function AppShell({ transport }: AppShellProps) {
         New Session
       </button>
     </div>
+  );
+
+  // Desktop main content
+  const desktopMainContent = selectedId ? (
+    <SessionView
+      sessionId={selectedId}
+      transport={transport}
+      onSelectionLoadSettled={handleSelectionLoadSettled}
+    />
+  ) : isDraftActive ? (
+    <DraftChatView
+      defaultProjectPath={defaultProjectPath}
+      onSpawned={handleDraftSpawned}
+      onOpenAdvanced={handleOpenAdvanced}
+    />
   ) : (
     <div className="flex h-full items-center justify-center text-zinc-500">
       Select a session or press{" "}
-      <kbd className="mx-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
+      <kbd className="mx-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 font-mono text-xs">
         Ctrl+N
       </kbd>{" "}
       to start a new chat
     </div>
   );
+
+  // On mobile: show the session title in the header when a session is selected
+  const mobileHeaderTitle = selectedSession?.title ?? null;
 
   return (
     <TransportContext.Provider value={transport}>
@@ -361,11 +384,15 @@ function AppShell({ transport }: AppShellProps) {
         <ConnectionBanner />
         {isMobile ? (
           <>
-            <MobileHeader onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)} />
-            <main className="flex-1 overflow-hidden">{mainContent}</main>
+            <MobileHeader
+              title={mobileHeaderTitle}
+              onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
+            />
+            <main className="flex-1 overflow-hidden">{mobileMainContent}</main>
             <MobileTabBar
               hasSelectedSession={!!selectedId}
-              onNewSession={activateDraft}
+              activeTab={mobileActiveTab}
+              onTabChange={setMobileActiveTab}
               onShowSessions={() => setIsMobileSidebarOpen(true)}
             />
             <MobileSidebarDrawer
@@ -379,7 +406,7 @@ function AppShell({ transport }: AppShellProps) {
           <>
             <div className="flex flex-1 overflow-hidden">
               <Sidebar {...sidebarProps} />
-              <main className="flex-1 overflow-hidden">{mainContent}</main>
+              <main className="flex-1 overflow-hidden">{desktopMainContent}</main>
             </div>
             <StatusBar
               sessionCount={sessions.length}

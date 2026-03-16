@@ -1,34 +1,49 @@
-import { LayoutList, MessageSquare, FileCode2, ScrollText, Settings } from "lucide-react";
+import { Eye, FileCode2, LayoutList, MessageSquare, ScrollText } from "lucide-react";
 
-export type MobileTab = "sessions" | "chat" | "diff" | "logs" | "settings";
+export type MobileSessionTab = "chat" | "logs" | "diff" | "overview";
 
 interface MobileTabBarProps {
-  activeTab: MobileTab;
-  onTabChange: (tab: MobileTab) => void;
-  hasActiveSession: boolean;
+  hasSelectedSession: boolean;
+  activeTab: MobileSessionTab;
+  onTabChange: (tab: MobileSessionTab) => void;
+  onShowSessions: () => void;
 }
 
-const TABS: { id: MobileTab; label: string; icon: typeof LayoutList }[] = [
-  { id: "sessions", label: "Sessions", icon: LayoutList },
+const SESSION_TABS: { id: MobileSessionTab; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "diff", label: "Diff", icon: FileCode2 },
   { id: "logs", label: "Logs", icon: ScrollText },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "diff", label: "Diff", icon: FileCode2 },
+  { id: "overview", label: "Info", icon: Eye },
 ];
 
-export function MobileTabBar({ activeTab, onTabChange, hasActiveSession }: MobileTabBarProps) {
+export function MobileTabBar({
+  hasSelectedSession,
+  activeTab,
+  onTabChange,
+  onShowSessions,
+}: MobileTabBarProps) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800 bg-zinc-950 safe-area-bottom">
+    <nav className="border-t border-zinc-800 bg-zinc-950 safe-area-bottom">
       <div className="flex items-stretch justify-around">
-        {TABS.map(({ id, label, icon: Icon }) => {
-          const isActive = activeTab === id;
-          const disabled = id !== "sessions" && id !== "settings" && !hasActiveSession;
+        {/* Sessions button — always visible, opens sidebar drawer */}
+        <button
+          type="button"
+          onClick={onShowSessions}
+          className="tap-target flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium text-zinc-500 transition active:text-zinc-300"
+        >
+          <LayoutList className="h-5 w-5" />
+          Sessions
+        </button>
 
+        {/* Session-content tabs — only active when a session is selected */}
+        {SESSION_TABS.map(({ id, label, icon: Icon }) => {
+          const isActive = hasSelectedSession && activeTab === id;
+          const disabled = !hasSelectedSession;
           return (
             <button
               key={id}
               type="button"
-              onClick={() => onTabChange(id)}
+              onClick={() => { if (!disabled) onTabChange(id); }}
               disabled={disabled}
               className={`tap-target flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium transition ${
                 isActive
