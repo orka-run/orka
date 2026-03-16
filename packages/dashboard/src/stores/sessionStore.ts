@@ -1,4 +1,4 @@
-import type { Session, SpawnRequest } from "@orka/core";
+import type { Session, SessionListItem, SpawnRequest, SpawnResult } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RequestOptions } from "../lib/wsTransport";
@@ -43,7 +43,7 @@ export interface SessionState {
 }
 
 function toSessionSummary(
-  session: Session & { title?: string; model?: string | null; prompt?: string },
+  session: SessionListItem,
   options?: { fallbackTitle?: string; nodeId?: string },
 ): SessionSummary {
   const title = options?.fallbackTitle ?? session.title ?? session.id;
@@ -129,13 +129,13 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           const results = await Promise.all(
             nodeIds.map(async (nodeId) => {
               const reqOpts: RequestOptions = { node: nodeId };
-              const sessions = await transport.request<Session[]>("listSessions", undefined, reqOpts);
+              const sessions = await transport.request<SessionListItem[]>("listSessions", undefined, reqOpts);
               return sessions.map((session) => toSessionSummary(session, { nodeId }));
             }),
           );
           allSummaries = results.flat();
         } else {
-          const sessions = await transport.request<Session[]>("listSessions");
+          const sessions = await transport.request<SessionListItem[]>("listSessions");
           allSummaries = sessions.map((session) => toSessionSummary(session));
         }
 
@@ -159,19 +159,37 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
 
       try {
         const reqOpts: RequestOptions | undefined = request.nodeId ? { node: request.nodeId } : undefined;
-        const session = await transport.request<Session>("spawn", request, reqOpts);
-        const summary = toSessionSummary(
-          session,
-          { fallbackTitle: fallbackTitleFromRequest(request), nodeId: request.nodeId },
-        );
+        const result = await transport.request<SpawnResult>("spawn", request, reqOpts);
+
+        // Build a minimal summary from SpawnResult + request data.
+        // The next fetchSessions will fill in the full SessionListItem fields.
+        const summary: SessionSummary = {
+          id: result.id,
+          taskId: "",
+          status: result.status,
+          backend: request.backend,
+          mode: request.mode,
+          title: result.title || fallbackTitleFromRequest(request) || result.id,
+          model: request.model ?? null,
+          createdAt: new Date().toISOString(),
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+          exitCode: null,
+          projectPath: request.projectPath,
+          workingDir: "",
+          kept: false,
+          autoMerge: request.autoMerge ?? false,
+          prompt: request.prompt,
+          nodeId: request.nodeId ?? null,
+        };
 
         set((state) => ({
           sessions: upsertSession(state.sessions, summary),
-          selectedId: session.id,
+          selectedId: result.id,
           error: null,
         }));
 
-        return session.id;
+        return result.id;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to spawn session";
         set({ error: message });

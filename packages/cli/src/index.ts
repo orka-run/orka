@@ -824,10 +824,8 @@ const spawnCmd = command({
     }
 
     console.log(`spawned session ${session.id}`);
-    console.log(`  backend:  ${session.backend}`);
-    console.log(`  mode:     ${session.mode}`);
-    console.log(`  workdir:  ${session.workingDir}`);
-    console.log(`  log:      ${session.logFile}`);
+    console.log(`  backend:  ${spawnRequest.backend}`);
+    console.log(`  mode:     ${spawnRequest.mode}`);
     if (args.tag.length > 0) {
       console.log(`  tags:     ${args.tag.join(", ")}`);
     }
@@ -1272,10 +1270,8 @@ const retryCmd = command({
     const newSession = await svc.spawn(retryRequest);
 
     console.log(`retried session ${session.id} → ${newSession.id}`);
-    console.log(`  backend:  ${newSession.backend}`);
-    console.log(`  mode:     ${newSession.mode}`);
-    console.log(`  workdir:  ${newSession.workingDir}`);
-    console.log(`  log:      ${newSession.logFile}`);
+    console.log(`  backend:  ${retryRequest.backend}`);
+    console.log(`  mode:     ${retryRequest.mode}`);
   }),
 });
 

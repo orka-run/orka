@@ -99,8 +99,8 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     const spawned = spawnResp.result as Record<string, unknown>;
     expect(typeof spawned.id).toBe("string");
     expect((spawned.id as string).startsWith("sess-")).toBe(true);
-    expect(spawned.backend).toBe("shell");
     expect(spawned.status).toBe("running");
+    expect(spawned.title).toBe("lifecycle-full-test");
 
     const sessionId = spawned.id as string;
 
@@ -258,7 +258,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       const session = resp.result as Record<string, unknown>;
       expect(typeof session.id).toBe("string");
       expect((session.id as string).startsWith("sess-")).toBe(true);
-      expect(session.backend).toBe("shell");
+      expect(session.status).toBe("running");
       sessionIds.push(session.id as string);
     }
 

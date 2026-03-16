@@ -68,104 +68,116 @@ describe("Worktree Management", () => {
   });
 
   test("background session auto-creates worktree with named branch", async () => {
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: "echo 'wt-auto' && exit 0",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
+
+    const session = await client.getSession(result.id);
+    expect(session).not.toBeNull();
 
     // Worktree path is under ORKA_HOME/worktrees/
     const wtDir = join(testHome, "worktrees");
-    expect(session.workingDir).toStartWith(wtDir);
-    expect(existsSync(session.workingDir)).toBe(true);
+    expect(session!.workingDir).toStartWith(wtDir);
+    expect(existsSync(session!.workingDir)).toBe(true);
 
     // Branch should be orka/<session-id>
-    const branch = (await $`git -C ${session.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
-    expect(branch).toBe(`orka/${session.id}`);
+    const branch = (await $`git -C ${session!.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+    expect(branch).toBe(`orka/${result.id}`);
 
-    await waitForTerminal(client, session.id);
+    await waitForTerminal(client, result.id);
   });
 
   test("interactive session does NOT create a worktree", async () => {
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: "echo 'no-wt' && exit 0",
       backend: "shell",
       mode: "interactive",
       projectPath: testRepo,
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
+
+    const session = await client.getSession(result.id);
+    expect(session).not.toBeNull();
 
     // Interactive sessions use the project dir directly
-    expect(session.workingDir).toBe(testRepo);
-    await waitForTerminal(client, session.id);
+    expect(session!.workingDir).toBe(testRepo);
+    await waitForTerminal(client, result.id);
   });
 
   test("custom branch creates worktree on specified branch", async () => {
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: "echo 'custom-branch' && exit 0",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
       branch: "feat/custom-test",
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
 
-    const branch = (await $`git -C ${session.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+    const session = await client.getSession(result.id);
+    expect(session).not.toBeNull();
+
+    const branch = (await $`git -C ${session!.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
     expect(branch).toBe("feat/custom-test");
 
-    await waitForTerminal(client, session.id);
+    await waitForTerminal(client, result.id);
   });
 
   test("getDiff detects changes in worktree", async () => {
     // Keep the session alive so the worktree is not cleaned up before getDiff
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: "echo 'diff-content' > test-file.txt && sleep 300",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
 
     // Wait for the file to be created
     await Bun.sleep(500);
 
-    const diff = await client.getDiff(session.id);
+    const diff = await client.getDiff(result.id);
     expect(diff.status).toContain("test-file.txt");
 
-    await client.stop(session.id);
+    await client.stop(result.id);
   });
 
   test("merge brings worktree commits into main repo", async () => {
     // Keep the session alive so the worktree is not cleaned up.
     // Git config must be set inside the prompt.
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: 'git config user.email "test@orka.dev" && git config user.name "Orka Test" && echo \'merge-test-content\' > merge-test.txt && git add merge-test.txt && git commit -m \'add merge-test\' && sleep 300',
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
+
+    const session = await client.getSession(result.id);
+    expect(session).not.toBeNull();
 
     // Wait for the commit to be made
     await Bun.sleep(1000);
 
     // Verify the commit was made in the worktree
-    const wtLog = (await $`git -C ${session.workingDir} log --oneline -1`.quiet().text()).trim();
+    const wtLog = (await $`git -C ${session!.workingDir} log --oneline -1`.quiet().text()).trim();
     expect(wtLog).toContain("merge-test");
 
     // Stop the session first (merge needs the worktree intact)
     // We use setKept to prevent auto-cleanup
-    await client.setKept(session.id, true);
-    await client.stop(session.id);
-    await waitForTerminal(client, session.id);
+    await client.setKept(result.id, true);
+    await client.stop(result.id);
+    await waitForTerminal(client, result.id);
 
     // Merge into main repo
-    const result = await client.merge(session.id);
-    expect(result.branch).toBe(`orka/${session.id}`);
-    expect(result.commits).toBeGreaterThanOrEqual(1);
-    expect(result.cleaned).toBe(true);
+    const mergeResult = await client.merge(result.id);
+    expect(mergeResult.branch).toBe(`orka/${result.id}`);
+    expect(mergeResult.commits).toBeGreaterThanOrEqual(1);
+    expect(mergeResult.cleaned).toBe(true);
 
     // Verify the file now exists in the main repo
     expect(existsSync(join(testRepo, "merge-test.txt"))).toBe(true);
@@ -173,42 +185,45 @@ describe("Worktree Management", () => {
 
   test("merge throws when no commits to merge", async () => {
     // Keep the session alive so worktree is not cleaned up
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: "echo 'no-commit' && sleep 300",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
 
     await Bun.sleep(500);
 
     // Keep to prevent auto-cleanup
-    await client.setKept(session.id, true);
-    await client.stop(session.id);
-    await waitForTerminal(client, session.id);
+    await client.setKept(result.id, true);
+    await client.stop(result.id);
+    await waitForTerminal(client, result.id);
 
     // No git commits were made in the worktree, so merge should fail
-    await expect(client.merge(session.id)).rejects.toThrow("No commits to merge");
+    await expect(client.merge(result.id)).rejects.toThrow("No commits to merge");
   });
 
   test("keep protects worktree from cleanup on stop", async () => {
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: "sleep 600",
       backend: "shell",
       mode: "background",
       projectPath: testRepo,
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
+
+    const session = await client.getSession(result.id);
+    expect(session).not.toBeNull();
 
     // Mark as kept
-    await client.setKept(session.id, true);
+    await client.setKept(result.id, true);
 
     // Stop the session — worktree should be preserved because of kept flag
-    await client.stop(session.id);
-    await waitForTerminal(client, session.id);
+    await client.stop(result.id);
+    await waitForTerminal(client, result.id);
 
     // Worktree should still exist
-    expect(existsSync(session.workingDir)).toBe(true);
+    expect(existsSync(session!.workingDir)).toBe(true);
   });
 });

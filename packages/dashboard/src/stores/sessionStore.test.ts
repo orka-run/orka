@@ -1,13 +1,13 @@
-import type { Session, SpawnRequest, Task } from "@orka/core";
+import type { Session, SessionListItem, SpawnRequest, SpawnResult, Task } from "@orka/core";
 import { describe, expect, test } from "bun:test";
 import { createSessionStore } from "./sessionStore";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import type { WsTransport } from "../lib/wsTransport";
 
 class MockWsTransport {
-  sessions: Session[] = [];
+  sessions: SessionListItem[] = [];
   tasks = new Map<string, Task>();
-  spawnResult: Session | null = null;
+  spawnResult: SpawnResult | null = null;
   spawnParams: SpawnRequest | null = null;
 
   async request<T>(method: string, params?: unknown): Promise<T> {
@@ -41,7 +41,7 @@ function asTransport(transport: MockWsTransport): WsTransport {
   return transport as unknown as WsTransport;
 }
 
-function makeSession(overrides: Partial<Session & { title?: string; model?: string | null; prompt?: string }> = {}): Session & { title?: string; model?: string | null; prompt?: string } {
+function makeSession(overrides: Partial<SessionListItem> = {}): SessionListItem {
   return {
     id: "sess-1",
     taskId: "task-1",
@@ -58,6 +58,18 @@ function makeSession(overrides: Partial<Session & { title?: string; model?: stri
     exitCode: null,
     kept: false,
     autoMerge: false,
+    title: "Dashboard task",
+    model: null,
+    prompt: "Build the dashboard session store",
+    ...overrides,
+  };
+}
+
+function makeSpawnResult(overrides: Partial<SpawnResult> = {}): SpawnResult {
+  return {
+    id: "sess-1",
+    status: "queued",
+    title: "Dashboard task",
     ...overrides,
   };
 }
@@ -185,11 +197,10 @@ describe("sessionStore", () => {
   test("spawnSession adds new session", async () => {
     const store = createSessionStore();
     const transport = new MockWsTransport();
-    transport.spawnResult = makeSession({
+    transport.spawnResult = makeSpawnResult({
       id: "sess-2",
-      taskId: "task-2",
-      createdAt: "2026-03-11T11:00:00.000Z",
-      autoMerge: true,
+      status: "queued",
+      title: "Ship dashboard store",
     });
 
     const request: SpawnRequest = {
@@ -208,27 +219,18 @@ describe("sessionStore", () => {
 
     expect(sessionId).toBe("sess-2");
     expect(transport.spawnParams).toEqual(request);
-    expect(store.getState().sessions).toEqual([
-      {
-        id: "sess-2",
-        taskId: "task-2",
-        status: "queued",
-        backend: "codex",
-        mode: "interactive",
-        title: "Ship dashboard store",
-        model: null,
-        createdAt: "2026-03-11T11:00:00.000Z",
-        startedAt: null,
-        finishedAt: null,
-        exitCode: null,
-        projectPath: "/tmp/project",
-        workingDir: "/tmp/project",
-        kept: false,
-        autoMerge: true,
-        prompt: null,
-        nodeId: null,
-      },
-    ]);
+
+    const sessions = store.getState().sessions;
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toBe("sess-2");
+    expect(sessions[0].status).toBe("queued");
+    expect(sessions[0].backend).toBe("codex");
+    expect(sessions[0].mode).toBe("interactive");
+    expect(sessions[0].title).toBe("Ship dashboard store");
+    expect(sessions[0].model).toBe("gpt-5");
+    expect(sessions[0].projectPath).toBe("/tmp/project");
+    expect(sessions[0].autoMerge).toBe(true);
+    expect(sessions[0].nodeId).toBeNull();
     expect(store.getState().selectedId).toBe("sess-2");
   });
 });

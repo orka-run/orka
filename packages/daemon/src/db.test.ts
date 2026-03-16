@@ -91,7 +91,8 @@ describe("usage_log helpers", () => {
     const session = db.getSession("sess-custom-2");
     expect(session?.systemPrompt).toBe("Stay concise.");
     expect(session?.allowedTools).toEqual(["Bash", "Read"]);
-    expect(session?.env).toEqual({ FOO: "bar" });
+    // env is deliberately stripped from reads — it contains secrets and must never cross the RPC wire
+    expect(session?.env).toBeUndefined();
   });
 
   test("stores per-session usage and summarizes with filters", () => {

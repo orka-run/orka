@@ -664,6 +664,22 @@ export class DatabaseRepository {
     });
   }
 
+  /** List sessions by tag with task fields inlined (avoids N+1 getTask calls). */
+  listSessionItemsByTag(tag: string): SessionListItem[] {
+    return withSpanSync("orka.db.listSessionItemsByTag", {}, () => {
+      const rows = this.db
+        .prepare(
+          `SELECT s.*, tk.title, tk.model, tk.prompt FROM sessions s
+           INNER JOIN session_tags t ON s.id = t.session_id
+           LEFT JOIN tasks tk ON s.task_id = tk.id
+           WHERE t.tag = ?
+           ORDER BY s.created_at DESC`,
+        )
+        .all(tag) as any[];
+      return rows.map(rowToSessionListItem);
+    });
+  }
+
   // --- Client errors ---
 
   insertClientError(report: { error: string; stack?: string; url: string; timestamp: string }): void {
@@ -701,6 +717,21 @@ export class DatabaseRepository {
         .prepare("SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY created_at DESC")
         .all(parentId) as any[];
       return rows.map(rowToSession);
+    });
+  }
+
+  /** List child sessions with task fields inlined (avoids N+1 getTask calls). */
+  listChildSessionItems(parentId: string): SessionListItem[] {
+    return withSpanSync("orka.db.listChildSessionItems", { "orka.session.parent_id": parentId }, () => {
+      const rows = this.db
+        .prepare(
+          `SELECT s.*, t.title, t.model, t.prompt FROM sessions s
+           LEFT JOIN tasks t ON s.task_id = t.id
+           WHERE s.parent_session_id = ?
+           ORDER BY s.created_at DESC`,
+        )
+        .all(parentId) as any[];
+      return rows.map(rowToSessionListItem);
     });
   }
 }
@@ -742,7 +773,8 @@ function rowToSession(row: unknown): Session {
     ...(data.raw_log_file ? { rawLogFile: data.raw_log_file } : {}),
     ...(data.system_prompt ? { systemPrompt: data.system_prompt } : {}),
     ...(data.allowed_tools ? { allowedTools: JSON.parse(data.allowed_tools) as string[] } : {}),
-    ...(data.env_json ? { env: JSON.parse(data.env_json) as Record<string, string> } : {}),
+    // env is deliberately omitted — it contains secrets (API keys, tokens) and must never
+    // cross the RPC wire. The env is stored in the DB for auditing but only used at spawn time.
     ...(data.archived_at ? { archivedAt: data.archived_at } : {}),
   };
 }

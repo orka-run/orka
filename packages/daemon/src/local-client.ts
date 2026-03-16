@@ -16,7 +16,9 @@ import type {
   SessionResult,
   UsageSummary,
   SpawnRequest,
+  SpawnResult,
   Session,
+  SessionListItem,
   StoredNode,
   Task,
   ApprovalRequest,
@@ -80,8 +82,14 @@ class LocalClient implements OrkaService {
     this.pairingConfig = deps.pairingConfig ?? null;
   }
 
-  async spawn(req: SpawnRequest): Promise<Session> {
-    return spawnSession(this.ctx, req);
+  async spawn(req: SpawnRequest): Promise<SpawnResult> {
+    const session = await spawnSession(this.ctx, req);
+    const task = this.ctx.db.getTask(session.taskId);
+    return {
+      id: session.id,
+      status: session.status,
+      title: task?.title ?? req.title ?? req.prompt.slice(0, 80),
+    };
   }
 
   async stop(sessionId: string): Promise<void> {
@@ -96,11 +104,10 @@ class LocalClient implements OrkaService {
     return this.ctx.db.getSession(id);
   }
 
-  async listSessions(filters?: SessionFilters): Promise<Session[]> {
+  async listSessions(filters?: SessionFilters): Promise<SessionListItem[]> {
     const includeArchived = filters?.includeArchived ?? false;
     if (filters?.tag) {
-      // Tag query still uses old path — TODO: add listSessionItemsByTag
-      let sessions = this.ctx.db.listSessionsByTag(filters.tag);
+      let sessions = this.ctx.db.listSessionItemsByTag(filters.tag);
       if (filters.status) {
         sessions = sessions.filter((s) => s.status === filters.status);
       }
@@ -112,8 +119,8 @@ class LocalClient implements OrkaService {
     return this.ctx.db.listSessionItems(filters?.status, includeArchived);
   }
 
-  async getChildSessions(sessionId: string): Promise<Session[]> {
-    return this.ctx.db.getChildSessions(sessionId);
+  async getChildSessions(sessionId: string): Promise<SessionListItem[]> {
+    return this.ctx.db.listChildSessionItems(sessionId);
   }
 
   async getTask(id: string): Promise<Task | null> {

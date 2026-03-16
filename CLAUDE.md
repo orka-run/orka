@@ -97,6 +97,22 @@ ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=mysecret ORKA_ENCRYPT=1 orka ps
 - Bun resolves `.ts` files from extensionless imports automatically
 - Never use `@/` prefix — it doesn't work in Bun monorepo context
 
+## Layer Separation
+
+### Type Layers
+- **DB Row types** (`*Row` schemas) — stay in `daemon/db.ts`, never exported
+- **Domain types** (`Session`, `Task`, etc.) — in `core/types.ts`, used for internal logic
+- **API response types** (`SpawnResult`, `SessionListItem`, etc.) — in `core/service.ts`, returned by OrkaService
+- **Dashboard types** (`SessionSummary`, etc.) — in `dashboard/src/stores/`, derived from API responses
+
+### Rules
+1. **Never return a domain type directly from an API method.** Use a response DTO.
+2. **Never expose DB row shapes to API consumers.** Map to domain first, then to response DTO.
+3. **Never include filesystem paths in API responses** (`logFile`, `rawLogFile`, `workingDir` for non-detail views).
+4. **Never include `env` in API responses.** Environment variables are security-sensitive.
+5. **List endpoints return summary DTOs**, not full objects. Detail endpoints return full DTOs.
+6. **If a dashboard mapper strips fields from the API response, the API response is too large.**
+
 ## Tech Stack
 
 - **Runtime**: Bun

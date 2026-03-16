@@ -4,8 +4,10 @@ import type {
   OrchestrationEvent,
   OrkaService,
   Session,
+  SessionListItem,
   Task,
   SpawnRequest,
+  SpawnResult,
   SessionFilters,
   PruneOptions,
   PruneResult,
@@ -235,7 +237,7 @@ class OrkaClient implements OrkaService {
 
   // --- OrkaService ---
 
-  async spawn(req: SpawnRequest): Promise<Session> {
+  async spawn(req: SpawnRequest): Promise<SpawnResult> {
     return this.call("spawn", req);
   }
 
@@ -251,11 +253,11 @@ class OrkaClient implements OrkaService {
     return this.call("getSession", { id });
   }
 
-  async listSessions(filters?: SessionFilters): Promise<Session[]> {
+  async listSessions(filters?: SessionFilters): Promise<SessionListItem[]> {
     return this.call("listSessions", { filters });
   }
 
-  async getChildSessions(sessionId: string): Promise<Session[]> {
+  async getChildSessions(sessionId: string): Promise<SessionListItem[]> {
     return this.call("getChildSessions", { sessionId });
   }
 

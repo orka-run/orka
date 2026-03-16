@@ -1,7 +1,15 @@
-import type { ChatEntry, NodeInfo, Session, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
+import type { ChatEntry, NodeInfo, Session, SessionId, SessionListItem, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
+
+// --- Spawn Result (minimal DTO returned by spawn) ---
+
+export interface SpawnResult {
+  id: SessionId;
+  status: SessionStatus;
+  title: string;
+}
 
 // --- Session Result (moved from daemon/result-parser) ---
 
@@ -119,14 +127,14 @@ export interface PairWithNodeResult {
  */
 export interface OrkaService {
   // --- Session lifecycle ---
-  spawn(req: SpawnRequest): Promise<Session>;
+  spawn(req: SpawnRequest): Promise<SpawnResult>;
   stop(sessionId: string): Promise<void>;
   reap(): Promise<number>;
 
   // --- Queries ---
   getSession(id: string): Promise<Session | null>;
-  listSessions(filters?: SessionFilters): Promise<Session[]>;
-  getChildSessions(sessionId: string): Promise<Session[]>;
+  listSessions(filters?: SessionFilters): Promise<SessionListItem[]>;
+  getChildSessions(sessionId: string): Promise<SessionListItem[]>;
   getTask(id: string): Promise<Task | null>;
 
   // --- Session properties ---

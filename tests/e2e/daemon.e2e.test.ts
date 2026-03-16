@@ -82,7 +82,7 @@ describe("Daemon Session Lifecycle", () => {
   // ---- Spawn ----
 
   test("spawn returns a running session with correct fields", async () => {
-    const session = await client.spawn({
+    const result = await client.spawn({
       prompt: "echo 'hello orka'",
       backend: "shell",
       mode: "background",
@@ -90,15 +90,20 @@ describe("Daemon Session Lifecycle", () => {
       title: "E2E test session",
       tags: ["e2e", "test"],
     });
-    sessionIds.push(session.id);
+    sessionIds.push(result.id);
 
-    expect(session.id).toMatch(/^sess-/);
-    expect(session.status).toBe("running");
-    expect(session.backend).toBe("shell");
-    expect(session.mode).toBe("background");
-    expect(session.projectPath).toBe(testRepo);
-    expect(session.startedAt).toBeTruthy();
-    expect(session.logFile).toContain(session.id);
+    expect(result.id).toMatch(/^sess-/);
+    expect(result.status).toBe("running");
+    expect(result.title).toBe("E2E test session");
+
+    // Full session details available via getSession
+    const session = await client.getSession(result.id);
+    expect(session).not.toBeNull();
+    expect(session!.backend).toBe("shell");
+    expect(session!.mode).toBe("background");
+    expect(session!.projectPath).toBe(testRepo);
+    expect(session!.startedAt).toBeTruthy();
+    expect(session!.logFile).toContain(result.id);
   });
 
   // ---- Queries ----
@@ -132,10 +137,14 @@ describe("Daemon Session Lifecycle", () => {
     });
     sessionIds.push(spawned.id);
 
-    const task = await client.getTask(spawned.taskId);
+    // Get the full session to find taskId
+    const session = await client.getSession(spawned.id);
+    expect(session).not.toBeNull();
+
+    const task = await client.getTask(session!.taskId);
 
     expect(task).not.toBeNull();
-    expect(task!.id).toBe(spawned.taskId);
+    expect(task!.id).toBe(session!.taskId);
     expect(task!.prompt).toContain("echo 'getTask-test'");
     expect(task!.backend).toBe("shell");
   });
