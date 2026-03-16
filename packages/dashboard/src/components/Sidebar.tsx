@@ -1,10 +1,13 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useId, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
 import type { NodeInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
-import { useVirtualList, ITEM_HEIGHT, GAP } from "../hooks/useVirtualList";
+
+const ITEM_HEIGHT = 48;
+const GAP = 4;
 
 interface SidebarProps {
   sessions: SessionSummary[];
@@ -42,7 +45,7 @@ export function Sidebar({
   const normalizedQuery = query.trim().toLowerCase();
   const now = Date.now();
   const showNodeSelector = nodes.length > 1;
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Filter by selected node
   const nodeFilteredSessions = selectedNodeId
@@ -52,14 +55,18 @@ export function Sidebar({
   const runningCount = nodeFilteredSessions.filter((session) => isActive(session.status)).length;
   const filteredSessions = nodeFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
 
-  const { visibleItems, totalHeight, offsetY, onScroll, scrollToIndex } =
-    useVirtualList(filteredSessions, scrollRef);
+  const virtualizer = useVirtualizer({
+    count: filteredSessions.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ITEM_HEIGHT + GAP,
+    overscan: 5,
+  });
 
   // Scroll selected session into view when selection changes
   useEffect(() => {
     if (!selectedId) return;
     const idx = filteredSessions.findIndex((s) => s.id === selectedId);
-    if (idx >= 0) scrollToIndex(idx);
+    if (idx >= 0) virtualizer.scrollToIndex(idx, { align: "auto" });
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -125,7 +132,7 @@ export function Sidebar({
           />
         </div>
       </div>
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-2 py-2">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-2 py-2">
         {isDraftActive ? (
           <button
             type="button"
@@ -148,12 +155,24 @@ export function Sidebar({
             </p>
           </div>
         ) : (
-          <div style={{ height: totalHeight, position: "relative" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${offsetY}px)` }}>
-              {visibleItems.map(({ item: session }) => {
-                const isSelected = selectedId === session.id;
-                return (
-                  <div key={session.id} style={{ height: ITEM_HEIGHT, marginBottom: GAP }}>
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const session = filteredSessions[virtualRow.index];
+              if (!session) return null;
+              const isSelected = selectedId === session.id;
+              return (
+                <div
+                  key={session.id}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: virtualRow.size,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <div style={{ height: ITEM_HEIGHT, marginBottom: GAP }}>
                     <button
                       type="button"
                       onClick={() => onSelect(session.id)}
@@ -185,9 +204,9 @@ export function Sidebar({
                       </div>
                     </button>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

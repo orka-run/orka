@@ -1,5 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, Globe, LoaderCircle, RotateCcw, Search, Square, TerminalSquare, User, Wrench, Eye } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
@@ -523,8 +524,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     });
   }, []);
 
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   // Mutable refs for the push handler to accumulate deltas without re-subscribing
   const eventsRef = useRef<OrchestrationEvent[]>([]);
   // Stable refs for values used in effects without triggering re-runs
@@ -532,6 +533,13 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   initialPromptRef.current = initialPrompt;
   const onSelectionLoadSettledRef = useRef(onSelectionLoadSettled);
   onSelectionLoadSettledRef.current = onSelectionLoadSettled;
+
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 60,
+    overscan: 5,
+  });
 
   const getCachedTimeline = useTimelineCache((s) => s.get);
   const setCachedTimeline = useTimelineCache((s) => s.set);
@@ -605,7 +613,10 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
     if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ block: "end" });
+      // Use requestAnimationFrame to ensure the virtualizer has updated its total size
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ block: "end" });
+      });
     }
   }, [entries.length, autoScroll]);
 
@@ -741,23 +752,41 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onScroll={handleScroll}
           className={`h-full flex-1 overflow-y-auto overflow-x-hidden ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}
         >
-          <div className="min-w-0 space-y-2">
-            {entries.length === 0 ? (
-              <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
-            ) : (
-              entries.map((entry) => (
-                <TimelineEntry
-                  key={entry.id}
-                  entry={entry}
-                  isExpanded={expandedGroups.has(entry.id)}
-                  onToggleExpand={handleToggleGroup}
-                  onApprovalResolve={handleApprovalResolve}
-                />
-              ))
-            )}
-            {isRunning(activeSession.status) ? <ThinkingIndicator state={deriveThinkingState(events)} /> : null}
-            <div ref={bottomRef} />
-          </div>
+          {entries.length === 0 ? (
+            <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
+          ) : (
+            <div className="min-w-0" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const entry = entries[virtualRow.index];
+                if (!entry) return null;
+                return (
+                  <div
+                    key={entry.id}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <div className="pb-2">
+                      <TimelineEntry
+                        entry={entry}
+                        isExpanded={expandedGroups.has(entry.id)}
+                        onToggleExpand={handleToggleGroup}
+                        onApprovalResolve={handleApprovalResolve}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {isRunning(activeSession.status) ? <ThinkingIndicator state={deriveThinkingState(events)} /> : null}
+          <div ref={bottomRef} />
         </div>
 
         {!autoScroll ? (
