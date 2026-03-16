@@ -191,18 +191,17 @@ export function SessionView({
     </header>
   );
 
-  // On mobile, show a slim action bar for stop/retry
-  const mobileActionBar = isMobile && (isStoppable || isRetryable) ? (
-    <div className="flex items-center gap-2 border-b border-border px-2 py-1">
+  // On mobile, floating action button in bottom-right corner (above tab bar)
+  const mobileFab = isMobile && (isStoppable || isRetryable) ? (
+    <div className="absolute bottom-2 right-2 z-10">
       {isStoppable && (
         <button
           type="button"
           onClick={() => void handleStopSession()}
           disabled={isStopping}
-          className="flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition active:bg-status-error/20 disabled:opacity-50"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-status-error/30 bg-surface/90 text-status-error shadow-sm backdrop-blur transition active:bg-status-error/10 disabled:opacity-50"
         >
-          {isStopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-          Stop
+          {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
         </button>
       )}
       {isRetryable && (
@@ -210,21 +209,19 @@ export function SessionView({
           type="button"
           onClick={() => void handleRetrySession()}
           disabled={isRetrying}
-          className="flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] font-medium text-ink-secondary transition active:bg-surface-hover disabled:opacity-50"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface/90 text-ink-secondary shadow-sm backdrop-blur transition active:bg-surface-hover disabled:opacity-50"
         >
-          {isRetrying ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-          Retry
+          {isRetrying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
         </button>
       )}
-      {stopError ? <p className="text-[11px] text-status-error">{stopError}</p> : null}
     </div>
   ) : null;
 
   return (
     <div className="flex h-full flex-col">
       {header}
-      {mobileActionBar}
-      <div className="flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden">
+        {mobileFab}
         <div className={`h-full ${activeTab === "chat" ? "" : "hidden"} ${isMobile ? "" : "p-3"}`}>
           <ChatView
             sessionId={sessionId}
