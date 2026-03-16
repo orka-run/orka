@@ -581,17 +581,29 @@ export class DatabaseRepository {
     });
   }
 
-  getOrchestrationEvents(sessionId: string): OrchestrationEvent[] {
+  getOrchestrationEvents(sessionId: string, offset?: number, limit?: number): OrchestrationEvent[] {
     return withSpanSync("orka.db.getOrchestrationEvents", { "orka.session.id": sessionId }, () => {
-      const rows = this.db
-        .prepare(
-          `SELECT payload
-           FROM orchestration_events
-           WHERE session_id = ?
-           ORDER BY seq ASC`,
-        )
-        .all(sessionId) as unknown[];
+      let sql = `SELECT payload FROM orchestration_events WHERE session_id = ? ORDER BY seq ASC`;
+      const args: any[] = [sessionId];
+      if (limit !== undefined) {
+        sql += ` LIMIT ?`;
+        args.push(limit);
+        if (offset !== undefined) {
+          sql += ` OFFSET ?`;
+          args.push(offset);
+        }
+      }
+      const rows = this.db.prepare(sql).all(...args) as unknown[];
       return rows.map(rowToOrchestrationEvent);
+    });
+  }
+
+  getOrchestrationEventCount(sessionId: string): number {
+    return withSpanSync("orka.db.getOrchestrationEventCount", { "orka.session.id": sessionId }, () => {
+      const row = this.db
+        .prepare("SELECT COUNT(*) AS cnt FROM orchestration_events WHERE session_id = ?")
+        .get(sessionId) as { cnt: number } | undefined;
+      return row?.cnt ?? 0;
     });
   }
 
@@ -647,6 +659,27 @@ export class DatabaseRepository {
         .prepare("SELECT tag FROM session_tags WHERE session_id = ? ORDER BY tag")
         .all(sessionId) as { tag: string }[];
       return rows.map((r) => r.tag);
+    });
+  }
+
+  /** Batch-fetch tags for multiple sessions. Returns a map of sessionId → tags[]. */
+  getSessionTagsBatch(sessionIds: string[]): Map<string, string[]> {
+    if (sessionIds.length === 0) return new Map();
+    return withSpanSync("orka.db.getSessionTagsBatch", { "orka.session.count": sessionIds.length }, () => {
+      const placeholders = sessionIds.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(`SELECT session_id, tag FROM session_tags WHERE session_id IN (${placeholders}) ORDER BY tag`)
+        .all(...sessionIds) as { session_id: string; tag: string }[];
+      const map = new Map<string, string[]>();
+      for (const row of rows) {
+        let tags = map.get(row.session_id);
+        if (!tags) {
+          tags = [];
+          map.set(row.session_id, tags);
+        }
+        tags.push(row.tag);
+      }
+      return map;
     });
   }
 

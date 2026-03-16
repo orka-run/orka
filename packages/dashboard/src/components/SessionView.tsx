@@ -323,11 +323,7 @@ function OverviewTab({
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Paths</p>
           <dl className="mt-2 space-y-2">
             <MetadataItem label="Session ID" value={session.id} mono />
-            <MetadataItem label="Task ID" value={session.taskId} mono />
             <MetadataItem label="Project Path" value={session.projectPath} mono />
-            {session.workingDir !== session.projectPath && (
-              <MetadataItem label="Working Directory" value={session.workingDir} mono />
-            )}
           </dl>
         </section>
       </div>

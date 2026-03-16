@@ -953,7 +953,6 @@ const psCmd = command({
     console.log("-".repeat(lineWidth));
 
     for (const s of sessions) {
-      const task = await svc.getTask(s.taskId);
       const statusText = s.kept ? `${s.status} [kept]` : s.status;
       const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
       const statusPad = 20 - statusText.length + colored.length;
@@ -978,7 +977,7 @@ const psCmd = command({
         line += padR(cost, 10) + padR(duration, 10) + padR(tokens, 14);
       }
 
-      line += (task?.title ?? "").slice(0, verbose ? 40 : 50);
+      line += (s.title ?? "").slice(0, verbose ? 40 : 50);
       console.log(line);
       if (verbose && s.parentSessionId) {
         console.log(`  parent: ${s.parentSessionId}`);
@@ -1093,27 +1092,12 @@ const logsCmd = command({
       return;
     }
 
-    if (session.logFile && existsSync(session.logFile)) {
-      const proc = Bun.spawn(["tail", "-f", session.logFile], {
-        stdout: "pipe",
-        stderr: "inherit",
-      });
+    // Session not alive — try fetching stored log content from daemon
+    const logContent = await svc.getLogContent(session.id);
+    if (logContent) {
       const formatter = createLogChunkFormatter();
-      const decoder = new TextDecoder();
-      if (proc.stdout) {
-        const reader = proc.stdout.getReader();
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value) {
-            formatter.push(decoder.decode(value, { stream: true }));
-          }
-        }
-        const tail = decoder.decode();
-        if (tail) formatter.push(tail);
-      }
+      formatter.push(logContent);
       formatter.flush();
-      await proc.exited;
       return;
     }
 
@@ -1249,23 +1233,16 @@ const retryCmd = command({
       fail(`session ${session.id} is still running — stop it first`);
     }
 
-    const task = await svc.getTask(session.taskId);
-    if (!task) {
-      fail(`task not found for session: ${session.id}`);
-    }
-
-    const oldTags = await svc.getTags(session.id);
     const retryRequest: SpawnRequest = {
-      prompt: task.prompt,
+      prompt: session.prompt,
       projectPath: session.projectPath || session.workingDir,
       backend: session.backend,
       mode: session.mode,
-      ...(task.title ? { title: task.title } : {}),
-      ...(task.model ? { model: task.model } : {}),
-      ...(oldTags.length > 0 ? { tags: oldTags } : {}),
+      ...(session.title ? { title: session.title } : {}),
+      ...(session.model ? { model: session.model } : {}),
+      ...(session.tags.length > 0 ? { tags: session.tags } : {}),
       ...(session.systemPrompt ? { systemPrompt: session.systemPrompt } : {}),
       ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
-      ...(session.env ? { env: session.env } : {}),
     };
     const newSession = await svc.spawn(retryRequest);
 
@@ -1292,17 +1269,14 @@ const showCmd = command({
       fail(`session not found: ${sessionId}`);
     }
 
-    const task = await svc.getTask(session.taskId);
-
     console.log(`session ${session.id}`);
     console.log("");
     console.log(`  status:    ${session.status}`);
     console.log(`  backend:   ${session.backend}`);
     console.log(`  mode:      ${session.mode}`);
-    if (task?.model) console.log(`  model:     ${task.model}`);
+    if (session.model) console.log(`  model:     ${session.model}`);
     console.log(`  project:   ${session.projectPath || "(unknown)"}`);
     console.log(`  workdir:   ${session.workingDir}`);
-    console.log(`  log:       ${session.logFile}`);
     console.log(`  created:   ${session.createdAt}`);
     console.log(`  started:   ${session.startedAt ?? "(not started)"}`);
     console.log(`  finished:  ${session.finishedAt ?? "(not finished)"}`);
@@ -1312,19 +1286,13 @@ const showCmd = command({
     if (session.allowedTools && session.allowedTools.length > 0) {
       console.log(`  tools:     ${session.allowedTools.join(", ")}`);
     }
-    if (session.env && Object.keys(session.env).length > 0) {
-      console.log(`  env:       ${Object.keys(session.env).join(", ")}`);
-    }
 
-    const tags = await svc.getTags(session.id);
-    if (tags.length > 0) console.log(`  tags:      ${tags.join(", ")}`);
+    if (session.tags.length > 0) console.log(`  tags:      ${session.tags.join(", ")}`);
 
-    if (task) {
-      console.log("");
-      console.log(`  title:     ${task.title}`);
-      console.log(`  prompt:    ${task.prompt}`);
-      if (session.systemPrompt) console.log(`  system:    ${session.systemPrompt}`);
-    }
+    console.log("");
+    console.log(`  title:     ${session.title}`);
+    console.log(`  prompt:    ${session.prompt}`);
+    if (session.systemPrompt) console.log(`  system:    ${session.systemPrompt}`);
   }),
 });
 
@@ -1412,8 +1380,7 @@ const waitCmd = command({
         if (!s || terminalStatuses.has(s.status)) {
           pending.delete(id);
           const status = s?.status ?? "unknown";
-          const task = s ? await svc.getTask(s.taskId) : null;
-          const label = task?.title?.slice(0, 50) ?? id;
+          const label = s?.title?.slice(0, 50) ?? id;
           const icon = status === "failed" ? "✗" : "✓";
 
           const result = s ? await svc.getResult(s.id) : null;
@@ -1495,9 +1462,8 @@ const resultCmd = command({
     const c = (code: string, text: string): string =>
       noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
 
-    const task = await svc.getTask(session.taskId);
     console.log(c("1", `session ${session.id}`));
-    if (task) console.log(`  title: ${task.title.slice(0, 80)}`);
+    if (session.title) console.log(`  title: ${session.title.slice(0, 80)}`);
 
     console.log("");
     if (result.isError) {
@@ -3158,7 +3124,10 @@ async function findSession(query: string) {
 
   const all = await svc.listSessions();
   const matches = all.filter((s) => s.id.includes(resolved));
-  if (matches.length === 1) return matches[0] ?? null;
+  if (matches.length === 1) {
+    // Fetch full detail for the matched session
+    return svc.getSession(matches[0]!.id);
+  }
   if (matches.length > 1) {
     console.error(`ambiguous session id "${resolved}", matches:`);
     for (const m of matches) console.error(`  ${m.id}`);

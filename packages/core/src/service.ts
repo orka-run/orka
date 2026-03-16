@@ -1,4 +1,4 @@
-import type { ChatEntry, NodeInfo, Session, SessionId, SessionListItem, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
+import type { BackendKind, ChatEntry, NodeInfo, Session, SessionId, SessionMode, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -9,6 +9,69 @@ export interface SpawnResult {
   id: SessionId;
   status: SessionStatus;
   title: string;
+}
+
+// --- Session Detail Response (returned by getSession) ---
+
+/** Full detail view for a single session. No secrets or server internals. */
+export interface SessionDetailResponse {
+  id: SessionId;
+  status: SessionStatus;
+  backend: BackendKind;
+  mode: SessionMode;
+  title: string;
+  model: string | null;
+  prompt: string;
+  projectPath: string;
+  workingDir: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  kept: boolean;
+  autoMerge: boolean;
+  parentSessionId: string | null;
+  systemPrompt: string | null;
+  allowedTools: string[] | null;
+  archivedAt: string | null;
+  tags: string[];
+  // Deliberately omitted: env, logFile, rawLogFile, workspaceId, taskId
+}
+
+// --- Session List Response (returned by listSessions, getChildSessions) ---
+
+/** Summary view for session lists. Lightweight, no server internals. */
+export interface SessionListResponse {
+  id: SessionId;
+  status: SessionStatus;
+  backend: BackendKind;
+  mode: SessionMode;
+  title: string;
+  model: string | null;
+  prompt: string;
+  projectPath: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  kept: boolean;
+  autoMerge: boolean;
+  parentSessionId: string | null;
+  tags: string[];
+  // No: workspaceId, logFile, rawLogFile, taskId, workingDir, systemPrompt, allowedTools, env
+}
+
+// --- Timeline Response (returned by getSessionTimeline) ---
+
+export interface TimelineResponse {
+  events: OrchestrationEvent[];
+  total: number;
+}
+
+export interface TimelineParams {
+  sessionId: string;
+  offset?: number;
+  limit?: number;
 }
 
 // --- Session Result (moved from daemon/result-parser) ---
@@ -132,9 +195,9 @@ export interface OrkaService {
   reap(): Promise<number>;
 
   // --- Queries ---
-  getSession(id: string): Promise<Session | null>;
-  listSessions(filters?: SessionFilters): Promise<SessionListItem[]>;
-  getChildSessions(sessionId: string): Promise<SessionListItem[]>;
+  getSession(id: string): Promise<SessionDetailResponse | null>;
+  listSessions(filters?: SessionFilters): Promise<SessionListResponse[]>;
+  getChildSessions(sessionId: string): Promise<SessionListResponse[]>;
   getTask(id: string): Promise<Task | null>;
 
   // --- Session properties ---
@@ -143,7 +206,7 @@ export interface OrkaService {
 
   // --- Session output ---
   getResult(sessionId: string): Promise<SessionResult | null>;
-  getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]>;
+  getSessionTimeline(params: TimelineParams): Promise<TimelineResponse>;
   getChatMessages(sessionId: string): Promise<ChatEntry[]>;
   getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary>;
   captureOutput(sessionId: string): Promise<string>;

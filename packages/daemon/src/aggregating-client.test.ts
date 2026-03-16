@@ -1,8 +1,10 @@
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import type {
   OrkaService,
-  Session,
+  SessionDetailResponse,
+  SessionListResponse,
   SessionSummary,
+  SpawnResult,
   UsageSummary,
 } from "@orka/core";
 import type { RemoteNodeManager, RemoteNodeHandle } from "./remote-nodes";
@@ -11,25 +13,61 @@ import { createAggregatingClient } from "./aggregating-client";
 
 // --- Mock Factories ---
 
-function mockSession(overrides: Partial<Session> = {}): Session {
+function mockDetailResponse(overrides: Partial<SessionDetailResponse> = {}): SessionDetailResponse {
   return {
     id: overrides.id ?? "sess-local-1",
-    taskId: "task-1",
-    workspaceId: "ws-1",
     status: "completed",
-    backend: "claude",
+    backend: "claude-code",
     mode: "background",
+    title: "test session",
+    model: null,
+    prompt: "",
     projectPath: "/proj",
     workingDir: "/work",
-    logFile: "/log",
     createdAt: "2026-01-01T00:00:00Z",
     startedAt: "2026-01-01T00:00:01Z",
     finishedAt: "2026-01-01T00:01:00Z",
     exitCode: 0,
     kept: false,
     autoMerge: false,
+    parentSessionId: null,
+    systemPrompt: null,
+    allowedTools: null,
+    archivedAt: null,
+    tags: [],
     ...overrides,
-  } as Session;
+  };
+}
+
+function mockListResponse(overrides: Partial<SessionListResponse> = {}): SessionListResponse {
+  return {
+    id: overrides.id ?? "sess-local-1",
+    status: "completed",
+    backend: "claude-code",
+    mode: "background",
+    title: "test session",
+    model: null,
+    prompt: "",
+    projectPath: "/proj",
+    createdAt: "2026-01-01T00:00:00Z",
+    startedAt: "2026-01-01T00:00:01Z",
+    finishedAt: "2026-01-01T00:01:00Z",
+    exitCode: 0,
+    kept: false,
+    autoMerge: false,
+    parentSessionId: null,
+    tags: [],
+    ...overrides,
+  };
+}
+
+function mockSpawnResult(overrides: Partial<SpawnResult> = {}): SpawnResult {
+  return {
+    id: overrides.id ?? "sess-new-local",
+    status: "queued",
+    title: "new session",
+    ...overrides,
+  };
 }
 
 function mockSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -46,22 +84,22 @@ function mockSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
 
 function createMockLocalClient(): OrkaService {
   return {
-    spawn: mock(async (req) => mockSession({ id: "sess-new-local" })),
+    spawn: mock(async (req) => mockSpawnResult()),
     stop: mock(async () => {}),
     reap: mock(async () => 0),
     getSession: mock(async (id) =>
-      id.startsWith("sess-local") ? mockSession({ id }) : null,
+      id.startsWith("sess-local") ? mockDetailResponse({ id }) : null,
     ),
     listSessions: mock(async () => [
-      mockSession({ id: "sess-local-1" }),
-      mockSession({ id: "sess-local-2", createdAt: "2026-01-03T00:00:00Z" }),
+      mockListResponse({ id: "sess-local-1" }),
+      mockListResponse({ id: "sess-local-2", createdAt: "2026-01-03T00:00:00Z" }),
     ]),
     getChildSessions: mock(async () => []),
     getTask: mock(async () => null),
     setKept: mock(async () => {}),
     getTags: mock(async () => ["tag1"]),
     getResult: mock(async () => null),
-    getSessionTimeline: mock(async () => []),
+    getSessionTimeline: mock(async () => ({ events: [], total: 0 })),
     getChatMessages: mock(async () => []),
     getUsage: mock(async () => ({
       totalCostUsd: 1.0,
@@ -295,7 +333,7 @@ describe("AggregatingClient", () => {
     });
 
     it("routes to remote for remote sessions", async () => {
-      const remoteSession = mockSession({ id: "sess-remote-1" });
+      const remoteSession = mockDetailResponse({ id: "sess-remote-1" });
       (remote.request as any).mockImplementation(
         async (nodeId: string, method: string) => {
           if (method === "getSession") return remoteSession;
@@ -314,13 +352,13 @@ describe("AggregatingClient", () => {
 
   describe("spawn", () => {
     it("routes to remote node when nodeId specified", async () => {
-      const remoteSession = mockSession({ id: "sess-spawned-remote" });
-      (remote.request as any).mockImplementation(async () => remoteSession);
+      const remoteResult = mockSpawnResult({ id: "sess-spawned-remote" });
+      (remote.request as any).mockImplementation(async () => remoteResult);
 
       const result = await svc.spawn({
         prompt: "test",
         projectPath: "/proj",
-        backend: "claude",
+        backend: "claude-code",
         mode: "background",
         nodeId: "node-1",
       });
@@ -334,7 +372,7 @@ describe("AggregatingClient", () => {
       const result = await svc.spawn({
         prompt: "test",
         projectPath: "/proj",
-        backend: "claude",
+        backend: "claude-code",
         mode: "background",
       });
 
@@ -346,7 +384,7 @@ describe("AggregatingClient", () => {
       const result = await svc.spawn({
         prompt: "test",
         projectPath: "/proj",
-        backend: "claude",
+        backend: "claude-code",
         mode: "background",
         nodeId: "local",
       });

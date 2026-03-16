@@ -1,11 +1,11 @@
-import type { Session, SessionListItem, SpawnRequest, SpawnResult, Task } from "@orka/core";
+import type { SessionListResponse, SpawnRequest, SpawnResult, Task } from "@orka/core";
 import { describe, expect, test } from "bun:test";
 import { createSessionStore } from "./sessionStore";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import type { WsTransport } from "../lib/wsTransport";
 
 class MockWsTransport {
-  sessions: SessionListItem[] = [];
+  sessions: SessionListResponse[] = [];
   tasks = new Map<string, Task>();
   spawnResult: SpawnResult | null = null;
   spawnParams: SpawnRequest | null = null;
@@ -41,17 +41,13 @@ function asTransport(transport: MockWsTransport): WsTransport {
   return transport as unknown as WsTransport;
 }
 
-function makeSession(overrides: Partial<SessionListItem> = {}): SessionListItem {
+function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListResponse {
   return {
     id: "sess-1",
-    taskId: "task-1",
-    workspaceId: "workspace-1",
     status: "queued",
     backend: "codex",
     mode: "interactive",
     projectPath: "/tmp/project",
-    workingDir: "/tmp/project",
-    logFile: "/tmp/project/.orka/logs/sess-1.log",
     createdAt: "2026-03-11T10:00:00.000Z",
     startedAt: null,
     finishedAt: null,
@@ -61,6 +57,8 @@ function makeSession(overrides: Partial<SessionListItem> = {}): SessionListItem 
     title: "Dashboard task",
     model: null,
     prompt: "Build the dashboard session store",
+    parentSessionId: null,
+    tags: [],
     ...overrides,
   };
 }
@@ -98,7 +96,6 @@ describe("sessionStore", () => {
     expect(store.getState().sessions).toEqual([
       {
         id: "sess-1",
-        taskId: "task-1",
         status: "queued",
         backend: "codex",
         mode: "interactive",
@@ -109,10 +106,11 @@ describe("sessionStore", () => {
         finishedAt: null,
         exitCode: null,
         projectPath: "/tmp/project",
-        workingDir: "/tmp/project",
         kept: false,
         autoMerge: false,
         prompt: "Build the dashboard session store",
+        parentSessionId: null,
+        tags: [],
         nodeId: null,
       },
     ]);
@@ -135,7 +133,6 @@ describe("sessionStore", () => {
       sessions: [
         {
           id: session.id,
-          taskId: session.taskId,
           status: session.status,
           backend: session.backend,
           mode: session.mode,
@@ -146,10 +143,12 @@ describe("sessionStore", () => {
           finishedAt: session.finishedAt,
           exitCode: session.exitCode,
           projectPath: session.projectPath,
-          workingDir: session.workingDir,
           kept: session.kept,
           autoMerge: session.autoMerge,
           prompt: null,
+          parentSessionId: null,
+          tags: [],
+          nodeId: null,
         },
       ],
     });
@@ -167,7 +166,6 @@ describe("sessionStore", () => {
       sessions: [
         {
           id: session.id,
-          taskId: session.taskId,
           status: session.status,
           backend: session.backend,
           mode: session.mode,
@@ -178,10 +176,12 @@ describe("sessionStore", () => {
           finishedAt: session.finishedAt,
           exitCode: session.exitCode,
           projectPath: session.projectPath,
-          workingDir: session.workingDir,
           kept: session.kept,
           autoMerge: session.autoMerge,
           prompt: null,
+          parentSessionId: null,
+          tags: [],
+          nodeId: null,
         },
       ],
       selectedId: session.id,

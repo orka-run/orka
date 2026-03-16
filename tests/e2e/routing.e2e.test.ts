@@ -200,19 +200,18 @@ describe("Full-Stack Routing", () => {
     ws.close();
   });
 
-  test("getTask routes through relay", async () => {
+  test("getTags routes through relay", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
     await waitForOpen(ws);
 
-    // First list sessions to get a task ID
+    // First list sessions to get a session ID
     const listResp = await rpc(ws, "listSessions", { filters: {} });
     expect(listResp.result.length).toBeGreaterThan(0);
-    const taskId = listResp.result[0].taskId;
+    const sessionId = listResp.result[0].id;
 
-    const taskResp = await rpc(ws, "getTask", { id: taskId });
-    expect(taskResp.error).toBeUndefined();
-    expect(taskResp.result.id).toBe(taskId);
-    expect(taskResp.result.backend).toBe("shell");
+    const tagsResp = await rpc(ws, "getTags", { sessionId });
+    expect(tagsResp.error).toBeUndefined();
+    expect(tagsResp.result).toBeInstanceOf(Array);
 
     ws.close();
   });

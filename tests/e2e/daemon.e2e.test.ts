@@ -19,7 +19,7 @@ process.env["ORKA_HOME"] = testHome;
 writeFileSync(join(testHome, "config.toml"), "[limits]\nmax_concurrent = 0\n");
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
-import type { OrkaService, Session } from "@orka/core";
+import type { OrkaService, SessionDetailResponse } from "@orka/core";
 
 /** Poll until predicate is true, or timeout. */
 async function waitFor(
@@ -39,7 +39,7 @@ async function waitForTerminal(
   client: OrkaService,
   sessionId: string,
   timeoutMs = 10_000,
-): Promise<Session> {
+): Promise<SessionDetailResponse> {
   const terminal = new Set(["completed", "cancelled", "failed", "stopped"]);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -103,7 +103,7 @@ describe("Daemon Session Lifecycle", () => {
     expect(session!.mode).toBe("background");
     expect(session!.projectPath).toBe(testRepo);
     expect(session!.startedAt).toBeTruthy();
-    expect(session!.logFile).toContain(result.id);
+    expect(session!.tags).toEqual(["e2e", "test"]);
   });
 
   // ---- Queries ----
@@ -126,27 +126,6 @@ describe("Daemon Session Lifecycle", () => {
     expect(session!.mode).toBe("background");
     expect(session!.status).toBe("running");
     expect(session!.projectPath).toBe(testRepo);
-  });
-
-  test("getTask returns the linked task", async () => {
-    const spawned = await client.spawn({
-      prompt: "echo 'getTask-test'",
-      backend: "shell",
-      mode: "background",
-      projectPath: testRepo,
-    });
-    sessionIds.push(spawned.id);
-
-    // Get the full session to find taskId
-    const session = await client.getSession(spawned.id);
-    expect(session).not.toBeNull();
-
-    const task = await client.getTask(session!.taskId);
-
-    expect(task).not.toBeNull();
-    expect(task!.id).toBe(session!.taskId);
-    expect(task!.prompt).toContain("echo 'getTask-test'");
-    expect(task!.backend).toBe("shell");
   });
 
   test("listSessions returns all sessions", async () => {

@@ -568,16 +568,17 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     // Always fetch fresh data (stale-while-revalidate for running sessions)
     async function load() {
       try {
-        const timeline = await transport.request<OrchestrationEvent[]>(
+        const response = await transport.request<{ events: OrchestrationEvent[]; total: number }>(
           "getSessionTimeline",
           { sessionId },
         );
         if (cancelled) return;
 
-        const filtered = timeline.filter((e) => e.sessionId === sessionId);
+        const timeline = Array.isArray(response) ? response : (response?.events ?? []);
+        const filtered = timeline.filter((e: OrchestrationEvent) => e.sessionId === sessionId);
         eventsRef.current = filtered;
         setEvents(filtered);
-        setEntries(eventsToEntries(filtered, initialPromptRef.current, session?.workingDir));
+        setEntries(eventsToEntries(filtered, initialPromptRef.current, session?.projectPath));
         setCachedTimeline(sessionId, timeline);
         onSelectionLoadSettledRef.current?.("ok");
       } catch (e) {
@@ -604,7 +605,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
       eventsRef.current = [...eventsRef.current, event];
       setEvents(eventsRef.current);
-      setEntries(eventsToEntries(eventsRef.current, initialPromptRef.current, session?.workingDir));
+      setEntries(eventsToEntries(eventsRef.current, initialPromptRef.current, session?.projectPath));
     });
 
     return unsubscribe;

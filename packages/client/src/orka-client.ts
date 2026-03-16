@@ -3,8 +3,8 @@ import type {
   NodeInfo,
   OrchestrationEvent,
   OrkaService,
-  Session,
-  SessionListItem,
+  SessionDetailResponse,
+  SessionListResponse,
   Task,
   SpawnRequest,
   SpawnResult,
@@ -14,6 +14,8 @@ import type {
   DiffResult,
   MergeResult,
   SessionResult,
+  TimelineParams,
+  TimelineResponse,
   UsageSummary,
   ApprovalRequest,
   ApprovalDecision,
@@ -249,15 +251,15 @@ class OrkaClient implements OrkaService {
     return this.call("reap");
   }
 
-  async getSession(id: string): Promise<Session | null> {
+  async getSession(id: string): Promise<SessionDetailResponse | null> {
     return this.call("getSession", { id });
   }
 
-  async listSessions(filters?: SessionFilters): Promise<SessionListItem[]> {
+  async listSessions(filters?: SessionFilters): Promise<SessionListResponse[]> {
     return this.call("listSessions", { filters });
   }
 
-  async getChildSessions(sessionId: string): Promise<SessionListItem[]> {
+  async getChildSessions(sessionId: string): Promise<SessionListResponse[]> {
     return this.call("getChildSessions", { sessionId });
   }
 
@@ -277,15 +279,15 @@ class OrkaClient implements OrkaService {
     return this.call("getResult", { sessionId });
   }
 
-  async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
-    const raw: unknown[] = await this.call("getSessionTimeline", { sessionId });
-    if (!Array.isArray(raw)) return [];
+  async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
+    const raw: any = await this.call("getSessionTimeline", params);
+    const rawEvents: unknown[] = Array.isArray(raw?.events) ? raw.events : (Array.isArray(raw) ? raw : []);
     const events: OrchestrationEvent[] = [];
-    for (const item of raw) {
+    for (const item of rawEvents) {
       const event = parseWireEvent(item);
       if (event) events.push(event);
     }
-    return events;
+    return { events, total: typeof raw?.total === "number" ? raw.total : events.length };
   }
 
   async getChatMessages(sessionId: string): Promise<ChatEntry[]> {

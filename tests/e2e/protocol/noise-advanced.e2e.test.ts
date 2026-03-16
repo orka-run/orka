@@ -374,14 +374,8 @@ describe("Noise NK Transport — Advanced", () => {
     expect(fetched.id).toBe(session.id);
     expect(fetched.backend).toBe("shell");
 
-    // Retrieve the task to verify the large prompt was stored correctly
-    const taskResp = await encryptedRpc(transport, ws, "getTask", {
-      id: fetched.taskId,
-    });
-
-    expect(taskResp.error).toBeUndefined();
-    const task = taskResp.result as Record<string, unknown>;
-    expect(task.prompt).toBe(largePrompt);
+    // Verify the large prompt was stored correctly (now inline in SessionDetailResponse)
+    expect(fetched.prompt).toBe(largePrompt);
 
     ws.close();
   }, 30_000);

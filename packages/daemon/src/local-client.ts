@@ -14,6 +14,10 @@ import type {
   DiffResult,
   MergeResult,
   SessionResult,
+  SessionDetailResponse,
+  SessionListResponse,
+  TimelineParams,
+  TimelineResponse,
   UsageSummary,
   SpawnRequest,
   SpawnResult,
@@ -100,27 +104,34 @@ class LocalClient implements OrkaService {
     return reapSessions();
   }
 
-  async getSession(id: string): Promise<Session | null> {
-    return this.ctx.db.getSession(id);
+  async getSession(id: string): Promise<SessionDetailResponse | null> {
+    const session = this.ctx.db.getSession(id);
+    if (!session) return null;
+    const task = this.ctx.db.getTask(session.taskId);
+    const tags = this.ctx.db.getSessionTags(id);
+    return sessionToDetail(session, task, tags);
   }
 
-  async listSessions(filters?: SessionFilters): Promise<SessionListItem[]> {
+  async listSessions(filters?: SessionFilters): Promise<SessionListResponse[]> {
     const includeArchived = filters?.includeArchived ?? false;
+    let items: SessionListItem[];
     if (filters?.tag) {
-      let sessions = this.ctx.db.listSessionItemsByTag(filters.tag);
+      items = this.ctx.db.listSessionItemsByTag(filters.tag);
       if (filters.status) {
-        sessions = sessions.filter((s) => s.status === filters.status);
+        items = items.filter((s) => s.status === filters.status);
       }
       if (!includeArchived) {
-        sessions = sessions.filter((s) => !s.archivedAt);
+        items = items.filter((s) => !s.archivedAt);
       }
-      return sessions;
+    } else {
+      items = this.ctx.db.listSessionItems(filters?.status, includeArchived);
     }
-    return this.ctx.db.listSessionItems(filters?.status, includeArchived);
+    return sessionItemsToListResponse(this.ctx.db, items);
   }
 
-  async getChildSessions(sessionId: string): Promise<SessionListItem[]> {
-    return this.ctx.db.listChildSessionItems(sessionId);
+  async getChildSessions(sessionId: string): Promise<SessionListResponse[]> {
+    const items = this.ctx.db.listChildSessionItems(sessionId);
+    return sessionItemsToListResponse(this.ctx.db, items);
   }
 
   async getTask(id: string): Promise<Task | null> {
@@ -157,8 +168,12 @@ class LocalClient implements OrkaService {
     return parsedResult;
   }
 
-  async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
-    return this.ctx.db.getOrchestrationEvents(sessionId);
+  async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
+    const events = this.ctx.db.getOrchestrationEvents(params.sessionId, params.offset, params.limit);
+    const total = (params.offset !== undefined || params.limit !== undefined)
+      ? this.ctx.db.getOrchestrationEventCount(params.sessionId)
+      : events.length;
+    return { events, total };
   }
 
   async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
@@ -855,6 +870,63 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
 
   entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   return entries;
+}
+
+// --- DTO Mappers ---
+
+function sessionToDetail(session: Session, task: Task | null, tags: string[]): SessionDetailResponse {
+  return {
+    id: session.id,
+    status: session.status,
+    backend: session.backend,
+    mode: session.mode,
+    title: task?.title ?? session.id,
+    model: task?.model ?? null,
+    prompt: task?.prompt ?? "",
+    projectPath: session.projectPath,
+    workingDir: session.workingDir,
+    createdAt: session.createdAt,
+    startedAt: session.startedAt,
+    finishedAt: session.finishedAt,
+    exitCode: session.exitCode,
+    kept: session.kept,
+    autoMerge: session.autoMerge,
+    parentSessionId: session.parentSessionId ?? null,
+    systemPrompt: session.systemPrompt ?? null,
+    allowedTools: session.allowedTools ?? null,
+    archivedAt: session.archivedAt ?? null,
+    tags,
+  };
+}
+
+function sessionItemToListResponse(item: SessionListItem, tags: string[]): SessionListResponse {
+  return {
+    id: item.id,
+    status: item.status,
+    backend: item.backend,
+    mode: item.mode,
+    title: item.title ?? item.id,
+    model: item.model ?? null,
+    prompt: item.prompt ?? "",
+    projectPath: item.projectPath,
+    createdAt: item.createdAt,
+    startedAt: item.startedAt,
+    finishedAt: item.finishedAt,
+    exitCode: item.exitCode,
+    kept: item.kept,
+    autoMerge: item.autoMerge,
+    parentSessionId: item.parentSessionId ?? null,
+    tags,
+  };
+}
+
+function sessionItemsToListResponse(
+  db: { getSessionTagsBatch(ids: string[]): Map<string, string[]> },
+  items: SessionListItem[],
+): SessionListResponse[] {
+  const ids = items.map((i) => i.id);
+  const tagMap = db.getSessionTagsBatch(ids);
+  return items.map((item) => sessionItemToListResponse(item, tagMap.get(item.id) ?? []));
 }
 
 /** Capture committed changes on the session branch vs the parent branch. */

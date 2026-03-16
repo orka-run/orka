@@ -5,22 +5,25 @@ import type {
   DiffResult,
   MergeResult,
   NodeInfo,
-  OrchestrationEvent,
   OrkaService,
   PairWithNodeParams,
   PairWithNodeResult,
   PruneOptions,
   PruneResult,
   PushChannel,
-  Session,
+  SessionDetailResponse,
   SessionFilters,
+  SessionListResponse,
   SessionResult,
   SessionSummary,
   SpawnRequest,
+  SpawnResult,
   StartPairingParams,
   StartPairingResult,
   StoredNode,
   Task,
+  TimelineParams,
+  TimelineResponse,
   UsageSummary,
 } from "@orka/core";
 import type { RemoteNodeManager } from "./remote-nodes";
@@ -49,11 +52,11 @@ export function createAggregatingClient(
   /** Fetch remote sessions and populate cache for a node. */
   function initNodeCache(nodeId: string): void {
     remoteNodes
-      .request<Session[]>(nodeId, "listSessions", { filters: {} })
+      .request<SessionListResponse[]>(nodeId, "listSessions", { filters: {} })
       .then((sessions) => {
         sessionCache.setNodeSessions(
           nodeId,
-          sessions.map((s) => toSummary(s, nodeId)),
+          sessions.map((s) => listResponseToSummary(s, nodeId)),
         );
       })
       .catch(() => {
@@ -133,7 +136,7 @@ export function createAggregatingClient(
       case "getSession":
         return svc.getSession(params.id);
       case "getSessionTimeline":
-        return svc.getSessionTimeline(params.sessionId);
+        return svc.getSessionTimeline(params as any);
       case "getChatMessages":
         return svc.getChatMessages(params.sessionId);
       case "getResult":
@@ -187,37 +190,38 @@ export function createAggregatingClient(
     }
   }
 
-  /** Convert a full Session to a SessionSummary for cache storage. */
-  function toSummary(s: Session, nodeId: string): SessionSummary {
+  /** Convert a SessionListResponse to a SessionSummary for cache storage. */
+  function listResponseToSummary(s: SessionListResponse, nodeId: string): SessionSummary {
     return {
       id: s.id,
       status: s.status,
       backend: s.backend,
-      title: "",
+      title: s.title,
       createdAt: s.createdAt,
       nodeId,
     };
   }
 
-  /** Convert a SessionSummary to a stub Session (for listing when full data unavailable). */
-  function summaryToStubSession(s: SessionSummary): Session {
+  /** Convert a SessionSummary to a stub SessionListResponse (for listing when full data unavailable). */
+  function summaryToStubListResponse(s: SessionSummary): SessionListResponse {
     return {
       id: s.id,
-      taskId: "",
-      workspaceId: "",
       status: s.status,
       backend: s.backend,
       mode: "background",
+      title: s.title,
+      model: null,
+      prompt: "",
       projectPath: "",
-      workingDir: "",
-      logFile: "",
       createdAt: s.createdAt,
       startedAt: null,
       finishedAt: null,
       exitCode: null,
       kept: false,
       autoMerge: false,
-    } as Session;
+      parentSessionId: null,
+      tags: [],
+    };
   }
 
   /** Get connected remote node IDs. */
@@ -261,7 +265,7 @@ export function createAggregatingClient(
 
   const svc: OrkaService = {
     // --- Merge: listSessions ---
-    async listSessions(filters?: SessionFilters): Promise<Session[]> {
+    async listSessions(filters?: SessionFilters): Promise<SessionListResponse[]> {
       const localSessions = await localClient.listSessions(filters);
 
       // Get cached remote sessions and apply what filters we can
@@ -270,11 +274,11 @@ export function createAggregatingClient(
         remoteSessions = remoteSessions.filter((s) => s.status === filters.status);
       }
 
-      // Merge: local sessions + stub sessions from cache
+      // Merge: local sessions + stub list responses from cache
       const localIds = new Set(localSessions.map((s) => s.id));
       const remoteStubs = remoteSessions
         .filter((s) => !localIds.has(s.id))
-        .map(summaryToStubSession);
+        .map(summaryToStubListResponse);
 
       const merged = [...localSessions, ...remoteStubs];
       merged.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -322,28 +326,35 @@ export function createAggregatingClient(
     },
 
     // --- Route by spawn param ---
-    async spawn(req: SpawnRequest): Promise<Session> {
+    async spawn(req: SpawnRequest): Promise<SpawnResult> {
       if (req.nodeId && req.nodeId !== "local") {
         ensureReachable(req.nodeId);
-        const session = await remoteNodes.request<Session>(
+        const result = await remoteNodes.request<SpawnResult>(
           req.nodeId,
           "spawn",
           req,
         );
         // Update cache with new session
-        sessionCache.upsertSession(req.nodeId, toSummary(session, req.nodeId));
-        return session;
+        sessionCache.upsertSession(req.nodeId, {
+          id: result.id,
+          status: result.status,
+          backend: req.backend,
+          title: result.title,
+          createdAt: new Date().toISOString(),
+          nodeId: req.nodeId,
+        });
+        return result;
       }
       return localClient.spawn(req);
     },
 
     // --- Route to owning node ---
-    async getSession(id: string): Promise<Session | null> {
-      return routeBySession<Session | null>(id, "getSession", { id });
+    async getSession(id: string): Promise<SessionDetailResponse | null> {
+      return routeBySession<SessionDetailResponse | null>(id, "getSession", { id });
     },
 
-    async getSessionTimeline(sessionId: string): Promise<OrchestrationEvent[]> {
-      return routeBySession<OrchestrationEvent[]>(sessionId, "getSessionTimeline", { sessionId });
+    async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
+      return routeBySession<TimelineResponse>(params.sessionId, "getSessionTimeline", params);
     },
 
     async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
@@ -408,8 +419,8 @@ export function createAggregatingClient(
       );
     },
 
-    async getChildSessions(sessionId: string): Promise<Session[]> {
-      return routeBySession<Session[]>(sessionId, "getChildSessions", { sessionId });
+    async getChildSessions(sessionId: string): Promise<SessionListResponse[]> {
+      return routeBySession<SessionListResponse[]>(sessionId, "getChildSessions", { sessionId });
     },
 
     async getTask(id: string): Promise<Task | null> {

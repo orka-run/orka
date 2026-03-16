@@ -1,29 +1,43 @@
 import { context, propagation, trace } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import type { OrkaService, Session } from "@orka/core";
+import type { OrkaService, SpawnResult, SessionDetailResponse } from "@orka/core";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PushHub } from "./push-hub";
 import type { DaemonContext } from "./daemon-context";
 import { handleRpcRequest } from "./rpc-handler";
 
-function makeSession(overrides: Partial<Session> = {}): Session {
+function makeSpawnResult(overrides: Partial<SpawnResult> = {}): SpawnResult {
   return {
     id: "sess-1",
-    taskId: "task-1",
-    workspaceId: "ws-1",
+    status: "running",
+    title: "Test session",
+    ...overrides,
+  };
+}
+
+function makeDetailResponse(overrides: Partial<SessionDetailResponse> = {}): SessionDetailResponse {
+  return {
+    id: "sess-1",
     status: "running",
     backend: "codex",
     mode: "interactive",
+    title: "Test session",
+    model: null,
+    prompt: "echo hello",
     projectPath: "/tmp/project",
     workingDir: "/tmp/project",
-    logFile: "/tmp/logs/sess-1.log",
     createdAt: "2026-03-11T10:00:00.000Z",
     startedAt: "2026-03-11T10:00:01.000Z",
     finishedAt: null,
     exitCode: null,
     kept: false,
     autoMerge: false,
+    parentSessionId: null,
+    systemPrompt: null,
+    allowedTools: null,
+    archivedAt: null,
+    tags: [],
     ...overrides,
   };
 }
@@ -73,10 +87,10 @@ function makeMockCtx(): { ctx: DaemonContext; events: Array<{ channel: string; d
 describe("handleRpcRequest", () => {
   test("broadcasts session updates after spawn", async () => {
     const { ctx, events } = makeMockCtx();
-    const session = makeSession();
+    const spawnResult = makeSpawnResult();
     const svc = {
       async spawn() {
-        return session;
+        return spawnResult;
       },
     } as unknown as OrkaService;
 
@@ -88,39 +102,39 @@ describe("handleRpcRequest", () => {
 
     expect(JSON.parse(response)).toMatchObject({
       id: 1,
-      result: { id: session.id, status: session.status },
+      result: { id: spawnResult.id, status: spawnResult.status },
     });
     expect(events).toEqual([
       {
         channel: "orchestration.sessionUpdated",
-        data: { sessionId: session.id, status: session.status },
+        data: { sessionId: spawnResult.id, status: spawnResult.status },
       },
     ]);
   });
 
   test("broadcasts session updates after stop", async () => {
     const { ctx, events } = makeMockCtx();
-    const session = makeSession({ status: "cancelled", finishedAt: "2026-03-11T10:05:00.000Z" });
+    const detail = makeDetailResponse({ status: "cancelled", finishedAt: "2026-03-11T10:05:00.000Z" });
     let stoppedSessionId: string | null = null;
     const svc = {
       async stop(sessionId: string) {
         stoppedSessionId = sessionId;
       },
       async getSession(sessionId: string) {
-        return sessionId === session.id ? session : null;
+        return sessionId === detail.id ? detail : null;
       },
     } as unknown as OrkaService;
 
     const response = await handleRpcRequest(
       ctx,
       svc,
-      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "stop", params: { sessionId: session.id } }),
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "stop", params: { sessionId: detail.id } }),
     );
 
     if (!stoppedSessionId) {
       throw new Error("Expected stop to be called");
     }
-    expect(stoppedSessionId === session.id).toBe(true);
+    expect(stoppedSessionId === detail.id).toBe(true);
     expect(JSON.parse(response ?? "null")).toEqual({
       jsonrpc: "2.0",
       id: 2,
@@ -129,7 +143,7 @@ describe("handleRpcRequest", () => {
     expect(events).toEqual([
       {
         channel: "orchestration.sessionUpdated",
-        data: { sessionId: session.id, status: "cancelled" },
+        data: { sessionId: detail.id, status: "cancelled" },
       },
     ]);
   });

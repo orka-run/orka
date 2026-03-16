@@ -18,14 +18,14 @@ const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-wt-"));
 process.env["ORKA_HOME"] = testHome;
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
-import type { OrkaService, Session } from "@orka/core";
+import type { OrkaService, SessionDetailResponse } from "@orka/core";
 
 /** Wait for a session to reach a terminal status. */
 async function waitForTerminal(
   client: OrkaService,
   sessionId: string,
   timeoutMs = 10_000,
-): Promise<Session> {
+): Promise<SessionDetailResponse> {
   const terminal = new Set(["completed", "cancelled", "failed", "stopped"]);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

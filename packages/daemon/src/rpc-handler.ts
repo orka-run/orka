@@ -130,7 +130,7 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
           case "getResult":
             return svc.getResult(params.sessionId);
           case "getSessionTimeline":
-            return svc.getSessionTimeline(params.sessionId);
+            return svc.getSessionTimeline(params);
           case "getChatMessages":
             return svc.getChatMessages(params.sessionId);
           case "getUsage":

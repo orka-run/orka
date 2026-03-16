@@ -1,4 +1,4 @@
-import type { Session, SessionListItem, SpawnRequest, SpawnResult } from "@orka/core";
+import type { Session, SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RequestOptions } from "../lib/wsTransport";
@@ -9,7 +9,6 @@ const SELECTED_SESSION_KEY = "orka:selectedSession";
 
 export interface SessionSummary {
   id: string;
-  taskId: string;
   status: Session["status"];
   backend: Session["backend"];
   mode: Session["mode"];
@@ -20,10 +19,11 @@ export interface SessionSummary {
   finishedAt: string | null;
   exitCode: number | null;
   projectPath: string;
-  workingDir: string;
   kept: boolean;
   autoMerge: boolean;
   prompt: string | null;
+  parentSessionId: string | null;
+  tags: string[];
   nodeId: string | null;
 }
 
@@ -43,14 +43,13 @@ export interface SessionState {
 }
 
 function toSessionSummary(
-  session: SessionListItem,
+  session: SessionListResponse,
   options?: { fallbackTitle?: string; nodeId?: string },
 ): SessionSummary {
   const title = options?.fallbackTitle ?? session.title ?? session.id;
 
   return {
     id: session.id,
-    taskId: session.taskId,
     status: session.status,
     backend: session.backend,
     mode: session.mode,
@@ -61,10 +60,11 @@ function toSessionSummary(
     finishedAt: session.finishedAt,
     exitCode: session.exitCode,
     projectPath: session.projectPath,
-    workingDir: session.workingDir,
     kept: session.kept,
     autoMerge: session.autoMerge,
     prompt: session.prompt ?? null,
+    parentSessionId: session.parentSessionId ?? null,
+    tags: session.tags ?? [],
     nodeId: options?.nodeId ?? null,
   };
 }
@@ -130,13 +130,13 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           const results = await Promise.all(
             nodeIds.map(async (nodeId) => {
               const reqOpts: RequestOptions = { node: nodeId };
-              const sessions = await transport.request<SessionListItem[]>("listSessions", undefined, reqOpts);
+              const sessions = await transport.request<SessionListResponse[]>("listSessions", undefined, reqOpts);
               return sessions.map((session) => toSessionSummary(session, { nodeId }));
             }),
           );
           allSummaries = results.flat();
         } else {
-          const sessions = await transport.request<SessionListItem[]>("listSessions");
+          const sessions = await transport.request<SessionListResponse[]>("listSessions");
           allSummaries = sessions.map((session) => toSessionSummary(session));
         }
 
@@ -166,7 +166,6 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
         // The next fetchSessions will fill in the full SessionListItem fields.
         const summary: SessionSummary = {
           id: result.id,
-          taskId: "",
           status: result.status,
           backend: request.backend,
           mode: request.mode,
@@ -177,10 +176,11 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           finishedAt: null,
           exitCode: null,
           projectPath: request.projectPath,
-          workingDir: "",
           kept: false,
           autoMerge: request.autoMerge ?? false,
           prompt: request.prompt,
+          parentSessionId: request.parentSessionId ?? null,
+          tags: request.tags ?? [],
           nodeId: request.nodeId ?? null,
         };
 
