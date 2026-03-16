@@ -95,53 +95,44 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
 
   return (
     <div className="border-t border-border bg-surface px-2 py-2">
-      <div className="flex items-end gap-2">
-        <div className="min-w-0 flex-1">
-          <textarea
-            id={textareaId}
-            ref={textareaRef}
-            value={text}
-            rows={1}
-            disabled={!isEditable}
-            placeholder={placeholder ?? STATE_PLACEHOLDERS[inputState]}
-            aria-label="Chat message"
-            aria-busy={isSending}
-            onChange={(event) => {
-              setText(event.target.value);
-              if (sendError) onClearError?.();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.currentTarget.blur();
-                return;
-              }
+      <div className="flex items-center gap-2">
+        <textarea
+          id={textareaId}
+          ref={textareaRef}
+          value={text}
+          rows={1}
+          disabled={!isEditable}
+          placeholder={placeholder ?? STATE_PLACEHOLDERS[inputState]}
+          aria-label="Chat message"
+          aria-busy={isSending}
+          onChange={(event) => {
+            setText(event.target.value);
+            if (sendError) onClearError?.();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.currentTarget.blur();
+              return;
+            }
 
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                event.preventDefault();
-                void submit();
-                return;
-              }
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault();
+              void submit();
+              return;
+            }
 
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                void submit();
-              }
-            }}
-            className={`min-h-9 w-full resize-none rounded-sm border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:ring-1 disabled:cursor-not-allowed disabled:bg-surface-alt/70 disabled:text-ink-muted ${
-              sendError
-                ? "border-status-error/50 focus:border-status-error/50 focus:ring-status-error/20"
-                : "border-border focus:border-accent focus:ring-accent/20"
-            }`}
-            style={{ maxHeight: `${MAX_TEXTAREA_HEIGHT}px` }}
-          />
-          {sendError ? (
-            <p className="mt-1 text-[11px] text-status-error">{sendError}</p>
-          ) : inputState === "busy" ? (
-            <p className="mt-1 animate-pulse text-[11px] text-accent-strong">
-              {STATE_MESSAGES.busy}
-            </p>
-          ) : null}
-        </div>
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+          className={`min-h-9 min-w-0 flex-1 resize-none rounded-sm border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:ring-1 disabled:cursor-not-allowed disabled:bg-surface-alt/70 disabled:text-ink-muted ${
+            sendError
+              ? "border-status-error/50 focus:border-status-error/50 focus:ring-status-error/20"
+              : "border-border focus:border-accent focus:ring-accent/20"
+          }`}
+          style={{ maxHeight: `${MAX_TEXTAREA_HEIGHT}px` }}
+        />
         {onStop && (
           <button
             type="button"
@@ -178,6 +169,13 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
           {isSending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
         </button>
       </div>
+      {sendError ? (
+        <p className="mt-1 text-[11px] text-status-error">{sendError}</p>
+      ) : inputState === "busy" ? (
+        <p className="mt-1 animate-pulse text-[11px] text-accent-strong">
+          {STATE_MESSAGES.busy}
+        </p>
+      ) : null}
     </div>
   );
 }
