@@ -12,6 +12,7 @@ const DefaultsSchema = z.object({
   systemPrompt: z.string().default(""),
   reasoningEffort: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  permissionMode: z.string().default(""),
 });
 
 const PerBackendDefaultsSchema = z.object({
@@ -26,6 +27,7 @@ export type PerBackendDefaults = z.infer<typeof PerBackendDefaultsSchema>;
 const LimitsSchema = z.object({
   maxConcurrent: z.number().default(5),
   sessionTimeoutMinutes: z.number().default(60),
+  approvalTimeoutMinutes: z.number().default(5),
 });
 
 const HookCommandSchema = z.object({
@@ -65,6 +67,7 @@ export interface ResolvedDefaults {
   systemPrompt: string;
   reasoningEffort: string;
   tags: string[];
+  permissionMode: string;
 }
 
 /**
@@ -126,6 +129,7 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
               systemPrompt: getString(defaults.system_prompt ?? defaults.systemPrompt),
               reasoningEffort: getString(defaults.reasoning_effort ?? defaults.reasoningEffort),
               tags: getStringArray(defaults.tags),
+              permissionMode: getString(defaults.permission_mode ?? defaults.permissionMode),
             }
           : undefined,
       limits:
@@ -133,6 +137,7 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
           ? {
               ...(limits.max_concurrent !== undefined ? { maxConcurrent: getNumber(limits.max_concurrent) } : {}),
               ...(limits.session_timeout_minutes !== undefined ? { sessionTimeoutMinutes: getNumber(limits.session_timeout_minutes) } : {}),
+              ...(limits.approval_timeout_minutes !== undefined ? { approvalTimeoutMinutes: getNumber(limits.approval_timeout_minutes) } : {}),
             }
           : undefined,
       hooks:
@@ -191,6 +196,7 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
       systemPrompt: pickOverride(projDefaults.systemPrompt, userDefaults.systemPrompt, schemaDefaults.systemPrompt),
       reasoningEffort: pickOverride(projDefaults.reasoningEffort, userDefaults.reasoningEffort, schemaDefaults.reasoningEffort),
       tags: mergeTags(userDefaults.tags, projDefaults.tags),
+      permissionMode: pickOverride(projDefaults.permissionMode, userDefaults.permissionMode, schemaDefaults.permissionMode),
     },
     limits: (() => {
       const ld = LimitsSchema.parse({});
@@ -201,6 +207,9 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
         sessionTimeoutMinutes: projectConfig.limits.sessionTimeoutMinutes !== ld.sessionTimeoutMinutes
           ? projectConfig.limits.sessionTimeoutMinutes
           : userConfig.limits.sessionTimeoutMinutes,
+        approvalTimeoutMinutes: projectConfig.limits.approvalTimeoutMinutes !== ld.approvalTimeoutMinutes
+          ? projectConfig.limits.approvalTimeoutMinutes
+          : userConfig.limits.approvalTimeoutMinutes,
       };
     })(),
     hooks: {

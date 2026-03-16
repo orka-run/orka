@@ -10,6 +10,7 @@ export const PushChannelSchema = z.enum([
   "orchestration.event",
   "session.logLine",
   "fleet.nodeUpdated",
+  "approval.requested",
 ]);
 
 export type PushChannel = z.infer<typeof PushChannelSchema>;

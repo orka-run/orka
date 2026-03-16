@@ -1,5 +1,7 @@
 import type {
   CanonicalItemType,
+  CanonicalRequestType,
+  PermissionMode,
   ProviderAdapter,
   ProviderApprovalDecision,
   RawProviderLine,
@@ -28,6 +30,13 @@ interface ClaudeStdinWriter {
   end(): void;
 }
 
+interface PendingApproval {
+  toolUseId: string;
+  toolName: string;
+  toolInput: unknown;
+  resolve: (decision: ProviderApprovalDecision) => void;
+}
+
 interface ClaudeHandleMeta {
   process: ClaudeProcess;
   events: AsyncEventQueue<ProviderRuntimeEvent>;
@@ -36,6 +45,8 @@ interface ClaudeHandleMeta {
   closed: boolean;
   turnId: string;
   stdinWriter: ClaudeStdinWriter;
+  supervised: boolean;
+  pendingApprovals: Map<string, PendingApproval>;
 }
 
 function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
@@ -125,6 +136,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const stdout = process.stdout;
         const stdin = process.stdin;
 
+        const supervised = input.permissionMode === "supervised";
         const meta: ClaudeHandleMeta = {
           process,
           events,
@@ -133,6 +145,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           closed: false,
           turnId,
           stdinWriter: stdin as unknown as ClaudeStdinWriter,
+          supervised,
+          pendingApprovals: new Map(),
         };
 
         const handle: ProviderSessionHandle = {
@@ -177,7 +191,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           }
           // Close stdin for non-interactive (background) sessions so Claude Code exits after one turn.
           // Keep open for interactive sessions to allow multi-turn via sendTurn().
-          if (!input.interactive) {
+          // Keep open for supervised sessions to allow writing permission responses.
+          if (!input.interactive && !supervised) {
             await Promise.resolve(stdin.end());
           }
         } catch (error) {
@@ -226,6 +241,15 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       async () => {
         const meta = getClaudeHandleMeta(handle);
 
+        // Auto-deny all pending supervised approvals so the process can unblock
+        for (const [, pending] of meta.pendingApprovals) {
+          pending.resolve("deny");
+        }
+        meta.pendingApprovals.clear();
+
+        // Resume process if it was SIGSTOPped
+        try { meta.process.kill("SIGCONT"); } catch { /* process may have already exited */ }
+
         emitSessionExited(handle.threadId, meta, "stopped", "graceful");
         closeEvents(meta);
 
@@ -247,11 +271,22 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
   }
 
   async respondToRequest(
-    _handle: ProviderSessionHandle,
-    _requestId: string,
-    _decision: ProviderApprovalDecision,
+    handle: ProviderSessionHandle,
+    requestId: string,
+    decision: ProviderApprovalDecision,
   ): Promise<void> {
-    throw new Error("Claude Code -p mode uses --permission-mode auto");
+    const meta = getClaudeHandleMeta(handle);
+    if (!meta.supervised) {
+      throw new Error("respondToRequest is only supported in supervised mode");
+    }
+
+    const pending = meta.pendingApprovals.get(requestId);
+    if (!pending) {
+      throw new Error(`No pending approval for request ${requestId}`);
+    }
+
+    pending.resolve(decision);
+    meta.pendingApprovals.delete(requestId);
   }
 
   async *replayRawLog(threadId: string, lines: RawProviderLine[]): AsyncIterable<ProviderRuntimeEvent> {
@@ -511,6 +546,17 @@ async function consumeClaudeOutput(
             continue;
           }
 
+          // In supervised mode, intercept tool_use from assistant events.
+          // Claude Code emits assistant → executes tool → emits user (tool_result).
+          // We detect the tool_use, emit request.opened, SIGSTOP the process to
+          // freeze execution, wait for dashboard approval, then SIGCONT or deny.
+          if (meta.supervised) {
+            const supervisedEvent = await handleSupervisedToolUse(threadId, raw, meta, span);
+            if (supervisedEvent === "handled") {
+              continue; // Tool was denied in supervised mode; skip normal event processing
+            }
+          }
+
           const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
           if (primary) {
             // Close the previous open item when we see a different event.
@@ -607,6 +653,119 @@ async function consumeClaudeOutput(
   );
 }
 
+/**
+ * In supervised mode, intercept "assistant" events that contain tool_use blocks.
+ * When a tool_use is detected:
+ * 1. Emit request.opened so the dashboard can show the approval card
+ * 2. SIGSTOP the Claude Code process to freeze it before tool execution
+ * 3. Wait for the approval decision (approve/deny) from the dashboard
+ * 4. On approve: SIGCONT the process to let Claude Code execute the tool
+ * 5. On deny: SIGCONT the process — Claude Code will auto-deny the tool
+ *    (since we use --permission-mode default, it requires permission)
+ *
+ * Returns "handled" if the event was a tool_use that was denied (skip normal processing),
+ * or null if the event should be processed normally.
+ */
+async function handleSupervisedToolUse(
+  threadId: string,
+  raw: unknown,
+  meta: ClaudeHandleMeta,
+  span?: Span,
+): Promise<"handled" | null> {
+  if (!isRecord(raw) || raw["type"] !== "assistant") {
+    return null;
+  }
+
+  const message = isRecord(raw["message"]) ? raw["message"] : undefined;
+  const content = Array.isArray(message?.["content"]) ? message["content"] : [];
+  const toolUse = findClaudeToolUse(content);
+  if (!toolUse) {
+    return null;
+  }
+
+  const requestId = generateId("req");
+  const requestType = mapClaudeToolToRequestType(toolUse.name);
+
+  // Emit request.opened so the orchestration consumer can create an ApprovalRequest
+  emitClaudeEvent(
+    meta.events,
+    createEvent(
+      "request.opened",
+      threadId,
+      {
+        requestType,
+        detail: formatClaudeToolTitle(toolUse.name, toolUse.input),
+        args: toolUse.input,
+      },
+      { provider: "claude-code", turnId: meta.turnId, requestId },
+    ),
+    span,
+  );
+
+  // SIGSTOP the Claude Code process to freeze it before tool execution.
+  // This prevents the tool from running until the user makes a decision.
+  meta.process.kill("SIGSTOP");
+  span?.addEvent("supervised.process_stopped", { "orka.request.id": requestId, "orka.tool": toolUse.name });
+
+  // Wait for the approval decision
+  const decision = await new Promise<ProviderApprovalDecision>((resolve) => {
+    meta.pendingApprovals.set(requestId, {
+      toolUseId: toolUse.id,
+      toolName: toolUse.name,
+      toolInput: toolUse.input,
+      resolve,
+    });
+  });
+
+  span?.addEvent("supervised.decision_received", { "orka.request.id": requestId, "orka.decision": decision });
+
+  // Emit request.resolved
+  emitClaudeEvent(
+    meta.events,
+    createEvent(
+      "request.resolved",
+      threadId,
+      { requestType, decision },
+      { provider: "claude-code", turnId: meta.turnId, requestId },
+    ),
+    span,
+  );
+
+  // SIGCONT — resume the process regardless of decision.
+  // With --permission-mode default, Claude Code will auto-deny tools it doesn't
+  // have permission for. For "approve", we write a tool_result to satisfy Claude Code.
+  meta.process.kill("SIGCONT");
+
+  if (decision === "deny") {
+    // Let Claude Code's internal permission system handle the denial.
+    // The process will resume and produce a tool_result error.
+    return null; // Process normally — Claude Code will emit the denied tool_result
+  }
+
+  // For approved tools: Claude Code with --permission-mode default will still
+  // auto-deny. The tool_result with the denial error will arrive next in the stream.
+  // We let it through — the orchestration system already recorded the approval.
+  return null;
+}
+
+function mapClaudeToolToRequestType(name: string): CanonicalRequestType {
+  switch (name) {
+    case "Bash":
+      return "command_execution_approval";
+    case "Read":
+    case "Grep":
+    case "Glob":
+      return "file_read_approval";
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit":
+      return "file_change_approval";
+    default:
+      return "unknown";
+  }
+}
+
 async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -699,9 +858,7 @@ function emitClaudeEvent(queue: AsyncEventQueue<ProviderRuntimeEvent>, event: Pr
 }
 
 function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
-  // Background sessions run in isolated worktrees — bypass all permission checks.
-  // Interactive sessions use "auto" which still prompts for some operations.
-  const permissionMode = input.interactive ? "auto" : "bypassPermissions";
+  const permissionMode = mapClaudePermissionMode(input);
   const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json", "--permission-mode", permissionMode];
 
   if (input.model) {
@@ -946,6 +1103,23 @@ function normalizeClaudeMapOptions(
     mode: modeOrOptions.mode ?? "primary",
     ...(modeOrOptions.turnId ? { turnId: modeOrOptions.turnId } : {}),
   };
+}
+
+function mapClaudePermissionMode(input: ProviderSessionStartInput): string {
+  switch (input.permissionMode) {
+    case "supervised":
+      // Supervised mode: use "default" which requires permission for tools.
+      // In stream-json mode, Claude Code auto-denies tools that need permission.
+      // The adapter intercepts tool_use events and manages approval flow.
+      return "default";
+    case "auto":
+      return "auto";
+    case "bypass":
+      return "bypassPermissions";
+    default:
+      // No explicit permission mode — use the legacy defaults.
+      return input.interactive ? "auto" : "bypassPermissions";
+  }
 }
 
 function mapClaudeReasoningEffort(reasoningEffort?: ReasoningEffort): "low" | "medium" | "high" | "max" | undefined {

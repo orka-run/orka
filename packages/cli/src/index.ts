@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
+import type { BackendKind, PermissionMode, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
 import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
 import {
   ensureNoiseKeyPair,
@@ -737,6 +737,7 @@ const spawnCmd = command({
     env: multioption({ type: array(str), long: "env", description: "Environment variable to pass through (repeatable KEY=VALUE)" }),
     reasoningEffort: option({ type: optional(str), long: "reasoning-effort", description: "Reasoning effort level (low, medium, high)" }),
     autoMerge: flag({ long: "auto-merge", description: "Auto-merge worktree on successful completion" }),
+    supervised: flag({ long: "supervised", description: "Supervised mode — tool executions require dashboard approval" }),
     watch: flag({ long: "watch", short: "w", description: "Stream session output after spawn (Ctrl+C stops streaming, not the session)" }),
     tag: multioption({ type: array(str), long: "tag", description: "Tag the session (repeatable)" }),
     parent: option({ type: optional(str), long: "parent", description: "Parent session ID (creates child session)" }),
@@ -800,6 +801,9 @@ const spawnCmd = command({
 
     const allowedTools = parseAllowedTools(args.allowedTools);
     const env = parseEnvAssignments(args.env);
+    const effectivePermissionMode: PermissionMode | undefined = args.supervised
+      ? "supervised"
+      : (cfg.permissionMode as PermissionMode) || undefined;
     const spawnRequest: SpawnRequest = {
       prompt,
       projectPath,
@@ -815,6 +819,7 @@ const spawnCmd = command({
       ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
       ...(allowedTools ? { allowedTools } : {}),
       ...(env ? { env } : {}),
+      ...(effectivePermissionMode ? { permissionMode: effectivePermissionMode } : {}),
     };
     let session;
     try {
@@ -826,6 +831,9 @@ const spawnCmd = command({
     console.log(`spawned session ${session.id}`);
     console.log(`  backend:  ${spawnRequest.backend}`);
     console.log(`  mode:     ${spawnRequest.mode}`);
+    if (effectivePermissionMode) {
+      console.log(`  permissions: ${effectivePermissionMode}`);
+    }
     if (args.tag.length > 0) {
       console.log(`  tags:     ${args.tag.join(", ")}`);
     }

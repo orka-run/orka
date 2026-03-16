@@ -39,7 +39,9 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
   const rawDb = openDb(home);
   const db = new DatabaseRepository(rawDb);
   const pushHub = new PushHub();
-  const approvalManager = new ApprovalManager();
+  const approvalManager = new ApprovalManager({
+    approvalTimeoutMinutes: config.limits.approvalTimeoutMinutes,
+  });
 
   const providerAdapterRegistry = new ProviderAdapterRegistry();
   providerAdapterRegistry.register("claude-code", new ClaudeCodeAdapter());

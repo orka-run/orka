@@ -120,6 +120,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(req.env ? { env: req.env } : {}),
       interactive: req.mode === "interactive",
+      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
     });
 
     const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);

@@ -21,6 +21,9 @@ export type BackendKind = z.infer<typeof BackendKindSchema>;
 export const SessionModeSchema = z.enum(["interactive", "background"]);
 export type SessionMode = z.infer<typeof SessionModeSchema>;
 
+export const PermissionModeSchema = z.enum(["bypass", "supervised", "auto"]);
+export type PermissionMode = z.infer<typeof PermissionModeSchema>;
+
 export const SessionStatusSchema = z.enum([
   "queued",
   "preparing",
@@ -169,4 +172,6 @@ export interface SpawnRequest {
   env?: Record<string, string>;
   /** Target node ID for relay routing. Omit for least-loaded scheduling. */
   nodeId?: string;
+  /** Permission mode: bypass (all tools auto-approved), supervised (dashboard approval), auto (Claude auto-approves). */
+  permissionMode?: PermissionMode;
 }

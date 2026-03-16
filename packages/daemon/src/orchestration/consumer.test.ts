@@ -213,18 +213,12 @@ describe("consumeProviderEvents", () => {
       totalTokens: { input: 120, output: 80 },
       pendingRequests: [{ requestId: "req-1", requestType: "command_execution_approval" }],
     });
-    expect(approvals.getPendingForSession("sess-1")).toEqual([
-      {
-        id: "req-1",
-        sessionId: "sess-1",
-        threadId: "thread-1",
-        requestType: "command_execution_approval",
-        detail: "Run tests",
-        args: { command: "bun test" },
-        status: "pending",
-        createdAt: "2026-03-11T00:00:01.000Z",
-      },
-    ]);
+    // Pending approvals are auto-denied on session exit
+    expect(approvals.getPendingForSession("sess-1")).toEqual([]);
+    const resolved = approvals.getRequest("req-1");
+    expect(resolved).toBeTruthy();
+    expect(resolved!.status).toBe("resolved");
+    expect(resolved!.decision).toBe("deny");
     expect(usageRecords).toEqual([
       {
         sessionId: "sess-1",

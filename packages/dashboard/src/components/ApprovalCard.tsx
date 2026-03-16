@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, LoaderCircle, ShieldAlert, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Check, Clock, LoaderCircle, ShieldAlert, Terminal, FileEdit, FileSearch, X } from "lucide-react";
 import { formatDateTime } from "../lib/sessionUi";
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
@@ -7,6 +7,12 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   file_read_approval: "Read File",
   file_change_approval: "Edit File",
   tool_user_input: "User Input Required",
+};
+
+const REQUEST_TYPE_ICONS: Record<string, typeof Terminal> = {
+  command_execution_approval: Terminal,
+  file_read_approval: FileSearch,
+  file_change_approval: FileEdit,
 };
 
 function humanRequestType(raw: string): string {
@@ -26,6 +32,31 @@ export interface ApprovalEntry {
 interface ApprovalCardProps {
   entry: ApprovalEntry;
   onResolve: (requestId: string, decision: "approve" | "deny") => Promise<void>;
+}
+
+function ElapsedTime({ since }: { since: string }) {
+  const [elapsed, setElapsed] = useState("");
+
+  useEffect(() => {
+    function update() {
+      const ms = Date.now() - new Date(since).getTime();
+      if (ms < 60_000) {
+        setElapsed(`${Math.floor(ms / 1000)}s`);
+      } else {
+        setElapsed(`${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`);
+      }
+    }
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [since]);
+
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[10px] text-ink-muted">
+      <Clock className="h-2.5 w-2.5" />
+      {elapsed}
+    </span>
+  );
 }
 
 export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
@@ -54,11 +85,14 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
       ? "bg-emerald-600/5"
       : "bg-status-error/5";
 
+  const Icon = REQUEST_TYPE_ICONS[entry.requestType] ?? ShieldAlert;
+
   return (
     <div className={`rounded-sm border ${borderColor} ${bgColor} px-2 py-2`}>
       <div className="flex items-center gap-2">
-        <ShieldAlert className={`h-3.5 w-3.5 ${isPending ? "text-status-warning" : "text-ink-muted"}`} />
+        <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${isPending ? "text-status-warning" : "text-ink-muted"}`} />
         <p className="text-[12px] font-medium text-ink">{humanRequestType(entry.requestType)}</p>
+        {isPending && <ElapsedTime since={entry.timestamp} />}
         {!isPending && (
           <span
             className={`ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${

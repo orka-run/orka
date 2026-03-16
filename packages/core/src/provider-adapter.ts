@@ -2,7 +2,7 @@
 // See: apps/server/src/provider/ for original patterns
 
 import type { ProviderRuntimeEvent } from "./provider-events";
-import type { BackendKind, ReasoningEffort } from "./types";
+import type { BackendKind, PermissionMode, ReasoningEffort } from "./types";
 
 export interface RawProviderLine {
   direction: "in" | "out";
@@ -21,6 +21,8 @@ export interface ProviderSessionStartInput {
   env?: Record<string, string>;
   /** When true, keep stdin open for multi-turn (interactive mode). */
   interactive?: boolean;
+  /** Permission mode for tool execution. "supervised" enables dashboard approval flow. */
+  permissionMode?: PermissionMode;
 }
 
 export interface ProviderSendTurnInput {
