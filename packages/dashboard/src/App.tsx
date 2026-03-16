@@ -511,15 +511,15 @@ export function App() {
 
   const reportedErrors = useRef(new Map<string, number>());
   const reportError = async (report: ClientErrorReport): Promise<void> => {
-    // Skip Vite HMR internal errors (dev only)
     if (report.stack?.includes("@vite/client")) return;
-    // Deduplicate: same error message reported at most once per 60s
     const key = report.error ?? "";
     const now = Date.now();
-    const lastSeen = reportedErrors.current.get(key);
-    if (lastSeen && now - lastSeen < 60_000) return;
-    // Hard cap: max 10 unique errors tracked (prevent unbounded map growth)
-    if (reportedErrors.current.size >= 10 && !lastSeen) return;
+    // Evict entries older than 60s
+    for (const [k, ts] of reportedErrors.current) {
+      if (now - ts > 60_000) reportedErrors.current.delete(k);
+    }
+    // Deduplicate: same error at most once per 60s
+    if (reportedErrors.current.has(key)) return;
     reportedErrors.current.set(key, now);
     await transport.request("reportClientError", report).catch(() => undefined);
   };
