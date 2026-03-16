@@ -163,7 +163,7 @@ export function SessionView({
               type="button"
               onClick={() => void handleRetrySession()}
               disabled={isRetrying}
-              className="inline-flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:bg-surface-hover disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:text-ink-secondary disabled:opacity-50"
             >
               {isRetrying ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
               Retry
