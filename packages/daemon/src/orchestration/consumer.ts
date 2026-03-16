@@ -213,6 +213,13 @@ async function finalizeSession(
 
   callbacks.updateSessionStatus(sessionId, status, { finishedAt });
   recordSessionTerminalMetrics(callbacks.getSession?.(sessionId)?.startedAt ?? null, finishedAt, status);
+
+  // Auto-deny any pending approvals — session is done, no one can approve anymore
+  const pending = callbacks.approvalManager.getPendingForSession(sessionId);
+  for (const req of pending) {
+    callbacks.approvalManager.resolve(req.id, "deny");
+  }
+
   callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
     sessionId,
     status,
