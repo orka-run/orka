@@ -1295,7 +1295,7 @@ const showCmd = command({
       console.log(`  tools:     ${session.allowedTools.join(", ")}`);
     }
 
-    if (session.tags.length > 0) console.log(`  tags:      ${session.tags.join(", ")}`);
+    if (session.tags && session.tags.length > 0) console.log(`  tags:      ${session.tags.join(", ")}`);
 
     console.log("");
     console.log(`  title:     ${session.title}`);
