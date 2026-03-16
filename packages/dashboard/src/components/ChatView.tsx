@@ -748,35 +748,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
             isRetrying={retrying}
           />
         </div>
-      ) : (
-        <div className="flex items-center gap-2 border-t border-border px-2 py-1">
-          {isRunning(activeSession.status) && (
-            <button
-              type="button"
-              onClick={() => { void handleStop(); }}
-              disabled={stopping}
-              className="flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition hover:bg-status-error/20 disabled:opacity-50"
-            >
-              {stopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-              Stop
-            </button>
-          )}
-          {isTerminal(activeSession.status) && (
-            <button
-              type="button"
-              onClick={() => { void handleRetry(); }}
-              disabled={retrying}
-              className="flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:bg-surface-hover disabled:opacity-50"
-            >
-              {retrying ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-              Retry
-            </button>
-          )}
-          {!isRunning(activeSession.status) && !isTerminal(activeSession.status) && (
-            <span className="text-[11px] text-ink-muted">Background session</span>
-          )}
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

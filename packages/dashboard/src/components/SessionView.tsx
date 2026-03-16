@@ -1,7 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, ScrollText, Shield, ShieldOff, Square } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, ScrollText, Shield, ShieldOff, Square } from "lucide-react";
 import type { SessionResult } from "@orka/core";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
@@ -33,6 +33,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
 };
 
 const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function StatusBadge({ status }: { status: string }) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS["cancelled"]!;
@@ -103,6 +104,8 @@ export function SessionView({
 
   const activeSession = session;
   const isStoppable = ACTIVE_STATUSES.has(activeSession.status);
+  const isRetryable = TERMINAL_STATUSES.has(activeSession.status);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   async function handleStopSession() {
     if (!isStoppable || isStopping) return;
@@ -125,6 +128,15 @@ export function SessionView({
     }
   }
 
+  async function handleRetrySession() {
+    setIsRetrying(true);
+    try {
+      await transport.request("retrySession", { sessionId });
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+
   // On mobile: no internal header — MobileHeader and MobileTabBar handle navigation.
   // On desktop: render full header with tab switcher.
   const header = isMobile ? null : (
@@ -135,7 +147,7 @@ export function SessionView({
           <p className="mt-0.5 font-mono text-[11px] text-ink-muted">{sessionId}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {isStoppable ? (
+          {isStoppable && (
             <button
               type="button"
               onClick={() => void handleStopSession()}
@@ -145,7 +157,18 @@ export function SessionView({
               {isStopping ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3" />}
               Stop
             </button>
-          ) : null}
+          )}
+          {isRetryable && (
+            <button
+              type="button"
+              onClick={() => void handleRetrySession()}
+              disabled={isRetrying}
+              className="inline-flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:bg-surface-hover disabled:opacity-50"
+            >
+              {isRetrying ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+              Retry
+            </button>
+          )}
           <div className="flex rounded-sm border border-border bg-surface-alt p-0.5">
             {(["overview", "chat", "logs", "diff"] as const).map((tab) => (
               <button
@@ -168,18 +191,31 @@ export function SessionView({
     </header>
   );
 
-  // On mobile, show a slim stop-session bar if the session is stoppable
-  const mobileStopBar = isMobile && isStoppable ? (
+  // On mobile, show a slim action bar for stop/retry
+  const mobileActionBar = isMobile && (isStoppable || isRetryable) ? (
     <div className="flex items-center gap-2 border-b border-border px-2 py-1">
-      <button
-        type="button"
-        onClick={() => void handleStopSession()}
-        disabled={isStopping}
-        className="flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition active:bg-status-error/20 disabled:opacity-50"
-      >
-        {isStopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-        Stop
-      </button>
+      {isStoppable && (
+        <button
+          type="button"
+          onClick={() => void handleStopSession()}
+          disabled={isStopping}
+          className="flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition active:bg-status-error/20 disabled:opacity-50"
+        >
+          {isStopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+          Stop
+        </button>
+      )}
+      {isRetryable && (
+        <button
+          type="button"
+          onClick={() => void handleRetrySession()}
+          disabled={isRetrying}
+          className="flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] font-medium text-ink-secondary transition active:bg-surface-hover disabled:opacity-50"
+        >
+          {isRetrying ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+          Retry
+        </button>
+      )}
       {stopError ? <p className="text-[11px] text-status-error">{stopError}</p> : null}
     </div>
   ) : null;
@@ -189,7 +225,7 @@ export function SessionView({
   return (
     <div className="flex h-full flex-col">
       {header}
-      {mobileStopBar}
+      {mobileActionBar}
       <div className="flex-1 overflow-hidden">
         <div className={`h-full ${contentPadding} ${activeTab === "chat" ? "" : "hidden"}`}>
           <ChatView
