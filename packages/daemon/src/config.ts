@@ -36,10 +36,18 @@ const HooksSchema = z.object({
   postWorktreeCreate: z.array(z.string()).default([]),
 });
 
+const PermissionsSchema = z.object({
+  mode: z.enum(["auto", "supervised", "bypass"]).default("auto"),
+  autoApprove: z.array(z.string()).default([]),
+  alwaysDeny: z.array(z.string()).default([]),
+  approvalTimeout: z.number().default(0),
+});
+
 export const ConfigSchema = z.object({
   defaults: DefaultsSchema.default(DefaultsSchema.parse({})),
   limits: LimitsSchema.default(LimitsSchema.parse({})),
   hooks: HooksSchema.default(HooksSchema.parse({})),
+  permissions: PermissionsSchema.default(PermissionsSchema.parse({})),
   backendDefaults: z.record(z.string(), PerBackendDefaultsSchema).default({}),
 });
 
@@ -95,6 +103,7 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
     const defaults = getTable(toml.defaults);
     const limits = getTable(toml.limits);
     const hooks = getTable(toml.hooks);
+    const permissions = getTable(toml.permissions);
 
     const backendDefaults: Record<string, Record<string, unknown>> = {};
     if (defaults) {
@@ -129,6 +138,21 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
       hooks:
         hooks?.post_worktree_create !== undefined
           ? { postWorktreeCreate: normalizeHookCommands(hooks.post_worktree_create) }
+          : undefined,
+      permissions:
+        permissions !== undefined
+          ? {
+              ...(getString(permissions.mode) !== undefined ? { mode: getString(permissions.mode) } : {}),
+              ...(getStringArray(permissions.auto_approve ?? permissions.autoApprove) !== undefined
+                ? { autoApprove: getStringArray(permissions.auto_approve ?? permissions.autoApprove) }
+                : {}),
+              ...(getStringArray(permissions.always_deny ?? permissions.alwaysDeny) !== undefined
+                ? { alwaysDeny: getStringArray(permissions.always_deny ?? permissions.alwaysDeny) }
+                : {}),
+              ...(getNumber(permissions.approval_timeout ?? permissions.approvalTimeout) !== undefined
+                ? { approvalTimeout: getNumber(permissions.approval_timeout ?? permissions.approvalTimeout) }
+                : {}),
+            }
           : undefined,
       backendDefaults:
         Object.keys(backendDefaults).length > 0 ? backendDefaults : undefined,
@@ -184,6 +208,23 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
         ? projectConfig.hooks.postWorktreeCreate
         : userConfig.hooks.postWorktreeCreate,
     },
+    permissions: (() => {
+      const pd = PermissionsSchema.parse({});
+      return {
+        mode: projectConfig.permissions.mode !== pd.mode
+          ? projectConfig.permissions.mode
+          : userConfig.permissions.mode,
+        autoApprove: projectConfig.permissions.autoApprove.length > 0
+          ? [...new Set([...userConfig.permissions.autoApprove, ...projectConfig.permissions.autoApprove])]
+          : userConfig.permissions.autoApprove,
+        alwaysDeny: projectConfig.permissions.alwaysDeny.length > 0
+          ? [...new Set([...userConfig.permissions.alwaysDeny, ...projectConfig.permissions.alwaysDeny])]
+          : userConfig.permissions.alwaysDeny,
+        approvalTimeout: projectConfig.permissions.approvalTimeout !== pd.approvalTimeout
+          ? projectConfig.permissions.approvalTimeout
+          : userConfig.permissions.approvalTimeout,
+      };
+    })(),
     backendDefaults: {
       ...userConfig.backendDefaults,
       ...Object.fromEntries(

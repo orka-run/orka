@@ -2,6 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { $ } from "bun";
 import type {
   ApprovalRequest,
+  ProviderApprovalDecision,
   RawProviderLine,
   ProviderRuntimeEvent,
   ProviderRuntimeEventOf,
@@ -11,6 +12,7 @@ import type {
   UsageRecord,
 } from "@orka/core";
 import type { ApprovalManager } from "../approval-manager";
+import { evaluatePermission, extractToolInfo, type PermissionRuleSet } from "../permission-rules";
 import type { PushHub } from "../push-hub";
 import { getDaemonMetrics, withSpan } from "../tracing";
 import { deleteBranch, getWorktreeDir, worktreeMerge, worktreeRemove } from "../worktree";
@@ -37,6 +39,8 @@ export interface ProviderEventConsumerCallbacks {
   orkaHome?: string;
   cleanupWorktree?: () => Promise<void>;
   getSession?: (sessionId: string) => Session | null;
+  permissionRules?: PermissionRuleSet;
+  respondToRequest?: (threadId: string, requestId: string, decision: ProviderApprovalDecision) => Promise<void>;
 }
 
 export async function consumeProviderEvents(
@@ -96,7 +100,7 @@ async function handleProviderEvent(
       });
       return;
     case "request.opened":
-      callbacks.approvalManager.addRequest(toApprovalRequest(sessionId, handle, event));
+      await handleRequestOpened(sessionId, handle, event, callbacks);
       return;
     case "turn.completed":
       persistUsageRecord(sessionId, handle, event, callbacks);
@@ -135,6 +139,44 @@ function toApprovalRequest(
     status: "pending",
     createdAt: event.createdAt,
   };
+}
+
+async function handleRequestOpened(
+  sessionId: string,
+  handle: ProviderSessionHandle,
+  event: ProviderRuntimeEventOf<"request.opened">,
+  callbacks: ProviderEventConsumerCallbacks,
+): Promise<void> {
+  const request = toApprovalRequest(sessionId, handle, event);
+
+  if (callbacks.permissionRules && callbacks.respondToRequest) {
+    const { tool, input } = extractToolInfo(request);
+    const decision = evaluatePermission(callbacks.permissionRules, tool, input);
+
+    if (decision === "auto_approve") {
+      await callbacks.respondToRequest(handle.threadId, request.id, "approve");
+      callbacks.pushHub?.broadcast("orchestration.event", {
+        sessionId,
+        type: "permission.auto_approved",
+        tool,
+        detail: event.payload.detail,
+      });
+      return;
+    }
+
+    if (decision === "auto_deny") {
+      await callbacks.respondToRequest(handle.threadId, request.id, "deny");
+      callbacks.pushHub?.broadcast("orchestration.event", {
+        sessionId,
+        type: "permission.auto_denied",
+        tool,
+        detail: event.payload.detail,
+      });
+      return;
+    }
+  }
+
+  callbacks.approvalManager.addRequest(request);
 }
 
 function persistUsageRecord(

@@ -142,6 +142,11 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       model: req.model ?? null,
       orkaHome: ctx.orkaHome,
       getSession: (id) => ctx.db.getSession(id),
+      permissionRules: ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0
+        ? { autoApprove: ctx.config.permissions.autoApprove, alwaysDeny: ctx.config.permissions.alwaysDeny }
+        : undefined,
+      respondToRequest: (threadId, requestId, decision) =>
+        ctx.providerService.respondToRequest(threadId, requestId, decision),
       cleanupWorktree: async () => {
         const currentSession = ctx.db.getSession(sessionId);
         if (currentSession) {
