@@ -196,13 +196,14 @@ function AppShell({ transport }: AppShellProps) {
     }
   }, [sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Detect first-run: no sessions AND mode is local AND no paired nodes
-  // Only check after initial load completes to avoid flash
+  // Detect first-run: show onboarding only once after initial load, not reactively
+  const onboardingCheckedRef = useRef(false);
   useEffect(() => {
-    if (onboardingDismissed || !initialLoadDone) return;
+    if (onboardingDismissed || !initialLoadDone || onboardingCheckedRef.current) return;
+    onboardingCheckedRef.current = true;
     const isFirstRun = sessions.length === 0 && mode === "local" && pairedNodes.length === 0;
-    setShowOnboarding(isFirstRun);
-  }, [sessions.length, mode, pairedNodes.length, onboardingDismissed, initialLoadDone]);
+    if (isFirstRun) setShowOnboarding(true);
+  }, [initialLoadDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync selectedId to URL hash
   useEffect(() => {
