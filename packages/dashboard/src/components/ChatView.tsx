@@ -480,6 +480,22 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
 
   flushAssistant();
   flushToolGroup();
+
+  // If session reached terminal state, clear all inProgress flags —
+  // no tool is actually running anymore even if item.completed was never emitted
+  const hasTerminalEvent = events.some((e) =>
+    e.type === "session.completed" || e.type === "session.failed" || e.type === "session.cancelled",
+  );
+  if (hasTerminalEvent) {
+    for (const entry of entries) {
+      if (entry.type === "tool_group") {
+        for (const tool of entry.tools) {
+          tool.inProgress = false;
+        }
+      }
+    }
+  }
+
   return entries;
 }
 

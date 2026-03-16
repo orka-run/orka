@@ -253,25 +253,23 @@ function matchesQuery(session: SessionSummary, query: string): boolean {
 
 const STATUS_CONFIG: Record<
   SessionSummary["status"],
-  { dotClass: string; label?: string }
+  { dotClass: string; label: string }
 > = {
   running: { dotClass: "bg-status-running animate-pulse", label: "Running" },
   queued: { dotClass: "bg-accent animate-pulse", label: "Queued" },
   preparing: { dotClass: "bg-accent animate-pulse", label: "Preparing" },
-  completed: { dotClass: "bg-ink-muted" },
+  completed: { dotClass: "bg-ink-muted", label: "Done" },
   failed: { dotClass: "bg-status-error", label: "Failed" },
-  cancelled: { dotClass: "bg-status-warning" },
-  interrupted: { dotClass: "bg-orange-500", label: "Interrupted" },
+  cancelled: { dotClass: "bg-ink-muted", label: "Cancelled" },
+  interrupted: { dotClass: "bg-status-warning", label: "Interrupted" },
 };
 
 function StatusPill({ status }: { status: SessionSummary["status"] }) {
-  const config = STATUS_CONFIG[status] ?? { dotClass: "bg-ink-muted" };
+  const config = STATUS_CONFIG[status] ?? { dotClass: "bg-ink-muted", label: status };
   return (
     <span className="inline-flex items-center gap-1">
       <span className={`inline-block h-1.5 w-1.5 rounded-sm ${config.dotClass}`} />
-      {config.label && (
-        <span className="text-[10px] text-ink-muted">{config.label}</span>
-      )}
+      <span className="text-[10px] text-ink-muted">{config.label}</span>
     </span>
   );
 }
