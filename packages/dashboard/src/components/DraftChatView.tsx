@@ -80,13 +80,13 @@ export function DraftChatView({ defaultProjectPath, onSpawned, onOpenAdvanced }:
 
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-zinc-800 px-6 py-3">
-        <div className="flex flex-wrap items-center gap-3">
+      <header className="border-b border-border px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-2">
           <MiniPills options={BACKENDS} value={backend} onChange={setBackend} />
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 outline-none transition focus:border-zinc-700"
+            className="rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink-secondary outline-none transition focus:border-accent"
           >
             {MODELS.map((m) => (
               <option key={m.value} value={m.value}>
@@ -98,46 +98,46 @@ export function DraftChatView({ defaultProjectPath, onSpawned, onOpenAdvanced }:
           <button
             type="button"
             onClick={() => onOpenAdvanced({ backend, model, mode })}
-            className="ml-auto flex items-center gap-1.5 text-xs text-zinc-500 transition hover:text-zinc-300"
+            className="ml-auto flex items-center gap-1 text-[11px] text-ink-muted transition hover:text-ink-secondary"
           >
-            <Settings2 className="h-3.5 w-3.5" />
+            <Settings2 className="h-3 w-3" />
             Advanced…
           </button>
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden p-6">
-        <div className="flex h-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/70">
-          <div className="flex flex-1 items-center justify-center overflow-y-auto px-4">
+      <div className="flex-1 overflow-hidden p-3">
+        <div className="flex h-full flex-col overflow-hidden rounded-sm border border-border bg-surface">
+          <div className="flex flex-1 items-center justify-center overflow-y-auto px-2">
             {pendingMessage ? (
-              <div className="w-full max-w-3xl space-y-4 self-start pt-8">
+              <div className="w-full max-w-3xl space-y-2 self-start pt-4">
                 <div className="flex justify-end">
-                  <div className="flex max-w-3xl items-start gap-3">
-                    <div className="min-w-0 rounded-2xl rounded-tr-md border border-indigo-900/50 bg-zinc-900 px-4 py-3 [overflow-wrap:anywhere]">
-                      <p className="text-sm text-zinc-100">{pendingMessage}</p>
+                  <div className="flex max-w-3xl items-start gap-2">
+                    <div className="min-w-0 rounded-sm rounded-tr-none border border-accent/20 bg-accent/5 px-2 py-1.5 [overflow-wrap:anywhere]">
+                      <p className="text-[12px] text-ink">{pendingMessage}</p>
                     </div>
-                    <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
-                      <User className="h-4 w-4" />
+                    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">
+                      <User className="h-3.5 w-3.5" />
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 px-1 py-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
-                    <Bot className="h-4 w-4" />
+                <div className="flex items-center gap-2 px-1 py-1">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">
+                    <Bot className="h-3.5 w-3.5" />
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-400">
-                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  <div className="flex items-center gap-1 text-[12px] text-ink-muted">
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
                     Starting session…
                   </div>
                 </div>
               </div>
             ) : (
               <div className="text-center">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800/80">
-                  <MessageSquarePlus className="h-6 w-6 text-zinc-400" />
+                <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-sm bg-surface-alt">
+                  <MessageSquarePlus className="h-5 w-5 text-ink-muted" />
                 </div>
-                <p className="text-lg font-medium text-zinc-300">New session</p>
-                <p className="mt-2 text-sm text-zinc-500">
+                <p className="text-[13px] font-medium text-ink-secondary">New session</p>
+                <p className="mt-1 text-[11px] text-ink-muted">
                   Send a message to start a new session
                 </p>
               </div>
@@ -168,16 +168,16 @@ function MiniPills<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
+    <div className="inline-flex rounded-sm border border-border bg-surface-alt p-0.5">
       {options.map((opt) => (
         <button
           key={opt}
           type="button"
           onClick={() => onChange(opt)}
-          className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
+          className={`rounded-sm px-2 py-1 text-[11px] font-medium transition ${
             value === opt
-              ? "bg-zinc-700 text-zinc-100"
-              : "text-zinc-500 hover:text-zinc-300"
+              ? "bg-surface-hover text-ink"
+              : "text-ink-muted hover:text-ink-secondary"
           }`}
         >
           {opt}

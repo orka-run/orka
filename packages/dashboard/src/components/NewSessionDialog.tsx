@@ -177,12 +177,12 @@ export function NewSessionDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/70 backdrop-blur-sm md:items-center md:justify-center md:px-4 md:py-8">
-      <div className="flex w-full flex-col overflow-hidden bg-zinc-950 max-md:h-full md:max-w-2xl md:rounded-2xl md:border md:border-zinc-800 md:shadow-2xl">
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-800 px-4 py-4 md:px-6 md:py-5">
+    <div className="fixed inset-0 z-50 flex bg-ink/40 backdrop-blur-sm md:items-center md:justify-center md:px-4 md:py-8">
+      <div className="flex w-full flex-col overflow-hidden bg-surface max-md:h-full md:max-w-2xl md:rounded-sm md:border md:border-border">
+        <div className="flex shrink-0 items-start justify-between gap-2 border-b border-border px-3 py-2">
           <div>
-            <h2 className="text-lg font-semibold text-zinc-100">New Session</h2>
-            <p className="mt-1 text-sm text-zinc-500">
+            <h2 className="text-[13px] font-semibold text-ink">New Session</h2>
+            <p className="mt-0.5 text-[11px] text-ink-muted">
               Launch a fresh dashboard session with prompt, backend, and mode controls.
             </p>
           </div>
@@ -190,14 +190,14 @@ export function NewSessionDialog({
             type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            className="rounded-lg border border-zinc-800 p-2 text-zinc-400 transition hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} data-spawn-form className="flex-1 space-y-5 overflow-y-auto px-4 py-4 md:px-6 md:py-5">
+        <form onSubmit={handleSubmit} data-spawn-form className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
           <div>
-            <label htmlFor={promptId} className="mb-2 block text-sm font-medium text-zinc-200">
+            <label htmlFor={promptId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
               Prompt
             </label>
             <textarea
@@ -206,12 +206,12 @@ export function NewSessionDialog({
               onChange={(event) => setPrompt(event.target.value)}
               rows={6}
               placeholder="Describe the work you want the agent to do"
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+              className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
             />
           </div>
 
           <div>
-            <label htmlFor={titleId} className="mb-2 block text-sm font-medium text-zinc-200">
+            <label htmlFor={titleId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
               Title
             </label>
             <input
@@ -220,14 +220,14 @@ export function NewSessionDialog({
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder="Optional"
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+              className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
             />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-2 md:grid-cols-2">
             <div>
-              <p className="mb-2 text-sm font-medium text-zinc-200">Backend</p>
-              <div className="grid grid-cols-3 gap-2">
+              <p className="mb-1 text-[11px] font-medium text-ink-secondary">Backend</p>
+              <div className="grid grid-cols-3 gap-1">
                 {(["claude-code", "codex", "shell"] as const).map((option) => (
                   <ToggleButton
                     key={option}
@@ -240,7 +240,7 @@ export function NewSessionDialog({
             </div>
 
             <div>
-              <label htmlFor={modelId} className="mb-2 block text-sm font-medium text-zinc-200">
+              <label htmlFor={modelId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
                 Model
               </label>
               <input
@@ -249,14 +249,14 @@ export function NewSessionDialog({
                 value={model}
                 onChange={(event) => setModel(event.target.value)}
                 placeholder="Optional"
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
               />
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
             <div>
-              <label htmlFor={projectPathId} className="mb-2 block text-sm font-medium text-zinc-200">
+              <label htmlFor={projectPathId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
                 Project Path
               </label>
               <input
@@ -265,13 +265,13 @@ export function NewSessionDialog({
                 value={projectPath}
                 onChange={(event) => setProjectPath(event.target.value)}
                 placeholder="/path/to/project"
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
               />
             </div>
 
             <div>
-              <p className="mb-2 text-sm font-medium text-zinc-200">Mode</p>
-              <div className="grid grid-cols-2 gap-2">
+              <p className="mb-1 text-[11px] font-medium text-ink-secondary">Mode</p>
+              <div className="grid grid-cols-2 gap-1">
                 {(["background", "interactive"] as const).map((option) => (
                   <ToggleButton
                     key={option}
@@ -286,8 +286,8 @@ export function NewSessionDialog({
 
           {showNodeSelector ? (
             <div>
-              <p className="mb-2 text-sm font-medium text-zinc-200">Target Node</p>
-              <div className="flex flex-wrap gap-2">
+              <p className="mb-1 text-[11px] font-medium text-ink-secondary">Target Node</p>
+              <div className="flex flex-wrap gap-1">
                 <ToggleButton
                   active={targetNode === ""}
                   label="auto"
@@ -307,45 +307,45 @@ export function NewSessionDialog({
 
           <label
             htmlFor={autoMergeId}
-            className="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 transition hover:border-zinc-700"
+            className="flex cursor-pointer items-start gap-2 rounded-sm border border-border bg-surface-alt px-2 py-1.5 transition hover:border-ink-muted"
           >
             <input
               id={autoMergeId}
               type="checkbox"
               checked={autoMerge}
               onChange={(event) => setAutoMerge(event.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-zinc-700 bg-zinc-950 accent-zinc-100"
+              className="mt-0.5 h-4 w-4 rounded-sm border-border bg-surface accent-accent-strong"
             />
             <div>
-              <p className="text-sm font-medium text-zinc-200">Auto-merge</p>
-              <p className="mt-1 text-sm text-zinc-500">
+              <p className="text-[12px] font-medium text-ink-secondary">Auto-merge</p>
+              <p className="mt-0.5 text-[11px] text-ink-muted">
                 Automatically merge changes when the session completes successfully.
               </p>
             </div>
           </label>
 
-          <section className="rounded-xl border border-zinc-800 bg-zinc-950/60">
+          <section className="rounded-sm border border-border bg-surface">
             <button
               type="button"
               onClick={() => setShowAdvanced((current) => !current)}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left"
               aria-expanded={showAdvanced}
             >
               <div>
-                <p className="text-sm font-medium text-zinc-200">Advanced</p>
-                <p className="mt-1 text-sm text-zinc-500">Tags and system prompt overrides.</p>
+                <p className="text-[12px] font-medium text-ink-secondary">Advanced</p>
+                <p className="mt-0.5 text-[11px] text-ink-muted">Tags and system prompt overrides.</p>
               </div>
               {showAdvanced ? (
-                <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
               ) : (
-                <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
               )}
             </button>
 
             {showAdvanced ? (
-              <div className="space-y-4 border-t border-zinc-800 px-4 py-4">
+              <div className="space-y-2 border-t border-border px-2 py-2">
                 <div>
-                  <label htmlFor={tagsId} className="mb-2 block text-sm font-medium text-zinc-200">
+                  <label htmlFor={tagsId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
                     Tags
                   </label>
                   <input
@@ -354,14 +354,14 @@ export function NewSessionDialog({
                     value={tags}
                     onChange={(event) => setTags(event.target.value)}
                     placeholder="frontend, urgent, polish"
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                    className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
                   />
                 </div>
 
                 <div>
                   <label
                     htmlFor={systemPromptId}
-                    className="mb-2 block text-sm font-medium text-zinc-200"
+                    className="mb-1 block text-[11px] font-medium text-ink-secondary"
                   >
                     System Prompt
                   </label>
@@ -371,7 +371,7 @@ export function NewSessionDialog({
                     onChange={(event) => setSystemPrompt(event.target.value)}
                     rows={4}
                     placeholder="Optional"
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                    className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
                   />
                 </div>
               </div>
@@ -379,24 +379,24 @@ export function NewSessionDialog({
           </section>
 
           {localError || storeError ? (
-            <div className="rounded-xl border border-red-950 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+            <div className="rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1.5 text-[12px] text-status-error">
               {localError ?? storeError}
             </div>
           ) : null}
 
-          <div className="flex items-center justify-end gap-3 pt-2">
+          <div className="flex items-center justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="rounded-xl border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSubmitting ? "Spawning..." : "Spawn Session"}
             </button>
@@ -420,10 +420,10 @@ function ToggleButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-xl border px-3 py-3 text-sm font-medium transition ${
+      className={`rounded-sm border px-2 py-1.5 text-[12px] font-medium transition ${
         active
-          ? "border-zinc-100 bg-zinc-100 text-zinc-950"
-          : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-zinc-100"
+          ? "border-ink bg-ink text-surface"
+          : "border-border bg-surface-alt text-ink-secondary hover:border-ink-muted hover:text-ink"
       }`}
     >
       {label}

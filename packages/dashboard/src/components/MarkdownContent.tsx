@@ -2,7 +2,7 @@ import type { ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import "highlight.js/styles/github-dark.css";
+import "highlight.js/styles/github.css";
 
 interface MarkdownContentProps {
   content: string;
@@ -34,7 +34,7 @@ function MarkdownCode({ className, children, node, ...props }: CodeProps) {
     return (
       <code
         className={[
-          "block min-w-full bg-transparent p-0 font-mono text-[13px] leading-6 text-zinc-100",
+          "block min-w-full bg-transparent p-0 font-mono text-[12px] leading-6 text-ink",
           combinedClassName,
         ].filter(Boolean).join(" ")}
         {...props}
@@ -46,7 +46,7 @@ function MarkdownCode({ className, children, node, ...props }: CodeProps) {
 
   return (
     <code
-      className="rounded-md border border-zinc-700/80 bg-zinc-800/90 px-1.5 py-0.5 font-mono text-[0.9em] text-zinc-100"
+      className="rounded-sm border border-border bg-surface-alt px-1 py-0.5 font-mono text-[0.9em] text-ink"
       {...props}
     >
       {children}
@@ -56,50 +56,50 @@ function MarkdownCode({ className, children, node, ...props }: CodeProps) {
 
 export function MarkdownContent({ content }: MarkdownContentProps) {
   return (
-    <div className="min-w-0 max-w-none text-sm leading-6 text-zinc-100">
+    <div className="min-w-0 max-w-none text-[12px] leading-6 text-ink">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={{
-          h1: ({ children }) => <h1 className="mt-6 text-xl font-semibold tracking-tight text-zinc-50 first:mt-0">{children}</h1>,
-          h2: ({ children }) => <h2 className="mt-6 text-lg font-semibold tracking-tight text-zinc-50 first:mt-0">{children}</h2>,
-          h3: ({ children }) => <h3 className="mt-5 text-base font-semibold text-zinc-100 first:mt-0">{children}</h3>,
-          h4: ({ children }) => <h4 className="mt-4 text-sm font-semibold uppercase tracking-[0.12em] text-zinc-300 first:mt-0">{children}</h4>,
-          p: ({ children }) => <p className="mt-3 first:mt-0">{children}</p>,
-          ul: ({ children }) => <ul className="mt-3 list-disc space-y-2 pl-6 marker:text-zinc-500">{children}</ul>,
-          ol: ({ children }) => <ol className="mt-3 list-decimal space-y-2 pl-6 marker:text-zinc-500">{children}</ol>,
-          li: ({ children }) => <li className="pl-1 text-zinc-200">{children}</li>,
+          h1: ({ children }) => <h1 className="mt-4 text-[16px] font-semibold tracking-tight text-ink first:mt-0">{children}</h1>,
+          h2: ({ children }) => <h2 className="mt-4 text-[14px] font-semibold tracking-tight text-ink first:mt-0">{children}</h2>,
+          h3: ({ children }) => <h3 className="mt-3 text-[13px] font-semibold text-ink first:mt-0">{children}</h3>,
+          h4: ({ children }) => <h4 className="mt-3 text-[12px] font-semibold uppercase tracking-[0.12em] text-ink-secondary first:mt-0">{children}</h4>,
+          p: ({ children }) => <p className="mt-2 first:mt-0">{children}</p>,
+          ul: ({ children }) => <ul className="mt-2 list-disc space-y-1 pl-5 marker:text-ink-muted">{children}</ul>,
+          ol: ({ children }) => <ol className="mt-2 list-decimal space-y-1 pl-5 marker:text-ink-muted">{children}</ol>,
+          li: ({ children }) => <li className="pl-1 text-ink-secondary">{children}</li>,
           a: ({ children, href }) => (
             <a
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="font-medium text-sky-300 underline decoration-sky-400/40 underline-offset-4 transition hover:text-sky-200 hover:decoration-sky-300/80"
+              className="font-medium text-accent-strong underline decoration-accent/40 underline-offset-4 transition hover:text-accent hover:decoration-accent/80"
             >
               {children}
             </a>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="mt-4 border-l-2 border-zinc-700 pl-4 italic text-zinc-300">
+            <blockquote className="mt-3 border-l-2 border-border pl-3 italic text-ink-secondary">
               {children}
             </blockquote>
           ),
-          hr: () => <hr className="my-5 border-zinc-800" />,
+          hr: () => <hr className="my-4 border-border" />,
           table: ({ children }) => (
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full border-collapse text-left text-sm text-zinc-200">{children}</table>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full border-collapse text-left text-[12px] text-ink-secondary">{children}</table>
             </div>
           ),
-          thead: ({ children }) => <thead className="border-b border-zinc-700 text-zinc-100">{children}</thead>,
-          tbody: ({ children }) => <tbody className="divide-y divide-zinc-800">{children}</tbody>,
-          th: ({ children }) => <th className="px-3 py-2 font-medium">{children}</th>,
-          td: ({ children }) => <td className="px-3 py-2 align-top text-zinc-300">{children}</td>,
+          thead: ({ children }) => <thead className="border-b border-border text-ink">{children}</thead>,
+          tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
+          th: ({ children }) => <th className="px-2 py-1.5 font-medium">{children}</th>,
+          td: ({ children }) => <td className="px-2 py-1.5 align-top text-ink-secondary">{children}</td>,
           img: (props) => (
             // eslint-disable-next-line jsx-a11y/alt-text
             <img className="max-w-full h-auto" {...props} />
           ),
           pre: ({ children }) => (
-            <pre className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-[13px] leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] [-webkit-overflow-scrolling:touch] md:whitespace-pre-wrap md:break-all md:[overflow-wrap:anywhere]">
+            <pre className="mt-3 overflow-x-auto rounded-sm border border-border bg-surface-alt px-2 py-2 text-[12px] leading-6 [-webkit-overflow-scrolling:touch] md:whitespace-pre-wrap md:break-all md:[overflow-wrap:anywhere]">
               {children}
             </pre>
           ),

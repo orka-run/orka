@@ -23,13 +23,13 @@ export function MobileTabBar({
   onShowSessions,
 }: MobileTabBarProps) {
   return (
-    <nav className="border-t border-zinc-800 bg-zinc-950 safe-area-bottom">
+    <nav className="border-t border-border bg-surface safe-area-bottom">
       <div className="flex items-stretch justify-around">
         {/* Sessions button — always visible, opens sidebar drawer */}
         <button
           type="button"
           onClick={onShowSessions}
-          className="tap-target flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium text-zinc-500 transition active:text-zinc-300"
+          className="tap-target flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium text-ink-muted transition active:text-ink-secondary"
         >
           <LayoutList className="h-5 w-5" />
           Sessions
@@ -47,10 +47,10 @@ export function MobileTabBar({
               disabled={disabled}
               className={`tap-target flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium transition ${
                 isActive
-                  ? "text-zinc-100"
+                  ? "text-ink"
                   : disabled
-                    ? "text-zinc-700"
-                    : "text-zinc-500 active:text-zinc-300"
+                    ? "text-border"
+                    : "text-ink-muted active:text-ink-secondary"
               }`}
             >
               <Icon className="h-5 w-5" />

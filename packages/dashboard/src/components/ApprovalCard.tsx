@@ -43,28 +43,28 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
   }
 
   const borderColor = isPending
-    ? "border-amber-800/70"
+    ? "border-status-warning/50"
     : entry.status === "approved"
-      ? "border-emerald-900/60"
-      : "border-red-900/60";
+      ? "border-emerald-600/30"
+      : "border-status-error/30";
 
   const bgColor = isPending
-    ? "bg-amber-950/20"
+    ? "bg-status-warning/5"
     : entry.status === "approved"
-      ? "bg-emerald-950/20"
-      : "bg-red-950/20";
+      ? "bg-emerald-600/5"
+      : "bg-status-error/5";
 
   return (
-    <div className={`rounded-xl border ${borderColor} ${bgColor} px-4 py-4`}>
+    <div className={`rounded-sm border ${borderColor} ${bgColor} px-2 py-2`}>
       <div className="flex items-center gap-2">
-        <ShieldAlert className={`h-4 w-4 ${isPending ? "text-amber-400" : "text-zinc-500"}`} />
-        <p className="text-sm font-medium text-zinc-100">{humanRequestType(entry.requestType)}</p>
+        <ShieldAlert className={`h-3.5 w-3.5 ${isPending ? "text-status-warning" : "text-ink-muted"}`} />
+        <p className="text-[12px] font-medium text-ink">{humanRequestType(entry.requestType)}</p>
         {!isPending && (
           <span
-            className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+            className={`ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${
               entry.status === "approved"
-                ? "bg-emerald-950/60 text-emerald-300"
-                : "bg-red-950/60 text-red-300"
+                ? "bg-emerald-600/10 text-emerald-800"
+                : "bg-status-error/10 text-status-error"
             }`}
           >
             {entry.status === "approved" ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
@@ -74,18 +74,18 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
       </div>
 
       {entry.detail && (
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 font-mono text-xs leading-relaxed text-zinc-300">
+        <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border bg-surface-alt px-2 py-1.5 font-mono text-[11px] leading-relaxed text-ink-secondary">
           {entry.detail}
         </pre>
       )}
 
       {isPending && (
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-2 flex items-center gap-2">
           <button
             type="button"
             onClick={() => void handleClick("approve")}
             disabled={inflight !== null}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-800/60 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-950/60 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-sm border border-emerald-600/30 bg-emerald-600/10 px-2 py-1 text-[11px] font-medium text-emerald-800 transition hover:bg-emerald-600/20 disabled:opacity-50"
           >
             {inflight === "approve" ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
             Approve
@@ -94,7 +94,7 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
             type="button"
             onClick={() => void handleClick("deny")}
             disabled={inflight !== null}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-950/60 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition hover:bg-status-error/20 disabled:opacity-50"
           >
             {inflight === "deny" ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
             Deny
@@ -102,7 +102,7 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
         </div>
       )}
 
-      <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+      <p className="mt-1.5 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
     </div>
   );
 }

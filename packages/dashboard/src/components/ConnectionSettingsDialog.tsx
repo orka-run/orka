@@ -65,63 +65,63 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-800 px-6 py-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4 py-8 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-sm border border-border bg-surface">
+        <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
           <div>
-            <h2 className="text-lg font-semibold text-zinc-100">Connection Settings</h2>
-            <p className="mt-1 text-sm text-zinc-500">
+            <h2 className="text-[13px] font-semibold text-ink">Connection Settings</h2>
+            <p className="mt-0.5 text-[11px] text-ink-muted">
               Choose how the dashboard connects to Orka.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-zinc-800 p-2 text-zinc-400 transition hover:text-zinc-100"
+            className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="space-y-5 px-6 py-5">
+        <div className="space-y-2 px-3 py-2">
           {/* Mode toggle */}
-          <div className="flex gap-2">
+          <div className="flex gap-1">
             <button
               type="button"
               disabled={locked}
               onClick={() => setLocalMode("local")}
-              className={`flex flex-1 items-center gap-2 rounded-xl border px-4 py-3 text-sm transition ${
+              className={`flex flex-1 items-center gap-2 rounded-sm border px-2 py-1.5 text-[12px] transition ${
                 localMode === "local"
-                  ? "border-sky-500/50 bg-sky-500/10 text-sky-400"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                  ? "border-accent/50 bg-accent/10 text-accent-strong"
+                  : "border-border bg-surface-alt text-ink-muted hover:text-ink-secondary"
               } ${locked ? "cursor-not-allowed opacity-60" : ""}`}
             >
               <Monitor className="h-4 w-4 shrink-0" />
               <div className="text-left">
                 <div className="font-medium">Local Daemon</div>
-                <div className="text-xs opacity-70">Daemon manages connections</div>
+                <div className="text-[10px] opacity-70">Daemon manages connections</div>
               </div>
             </button>
             <button
               type="button"
               disabled={locked}
               onClick={() => setLocalMode("hosted")}
-              className={`flex flex-1 items-center gap-2 rounded-xl border px-4 py-3 text-sm transition ${
+              className={`flex flex-1 items-center gap-2 rounded-sm border px-2 py-1.5 text-[12px] transition ${
                 localMode === "hosted"
-                  ? "border-sky-500/50 bg-sky-500/10 text-sky-400"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                  ? "border-accent/50 bg-accent/10 text-accent-strong"
+                  : "border-border bg-surface-alt text-ink-muted hover:text-ink-secondary"
               } ${locked ? "cursor-not-allowed opacity-60" : ""}`}
             >
               <Globe className="h-4 w-4 shrink-0" />
               <div className="text-left">
                 <div className="font-medium">Direct to Relay</div>
-                <div className="text-xs opacity-70">Browser connects directly</div>
+                <div className="text-[10px] opacity-70">Browser connects directly</div>
               </div>
             </button>
           </div>
 
           {locked ? (
-            <p className="text-xs text-zinc-500">
+            <p className="text-[10px] text-ink-muted">
               Mode is locked by {new URLSearchParams(window.location.search).get("mode") ? "URL parameter" : "build configuration"}.
             </p>
           ) : null}
@@ -129,7 +129,7 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
           {isHosted ? (
             <>
               <div>
-                <label htmlFor={endpointUrlId} className="mb-2 block text-sm font-medium text-zinc-200">
+                <label htmlFor={endpointUrlId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
                   Relay URL
                 </label>
                 <input
@@ -138,12 +138,12 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="ws://relay:7390/ws"
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                  className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
                 />
               </div>
 
               <div>
-                <label htmlFor={authTokenId} className="mb-2 block text-sm font-medium text-zinc-200">
+                <label htmlFor={authTokenId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
                   Auth Token
                 </label>
                 <input
@@ -152,28 +152,28 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="Optional"
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700"
+                  className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
                 />
               </div>
 
               {isCustom ? (
-                <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-400">
-                  Connected to <span className="text-zinc-200">{currentUrl}</span>
+                <div className="rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink-muted">
+                  Connected to <span className="text-ink-secondary">{currentUrl}</span>
                 </div>
               ) : null}
             </>
           ) : (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-400">
+            <div className="rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink-muted">
               Connected to local daemon. The daemon manages relay connections, encryption, and node pairing.
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-2">
+          <div className="flex items-center justify-end gap-2 pt-1">
             {isHosted && isCustom ? (
               <button
                 type="button"
                 onClick={handleDisconnect}
-                className="rounded-xl border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:text-zinc-100"
+                className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink"
               >
                 Use Default
               </button>
@@ -181,7 +181,7 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:text-zinc-100"
+              className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink"
             >
               Cancel
             </button>
@@ -189,7 +189,7 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
               type="button"
               onClick={handleSave}
               disabled={isHosted && !url.trim()}
-              className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isHosted ? "Connect" : "Save"}
             </button>

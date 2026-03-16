@@ -59,25 +59,25 @@ function formatTimestamp(timestamp: number): string {
 
 function getDurationTone(duration: number): string {
   if (duration < 100) {
-    return "text-emerald-300";
+    return "text-emerald-700";
   }
   if (duration <= 500) {
-    return "text-amber-300";
+    return "text-status-warning";
   }
-  return "text-red-300";
+  return "text-status-error";
 }
 
 function getConnectionTone(state: ConnectionState): string {
   if (state === "connected") {
-    return "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
+    return "border-emerald-600/40 bg-emerald-600/10 text-emerald-800";
   }
   if (state === "reconnecting") {
-    return "border-amber-500/40 bg-amber-500/10 text-amber-200";
+    return "border-status-warning/40 bg-status-warning/10 text-status-warning";
   }
   if (state === "connecting") {
-    return "border-sky-500/40 bg-sky-500/10 text-sky-200";
+    return "border-accent/40 bg-accent/10 text-accent-strong";
   }
-  return "border-red-500/40 bg-red-500/10 text-red-200";
+  return "border-status-error/40 bg-status-error/10 text-status-error";
 }
 
 function formatConnectionLabel(state: ConnectionState): string {
@@ -204,9 +204,9 @@ export function DevOverlay() {
       <button
         type="button"
         onClick={toggleCollapsed}
-        className="fixed bottom-14 right-2 z-50 flex max-w-[calc(100vw-1rem)] items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-950/90 px-3 py-2 text-xs text-zinc-100 shadow-2xl backdrop-blur sm:bottom-4 sm:right-4"
+        className="fixed bottom-14 right-2 z-50 flex max-w-[calc(100vw-1rem)] items-center gap-2 rounded-sm border border-border bg-surface px-2 py-1.5 text-[11px] text-ink backdrop-blur sm:bottom-4 sm:right-4"
       >
-        <Activity className="h-3.5 w-3.5 text-zinc-400" />
+        <Activity className="h-3.5 w-3.5 text-ink-muted" />
         <span className="font-medium">RPC: {formatDuration(overallAverage)} avg</span>
         <ConnectionIcon className={`h-3.5 w-3.5 ${connectionState === "reconnecting" ? "animate-spin" : ""}`} />
       </button>
@@ -216,77 +216,77 @@ export function DevOverlay() {
   const ConnectionIcon = connectionIcon;
 
   return (
-    <section className="fixed bottom-14 left-2 right-2 z-50 max-h-[min(60vh,34rem)] overflow-hidden rounded-2xl border border-zinc-700/70 bg-zinc-950/88 text-zinc-100 shadow-2xl backdrop-blur sm:bottom-4 sm:left-auto sm:right-4 sm:w-[30rem]">
-      <header className="flex items-start justify-between gap-3 border-b border-zinc-800/80 px-4 py-3">
+    <section className="fixed bottom-14 left-2 right-2 z-50 max-h-[min(60vh,34rem)] overflow-hidden rounded-sm border border-border bg-surface/95 text-ink backdrop-blur sm:bottom-4 sm:left-auto sm:right-4 sm:w-[30rem]">
+      <header className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-zinc-400" />
-            <h2 className="text-sm font-semibold text-zinc-50">Dev Overlay</h2>
+            <Activity className="h-3.5 w-3.5 text-ink-muted" />
+            <h2 className="text-[12px] font-semibold text-ink">Dev Overlay</h2>
           </div>
-          <p className="mt-1 text-xs text-zinc-400">
+          <p className="mt-0.5 text-[10px] text-ink-muted">
             {totalCount} RPC calls, {formatDuration(overallAverage)} weighted average
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <span
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium ${getConnectionTone(connectionState)}`}
+            className={`inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-[10px] font-medium ${getConnectionTone(connectionState)}`}
           >
             <ConnectionIcon
-              className={`h-3.5 w-3.5 ${connectionState === "reconnecting" ? "animate-spin" : ""}`}
+              className={`h-3 w-3 ${connectionState === "reconnecting" ? "animate-spin" : ""}`}
             />
             {formatConnectionLabel(connectionState)}
           </span>
           <button
             type="button"
             onClick={toggleCollapsed}
-            className="rounded-lg border border-zinc-700/80 p-1.5 text-zinc-400 transition hover:text-zinc-100"
+            className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink"
             aria-label="Collapse dev overlay"
           >
-            <ChevronDown className="h-4 w-4" />
+            <ChevronDown className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
             onClick={closeOverlay}
-            className="rounded-lg border border-zinc-700/80 p-1.5 text-zinc-400 transition hover:text-zinc-100"
+            className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink"
             aria-label="Close dev overlay"
           >
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </header>
 
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)]">
+      <div className="grid gap-2 p-2 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)]">
         <section className="min-h-0">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <div className="mb-1 flex items-center justify-between">
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
               Recent Calls
             </h3>
-            <span className="font-mono text-[11px] text-zinc-500">last {recentCalls.length}</span>
+            <span className="font-mono text-[10px] text-ink-muted">last {recentCalls.length}</span>
           </div>
           <div
             ref={recentCallsRef}
-            className="max-h-64 overflow-y-auto rounded-xl border border-zinc-800/80 bg-black/20"
+            className="max-h-64 overflow-y-auto rounded-sm border border-border bg-surface-alt"
           >
             {recentCalls.length === 0 ? (
-              <div className="px-3 py-6 text-center text-sm text-zinc-500">No RPC traffic yet.</div>
+              <div className="px-2 py-4 text-center text-[12px] text-ink-muted">No RPC traffic yet.</div>
             ) : (
-              <div className="divide-y divide-zinc-800/80">
+              <div className="divide-y divide-border">
                 {recentCalls.map((entry, index) => (
                   <div
                     key={`${entry.timestamp}-${entry.method}-${index}`}
-                    className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-3 py-2 text-xs"
+                    className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 px-2 py-1.5 text-[11px]"
                   >
                     <div className="min-w-0">
-                      <div className="truncate font-medium text-zinc-100">{entry.method}</div>
-                      <div className="mt-1 font-mono text-[11px] text-zinc-500">
+                      <div className="truncate font-medium text-ink">{entry.method}</div>
+                      <div className="mt-0.5 font-mono text-[10px] text-ink-muted">
                         {formatTimestamp(entry.timestamp)}
                       </div>
                     </div>
                     <span
-                      className={`rounded-full border px-2 py-0.5 font-medium uppercase tracking-[0.12em] ${
+                      className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] ${
                         entry.status === "ok"
-                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                          : "border-red-500/40 bg-red-500/10 text-red-200"
+                          ? "border-emerald-600/40 bg-emerald-600/10 text-emerald-800"
+                          : "border-status-error/40 bg-status-error/10 text-status-error"
                       }`}
                     >
                       {entry.status}
@@ -302,28 +302,28 @@ export function DevOverlay() {
         </section>
 
         <section className="min-h-0">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <div className="mb-1 flex items-center justify-between">
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
               Method Stats
             </h3>
             <button
               type="button"
               onClick={toggleCollapsed}
-              className="inline-flex items-center gap-1 text-[11px] text-zinc-500 transition hover:text-zinc-300"
+              className="inline-flex items-center gap-1 text-[10px] text-ink-muted transition hover:text-ink-secondary"
             >
               Minimize
-              <ChevronUp className="h-3.5 w-3.5" />
+              <ChevronUp className="h-3 w-3" />
             </button>
           </div>
-          <div className="max-h-64 overflow-y-auto rounded-xl border border-zinc-800/80 bg-black/20">
+          <div className="max-h-64 overflow-y-auto rounded-sm border border-border bg-surface-alt">
             {orderedStats.length === 0 ? (
-              <div className="px-3 py-6 text-center text-sm text-zinc-500">No method data yet.</div>
+              <div className="px-2 py-4 text-center text-[12px] text-ink-muted">No method data yet.</div>
             ) : (
-              <div className="divide-y divide-zinc-800/80">
+              <div className="divide-y divide-border">
                 {orderedStats.map(([method, methodStats]) => (
-                  <div key={method} className="px-3 py-2 text-xs">
-                    <div className="truncate font-medium text-zinc-100">{method}</div>
-                    <div className="mt-1 grid grid-cols-3 gap-2 font-mono text-[11px] text-zinc-400">
+                  <div key={method} className="px-2 py-1.5 text-[11px]">
+                    <div className="truncate font-medium text-ink">{method}</div>
+                    <div className="mt-0.5 grid grid-cols-3 gap-2 font-mono text-[10px] text-ink-muted">
                       <span>
                         avg{" "}
                         <strong className={getDurationTone(methodStats.avg)}>{formatDuration(methodStats.avg)}</strong>
@@ -333,7 +333,7 @@ export function DevOverlay() {
                         <strong className={getDurationTone(methodStats.p95)}>{formatDuration(methodStats.p95)}</strong>
                       </span>
                       <span>
-                        n <strong className="text-zinc-200">{methodStats.count}</strong>
+                        n <strong className="text-ink">{methodStats.count}</strong>
                       </span>
                     </div>
                   </div>

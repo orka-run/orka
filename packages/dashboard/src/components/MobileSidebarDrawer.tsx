@@ -49,7 +49,7 @@ export function MobileSidebarDrawer({ open, onClose, children }: MobileSidebarDr
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/60"
+        className="absolute inset-0 bg-ink/30"
         onClick={onClose}
       />
 
@@ -58,15 +58,15 @@ export function MobileSidebarDrawer({ open, onClose, children }: MobileSidebarDr
         ref={drawerRef}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
-        className={`absolute inset-y-0 left-0 flex w-4/5 max-w-sm flex-col bg-zinc-950 shadow-2xl transition-transform duration-200 safe-area-top safe-area-bottom safe-area-left ${
+        className={`absolute inset-y-0 left-0 flex w-4/5 max-w-sm flex-col bg-surface transition-transform duration-200 safe-area-top safe-area-bottom safe-area-left ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex items-center justify-end px-3 pt-3">
+        <div className="flex items-center justify-end px-2 pt-2">
           <button
             type="button"
             onClick={onClose}
-            className="tap-target inline-flex items-center justify-center rounded-lg text-zinc-400 transition hover:text-zinc-100"
+            className="tap-target inline-flex items-center justify-center rounded-sm text-ink-muted transition hover:text-ink"
           >
             <X className="h-5 w-5" />
           </button>

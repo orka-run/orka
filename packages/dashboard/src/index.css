@@ -1,5 +1,25 @@
-@import "highlight.js/styles/github-dark.css";
+@import "highlight.js/styles/github.css";
 @import "tailwindcss";
+
+@theme {
+  --color-surface: oklch(96.91% 0.013 134.90);
+  --color-surface-alt: oklch(93.72% 0.029 135.59);
+  --color-surface-hover: oklch(87.32% 0.055 135.15);
+  --color-border: oklch(87.32% 0.055 135.15);
+  --color-ink: oklch(22.30% 0.015 136.75);
+  --color-ink-secondary: oklch(43.83% 0.038 135.29);
+  --color-ink-muted: oklch(62.89% 0.057 135.01);
+  --color-accent: oklch(75.93% 0.167 126.18);
+  --color-accent-strong: oklch(52.38% 0.112 125.91);
+  --color-status-running: oklch(87.19% 0.204 120.27);
+  --color-status-error: oklch(63% 0.24 25);
+  --color-status-warning: oklch(80% 0.15 85);
+}
+
+body {
+  font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Safe-area insets for notched/island devices */
 @utility safe-area-top {

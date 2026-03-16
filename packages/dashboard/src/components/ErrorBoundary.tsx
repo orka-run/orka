@@ -136,45 +136,45 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   private renderErrorFallback(error: Error, errorDetails: string | null): ReactNode {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-10 text-zinc-100">
-        <div className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900/95 p-8 shadow-2xl shadow-black/30">
-          <div className="flex items-start gap-4">
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200">
-              <AlertTriangle className="h-6 w-6" />
+      <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-8 text-ink">
+        <div className="w-full max-w-2xl rounded-sm border border-border bg-surface p-6">
+          <div className="flex items-start gap-3">
+            <div className="rounded-sm border border-status-warning/30 bg-status-warning/10 p-2 text-status-warning">
+              <AlertTriangle className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">Application Error</p>
-              <h1 className="mt-2 text-2xl font-semibold text-zinc-50">Something went wrong</h1>
-              <p className="mt-3 break-words text-sm leading-6 text-zinc-300">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-muted">Application Error</p>
+              <h1 className="mt-1 text-[16px] font-semibold text-ink">Something went wrong</h1>
+              <p className="mt-2 break-words text-[12px] leading-6 text-ink-secondary">
                 {error.message || "The dashboard hit an unexpected error."}
               </p>
             </div>
           </div>
           {IS_DEV && errorDetails ? (
-            <details className="mt-6 rounded-xl border border-zinc-800 bg-slate-950/80">
-              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-zinc-300">
+            <details className="mt-4 rounded-sm border border-border bg-surface-alt">
+              <summary className="cursor-pointer list-none px-2 py-1.5 text-[12px] font-medium text-ink-secondary">
                 Stack trace
               </summary>
-              <pre className="overflow-x-auto border-t border-zinc-800 px-4 py-4 text-xs leading-5 text-zinc-400">
+              <pre className="overflow-x-auto border-t border-border px-2 py-2 text-[11px] leading-5 text-ink-muted">
                 {errorDetails}
               </pre>
             </details>
           ) : null}
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={this.handleRetry}
-              className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-white"
+              className="inline-flex items-center gap-2 rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent"
             >
-              <RotateCw className="h-4 w-4" />
+              <RotateCw className="h-3.5 w-3.5" />
               Retry
             </button>
             <button
               type="button"
               onClick={this.handleReload}
-              className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-100 transition hover:border-zinc-600 hover:bg-zinc-800"
+              className="inline-flex items-center gap-2 rounded-sm border border-border px-3 py-1.5 text-[12px] font-medium text-ink-secondary transition hover:text-ink"
             >
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCcw className="h-3.5 w-3.5" />
               Reload
             </button>
           </div>
@@ -186,16 +186,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   private renderBanner(banner: ErrorBannerState): ReactNode {
     return (
       <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
-        <div className="pointer-events-auto flex w-full max-w-2xl items-start gap-3 rounded-xl border border-amber-500/30 bg-zinc-900/95 px-4 py-3 text-sm text-zinc-100 shadow-lg shadow-black/25 backdrop-blur">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+        <div className="pointer-events-auto flex w-full max-w-2xl items-start gap-2 rounded-sm border border-status-warning/30 bg-surface px-3 py-2 text-[12px] text-ink backdrop-blur">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" />
           <div className="min-w-0 flex-1">
-            <p className="font-medium text-zinc-50">Unhandled promise rejection</p>
-            <p className="mt-1 break-words text-zinc-300">{banner.message}</p>
+            <p className="font-medium text-ink">Unhandled promise rejection</p>
+            <p className="mt-0.5 break-words text-ink-secondary">{banner.message}</p>
           </div>
           <button
             type="button"
             onClick={this.dismissBanner}
-            className="rounded-md px-2 py-1 text-xs font-medium text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
+            className="rounded-sm px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-surface-hover hover:text-ink"
           >
             Dismiss
           </button>

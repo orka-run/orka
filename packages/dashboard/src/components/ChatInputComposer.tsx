@@ -90,8 +90,8 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
   }
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950 px-4 py-4">
-      <div className="flex items-end gap-3">
+    <div className="border-t border-border bg-surface px-2 py-2">
+      <div className="flex items-end gap-2">
         <div className="min-w-0 flex-1">
           <textarea
             id={textareaId}
@@ -123,17 +123,17 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
                 void submit();
               }
             }}
-            className={`min-h-11 w-full resize-none rounded-lg border bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:ring-2 disabled:cursor-not-allowed disabled:bg-zinc-900/70 disabled:text-zinc-500 ${
+            className={`min-h-9 w-full resize-none rounded-sm border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:ring-1 disabled:cursor-not-allowed disabled:bg-surface-alt/70 disabled:text-ink-muted ${
               sendError
-                ? "border-red-500/70 focus:border-red-500/70 focus:ring-red-500/20"
-                : "border-zinc-800 focus:border-sky-500/70 focus:ring-sky-500/20"
+                ? "border-status-error/50 focus:border-status-error/50 focus:ring-status-error/20"
+                : "border-border focus:border-accent focus:ring-accent/20"
             }`}
             style={{ maxHeight: `${MAX_TEXTAREA_HEIGHT}px` }}
           />
           {sendError ? (
-            <p className="mt-2 text-xs text-red-400">{sendError}</p>
+            <p className="mt-1 text-[11px] text-status-error">{sendError}</p>
           ) : inputState !== "waiting" ? (
-            <p className={`mt-2 text-xs ${inputState === "busy" ? "animate-pulse text-sky-300" : "text-zinc-500"}`}>
+            <p className={`mt-1 text-[11px] ${inputState === "busy" ? "animate-pulse text-accent-strong" : "text-ink-muted"}`}>
               {STATE_MESSAGES[inputState]}
             </p>
           ) : null}
@@ -143,10 +143,10 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
           onClick={() => void submit()}
           disabled={!canSend}
           aria-label="Send message"
-          className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white transition ${
+          className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-white transition ${
             canSend
-              ? "bg-sky-500 hover:bg-sky-400"
-              : "cursor-not-allowed bg-zinc-700 text-zinc-300"
+              ? "bg-accent-strong hover:bg-accent"
+              : "cursor-not-allowed bg-surface-hover text-ink-muted"
           }`}
         >
           {isSending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}

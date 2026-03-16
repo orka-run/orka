@@ -176,8 +176,8 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/50">
-        <div className="flex items-center gap-3 text-sm text-zinc-400">
+      <div className="flex h-full items-center justify-center rounded-sm border border-border bg-surface">
+        <div className="flex items-center gap-2 text-[12px] text-ink-muted">
           <LoaderCircle className="h-4 w-4 animate-spin" />
           Loading logs…
         </div>
@@ -187,30 +187,30 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
 
   if (error) {
     return (
-      <div className="rounded-xl border border-red-950 bg-red-950/20 p-4 text-sm text-red-200">
+      <div className="rounded-sm border border-status-error/30 bg-status-error/10 p-2 text-[12px] text-status-error">
         <p className="font-medium">Unable to load session logs.</p>
-        <p className="mt-1 text-red-200/80">{error}</p>
+        <p className="mt-1 opacity-80">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/70">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+    <div className="flex h-full flex-col overflow-hidden rounded-sm border border-border bg-surface">
+      <div className="flex items-center justify-between border-b border-border px-2 py-1">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Session Logs</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Session Logs</p>
           {isRunning ? (
-            <p className="mt-1 text-sm text-zinc-400">Streaming live output…</p>
+            <p className="mt-0.5 text-[11px] text-ink-muted">Streaming live output…</p>
           ) : (
-            <p className="mt-1 text-sm text-zinc-400">
+            <p className="mt-0.5 text-[11px] text-ink-muted">
               {spans.length > 0 ? `${String(lineCountRef.current)} lines` : "No log output"}
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {isRunning ? (
-            <span className="flex items-center gap-1.5 rounded-full bg-emerald-950/60 px-2.5 py-1 text-xs text-emerald-300">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            <span className="flex items-center gap-1 rounded-sm bg-emerald-600/10 px-1.5 py-0.5 text-[10px] text-emerald-700">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-sm bg-emerald-600" />
               Live
             </span>
           ) : null}
@@ -221,9 +221,9 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-full overflow-y-auto bg-zinc-950 p-4"
+          className="h-full overflow-y-auto bg-surface p-2"
         >
-          <pre className="overflow-x-auto font-mono text-xs leading-5 text-zinc-300 [-webkit-overflow-scrolling:touch]">
+          <pre className="overflow-x-auto font-mono text-[11px] leading-5 text-ink-secondary [-webkit-overflow-scrolling:touch]">
             {spans.length > 0 ? (
               spans.map((span, i) => (
                 <span key={i} style={span.style}>
@@ -231,7 +231,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
                 </span>
               ))
             ) : (
-              <span className="text-zinc-500">No log output yet.</span>
+              <span className="text-ink-muted">No log output yet.</span>
             )}
           </pre>
         </div>
@@ -240,7 +240,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
           <button
             type="button"
             onClick={scrollToBottom}
-            className="absolute bottom-4 right-6 flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800/90 px-3 py-1.5 text-xs text-zinc-300 shadow-lg backdrop-blur transition hover:bg-zinc-700"
+            className="absolute bottom-2 right-4 flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink-secondary backdrop-blur transition hover:bg-surface-hover"
           >
             <ArrowDown className="h-3 w-3" />
             Scroll to bottom

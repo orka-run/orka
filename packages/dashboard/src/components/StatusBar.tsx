@@ -13,20 +13,20 @@ interface StatusBarProps {
 function getConnectionIndicator(status: ReturnType<typeof useConnectionStore.getState>["status"]) {
   if (status === "connected") {
     return {
-      dotClassName: "bg-emerald-400",
+      dotClassName: "bg-emerald-600",
       label: "Connected",
     };
   }
 
   if (status === "connecting" || status === "reconnecting") {
     return {
-      dotClassName: "bg-amber-400",
+      dotClassName: "bg-amber-500",
       label: "Connecting...",
     };
   }
 
   return {
-    dotClassName: "bg-red-400",
+    dotClassName: "bg-status-error",
     label: "Disconnected",
   };
 }
@@ -44,25 +44,25 @@ export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConne
   const connectionTarget = mode === "local" ? "Local daemon" : endpointUrl;
 
   return (
-    <footer className="flex items-center justify-between border-t border-zinc-800 bg-zinc-900 px-4 py-1.5 text-xs text-zinc-500">
-      <div className="flex items-center gap-3">
+    <footer className="flex items-center justify-between border-t border-border bg-surface-alt px-2 py-1 text-[11px] text-ink-muted">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onOpenConnectionSettings}
-          className="inline-flex items-center gap-1.5 text-zinc-300 transition hover:text-zinc-100"
+          className="inline-flex items-center gap-1.5 text-ink-secondary transition hover:text-ink"
           title="Connection settings"
         >
-          <span className={`h-2 w-2 rounded-full ${dotClassName}`} />
+          <span className={`h-2 w-2 rounded-sm ${dotClassName}`} />
           <span>
             {label}
             {reconnectLabel}
           </span>
           {connectionTarget ? (
-            <span className="max-w-48 truncate text-zinc-500" title={connectionTarget}>
+            <span className="max-w-48 truncate text-ink-muted" title={connectionTarget}>
               {connectionTarget}
             </span>
           ) : null}
-          <Settings className="h-3 w-3 text-zinc-600" />
+          <Settings className="h-3 w-3 text-ink-muted" />
         </button>
         {showRtt ? <span>RTT: {Math.round(connectionRtt)}ms</span> : null}
         <span>

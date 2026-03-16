@@ -23,13 +23,13 @@ interface SessionViewProps {
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  running: { bg: "bg-blue-950/60", text: "text-blue-300", dot: "bg-blue-400" },
-  queued: { bg: "bg-yellow-950/60", text: "text-yellow-300", dot: "bg-yellow-400" },
-  preparing: { bg: "bg-yellow-950/60", text: "text-yellow-300", dot: "bg-yellow-400" },
-  completed: { bg: "bg-emerald-950/60", text: "text-emerald-300", dot: "bg-emerald-400" },
-  failed: { bg: "bg-red-950/60", text: "text-red-300", dot: "bg-red-400" },
-  cancelled: { bg: "bg-zinc-800/60", text: "text-zinc-400", dot: "bg-zinc-500" },
-  interrupted: { bg: "bg-orange-950/60", text: "text-orange-300", dot: "bg-orange-400" },
+  running: { bg: "bg-accent/10", text: "text-accent-strong", dot: "bg-accent" },
+  queued: { bg: "bg-status-warning/10", text: "text-status-warning", dot: "bg-status-warning" },
+  preparing: { bg: "bg-status-warning/10", text: "text-status-warning", dot: "bg-status-warning" },
+  completed: { bg: "bg-emerald-600/10", text: "text-emerald-700", dot: "bg-emerald-600" },
+  failed: { bg: "bg-status-error/10", text: "text-status-error", dot: "bg-status-error" },
+  cancelled: { bg: "bg-surface-alt", text: "text-ink-muted", dot: "bg-ink-muted" },
+  interrupted: { bg: "bg-orange-500/10", text: "text-orange-600", dot: "bg-orange-500" },
 };
 
 const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
@@ -37,8 +37,8 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
 function StatusBadge({ status }: { status: string }) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS["cancelled"]!;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${colors.bg} ${colors.text}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${colors.dot}`} />
+    <span className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${colors.bg} ${colors.text}`}>
+      <span className={`h-1.5 w-1.5 rounded-sm ${colors.dot}`} />
       {status}
     </span>
   );
@@ -95,7 +95,7 @@ export function SessionView({
 
   if (!session) {
     return (
-      <div className="flex h-full items-center justify-center text-zinc-500">
+      <div className="flex h-full items-center justify-center text-ink-muted">
         Session metadata is unavailable.
       </div>
     );
@@ -128,34 +128,34 @@ export function SessionView({
   // On mobile: no internal header — MobileHeader and MobileTabBar handle navigation.
   // On desktop: render full header with tab switcher.
   const header = isMobile ? null : (
-    <header className="border-b border-zinc-800 px-6 py-3">
-      <div className="flex items-center justify-between gap-4">
+    <header className="border-b border-border px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-lg font-semibold text-zinc-100">{activeSession.title}</p>
-          <p className="mt-1 font-mono text-sm text-zinc-500">{sessionId}</p>
+          <p className="truncate text-[13px] font-semibold text-ink">{activeSession.title}</p>
+          <p className="mt-0.5 font-mono text-[11px] text-ink-muted">{sessionId}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1">
           {isStoppable ? (
             <button
               type="button"
               onClick={() => void handleStopSession()}
               disabled={isStopping}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-200 transition hover:bg-red-950/60 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition hover:bg-status-error/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
-              Stop Session
+              {isStopping ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3" />}
+              Stop
             </button>
           ) : null}
-          <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
+          <div className="flex rounded-sm border border-border bg-surface-alt p-0.5">
             {(["overview", "chat", "logs", "diff"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
                 onClick={() => setDesktopTab(tab)}
-                className={`rounded-md px-3 py-1.5 text-sm ${
+                className={`rounded-sm px-2 py-1 text-[11px] ${
                   activeTab === tab
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-500 transition hover:text-zinc-200"
+                    ? "bg-surface-hover text-ink"
+                    : "text-ink-muted transition hover:text-ink-secondary"
                 }`}
               >
                 {TAB_ICONS[tab]}
@@ -164,27 +164,27 @@ export function SessionView({
           </div>
         </div>
       </div>
-      {stopError ? <p className="mt-3 text-sm text-red-300">{stopError}</p> : null}
+      {stopError ? <p className="mt-1 text-[11px] text-status-error">{stopError}</p> : null}
     </header>
   );
 
   // On mobile, show a slim stop-session bar if the session is stoppable
   const mobileStopBar = isMobile && isStoppable ? (
-    <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
+    <div className="flex items-center gap-2 border-b border-border px-2 py-1">
       <button
         type="button"
         onClick={() => void handleStopSession()}
         disabled={isStopping}
-        className="flex items-center gap-1.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-300 transition active:bg-red-950/50 disabled:opacity-50"
+        className="flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition active:bg-status-error/20 disabled:opacity-50"
       >
         {isStopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
         Stop
       </button>
-      {stopError ? <p className="text-xs text-red-300">{stopError}</p> : null}
+      {stopError ? <p className="text-[11px] text-status-error">{stopError}</p> : null}
     </div>
   ) : null;
 
-  const contentPadding = isMobile ? "p-3" : "p-6";
+  const contentPadding = isMobile ? "p-2" : "p-3";
 
   return (
     <div className="flex h-full flex-col">
@@ -256,14 +256,14 @@ function OverviewTab({
   }, [isFinished, onSelectionLoadSettled, resultQuery.error, resultQuery.isError, resultQuery.isSuccess]);
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,1fr)]">
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Overview</p>
-          <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+    <div className="space-y-2">
+      <div className="grid gap-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,1fr)]">
+        <section className="rounded-sm border border-border bg-surface-alt p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Overview</p>
+          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Status</dt>
-              <dd className="mt-2"><StatusBadge status={session.status} /></dd>
+              <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Status</dt>
+              <dd className="mt-1"><StatusBadge status={session.status} /></dd>
             </div>
             <MetadataItem label="Backend" value={session.backend} />
             <MetadataItem label="Model" value={session.model ?? result?.model ?? "Default"} />
@@ -275,12 +275,12 @@ function OverviewTab({
             />
             {session.exitCode != null && (
               <div>
-                <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Exit Code</dt>
-                <dd className="mt-2">
-                  <span className={`inline-flex rounded-full px-2 py-0.5 font-mono text-xs font-medium ${
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Exit Code</dt>
+                <dd className="mt-1">
+                  <span className={`inline-flex rounded-sm px-1.5 py-0.5 font-mono text-[11px] font-medium ${
                     session.exitCode === 0
-                      ? "bg-emerald-950/60 text-emerald-300"
-                      : "bg-red-950/60 text-red-300"
+                      ? "bg-emerald-600/10 text-emerald-700"
+                      : "bg-status-error/10 text-status-error"
                   }`}>
                     {session.exitCode}
                   </span>
@@ -288,21 +288,21 @@ function OverviewTab({
               </div>
             )}
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Kept</dt>
-              <dd className="mt-2 flex items-center gap-1.5 text-sm text-zinc-100">
+              <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Kept</dt>
+              <dd className="mt-1 flex items-center gap-1 text-[12px] text-ink">
                 {session.kept ? (
-                  <><Shield className="h-3.5 w-3.5 text-amber-400" /> Protected</>
+                  <><Shield className="h-3.5 w-3.5 text-status-warning" /> Protected</>
                 ) : (
-                  <><ShieldOff className="h-3.5 w-3.5 text-zinc-500" /> No</>
+                  <><ShieldOff className="h-3.5 w-3.5 text-ink-muted" /> No</>
                 )}
               </dd>
             </div>
           </dl>
         </section>
 
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Paths</p>
-          <dl className="mt-4 space-y-4">
+        <section className="rounded-sm border border-border bg-surface-alt p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Paths</p>
+          <dl className="mt-2 space-y-2">
             <MetadataItem label="Session ID" value={session.id} mono />
             <MetadataItem label="Task ID" value={session.taskId} mono />
             <MetadataItem label="Project Path" value={session.projectPath} mono />
@@ -314,9 +314,9 @@ function OverviewTab({
       </div>
 
       {result && (
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Usage</p>
-          <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="rounded-sm border border-border bg-surface-alt p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Usage</p>
+          <dl className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <MetadataItem label="Cost" value={formatCost(result.costUsd)} />
             <MetadataItem label="Input Tokens" value={formatTokenCount(result.inputTokens)} />
             <MetadataItem label="Output Tokens" value={formatTokenCount(result.outputTokens)} />
@@ -329,21 +329,21 @@ function OverviewTab({
       )}
 
       {session.prompt && (
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
+        <section className="rounded-sm border border-border bg-surface-alt p-3">
           <button
             type="button"
             onClick={() => setPromptExpanded(!promptExpanded)}
             className="flex w-full items-center gap-2 text-left"
           >
             {promptExpanded ? (
-              <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
             ) : (
-              <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
             )}
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Prompt</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Prompt</p>
           </button>
           {promptExpanded && (
-            <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 font-mono text-sm leading-relaxed text-zinc-300">
+            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border bg-surface p-2 font-mono text-[11px] leading-relaxed text-ink-secondary">
               {session.prompt}
             </pre>
           )}
@@ -364,8 +364,8 @@ function MetadataItem({
 }) {
   return (
     <div>
-      <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</dt>
-      <dd className={`mt-2 text-sm text-zinc-100 ${mono ? "break-all font-mono" : ""}`}>{value}</dd>
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">{label}</dt>
+      <dd className={`mt-1 text-[12px] text-ink ${mono ? "break-all font-mono" : ""}`}>{value}</dd>
     </div>
   );
 }

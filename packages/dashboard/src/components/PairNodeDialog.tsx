@@ -282,15 +282,15 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
   const canStart = code.replace(/-/g, "").length >= 20 && relayUrl.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4 py-8 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-sm border border-border bg-surface">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-800 px-6 py-5">
+        <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
           <div>
-            <h2 className="text-lg font-semibold text-zinc-100">Pair Node</h2>
-            <p className="mt-1 text-sm text-zinc-500">
+            <h2 className="text-[13px] font-semibold text-ink">Pair Node</h2>
+            <p className="mt-0.5 text-[11px] text-ink-muted">
               Enter the code from{" "}
-              <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300">
+              <code className="rounded-sm border border-border bg-surface-alt px-1 py-0.5 text-[10px] text-ink-secondary">
                 orka node pair start
               </code>
             </p>
@@ -298,37 +298,37 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-zinc-800 p-2 text-zinc-400 transition hover:text-zinc-100"
+            className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="space-y-5 px-6 py-5">
+        <div className="space-y-2 px-3 py-2">
           {step === "done" && doneResult ? (
             /* Success state */
-            <div className="space-y-4">
-              <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-4">
+            <div className="space-y-2">
+              <div className="rounded-sm border border-emerald-600/30 bg-emerald-600/5 px-2 py-2">
                 <div className="flex items-center gap-2">
-                  <Check className="h-5 w-5 text-emerald-400" />
-                  <span className="text-sm font-medium text-emerald-200">Pairing successful</span>
+                  <Check className="h-4 w-4 text-emerald-700" />
+                  <span className="text-[12px] font-medium text-emerald-800">Pairing successful</span>
                 </div>
-                <div className="mt-3 space-y-1 text-sm text-zinc-300">
+                <div className="mt-2 space-y-1 text-[12px] text-ink-secondary">
                   <p>
-                    Node: <span className="text-zinc-100">{doneResult.nodeName}</span>
+                    Node: <span className="text-ink">{doneResult.nodeName}</span>
                   </p>
                   <p>
-                    ID: <span className="font-mono text-xs text-zinc-400">{doneResult.nodeId}</span>
+                    ID: <span className="font-mono text-[11px] text-ink-muted">{doneResult.nodeId}</span>
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-2 pt-1">
                 {mode === "local" ? (
                   <button
                     type="button"
                     onClick={onClose}
-                    className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400"
+                    className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent"
                   >
                     Done
                   </button>
@@ -337,14 +337,14 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
                     <button
                       type="button"
                       onClick={onClose}
-                      className="rounded-xl border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:text-zinc-100"
+                      className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink"
                     >
                       Close
                     </button>
                     <button
                       type="button"
                       onClick={handleConnect}
-                      className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400"
+                      className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent"
                     >
                       Connect
                     </button>
@@ -356,7 +356,7 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
             /* Form / Progress state */
             <>
               <div>
-                <label htmlFor={codeInputId} className="mb-2 block text-sm font-medium text-zinc-200">
+                <label htmlFor={codeInputId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
                   Pairing Code
                 </label>
                 <input
@@ -366,12 +366,12 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
                   onChange={(e) => setCode(formatCodeInput(e.target.value))}
                   placeholder="XXXX-XXXX-XXXX-XXXX-XXXXX"
                   disabled={isPairing}
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 font-mono text-sm tracking-wider text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700 disabled:opacity-50"
+                  className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 font-mono text-[12px] tracking-wider text-ink outline-none transition placeholder:text-ink-muted focus:border-accent disabled:opacity-50"
                 />
               </div>
 
               <div>
-                <label htmlFor={relayUrlId} className="mb-2 block text-sm font-medium text-zinc-200">
+                <label htmlFor={relayUrlId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
                   Relay URL
                 </label>
                 <input
@@ -381,41 +381,41 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
                   onChange={(e) => setRelayUrl(e.target.value)}
                   placeholder="ws://relay:7390"
                   disabled={isPairing}
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-zinc-700 disabled:opacity-50"
+                  className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent disabled:opacity-50"
                 />
               </div>
 
               {/* Progress indicator */}
               {isPairing && (
-                <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-sky-400" />
+                <div className="rounded-sm border border-border bg-surface-alt px-2 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-accent-strong" />
                     {mode === "local" ? (
-                      <span className="text-sm text-sky-300">Pairing via daemon...</span>
+                      <span className="text-[12px] text-accent-strong">Pairing via daemon...</span>
                     ) : (
-                      <span className="text-sm text-zinc-300">
-                        <span className="text-sky-300">
+                      <span className="text-[12px] text-ink-secondary">
+                        <span className="text-accent-strong">
                           {STEPS.find((s) => s.key === step)?.label}
                         </span>
-                        <span className="ml-2 text-zinc-500">
+                        <span className="ml-2 text-ink-muted">
                           ({STEPS.findIndex((s) => s.key === step) + 1}/{STEPS.length})
                         </span>
                       </span>
                     )}
                   </div>
                   {mode !== "local" && (
-                    <div className="mt-2 flex gap-1">
+                    <div className="mt-1.5 flex gap-1">
                       {STEPS.map(({ key }, i) => {
                         const currentIndex = STEPS.findIndex((s) => s.key === step);
                         return (
                           <div
                             key={key}
-                            className={`h-1 flex-1 rounded-full transition-colors ${
+                            className={`h-1 flex-1 rounded-sm transition-colors ${
                               i < currentIndex
-                                ? "bg-emerald-500"
+                                ? "bg-emerald-600"
                                 : i === currentIndex
-                                  ? "bg-sky-500"
-                                  : "bg-zinc-800"
+                                  ? "bg-accent-strong"
+                                  : "bg-border"
                             }`}
                           />
                         );
@@ -427,18 +427,18 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
 
               {/* Error */}
               {error && (
-                <div className="flex items-start gap-2 rounded-xl border border-red-950 bg-red-950/30 px-4 py-3 text-sm text-red-200">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="flex items-start gap-2 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1.5 text-[12px] text-status-error">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>{error}</span>
                 </div>
               )}
 
               {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-xl border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:text-zinc-100"
+                  className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink"
                 >
                   Cancel
                 </button>
@@ -446,11 +446,11 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
                   type="button"
                   onClick={startPairing}
                   disabled={!canStart || isPairing}
-                  className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isPairing ? (
                     <span className="flex items-center gap-2">
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                       Pairing...
                     </span>
                   ) : (

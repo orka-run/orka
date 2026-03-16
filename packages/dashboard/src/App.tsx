@@ -335,17 +335,17 @@ function AppShell({ transport }: AppShellProps) {
       onOpenAdvanced={handleOpenAdvanced}
     />
   ) : (
-    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="rounded-full bg-zinc-800 p-4">
-        <svg className="h-8 w-8 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+      <div className="rounded-sm bg-surface-alt p-3">
+        <svg className="h-8 w-8 text-ink-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
         </svg>
       </div>
-      <p className="text-sm text-zinc-400">Select a session to view details</p>
+      <p className="text-[12px] text-ink-muted">Select a session to view details</p>
       <button
         type="button"
         onClick={activateDraft}
-        className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-white"
+        className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent"
       >
         New Session
       </button>
@@ -366,9 +366,9 @@ function AppShell({ transport }: AppShellProps) {
       onOpenAdvanced={handleOpenAdvanced}
     />
   ) : (
-    <div className="flex h-full items-center justify-center text-zinc-500">
+    <div className="flex h-full items-center justify-center text-ink-muted text-[12px]">
       Select a session or press{" "}
-      <kbd className="mx-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 font-mono text-xs">
+      <kbd className="mx-1 rounded-sm border border-border bg-surface-alt px-1.5 py-0.5 font-mono text-[11px]">
         Ctrl+N
       </kbd>{" "}
       to start a new chat

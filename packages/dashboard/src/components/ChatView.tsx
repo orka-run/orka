@@ -612,7 +612,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
   if (!session) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4 text-sm text-zinc-400">
+      <div className="rounded-sm border border-border bg-surface p-2 text-[12px] text-ink-muted">
         Session data is unavailable.
       </div>
     );
@@ -678,8 +678,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/50">
-        <div className="flex items-center gap-3 text-sm text-zinc-400">
+      <div className="flex h-full items-center justify-center rounded-sm border border-border bg-surface">
+        <div className="flex items-center gap-2 text-[12px] text-ink-muted">
           <LoaderCircle className="h-4 w-4 animate-spin" />
           Loading chat timeline…
         </div>
@@ -689,19 +689,19 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
   if (error) {
     return (
-      <div className="rounded-xl border border-red-950 bg-red-950/20 p-4 text-sm text-red-200">
+      <div className="rounded-sm border border-status-error/30 bg-status-error/10 p-2 text-[12px] text-status-error">
         <p className="font-medium">Unable to load chat timeline.</p>
-        <p className="mt-1 text-red-200/80">{error}</p>
+        <p className="mt-1 opacity-80">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/70">
+    <div className="flex h-full flex-col overflow-hidden rounded-sm border border-border bg-surface">
       {!isMobile && (
-        <div className="border-b border-zinc-800 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Chat Timeline</p>
-          <p className="mt-1 text-sm text-zinc-400">
+        <div className="border-b border-border px-2 py-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Chat Timeline</p>
+          <p className="mt-0.5 text-[11px] text-ink-muted">
             {isRunning(activeSession.status) ? "Streaming live events…" : `${String(entries.length)} events`}
           </p>
         </div>
@@ -710,11 +710,11 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-full flex-1 overflow-y-auto overflow-x-hidden px-4 py-4"
+          className="h-full flex-1 overflow-y-auto overflow-x-hidden px-2 py-2"
         >
-          <div className="min-w-0 space-y-4">
+          <div className="min-w-0 space-y-2">
             {entries.length === 0 ? (
-              <div className="py-12 text-center text-sm text-zinc-500">No messages yet.</div>
+              <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
             ) : (
               entries.map((entry) => (
                 <TimelineEntry
@@ -735,22 +735,22 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           <button
             type="button"
             onClick={scrollToBottom}
-            className="absolute bottom-4 right-6 flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800/90 px-3 py-1.5 text-xs text-zinc-300 shadow-lg backdrop-blur transition hover:bg-zinc-700"
+            className="absolute bottom-2 right-4 flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink-secondary backdrop-blur transition hover:bg-surface-hover"
           >
             <ArrowDown className="h-3 w-3" />
             Scroll to bottom
           </button>
         ) : null}
       </div>
-      <div className="border-t border-zinc-800">
+      <div className="border-t border-border">
         {(isRunning(activeSession.status) || isTerminal(activeSession.status)) && (
-          <div className="flex items-center gap-2 px-4 py-2">
+          <div className="flex items-center gap-1 px-2 py-1">
             {isRunning(activeSession.status) && (
               <button
                 type="button"
                 onClick={() => { void handleStop(); }}
                 disabled={stopping}
-                className="flex items-center gap-1.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-950/50 disabled:opacity-50"
+                className="flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition hover:bg-status-error/20 disabled:opacity-50"
               >
                 {stopping ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
                 Stop
@@ -761,7 +761,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
                 type="button"
                 onClick={() => { void handleRetry(); }}
                 disabled={retrying}
-                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 disabled:opacity-50"
+                className="flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:bg-surface-hover disabled:opacity-50"
               >
                 {retrying ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
                 Retry
@@ -784,14 +784,14 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 function ThinkingIndicator({ state }: { state: ThinkingState }) {
   if (state === "thinking") {
     return (
-      <div className="flex items-center gap-3 px-1 py-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
-          <Bot className="h-4 w-4" />
+      <div className="flex items-center gap-2 px-1 py-1">
+        <div className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">
+          <Bot className="h-3.5 w-3.5" />
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
-          <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse [animation-delay:0.2s]" />
-          <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse [animation-delay:0.4s]" />
+        <div className="flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-sm bg-accent animate-pulse" />
+          <span className="h-1.5 w-1.5 rounded-sm bg-accent animate-pulse [animation-delay:0.2s]" />
+          <span className="h-1.5 w-1.5 rounded-sm bg-accent animate-pulse [animation-delay:0.4s]" />
         </div>
       </div>
     );
@@ -799,11 +799,11 @@ function ThinkingIndicator({ state }: { state: ThinkingState }) {
 
   if (state === "tools") {
     return (
-      <div className="flex items-center gap-3 px-1 py-2 text-sm text-zinc-400">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
-          <Bot className="h-4 w-4" />
+      <div className="flex items-center gap-2 px-1 py-1 text-[12px] text-ink-muted">
+        <div className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">
+          <Bot className="h-3.5 w-3.5" />
         </div>
-        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+        <LoaderCircle className="h-3 w-3 animate-spin" />
         Running tools…
       </div>
     );
@@ -830,13 +830,13 @@ function TimelineEntry({
 
   if (entry.type === "assistant") {
     return (
-      <div className="flex items-start gap-3">
-        <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
-          <Bot className="h-4 w-4" />
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">
+          <Bot className="h-3.5 w-3.5" />
         </div>
-        <div className="min-w-0 max-w-full rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-900 px-4 py-3 lg:max-w-3xl [overflow-wrap:anywhere]">
+        <div className="min-w-0 max-w-full rounded-sm rounded-tl-none border border-border bg-surface-alt px-2 py-1.5 lg:max-w-3xl [overflow-wrap:anywhere]">
           <MarkdownContent content={entry.body} />
-          <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+          <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
         </div>
       </div>
     );
@@ -845,13 +845,13 @@ function TimelineEntry({
   if (entry.type === "user") {
     return (
       <div className="flex justify-end">
-        <div className="flex max-w-full items-start gap-3 lg:max-w-3xl">
-          <div className="min-w-0 rounded-2xl rounded-tr-md border border-indigo-900/50 bg-zinc-900 px-4 py-3 [overflow-wrap:anywhere]">
+        <div className="flex max-w-full items-start gap-2 lg:max-w-3xl">
+          <div className="min-w-0 rounded-sm rounded-tr-none border border-accent/20 bg-accent/5 px-2 py-1.5 [overflow-wrap:anywhere]">
             <MarkdownContent content={entry.body} />
-            <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+            <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
           </div>
-          <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
-            <User className="h-4 w-4" />
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">
+            <User className="h-3.5 w-3.5" />
           </div>
         </div>
       </div>
@@ -866,31 +866,31 @@ function TimelineEntry({
       const tool = entry.tools[0];
       if (!tool) return null;
       return (
-        <div className="flex min-w-0 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-2.5">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
-            {tool.inProgress ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : toolIconEl(tool.icon, "h-3.5 w-3.5")}
+        <div className="flex min-w-0 items-center gap-2 rounded-sm border border-border bg-surface-alt px-2 py-1">
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-ink-muted">
+            {tool.inProgress ? <LoaderCircle className="h-3 w-3 animate-spin" /> : toolIconEl(tool.icon, "h-3 w-3")}
           </div>
-          <span className="min-w-0 truncate text-sm text-zinc-300">{tool.title}</span>
+          <span className="min-w-0 truncate text-[11px] text-ink-secondary">{tool.title}</span>
         </div>
       );
     }
 
     // Shared inner tool list for multi-tool groups
     const toolsList = (
-      <div className="border-t border-zinc-800">
+      <div className="border-t border-border">
         {entry.tools.map((tool) => (
-          <details key={tool.id} className="overflow-hidden border-b border-zinc-800/50 last:border-b-0">
-            <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-zinc-800/80 text-zinc-400">
+          <details key={tool.id} className="overflow-hidden border-b border-border/50 last:border-b-0">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1">
+              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-ink-muted">
                 {tool.inProgress ? <LoaderCircle className="h-3 w-3 animate-spin" /> : toolIconEl(tool.icon, "h-3 w-3")}
               </div>
-              <span className="min-w-0 truncate text-xs font-medium text-zinc-300">{tool.title}</span>
+              <span className="min-w-0 truncate text-[11px] font-medium text-ink-secondary">{tool.title}</span>
               {tool.summary !== tool.title ? (
-                <span className="ml-auto max-w-[40%] shrink-0 truncate text-xs text-zinc-500">{tool.summary}</span>
+                <span className="ml-auto max-w-[40%] shrink-0 truncate text-[10px] text-ink-muted">{tool.summary}</span>
               ) : null}
             </summary>
             {tool.details.length > 0 ? (
-              <div className="border-t border-zinc-800/30 px-4 py-2">
+              <div className="border-t border-border/30 px-2 py-1">
                 <ToolCallDetails title={tool.title} details={tool.details} args={tool.args} />
               </div>
             ) : null}
@@ -910,21 +910,21 @@ function TimelineEntry({
             const newState = (e.currentTarget as HTMLDetailsElement).open;
             if (newState !== isOpen) onToggleExpand?.(entry.id, newState);
           }}
-          className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70"
+          className="overflow-hidden rounded-sm border border-border bg-surface-alt"
         >
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-2.5">
-            <div className="flex items-center gap-2.5">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1">
+            <div className="flex items-center gap-1.5">
               {isOpen ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform" />
+                <ChevronDown className="h-3 w-3 shrink-0 text-ink-muted transition-transform" />
               ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform" />
+                <ChevronRight className="h-3 w-3 shrink-0 text-ink-muted transition-transform" />
               )}
-              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
-                {hasInProgress ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
+              <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-surface-hover text-ink-muted">
+                {hasInProgress ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Wrench className="h-3 w-3" />}
               </div>
-              <p className="text-sm text-zinc-400">{summary}</p>
+              <p className="text-[11px] text-ink-muted">{summary}</p>
             </div>
-            <div className="shrink-0 text-xs text-zinc-500">{formatRelativeTime(entry.timestamp)}</div>
+            <div className="shrink-0 text-[10px] text-ink-muted">{formatRelativeTime(entry.timestamp)}</div>
           </summary>
           {toolsList}
         </details>
@@ -938,16 +938,16 @@ function TimelineEntry({
     return (
       <details
         open
-        className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70"
+        className="overflow-hidden rounded-sm border border-border bg-surface-alt"
       >
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
-              {hasInProgress ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1">
+          <div className="flex items-center gap-1.5">
+            <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-surface-hover text-ink-muted">
+              {hasInProgress ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Wrench className="h-3 w-3" />}
             </div>
-            <p className="text-sm text-zinc-400">{label}</p>
+            <p className="text-[11px] text-ink-muted">{label}</p>
           </div>
-          <div className="shrink-0 text-xs text-zinc-500">{formatRelativeTime(entry.timestamp)}</div>
+          <div className="shrink-0 text-[10px] text-ink-muted">{formatRelativeTime(entry.timestamp)}</div>
         </summary>
         {toolsList}
       </details>
@@ -956,24 +956,24 @@ function TimelineEntry({
 
   if (entry.type === "error") {
     return (
-      <div className="rounded-xl border border-red-950 bg-red-950/30 px-4 py-4">
-        <div className="flex items-center gap-2 text-red-200">
-          <AlertTriangle className="h-4 w-4" />
-          <p className="text-sm font-medium">{entry.title}</p>
+      <div className="rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-2">
+        <div className="flex items-center gap-1 text-status-error">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          <p className="text-[12px] font-medium">{entry.title}</p>
         </div>
-        <p className="mt-2 text-sm text-red-100/90">{entry.body}</p>
-        <p className="mt-2 text-xs text-red-200/70">{formatDateTime(entry.timestamp)}</p>
+        <p className="mt-1 text-[12px] text-status-error/80">{entry.body}</p>
+        <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
-      <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+    <div className="flex items-start gap-2 rounded-sm border border-border bg-surface-alt px-2 py-1.5">
+      <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-muted" />
       <div>
-        <p className="text-sm font-medium text-zinc-100">{entry.title}</p>
-        <p className="mt-1 text-sm text-zinc-400">{entry.body}</p>
-        <p className="mt-2 text-xs text-zinc-500">{formatDateTime(entry.timestamp)}</p>
+        <p className="text-[12px] font-medium text-ink">{entry.title}</p>
+        <p className="mt-0.5 text-[11px] text-ink-muted">{entry.body}</p>
+        <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
       </div>
     </div>
   );

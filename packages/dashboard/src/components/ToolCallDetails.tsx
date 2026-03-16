@@ -48,7 +48,7 @@ export function ToolCallDetails({ title, details, args }: ToolCallDetailsProps) 
   const hasArgs = args != null && typeof args === "object" && Object.keys(args as Record<string, unknown>).length > 0;
   if (details.length === 0 && !hasArgs) {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 font-mono text-xs text-zinc-500">
+      <div className="rounded-sm border border-border bg-surface-alt px-2 py-1.5 font-mono text-[11px] text-ink-muted">
         No tool details recorded.
       </div>
     );
@@ -63,15 +63,15 @@ export function ToolCallDetails({ title, details, args }: ToolCallDetailsProps) 
         <details
           key={`${detail.kind}-${detail.label}-${String(index)}`}
           open={index === 0 && !hasArgs}
-          className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/80"
+          className="overflow-hidden rounded-sm border border-border bg-surface"
         >
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
-            <span className="truncate font-mono text-xs text-zinc-300">{detail.label}</span>
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1.5 [&::-webkit-details-marker]:hidden">
+            <span className="truncate font-mono text-[11px] text-ink-secondary">{detail.label}</span>
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
               {detail.kind === "default" ? "output" : detail.kind}
             </span>
           </summary>
-          <div className="border-t border-zinc-800">
+          <div className="border-t border-border">
             {detail.kind === "read" ? <ReadDetail detail={detail} /> : null}
             {detail.kind === "edit" ? <EditDetail detail={detail} /> : null}
             {detail.kind === "command" ? <CommandDetail detail={detail} /> : null}
@@ -116,13 +116,13 @@ function EditDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "edit" }
 function CommandDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "command" }> }) {
   return (
     <div>
-      <div className="border-b border-zinc-800 bg-zinc-800/70 px-3 py-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Command</p>
-        <p className="mt-1 overflow-x-auto whitespace-pre font-mono text-xs text-zinc-100">{detail.command}</p>
+      <div className="border-b border-border bg-surface-alt px-2 py-1.5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Command</p>
+        <p className="mt-0.5 overflow-x-auto whitespace-pre font-mono text-[11px] text-ink">{detail.command}</p>
       </div>
-      <div className="bg-zinc-950">
+      <div className="bg-surface">
         {detail.output.trim() ? (
-          <pre className="overflow-x-auto px-3 py-3 font-mono text-xs leading-6 text-zinc-300">
+          <pre className="overflow-x-auto px-2 py-2 font-mono text-[11px] leading-6 text-ink-secondary">
             <code>{detail.output}</code>
           </pre>
         ) : (
@@ -136,12 +136,12 @@ function CommandDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "comm
 function SearchDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "search" }> }) {
   return (
     <div>
-      <div className="border-b border-zinc-800 px-3 py-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Query</p>
-        <p className="mt-1 font-mono text-xs text-zinc-300">{detail.query}</p>
+      <div className="border-b border-border px-2 py-1.5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Query</p>
+        <p className="mt-0.5 font-mono text-[11px] text-ink-secondary">{detail.query}</p>
       </div>
       {detail.results.length > 0 ? (
-        <div className="divide-y divide-zinc-900">
+        <div className="divide-y divide-border">
           {detail.results.map((result, index) => (
             <SearchResultRow key={`${result}-${String(index)}`} result={result} />
           ))}
@@ -155,7 +155,7 @@ function SearchDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "searc
 
 function DefaultDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "default" }> }) {
   return (
-    <pre className="overflow-x-auto px-3 py-3 font-mono text-xs leading-6 text-zinc-300">
+    <pre className="overflow-x-auto px-2 py-2 font-mono text-[11px] leading-6 text-ink-secondary">
       <code>{detail.content}</code>
     </pre>
   );
@@ -168,11 +168,11 @@ function ArgsDetail({ args }: { args: Record<string, unknown> }) {
   if (entries.length === 0) return null;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/80">
-      <div className="border-b border-zinc-800 px-3 py-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Input</span>
+    <div className="overflow-hidden rounded-sm border border-border bg-surface">
+      <div className="border-b border-border px-2 py-1">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Input</span>
       </div>
-      <div className="divide-y divide-zinc-800/50">
+      <div className="divide-y divide-border">
         {entries.map(([key, value]) => (
           <ArgEntry key={key} name={key} value={value} />
         ))}
@@ -189,17 +189,17 @@ function ArgEntry({ name, value }: { name: string; value: unknown }) {
   if (isLong) {
     return (
       <details className="group">
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 [&::-webkit-details-marker]:hidden">
-          <span className="font-mono text-[11px] font-medium text-amber-400/80">{name}</span>
-          <span className="truncate font-mono text-xs text-zinc-500">{str.slice(0, 80)}…</span>
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1 [&::-webkit-details-marker]:hidden">
+          <span className="font-mono text-[10px] font-medium text-accent-strong">{name}</span>
+          <span className="truncate font-mono text-[11px] text-ink-muted">{str.slice(0, 80)}…</span>
         </summary>
-        <div className="border-t border-zinc-800/30">
+        <div className="border-t border-border">
           {isDiff ? (
-            <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-5 text-zinc-300">
+            <pre className="overflow-x-auto px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
               <code>{str}</code>
             </pre>
           ) : (
-            <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-5 text-zinc-300">
+            <pre className="overflow-x-auto px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
               <code>{str}</code>
             </pre>
           )}
@@ -209,25 +209,25 @@ function ArgEntry({ name, value }: { name: string; value: unknown }) {
   }
 
   return (
-    <div className="flex items-baseline gap-2 px-3 py-1.5">
-      <span className="shrink-0 font-mono text-[11px] font-medium text-amber-400/80">{name}</span>
-      <span className="min-w-0 break-all font-mono text-xs text-zinc-300">{str}</span>
+    <div className="flex items-baseline gap-2 px-2 py-1">
+      <span className="shrink-0 font-mono text-[10px] font-medium text-accent-strong">{name}</span>
+      <span className="min-w-0 break-all font-mono text-[11px] text-ink-secondary">{str}</span>
     </div>
   );
 }
 
 function PathHeader({ path }: { path: string }) {
   return (
-    <div className="border-b border-zinc-800 px-3 py-2">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Path</p>
-      <p className="mt-1 break-all font-mono text-xs text-zinc-400">{path}</p>
+    <div className="border-b border-border px-2 py-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Path</p>
+      <p className="mt-0.5 break-all font-mono text-[11px] text-ink-muted">{path}</p>
     </div>
   );
 }
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="px-3 py-3 font-mono text-xs text-zinc-500">{message}</div>
+    <div className="px-2 py-2 font-mono text-[11px] text-ink-muted">{message}</div>
   );
 }
 
@@ -245,20 +245,20 @@ function CodeBlock({ content }: { content: string }) {
 
   if (!hasLineNumbers) {
     return (
-      <pre className="overflow-x-auto px-3 py-3 font-mono text-xs leading-6 text-zinc-200">
+      <pre className="overflow-x-auto px-2 py-2 font-mono text-[11px] leading-6 text-ink-secondary">
         <code>{content}</code>
       </pre>
     );
   }
 
   return (
-    <div className="overflow-x-auto font-mono text-xs leading-6">
+    <div className="overflow-x-auto font-mono text-[11px] leading-6">
       {parsedLines.map((line, index) => (
         <div key={`${line.number ?? "plain"}-${String(index)}`} className="grid grid-cols-[3.5rem_minmax(0,1fr)]">
-          <span className="border-r border-zinc-900/80 px-2 py-1 text-right text-zinc-500">
+          <span className="border-r border-border px-2 py-0.5 text-right text-ink-muted">
             {line.number ?? ""}
           </span>
-          <span className="whitespace-pre-wrap break-all px-3 py-1 text-zinc-200">
+          <span className="whitespace-pre-wrap break-all px-2 py-0.5 text-ink-secondary">
             {line.content || " "}
           </span>
         </div>
@@ -271,11 +271,11 @@ function DiffBlock({ content }: { content: string }) {
   const lines = content.replace(/\n$/, "").split("\n");
 
   return (
-    <div className="overflow-x-auto font-mono text-xs leading-6">
+    <div className="overflow-x-auto font-mono text-[11px] leading-6">
       {lines.map((line, index) => (
         <div key={`${line}-${String(index)}`} className="grid grid-cols-[3rem_minmax(0,1fr)]">
-          <span className="border-r border-zinc-900/80 px-2 py-1 text-right text-zinc-600">{index + 1}</span>
-          <span className={`whitespace-pre-wrap break-all px-3 py-1 ${diffLineClassName(line)}`}>
+          <span className="border-r border-border px-2 py-0.5 text-right text-ink-muted">{index + 1}</span>
+          <span className={`whitespace-pre-wrap break-all px-2 py-0.5 ${diffLineClassName(line)}`}>
             {line || " "}
           </span>
         </div>
@@ -289,7 +289,7 @@ function SearchResultRow({ result }: { result: string }) {
 
   if (!match) {
     return (
-      <div className="px-3 py-2 font-mono text-xs text-zinc-300">{result}</div>
+      <div className="px-2 py-1.5 font-mono text-[11px] text-ink-secondary">{result}</div>
     );
   }
 
@@ -299,13 +299,13 @@ function SearchResultRow({ result }: { result: string }) {
   const snippet = rawSnippet ?? "";
 
   return (
-    <div className="px-3 py-2">
+    <div className="px-2 py-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="break-all font-mono text-xs text-zinc-400">{path}</span>
-        <span className="shrink-0 font-mono text-[11px] text-zinc-500">{location}</span>
+        <span className="break-all font-mono text-[11px] text-ink-muted">{path}</span>
+        <span className="shrink-0 font-mono text-[10px] text-ink-muted">{location}</span>
       </div>
       {snippet.trim() ? (
-        <p className="mt-1 whitespace-pre-wrap break-all font-mono text-xs text-zinc-200">{snippet.trimStart()}</p>
+        <p className="mt-0.5 whitespace-pre-wrap break-all font-mono text-[11px] text-ink-secondary">{snippet.trimStart()}</p>
       ) : null}
     </div>
   );
@@ -558,18 +558,18 @@ function looksLikeDiff(content: string): boolean {
 
 function diffLineClassName(line: string): string {
   if (/^\+\+\+ /.test(line) || /^--- /.test(line) || /^@@/.test(line)) {
-    return "bg-sky-400/10 text-sky-200";
+    return "bg-accent/10 text-accent-strong";
   }
 
   if (/^[+](?![+])/.test(line)) {
-    return "bg-emerald-400/10 text-emerald-200";
+    return "bg-emerald-600/5 text-emerald-800";
   }
 
   if (/^-(?!-)/.test(line)) {
-    return "bg-red-400/10 text-red-200";
+    return "bg-status-error/5 text-status-error";
   }
 
-  return "text-zinc-200";
+  return "text-ink-secondary";
 }
 
 function extractLabeledLine(lines: string[], pattern: RegExp): string | undefined {

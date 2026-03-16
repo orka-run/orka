@@ -62,34 +62,34 @@ export function NodeManagementDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4 py-8 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-zinc-100">Manage Nodes</h2>
+      <div className="w-full max-w-lg rounded-sm border border-border bg-surface">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <h2 className="text-[13px] font-semibold text-ink">Manage Nodes</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+            className="rounded-sm border border-border p-1 text-ink-muted transition hover:text-ink"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
+        <div className="max-h-[60vh] overflow-y-auto px-3 py-2">
           {error && (
-            <div className="mb-4 rounded-lg border border-red-800/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+            <div className="mb-2 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1.5 text-[12px] text-status-error">
               {error}
             </div>
           )}
           {pairedNodes.length === 0 ? (
-            <div className="py-8 text-center text-sm text-zinc-500">
+            <div className="py-6 text-center text-[12px] text-ink-muted">
               No paired nodes. Use the pair button to add remote nodes.
             </div>
           ) : (
-            <ul className="space-y-3">
+            <ul className="space-y-1">
               {pairedNodes.map((node) => {
                 const status = getStatus(node);
                 const isOnline = status === "online";
@@ -98,36 +98,36 @@ export function NodeManagementDialog({
                 return (
                   <li
                     key={node.nodeId}
-                    className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3"
+                    className="flex items-center justify-between rounded-sm border border-border bg-surface-alt px-2 py-1.5"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span
-                          className={`inline-block h-2 w-2 shrink-0 rounded-full ${
+                          className={`inline-block h-2 w-2 shrink-0 rounded-sm ${
                             status === "online"
-                              ? "bg-emerald-400"
+                              ? "bg-emerald-600"
                               : status === "error"
-                                ? "bg-red-400"
-                                : "bg-zinc-600"
+                                ? "bg-status-error"
+                                : "bg-border"
                           }`}
                         />
-                        <span className="truncate text-sm font-medium text-zinc-100">
+                        <span className="truncate text-[12px] font-medium text-ink">
                           {node.nodeName || node.nodeId}
                         </span>
                       </div>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-ink-muted">
                         <span>{node.nodeId}</span>
-                        <span className="text-zinc-700">|</span>
+                        <span className="text-border">|</span>
                         <span className="capitalize">{status}</span>
                         {node.pairedAt && (
                           <>
-                            <span className="text-zinc-700">|</span>
+                            <span className="text-border">|</span>
                             <span>Paired {new Date(node.pairedAt).toLocaleDateString()}</span>
                           </>
                         )}
                       </div>
                     </div>
-                    <div className="ml-3 flex shrink-0 items-center gap-1.5">
+                    <div className="ml-2 flex shrink-0 items-center gap-1">
                       {isOnline ? (
                         <button
                           type="button"
@@ -136,9 +136,9 @@ export function NodeManagementDialog({
                             handleAction(node.nodeId, () => onDisconnectNode(node.nodeId))
                           }
                           title="Disconnect"
-                          className="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-amber-400 disabled:opacity-50"
+                          className="rounded-sm p-1 text-ink-muted transition hover:bg-surface-hover hover:text-status-warning disabled:opacity-50"
                         >
-                          <PowerOff className="h-4 w-4" />
+                          <PowerOff className="h-3.5 w-3.5" />
                         </button>
                       ) : (
                         <button
@@ -148,9 +148,9 @@ export function NodeManagementDialog({
                             handleAction(node.nodeId, () => onConnectNode(node.nodeId))
                           }
                           title="Connect"
-                          className="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-emerald-400 disabled:opacity-50"
+                          className="rounded-sm p-1 text-ink-muted transition hover:bg-surface-hover hover:text-emerald-700 disabled:opacity-50"
                         >
-                          <Power className="h-4 w-4" />
+                          <Power className="h-3.5 w-3.5" />
                         </button>
                       )}
                       <button
@@ -160,9 +160,9 @@ export function NodeManagementDialog({
                           handleAction(node.nodeId, () => onRemoveNode(node.nodeId))
                         }
                         title="Remove node"
-                        className="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-red-400 disabled:opacity-50"
+                        className="rounded-sm p-1 text-ink-muted transition hover:bg-surface-hover hover:text-status-error disabled:opacity-50"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </li>
@@ -171,11 +171,11 @@ export function NodeManagementDialog({
             </ul>
           )}
         </div>
-        <div className="border-t border-zinc-800 px-6 py-4">
+        <div className="border-t border-border px-3 py-2">
           <button
             type="button"
             onClick={onClose}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800"
+            className="w-full rounded-sm border border-border bg-surface-alt px-3 py-1.5 text-[12px] font-medium text-ink-secondary transition hover:text-ink"
           >
             Done
           </button>

@@ -11,7 +11,7 @@ function ProtocolMismatchBanner() {
 
   if (mismatch.kind === "outdated_client") {
     return (
-      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-red-900/90 text-sm text-red-200 backdrop-blur-sm">
+      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-status-error/90 text-[12px] text-white backdrop-blur-sm">
         <AlertTriangle size={16} />
         <span>
           Dashboard version is incompatible with the daemon (server protocol v{mismatch.serverVersion}, dashboard supports v{mismatch.clientRange.min}–{mismatch.clientRange.max}). Please reload.
@@ -19,7 +19,7 @@ function ProtocolMismatchBanner() {
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="ml-2 inline-flex items-center gap-1 rounded border border-red-700 px-2 py-0.5 text-xs text-red-200 transition-colors hover:bg-red-800"
+          className="ml-2 inline-flex items-center gap-1 rounded-sm border border-white/30 px-2 py-0.5 text-[11px] text-white transition-colors hover:bg-white/10"
         >
           <RefreshCw size={12} />
           Reload
@@ -30,7 +30,7 @@ function ProtocolMismatchBanner() {
 
   // outdated_server: the daemon is older than the dashboard expects
   return (
-    <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-amber-900/90 text-sm text-amber-200 backdrop-blur-sm">
+    <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-status-warning/90 text-[12px] text-ink backdrop-blur-sm">
       <AlertTriangle size={16} />
       <span>
         Daemon protocol (v{mismatch.serverVersion}) is older than this dashboard expects (v{mismatch.clientRange.min}–{mismatch.clientRange.max}). Some features may not work. Update the daemon and reload.
@@ -38,7 +38,7 @@ function ProtocolMismatchBanner() {
       <button
         type="button"
         onClick={() => window.location.reload()}
-        className="ml-2 inline-flex items-center gap-1 rounded border border-amber-700 px-2 py-0.5 text-xs text-amber-200 transition-colors hover:bg-amber-800"
+        className="ml-2 inline-flex items-center gap-1 rounded-sm border border-ink/30 px-2 py-0.5 text-[11px] text-ink transition-colors hover:bg-ink/10"
       >
         <RefreshCw size={12} />
         Reload
@@ -86,7 +86,7 @@ export function ConnectionBanner() {
 
   if (showSuccess) {
     return (
-      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-emerald-900/90 text-sm text-emerald-200 backdrop-blur-sm">
+      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-emerald-600/90 text-[12px] text-white backdrop-blur-sm">
         <Wifi size={16} />
         <span>Connected</span>
       </div>
@@ -97,13 +97,13 @@ export function ConnectionBanner() {
 
   if (isError) {
     return (
-      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-red-900/90 text-sm text-red-200 backdrop-blur-sm">
+      <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-status-error/90 text-[12px] text-white backdrop-blur-sm">
         <WifiOff size={16} />
         <span>Unable to connect to daemon</span>
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="ml-2 inline-flex items-center gap-1 rounded border border-red-700 px-2 py-0.5 text-xs text-red-200 transition-colors hover:bg-red-800"
+          className="ml-2 inline-flex items-center gap-1 rounded-sm border border-white/30 px-2 py-0.5 text-[11px] text-white transition-colors hover:bg-white/10"
         >
           <RefreshCw size={12} />
           Retry
@@ -113,7 +113,7 @@ export function ConnectionBanner() {
   }
 
   return (
-    <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-amber-900/90 text-sm text-amber-200 backdrop-blur-sm">
+    <div className="flex h-10 shrink-0 items-center justify-center gap-2 bg-status-warning/90 text-[12px] text-ink backdrop-blur-sm">
       <RefreshCw size={16} className="animate-spin" />
       <span>Connection lost. Reconnecting...</span>
     </div>
