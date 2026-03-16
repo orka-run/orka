@@ -12,6 +12,8 @@ import { savePairedNode } from "../lib/nodeRegistry";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
 import { useMode } from "../hooks/useMode";
 import { useTransport } from "../lib/transportContext";
+import { DEFAULT_RELAY_URL } from "../lib/constants";
+import { PairingCodeInput, isValidPairingCode } from "./PairingCodeInput";
 
 interface PairNodeDialogProps {
   open: boolean;
@@ -29,20 +31,7 @@ const STEPS: { key: PairStep; label: string }[] = [
   { key: "done", label: "Done" },
 ];
 
-function formatCodeInput(raw: string): string {
-  const clean = raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 21);
-  const groups = [
-    clean.slice(0, 4),
-    clean.slice(4, 8),
-    clean.slice(8, 12),
-    clean.slice(12, 16),
-    clean.slice(16, 21),
-  ].filter(Boolean);
-  return groups.join("-");
-}
-
 export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
-  const codeInputId = useId();
   const relayUrlId = useId();
   const currentEndpoint = useConnectionSettingsStore((s) => s.endpointUrl);
   const setEndpoint = useConnectionSettingsStore((s) => s.setEndpoint);
@@ -50,7 +39,7 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
   const transport = useTransport();
 
   const [code, setCode] = useState("");
-  const [relayUrl, setRelayUrl] = useState("");
+  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY_URL);
   const [step, setStep] = useState<PairStep>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PairingClientResult | null>(null);
@@ -69,6 +58,8 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
       } catch {
         setRelayUrl(currentEndpoint);
       }
+    } else {
+      setRelayUrl(DEFAULT_RELAY_URL);
     }
     setCode("");
     setStep("idle");
@@ -279,7 +270,7 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
 
   const doneResult = localResult ?? result;
   const isPairing = step !== "idle" && step !== "done";
-  const canStart = code.replace(/-/g, "").length >= 20 && relayUrl.trim().length > 0;
+  const canStart = isValidPairingCode(code) && relayUrl.trim().length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4 py-8 backdrop-blur-sm">
@@ -355,20 +346,12 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
           ) : (
             /* Form / Progress state */
             <>
-              <div>
-                <label htmlFor={codeInputId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
-                  Pairing Code
-                </label>
-                <input
-                  id={codeInputId}
-                  type="text"
-                  value={code}
-                  onChange={(e) => setCode(formatCodeInput(e.target.value))}
-                  placeholder="XXXX-XXXX-XXXX-XXXX-XXXXX"
-                  disabled={isPairing}
-                  className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 font-mono text-[12px] tracking-wider text-ink outline-none transition placeholder:text-ink-muted focus:border-accent disabled:opacity-50"
-                />
-              </div>
+              <PairingCodeInput
+                value={code}
+                onChange={setCode}
+                disabled={isPairing}
+                error={null}
+              />
 
               <div>
                 <label htmlFor={relayUrlId} className="mb-1 block text-[11px] font-medium text-ink-secondary">

@@ -1,15 +1,19 @@
 import { useEffect, useId, useState } from "react";
-import { Monitor, Globe, X } from "lucide-react";
+import { Monitor, Globe, RotateCcw, X } from "lucide-react";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
 import type { DashboardMode } from "../stores/connectionSettingsStore";
 import { useMode } from "../hooks/useMode";
+import { DEFAULT_RELAY_URL, DEFAULT_RELAY_NAME } from "../lib/constants";
+
+type RelayChoice = "default" | "custom";
 
 interface ConnectionSettingsDialogProps {
   open: boolean;
   onClose: () => void;
+  onRerunWizard?: () => void;
 }
 
-export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDialogProps) {
+export function ConnectionSettingsDialog({ open, onClose, onRerunWizard }: ConnectionSettingsDialogProps) {
   const endpointUrlId = useId();
   const authTokenId = useId();
   const currentUrl = useConnectionSettingsStore((s) => s.endpointUrl);
@@ -20,12 +24,19 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
   const [url, setUrl] = useState(currentUrl ?? "");
   const [token, setToken] = useState(currentToken ?? "");
   const [localMode, setLocalMode] = useState<DashboardMode>(mode);
+  const [relayChoice, setRelayChoice] = useState<RelayChoice>("default");
 
   useEffect(() => {
     if (open) {
       setUrl(currentUrl ?? "");
       setToken(currentToken ?? "");
       setLocalMode(mode);
+      // Detect if current URL is default or custom
+      if (!currentUrl || currentUrl.startsWith(DEFAULT_RELAY_URL.replace("wss://", ""))) {
+        setRelayChoice("default");
+      } else {
+        setRelayChoice("custom");
+      }
     }
   }, [open, currentUrl, currentToken, mode]);
 
@@ -50,9 +61,9 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
       setStoreMode(localMode);
     }
     if (isHosted) {
-      const trimmedUrl = url.trim();
-      if (!trimmedUrl) return;
-      setEndpoint(trimmedUrl, token.trim() || null);
+      const effectiveUrl = relayChoice === "default" ? `${DEFAULT_RELAY_URL}/ws` : url.trim();
+      if (!effectiveUrl) return;
+      setEndpoint(effectiveUrl, token.trim() || null);
     }
     onClose();
   }
@@ -128,19 +139,52 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
 
           {isHosted ? (
             <>
+              {/* Relay URL selector */}
               <div>
-                <label htmlFor={endpointUrlId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
-                  Relay URL
+                <label className="mb-1 block text-[11px] font-medium text-ink-secondary">
+                  Relay
                 </label>
-                <input
-                  id={endpointUrlId}
-                  type="text"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="ws://relay:7390/ws"
-                  className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
-                />
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRelayChoice("default")}
+                    className={`flex-1 rounded-sm border px-2 py-1.5 text-[12px] transition ${
+                      relayChoice === "default"
+                        ? "border-accent/50 bg-accent/10 text-accent-strong"
+                        : "border-border bg-surface-alt text-ink-muted hover:text-ink-secondary"
+                    }`}
+                  >
+                    {DEFAULT_RELAY_NAME} (default)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRelayChoice("custom")}
+                    className={`flex-1 rounded-sm border px-2 py-1.5 text-[12px] transition ${
+                      relayChoice === "custom"
+                        ? "border-accent/50 bg-accent/10 text-accent-strong"
+                        : "border-border bg-surface-alt text-ink-muted hover:text-ink-secondary"
+                    }`}
+                  >
+                    Custom
+                  </button>
+                </div>
               </div>
+
+              {relayChoice === "custom" && (
+                <div>
+                  <label htmlFor={endpointUrlId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
+                    Relay URL
+                  </label>
+                  <input
+                    id={endpointUrlId}
+                    type="text"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="wss://relay.example.com/ws"
+                    className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
+                  />
+                </div>
+              )}
 
               <div>
                 <label htmlFor={authTokenId} className="mb-1 block text-[11px] font-medium text-ink-secondary">
@@ -164,35 +208,52 @@ export function ConnectionSettingsDialog({ open, onClose }: ConnectionSettingsDi
             </>
           ) : (
             <div className="rounded-sm border border-border bg-surface-alt px-2 py-1.5 text-[12px] text-ink-muted">
-              Connected to local daemon. The daemon manages relay connections, encryption, and node pairing.
+              Connected to local daemon. Relay is managed by your daemon.
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-1">
-            {isHosted && isCustom ? (
+          <div className="flex items-center justify-between pt-1">
+            <div>
+              {onRerunWizard && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onRerunWizard();
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] text-ink-muted transition hover:text-ink-secondary"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Re-run setup wizard
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {isHosted && isCustom ? (
+                <button
+                  type="button"
+                  onClick={handleDisconnect}
+                  className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink"
+                >
+                  Use Default
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={handleDisconnect}
+                onClick={onClose}
                 className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink"
               >
-                Use Default
+                Cancel
               </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-sm border border-border px-3 py-1.5 text-[12px] text-ink-secondary transition hover:text-ink"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isHosted && !url.trim()}
-              className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isHosted ? "Connect" : "Save"}
-            </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isHosted && relayChoice === "custom" && !url.trim()}
+                className="rounded-sm bg-accent-strong px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isHosted ? "Connect" : "Save"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

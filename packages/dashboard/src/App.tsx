@@ -19,6 +19,7 @@ import { MobileSidebarDrawer } from "./components/MobileSidebarDrawer";
 import { MobileTabBar, type MobileSessionTab } from "./components/MobileTabBar";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { NodeManagementDialog } from "./components/NodeManagementDialog";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { PairNodeDialog } from "./components/PairNodeDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
@@ -87,6 +88,9 @@ function AppShell({ transport }: AppShellProps) {
   const [isDevOverlayOpen, setIsDevOverlayOpen] = useState(false);
   const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
   const sessions = useSessionStore((state) => state.sessions);
   const selectedId = useSessionStore((state) => state.selectedId);
   const selectSession = useSessionStore((state) => state.selectSession);
@@ -192,6 +196,14 @@ function AppShell({ transport }: AppShellProps) {
     }
   }, [sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Detect first-run: no sessions AND mode is local AND no paired nodes
+  // Only check after initial load completes to avoid flash
+  useEffect(() => {
+    if (onboardingDismissed || !initialLoadDone) return;
+    const isFirstRun = sessions.length === 0 && mode === "local" && pairedNodes.length === 0;
+    setShowOnboarding(isFirstRun);
+  }, [sessions.length, mode, pairedNodes.length, onboardingDismissed, initialLoadDone]);
+
   // Sync selectedId to URL hash
   useEffect(() => {
     if (selectedId) {
@@ -270,7 +282,9 @@ function AppShell({ transport }: AppShellProps) {
     });
 
     // Fire sessions fetch immediately for faster first paint
-    void fetchSessions(transport);
+    void fetchSessions(transport).then(() => {
+      setInitialLoadDone(true);
+    });
 
     // Fetch nodes in parallel; re-fetch sessions with node IDs if multi-node
     void fetchNodes(transport).then(() => {
@@ -310,6 +324,25 @@ function AppShell({ transport }: AppShellProps) {
       transport.disconnect();
     };
   }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus]);
+
+  const handleOnboardingComplete = useCallback(() => {
+    setShowOnboarding(false);
+    setOnboardingDismissed(true);
+    // Refresh sessions and nodes after wizard completes
+    void fetchSessions(transport);
+    void fetchNodes(transport);
+    if (mode === "local") void fetchPairedNodes(transport);
+  }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes]);
+
+  const handleOnboardingSkip = useCallback(() => {
+    setShowOnboarding(false);
+    setOnboardingDismissed(true);
+  }, []);
+
+  const handleRerunWizard = useCallback(() => {
+    setOnboardingDismissed(false);
+    setShowOnboarding(true);
+  }, []);
 
   const sidebarProps = {
     sessions,
@@ -390,6 +423,20 @@ function AppShell({ transport }: AppShellProps) {
   // On mobile: show the session title in the header when a session is selected
   const mobileHeaderTitle = selectedSession?.title ?? null;
 
+  // Show onboarding wizard as full-screen replacement
+  if (showOnboarding) {
+    return (
+      <TransportContext.Provider value={transport}>
+        <div className="flex h-dvh flex-col bg-surface">
+          <OnboardingWizard
+            onComplete={handleOnboardingComplete}
+            onSkip={handleOnboardingSkip}
+          />
+        </div>
+      </TransportContext.Provider>
+    );
+  }
+
   return (
     <TransportContext.Provider value={transport}>
       <div className="flex h-dvh flex-col">
@@ -444,6 +491,7 @@ function AppShell({ transport }: AppShellProps) {
         <ConnectionSettingsDialog
           open={isConnectionSettingsOpen}
           onClose={() => setIsConnectionSettingsOpen(false)}
+          onRerunWizard={handleRerunWizard}
         />
         <PairNodeDialog
           open={isPairNodeOpen}
@@ -470,6 +518,10 @@ function AppShell({ transport }: AppShellProps) {
             onDisconnectNode={async (nodeId) => {
               await useNodeStore.getState().disconnectNode(transport, nodeId);
               void fetchNodes(transport);
+            }}
+            onPairNode={() => {
+              setIsNodeManagementOpen(false);
+              setIsPairNodeOpen(true);
             }}
           />
         )}
