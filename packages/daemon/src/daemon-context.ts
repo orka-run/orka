@@ -3,6 +3,7 @@ import { loadConfig } from "./config";
 import { DatabaseRepository, getOrkaHome, openDb } from "./db";
 import { ApprovalManager } from "./approval-manager";
 import { ClaudeCodeAdapter, CodexAdapter, ShellAdapter } from "./adapters";
+import { HookApprovalBridge } from "./hook-approval-bridge";
 import { OrchestrationEngine } from "./orchestration/engine";
 import { ProviderAdapterRegistry } from "./provider-registry";
 import { ProviderService } from "./provider-service";
@@ -24,6 +25,7 @@ export interface DaemonContext {
   providerService: ProviderService;
   orchestrationEngine: OrchestrationEngine;
   approvalManager: ApprovalManager;
+  hookApprovalBridge: HookApprovalBridge;
   nodeRegistry: NodeRegistry;
   remoteNodes: RemoteNodeManager;
 }
@@ -56,6 +58,13 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
     getSessionTimeline: (sessionId) => db.getOrchestrationEvents(sessionId),
   });
 
+  const hookApprovalBridge = new HookApprovalBridge(
+    approvalManager,
+    pushHub,
+    orchestrationEngine,
+    { timeoutMs: (config.limits.approvalTimeoutMinutes ?? 5) * 60_000 },
+  );
+
   const nodeRegistry = createNodeRegistry(home);
   const remoteNodes = createRemoteNodeManager(nodeRegistry, pushHub);
 
@@ -68,6 +77,7 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
     providerService,
     orchestrationEngine,
     approvalManager,
+    hookApprovalBridge,
     nodeRegistry,
     remoteNodes,
   };

@@ -545,6 +545,14 @@ class LocalClient implements OrkaService {
   }
 
   async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
+    // Try hook approval bridge first (for hook-based supervised sessions)
+    if (this.ctx.hookApprovalBridge.hasPending(requestId)) {
+      this.ctx.hookApprovalBridge.resolveRequest(requestId, decision);
+      // Also resolve in approval manager for bookkeeping
+      this.ctx.approvalManager.resolve(requestId, decision);
+      return;
+    }
+
     const resolved = this.ctx.approvalManager.resolve(requestId, decision);
     if (!resolved) {
       throw new Error(`Approval request not found or already resolved: ${requestId}`);

@@ -1,7 +1,5 @@
 import type {
   CanonicalItemType,
-  CanonicalRequestType,
-  PermissionMode,
   ProviderAdapter,
   ProviderApprovalDecision,
   RawProviderLine,
@@ -12,6 +10,8 @@ import type {
   ProviderSessionStartInput,
 } from "@orka/core";
 import type { Span } from "@opentelemetry/api";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { createEvent, generateId } from "@orka/core";
 import { withSpan } from "../tracing";
 import { buildAgentEnv } from "./env-filter";
@@ -30,13 +30,6 @@ interface ClaudeStdinWriter {
   end(): void;
 }
 
-interface PendingApproval {
-  toolUseId: string;
-  toolName: string;
-  toolInput: unknown;
-  resolve: (decision: ProviderApprovalDecision) => void;
-}
-
 interface ClaudeHandleMeta {
   process: ClaudeProcess;
   events: AsyncEventQueue<ProviderRuntimeEvent>;
@@ -46,7 +39,6 @@ interface ClaudeHandleMeta {
   turnId: string;
   stdinWriter: ClaudeStdinWriter;
   supervised: boolean;
-  pendingApprovals: Map<string, PendingApproval>;
 }
 
 function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
@@ -137,6 +129,12 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const stdin = process.stdin;
 
         const supervised = input.permissionMode === "supervised";
+
+        // For supervised mode, write hook settings and inject env vars
+        if (supervised && input.cwd) {
+          setupSupervisedHookSettings(input.cwd, input.threadId, spawnEnv);
+        }
+
         const meta: ClaudeHandleMeta = {
           process,
           events,
@@ -146,7 +144,6 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           turnId,
           stdinWriter: stdin as unknown as ClaudeStdinWriter,
           supervised,
-          pendingApprovals: new Map(),
         };
 
         const handle: ProviderSessionHandle = {
@@ -191,8 +188,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           }
           // Close stdin for non-interactive (background) sessions so Claude Code exits after one turn.
           // Keep open for interactive sessions to allow multi-turn via sendTurn().
-          // Keep open for supervised sessions to allow writing permission responses.
-          if (!input.interactive && !supervised) {
+          if (!input.interactive) {
             await Promise.resolve(stdin.end());
           }
         } catch (error) {
@@ -241,15 +237,6 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       async () => {
         const meta = getClaudeHandleMeta(handle);
 
-        // Auto-deny all pending supervised approvals so the process can unblock
-        for (const [, pending] of meta.pendingApprovals) {
-          pending.resolve("deny");
-        }
-        meta.pendingApprovals.clear();
-
-        // Resume process if it was SIGSTOPped
-        try { meta.process.kill("SIGCONT"); } catch { /* process may have already exited */ }
-
         emitSessionExited(handle.threadId, meta, "stopped", "graceful");
         closeEvents(meta);
 
@@ -271,22 +258,13 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
   }
 
   async respondToRequest(
-    handle: ProviderSessionHandle,
-    requestId: string,
-    decision: ProviderApprovalDecision,
+    _handle: ProviderSessionHandle,
+    _requestId: string,
+    _decision: ProviderApprovalDecision,
   ): Promise<void> {
-    const meta = getClaudeHandleMeta(handle);
-    if (!meta.supervised) {
-      throw new Error("respondToRequest is only supported in supervised mode");
-    }
-
-    const pending = meta.pendingApprovals.get(requestId);
-    if (!pending) {
-      throw new Error(`No pending approval for request ${requestId}`);
-    }
-
-    pending.resolve(decision);
-    meta.pendingApprovals.delete(requestId);
+    // Hook-based supervised mode: approvals are handled by HookApprovalBridge,
+    // not by the adapter. The hook script long-polls the daemon HTTP API and
+    // receives decisions there. This method is a no-op.
   }
 
   async *replayRawLog(threadId: string, lines: RawProviderLine[]): AsyncIterable<ProviderRuntimeEvent> {
@@ -546,17 +524,6 @@ async function consumeClaudeOutput(
             continue;
           }
 
-          // In supervised mode, intercept tool_use from assistant events.
-          // Claude Code emits assistant → executes tool → emits user (tool_result).
-          // We detect the tool_use, emit request.opened, SIGSTOP the process to
-          // freeze execution, wait for dashboard approval, then SIGCONT or deny.
-          if (meta.supervised) {
-            const supervisedEvent = await handleSupervisedToolUse(threadId, raw, meta, span);
-            if (supervisedEvent === "handled") {
-              continue; // Tool was denied in supervised mode; skip normal event processing
-            }
-          }
-
           const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
           if (primary) {
             // Close the previous open item when we see a different event.
@@ -651,119 +618,6 @@ async function consumeClaudeOutput(
       return meta.exitEmitted;
     },
   );
-}
-
-/**
- * In supervised mode, intercept "assistant" events that contain tool_use blocks.
- * When a tool_use is detected:
- * 1. Emit request.opened so the dashboard can show the approval card
- * 2. SIGSTOP the Claude Code process to freeze it before tool execution
- * 3. Wait for the approval decision (approve/deny) from the dashboard
- * 4. On approve: SIGCONT the process to let Claude Code execute the tool
- * 5. On deny: SIGCONT the process — Claude Code will auto-deny the tool
- *    (since we use --permission-mode default, it requires permission)
- *
- * Returns "handled" if the event was a tool_use that was denied (skip normal processing),
- * or null if the event should be processed normally.
- */
-async function handleSupervisedToolUse(
-  threadId: string,
-  raw: unknown,
-  meta: ClaudeHandleMeta,
-  span?: Span,
-): Promise<"handled" | null> {
-  if (!isRecord(raw) || raw["type"] !== "assistant") {
-    return null;
-  }
-
-  const message = isRecord(raw["message"]) ? raw["message"] : undefined;
-  const content = Array.isArray(message?.["content"]) ? message["content"] : [];
-  const toolUse = findClaudeToolUse(content);
-  if (!toolUse) {
-    return null;
-  }
-
-  const requestId = generateId("req");
-  const requestType = mapClaudeToolToRequestType(toolUse.name);
-
-  // Emit request.opened so the orchestration consumer can create an ApprovalRequest
-  emitClaudeEvent(
-    meta.events,
-    createEvent(
-      "request.opened",
-      threadId,
-      {
-        requestType,
-        detail: formatClaudeToolTitle(toolUse.name, toolUse.input),
-        args: toolUse.input,
-      },
-      { provider: "claude-code", turnId: meta.turnId, requestId },
-    ),
-    span,
-  );
-
-  // SIGSTOP the Claude Code process to freeze it before tool execution.
-  // This prevents the tool from running until the user makes a decision.
-  meta.process.kill("SIGSTOP");
-  span?.addEvent("supervised.process_stopped", { "orka.request.id": requestId, "orka.tool": toolUse.name });
-
-  // Wait for the approval decision
-  const decision = await new Promise<ProviderApprovalDecision>((resolve) => {
-    meta.pendingApprovals.set(requestId, {
-      toolUseId: toolUse.id,
-      toolName: toolUse.name,
-      toolInput: toolUse.input,
-      resolve,
-    });
-  });
-
-  span?.addEvent("supervised.decision_received", { "orka.request.id": requestId, "orka.decision": decision });
-
-  // Emit request.resolved
-  emitClaudeEvent(
-    meta.events,
-    createEvent(
-      "request.resolved",
-      threadId,
-      { requestType, decision },
-      { provider: "claude-code", turnId: meta.turnId, requestId },
-    ),
-    span,
-  );
-
-  // SIGCONT — resume the process regardless of decision.
-  // With --permission-mode default, Claude Code will auto-deny tools it doesn't
-  // have permission for. For "approve", we write a tool_result to satisfy Claude Code.
-  meta.process.kill("SIGCONT");
-
-  if (decision === "deny") {
-    // Let Claude Code's internal permission system handle the denial.
-    // The process will resume and produce a tool_result error.
-    return null; // Process normally — Claude Code will emit the denied tool_result
-  }
-
-  // For approved tools: Claude Code with --permission-mode default will still
-  // auto-deny. The tool_result with the denial error will arrive next in the stream.
-  // We let it through — the orchestration system already recorded the approval.
-  return null;
-}
-
-function mapClaudeToolToRequestType(name: string): CanonicalRequestType {
-  switch (name) {
-    case "Bash":
-      return "command_execution_approval";
-    case "Read":
-    case "Grep":
-    case "Glob":
-      return "file_read_approval";
-    case "Write":
-    case "Edit":
-    case "MultiEdit":
-    case "NotebookEdit":
-      return "file_change_approval";
-    default:
-      return "unknown";
-  }
 }
 
 async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -1108,10 +962,10 @@ function normalizeClaudeMapOptions(
 function mapClaudePermissionMode(input: ProviderSessionStartInput): string {
   switch (input.permissionMode) {
     case "supervised":
-      // Supervised mode: use "default" which requires permission for tools.
-      // In stream-json mode, Claude Code auto-denies tools that need permission.
-      // The adapter intercepts tool_use events and manages approval flow.
-      return "default";
+      // Supervised mode: use bypassPermissions so Claude Code doesn't auto-deny.
+      // PreToolUse hooks control tool approval — the hook script calls the daemon
+      // for each tool use and blocks until a human decision is made.
+      return "bypassPermissions";
     case "auto":
       return "auto";
     case "bypass":
@@ -1137,4 +991,46 @@ function mapClaudeReasoningEffort(reasoningEffort?: ReasoningEffort): "low" | "m
     default:
       return undefined;
   }
+}
+
+/**
+ * Set up .claude/settings.json with a PreToolUse hook in the session's working
+ * directory, and inject ORKA_SESSION_ID / ORKA_DAEMON_URL / ORKA_PERMISSION_RULES
+ * into the spawn environment so the hook script can communicate with the daemon.
+ */
+function setupSupervisedHookSettings(
+  cwd: string,
+  sessionId: string,
+  spawnEnv: Record<string, string>,
+): void {
+  // Resolve the hook script path relative to this file's package
+  const hookScriptPath = resolve(__dirname, "../hooks/supervised-hook.ts");
+
+  const settings = {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: "*",
+          hooks: [
+            {
+              type: "command",
+              command: `bun ${hookScriptPath}`,
+              timeout: 300,
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const claudeDir = join(cwd, ".claude");
+  mkdirSync(claudeDir, { recursive: true });
+  writeFileSync(join(claudeDir, "settings.json"), JSON.stringify(settings, null, 2));
+
+  // Inject env vars for the hook script
+  spawnEnv["ORKA_SESSION_ID"] = sessionId;
+  spawnEnv["ORKA_DAEMON_URL"] = "http://127.0.0.1:7394";
+
+  // ORKA_PERMISSION_RULES is injected by the orchestrator before calling
+  // startSession(), so the hook script can evaluate rules locally.
 }

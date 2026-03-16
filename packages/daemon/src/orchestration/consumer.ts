@@ -41,6 +41,8 @@ export interface ProviderEventConsumerCallbacks {
   getSession?: (sessionId: string) => Session | null;
   permissionRules?: PermissionRuleSet;
   respondToRequest?: (threadId: string, requestId: string, decision: ProviderApprovalDecision) => Promise<void>;
+  /** Deny all pending hook-based approvals for a session (called on session exit). */
+  denyHookApprovals?: (sessionId: string) => void;
 }
 
 export async function consumeProviderEvents(
@@ -219,6 +221,8 @@ async function finalizeSession(
   for (const req of pending) {
     callbacks.approvalManager.resolve(req.id, "deny");
   }
+  // Also deny pending hook-based approvals (unblocks long-polling hook scripts)
+  callbacks.denyHookApprovals?.(sessionId);
 
   callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
     sessionId,

@@ -109,6 +109,19 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     }
 
     // 5. Start provider runtime session
+    // For supervised mode, inject permission rules into env so the hook script
+    // can evaluate rules locally without an HTTP roundtrip to the daemon.
+    const supervisedEnv: Record<string, string> = {};
+    if (req.permissionMode === "supervised") {
+      const hasRules = ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0;
+      if (hasRules) {
+        supervisedEnv["ORKA_PERMISSION_RULES"] = JSON.stringify({
+          autoApprove: ctx.config.permissions.autoApprove,
+          alwaysDeny: ctx.config.permissions.alwaysDeny,
+        });
+      }
+    }
+
     const startedAt = new Date().toISOString();
     const handle = await ctx.providerService.startSession(req.backend, {
       threadId: sessionId,
@@ -118,7 +131,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       prompt: req.prompt,
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
-      ...(req.env ? { env: req.env } : {}),
+      env: { ...req.env, ...supervisedEnv },
       interactive: req.mode === "interactive",
       ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
     });
@@ -148,6 +161,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
         : undefined,
       respondToRequest: (threadId, requestId, decision) =>
         ctx.providerService.respondToRequest(threadId, requestId, decision),
+      denyHookApprovals: (id) => ctx.hookApprovalBridge.denyAllForSession(id),
       cleanupWorktree: async () => {
         const currentSession = ctx.db.getSession(sessionId);
         if (currentSession) {
@@ -214,6 +228,9 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
   return withSpan("orka.stop", { "orka.session.id": sessionId }, async (span) => {
     const session = ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    // Deny all pending hook-based approvals so the hook scripts unblock
+    ctx.hookApprovalBridge.denyAllForSession(sessionId);
 
     const providerHandle = ctx.providerService.getHandle(sessionId);
     if (providerHandle) {

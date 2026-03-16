@@ -142,6 +142,37 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
           return new Response("ok");
         }
 
+        // Hook-based tool approval endpoint — called by supervised-hook.ts
+        // POST /api/sessions/:id/tool-approval
+        // Long-polls until the dashboard resolves the approval request.
+        const toolApprovalMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/tool-approval$/);
+        if (toolApprovalMatch && req.method === "POST") {
+          const sessionId = toolApprovalMatch[1]!;
+          try {
+            const body = (await req.json()) as {
+              toolName: string;
+              toolInput: unknown;
+              toolUseId: string;
+            };
+            const result = await ctx.hookApprovalBridge.requestApproval(
+              sessionId,
+              body.toolName,
+              body.toolInput,
+              body.toolUseId,
+            );
+            return new Response(JSON.stringify(result), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return new Response(JSON.stringify({ error: msg }), {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            });
+          }
+        }
+
         // Upgrade to WebSocket
         if (server.upgrade(req, { data: {} })) {
           return undefined;
