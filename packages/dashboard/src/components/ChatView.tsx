@@ -546,6 +546,10 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
+  // Track whether user is scrolling up to apply scroll correction
+  const isScrollingUpRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
@@ -559,6 +563,22 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     },
     overscan: 20,
     getItemKey: (index) => entriesRef.current[index]?.id ?? String(index),
+    // Correct scroll position when items above viewport are measured
+    // This prevents the "jump" when scrolling up and new items get real heights
+    onChange: (instance) => {
+      if (!isScrollingUpRef.current || programmaticScrollRef.current) return;
+      const el = scrollRef.current;
+      if (!el) return;
+      // If virtualizer's total size changed and we're scrolling up,
+      // the scroll offset may have shifted. Restore the visual position
+      // by adjusting scrollTop to compensate.
+      const currentScrollTop = el.scrollTop;
+      const diff = currentScrollTop - lastScrollTopRef.current;
+      if (Math.abs(diff) > 2 && Math.abs(diff) < 500) {
+        // Virtualizer adjusted layout — compensate
+        el.scrollTop = lastScrollTopRef.current;
+      }
+    },
   });
 
   const getCachedTimeline = useTimelineCache((s) => s.get);
@@ -693,6 +713,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     if (programmaticScrollRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
+    isScrollingUpRef.current = el.scrollTop < lastScrollTopRef.current;
+    lastScrollTopRef.current = el.scrollTop;
     scrollTopRef.current = el.scrollTop;
     const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     const currentAutoScroll = useChatUiStore.getState().get(sessionId).autoScroll;
