@@ -528,6 +528,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const bottomRef = useRef<HTMLDivElement>(null);
   // Mutable refs for the push handler to accumulate deltas without re-subscribing
   const eventsRef = useRef<OrchestrationEvent[]>([]);
+  // Guard to prevent handleScroll from disabling autoScroll during programmatic scrolls
+  const programmaticScrollRef = useRef(false);
   // Stable refs for values used in effects without triggering re-runs
   const initialPromptRef = useRef(initialPrompt);
   initialPromptRef.current = initialPrompt;
@@ -611,18 +613,40 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     return unsubscribe;
   }, [sessionId, transport]);
 
+  // Reset auto-scroll when switching sessions
+  useEffect(() => {
+    setAutoScroll(true);
+    programmaticScrollRef.current = false;
+  }, [sessionId]);
+
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
-    if (autoScroll) {
-      // Use requestAnimationFrame to ensure the virtualizer has updated its total size
+    if (!autoScroll || entries.length === 0) return;
+
+    programmaticScrollRef.current = true;
+    // Use virtualizer.scrollToIndex for reliable scrolling with dynamic item heights —
+    // it handles iterative measurement corrections that scrollIntoView cannot.
+    virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+
+    // After virtualizer measurement passes settle, ensure absolute bottom is visible
+    // (past any content after the virtualizer like ThinkingIndicator)
+    const timer = setTimeout(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
       requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ block: "end" });
+        programmaticScrollRef.current = false;
       });
-    }
-  }, [entries.length, autoScroll]);
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      programmaticScrollRef.current = false;
+    };
+  }, [entries.length, autoScroll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Detect manual scroll to pause auto-scroll
   const handleScroll = useCallback(() => {
+    if (programmaticScrollRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
     const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -631,7 +655,10 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
   const scrollToBottom = useCallback(() => {
     setAutoScroll(true);
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    programmaticScrollRef.current = true;
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setTimeout(() => { programmaticScrollRef.current = false; }, 500);
   }, []);
 
   const handleApprovalResolve = useCallback(async (requestId: string, decision: "approve" | "deny") => {
