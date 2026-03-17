@@ -12,7 +12,7 @@ import type {
   UsageRecord,
   UsageSummary,
 } from "@orka/core";
-import { BackendKindSchema, SessionStatusSchema, parseWireEvent } from "@orka/core";
+import { BackendKindSchema, PermissionModeSchema, SessionStatusSchema, parseWireEvent } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
 const TaskRowSchema = z.object({
@@ -46,6 +46,7 @@ const SessionRowSchema = z.object({
   parent_session_id: z.string().nullable().default(null),
   archived_at: z.string().nullable().default(null),
   provider_session_id: z.string().nullable().default(null),
+  permission_mode: PermissionModeSchema.nullable().default(null),
 });
 
 const UsageLogRowSchema = z.object({
@@ -119,6 +120,7 @@ const MIGRATIONS = [
   { version: 28, sql: `ALTER TABLE sessions ADD COLUMN provider_session_id TEXT` },
   { version: 29, sql: `ALTER TABLE sessions DROP COLUMN mode` },
   { version: 30, sql: `ALTER TABLE tasks DROP COLUMN mode` },
+  { version: 31, sql: `ALTER TABLE sessions ADD COLUMN permission_mode TEXT` },
 ];
 
 function migrate(db: Database): void {
@@ -249,8 +251,8 @@ export class DatabaseRepository {
     withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
       this.db
         .prepare(
-          `INSERT INTO sessions (id, task_id, workspace_id, status, backend, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id, provider_session_id)
-           VALUES ($id, $taskId, $workspaceId, $status, $backend, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId, $providerSessionId)`,
+          `INSERT INTO sessions (id, task_id, workspace_id, status, backend, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id, provider_session_id, permission_mode)
+           VALUES ($id, $taskId, $workspaceId, $status, $backend, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId, $providerSessionId, $permissionMode)`,
         )
         .run({
           $id: session.id,
@@ -273,6 +275,7 @@ export class DatabaseRepository {
           $rawLogFile: session.rawLogFile ?? null,
           $parentSessionId: session.parentSessionId ?? null,
           $providerSessionId: session.providerSessionId ?? null,
+          $permissionMode: session.permissionMode ?? null,
         });
     });
   }
@@ -820,6 +823,7 @@ function rowToSession(row: unknown): Session {
     // cross the RPC wire. The env is stored in the DB for auditing but only used at spawn time.
     ...(data.archived_at ? { archivedAt: data.archived_at } : {}),
     ...(data.provider_session_id ? { providerSessionId: data.provider_session_id } : {}),
+    ...(data.permission_mode ? { permissionMode: data.permission_mode } : {}),
   };
 }
 

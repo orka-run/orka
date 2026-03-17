@@ -3,6 +3,10 @@ import { mkdirSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { $ } from "bun";
 import {
   generateId,
+  type BackendKind,
+  type PermissionMode,
+  type ProviderSessionHandle,
+  type ReasoningEffort,
   type Session,
   type Task,
   type SpawnRequest,
@@ -112,6 +116,55 @@ function buildConsumerCallbacks(
   };
 }
 
+// --- Provider launch ---
+
+interface LaunchOptions {
+  sessionId: string;
+  backend: BackendKind;
+  cwd: string;
+  prompt: string;
+  permissionMode?: PermissionMode;
+  systemPrompt?: string;
+  allowedTools?: string[];
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+  resumeSessionId?: string;
+  providerSessionId?: string;
+  env?: Record<string, string>;
+}
+
+/** Start a provider process for a session.
+ *  Builds supervised env if needed, then delegates to providerService.startSession(). */
+async function launchProviderSession(
+  ctx: DaemonContext,
+  opts: LaunchOptions,
+): Promise<ProviderSessionHandle> {
+  const supervisedEnv: Record<string, string> = {};
+  if (opts.permissionMode === "supervised") {
+    const hasRules = ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0;
+    if (hasRules) {
+      supervisedEnv["ORKA_PERMISSION_RULES"] = JSON.stringify({
+        autoApprove: ctx.config.permissions.autoApprove,
+        alwaysDeny: ctx.config.permissions.alwaysDeny,
+      });
+    }
+  }
+
+  return ctx.providerService.startSession(opts.backend, {
+    threadId: opts.sessionId,
+    cwd: opts.cwd,
+    prompt: opts.prompt,
+    ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
+    ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+    ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
+    env: { ...opts.env, ...supervisedEnv },
+    ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+    ...(opts.providerSessionId ? { providerSessionId: opts.providerSessionId } : {}),
+    ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
+  });
+}
+
 // --- Spawn ---
 
 /** Spawn a new agent session. Returns the created session. */
@@ -201,6 +254,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(req.env ? { env: req.env } : {}),
       ...(providerSessionId ? { providerSessionId } : {}),
+      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
     };
     ctx.db.insertSession(session);
 
@@ -211,29 +265,19 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     }
 
     // 5. Start provider runtime session
-    const supervisedEnv: Record<string, string> = {};
-    if (req.permissionMode === "supervised") {
-      const hasRules = ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0;
-      if (hasRules) {
-        supervisedEnv["ORKA_PERMISSION_RULES"] = JSON.stringify({
-          autoApprove: ctx.config.permissions.autoApprove,
-          alwaysDeny: ctx.config.permissions.alwaysDeny,
-        });
-      }
-    }
-
     const startedAt = new Date().toISOString();
-    const handle = await ctx.providerService.startSession(req.backend, {
-      threadId: sessionId,
+    const handle = await launchProviderSession(ctx, {
+      sessionId,
+      backend: req.backend,
       cwd: workingDir,
-      ...(req.model ? { model: req.model } : {}),
-      ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
       prompt: req.prompt,
-      ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
-      ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
-      env: { ...req.env, ...supervisedEnv },
-      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
-      ...(providerSessionId ? { providerSessionId } : {}),
+      permissionMode: req.permissionMode,
+      systemPrompt: req.systemPrompt,
+      allowedTools: req.allowedTools,
+      model: req.model,
+      reasoningEffort: req.reasoningEffort,
+      providerSessionId,
+      env: req.env,
     });
 
     const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
@@ -322,19 +366,24 @@ export async function resumeSession(
       fullPrompt = contextBlock + prompt;
     }
 
-    // Detect if session was supervised by checking for hook settings in worktree
-    const hookSettingsPath = join(session.workingDir, ".claude", "settings.json");
-    const wasSupervisedSession = existsSync(hookSettingsPath);
-    const permissionMode = wasSupervisedSession ? "supervised" : undefined;
+    // Read permissionMode from DB; fall back to filesystem detection for old sessions
+    let permissionMode = session.permissionMode;
+    if (!permissionMode) {
+      const hookSettingsPath = join(session.workingDir, ".claude", "settings.json");
+      if (existsSync(hookSettingsPath)) {
+        permissionMode = "supervised";
+      }
+    }
 
-    const handle = await ctx.providerService.startSession(session.backend, {
-      threadId: sessionId,
+    const handle = await launchProviderSession(ctx, {
+      sessionId,
+      backend: session.backend,
       cwd: session.workingDir,
       prompt: fullPrompt,
-      ...(session.providerSessionId ? { resumeSessionId: session.providerSessionId } : {}),
-      ...(systemPrompt ? { systemPrompt } : {}),
-      ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
-      ...(permissionMode ? { permissionMode } : {}),
+      permissionMode,
+      systemPrompt: session.systemPrompt,
+      allowedTools: session.allowedTools,
+      resumeSessionId: session.providerSessionId,
     });
 
     span.addEvent("session.resumed");
