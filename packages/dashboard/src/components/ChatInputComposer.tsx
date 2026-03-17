@@ -1,7 +1,8 @@
 import { LoaderCircle, ArrowUp, Square, RotateCcw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { InputState } from "../hooks/useInputState";
 import { useChatUiStore } from "../stores/chatUiStore";
+import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
 
 interface ChatInputComposerProps {
   sessionId: string;
@@ -16,8 +17,6 @@ interface ChatInputComposerProps {
   isRetrying?: boolean;
   isStopping?: boolean;
 }
-
-const MAX_TEXTAREA_HEIGHT = 200;
 
 const STATE_PLACEHOLDERS: Record<InputState, string> = {
   waiting: "Send a follow-up message...",
@@ -35,46 +34,25 @@ const STATE_MESSAGES: Record<Exclude<InputState, "waiting">, string> = {
 export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onStop, isRetrying, isStopping }: ChatInputComposerProps) {
   const text = useChatUiStore((s) => s.sessions[sessionId]?.draftText ?? "");
   const [isSending, setIsSending] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<ComposerEditorHandle>(null);
   const previousInputStateRef = useRef<InputState>(inputState);
 
   const isEditable = inputState === "waiting" && !isSending;
   const canSend = isEditable && text.trim().length > 0;
-  const textareaId = `chat-input-${sessionId}`;
-
-  function resizeTextarea() {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      return;
-    }
-
-    textarea.style.height = "0px";
-    const nextHeight = Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT);
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > MAX_TEXTAREA_HEIGHT ? "auto" : "hidden";
-  }
-
-  useEffect(() => {
-    resizeTextarea();
-  }, [text]);
 
   useEffect(() => {
     const previousInputState = previousInputStateRef.current;
     previousInputStateRef.current = inputState;
 
     if (previousInputState !== "waiting" && inputState === "waiting" && !isSending) {
-      textareaRef.current?.focus();
+      editorRef.current?.focus();
     }
   }, [inputState, isSending]);
 
-  useEffect(() => {
-    if (autoFocus) {
-      textareaRef.current?.focus();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const submitRef = useRef<() => void>();
 
   async function submit() {
-    const nextText = text.trim();
+    const nextText = (editorRef.current?.getText() ?? text).trim();
     if (!isEditable || nextText.length === 0) {
       return;
     }
@@ -84,9 +62,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
     try {
       await onSend(nextText);
       useChatUiStore.getState().update(sessionId, { draftText: "" });
-      requestAnimationFrame(() => {
-        resizeTextarea();
-      });
+      editorRef.current?.clear();
     } catch {
       // Error display handled by parent via sendError prop
     } finally {
@@ -94,46 +70,43 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
     }
   }
 
+  submitRef.current = submit;
+
+  const handleSubmit = useCallback(() => {
+    void submitRef.current?.();
+  }, []);
+
+  const handleChange = useCallback(
+    (nextText: string) => {
+      useChatUiStore.getState().update(sessionId, { draftText: nextText });
+      if (sendError) onClearError?.();
+    },
+    [sessionId, sendError, onClearError],
+  );
+
   return (
     <div className="border-t border-border bg-surface px-2 py-2">
       <div className="flex items-center gap-2">
-        <textarea
-          id={textareaId}
-          ref={textareaRef}
-          value={text}
-          rows={1}
-          disabled={!isEditable}
-          placeholder={placeholder ?? STATE_PLACEHOLDERS[inputState]}
-          aria-label="Chat message"
-          aria-busy={isSending}
-          onChange={(event) => {
-            useChatUiStore.getState().update(sessionId, { draftText: event.target.value });
-            if (sendError) onClearError?.();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.currentTarget.blur();
-              return;
-            }
-
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              event.preventDefault();
-              void submit();
-              return;
-            }
-
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void submit();
-            }
-          }}
-          className={`min-h-9 min-w-0 flex-1 resize-none rounded-sm border bg-surface-alt px-2 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-muted focus:ring-1 disabled:cursor-not-allowed disabled:bg-surface-alt/70 disabled:text-ink-muted ${
+        <div
+          className={`flex min-h-[34px] min-w-0 flex-1 rounded-sm border bg-surface-alt transition focus-within:ring-1 ${
+            !isEditable ? "cursor-not-allowed bg-surface-alt/70" : ""
+          } ${
             sendError
-              ? "border-status-error/50 focus:border-status-error/50 focus:ring-status-error/20"
-              : "border-border focus:border-accent focus:ring-accent/20"
+              ? "border-status-error/50 focus-within:border-status-error/50 focus-within:ring-status-error/20"
+              : "border-border focus-within:border-accent focus-within:ring-accent/20"
           }`}
-          style={{ maxHeight: `${MAX_TEXTAREA_HEIGHT}px` }}
-        />
+          style={{ maxHeight: "200px", overflowY: "auto" }}
+        >
+          <ComposerEditor
+            ref={editorRef}
+            disabled={!isEditable}
+            placeholder={placeholder ?? STATE_PLACEHOLDERS[inputState]}
+            autoFocus={autoFocus}
+            initialText={text}
+            onChange={handleChange}
+            onSubmit={handleSubmit}
+          />
+        </div>
         {onStop && (
           <button
             type="button"
