@@ -1,6 +1,7 @@
 import { LoaderCircle, ArrowUp, Square, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { InputState } from "../hooks/useInputState";
+import { useChatUiStore } from "../stores/chatUiStore";
 
 interface ChatInputComposerProps {
   sessionId: string;
@@ -32,7 +33,7 @@ const STATE_MESSAGES: Record<Exclude<InputState, "waiting">, string> = {
 };
 
 export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onStop, isRetrying, isStopping }: ChatInputComposerProps) {
-  const [text, setText] = useState("");
+  const text = useChatUiStore((s) => s.sessions[sessionId]?.draftText ?? "");
   const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previousInputStateRef = useRef<InputState>(inputState);
@@ -82,7 +83,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
 
     try {
       await onSend(nextText);
-      setText("");
+      useChatUiStore.getState().update(sessionId, { draftText: "" });
       requestAnimationFrame(() => {
         resizeTextarea();
       });
@@ -106,7 +107,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
           aria-label="Chat message"
           aria-busy={isSending}
           onChange={(event) => {
-            setText(event.target.value);
+            useChatUiStore.getState().update(sessionId, { draftText: event.target.value });
             if (sendError) onClearError?.();
           }}
           onKeyDown={(event) => {

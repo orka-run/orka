@@ -14,7 +14,10 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
 import { useRpcClient } from "../lib/transportContext";
 import { useTimelineCache } from "../lib/timelineCache";
+import { useChatUiStore } from "../stores/chatUiStore";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
+
+const EMPTY_SET = new Set<string>();
 
 type ToolIcon = "command" | "file" | "read" | "search" | "web" | "agent";
 
@@ -511,21 +514,26 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
+
+  // Per-session UI state from store (survives session switches and page reloads)
+  const autoScroll = useChatUiStore((s) => s.sessions[sessionId]?.autoScroll ?? true);
+  const expandedGroups = useChatUiStore((s) => s.sessions[sessionId]?.expandedGroups ?? EMPTY_SET);
   const entriesAtPauseRef = useRef(0);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  // Track scroll position in a ref to avoid store updates on every scroll event
+  const scrollTopRef = useRef(0);
+  // Pending scroll restoration after session switch (when autoScroll was false)
+  const pendingScrollRestoreRef = useRef<number | null>(null);
 
   const handleToggleGroup = useCallback((groupId: string, isOpen: boolean) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (isOpen) {
-        next.add(groupId);
-      } else {
-        next.delete(groupId);
-      }
-      return next;
-    });
-  }, []);
+    const current = useChatUiStore.getState().get(sessionId);
+    const next = new Set(current.expandedGroups);
+    if (isOpen) {
+      next.add(groupId);
+    } else {
+      next.delete(groupId);
+    }
+    useChatUiStore.getState().update(sessionId, { expandedGroups: next });
+  }, [sessionId]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -613,11 +621,41 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     return unsubscribe;
   }, [sessionId, transport]);
 
-  // Reset auto-scroll when switching sessions
+  // On session switch: check if scroll position needs restoring, and save outgoing session's scrollTop
   useEffect(() => {
-    setAutoScroll(true);
     programmaticScrollRef.current = false;
+    const state = useChatUiStore.getState().get(sessionId);
+    if (!state.autoScroll) {
+      pendingScrollRestoreRef.current = state.scrollTop;
+    } else {
+      pendingScrollRestoreRef.current = null;
+    }
+    return () => {
+      // Save scroll position of the session we're leaving
+      useChatUiStore.getState().update(sessionId, { scrollTop: scrollTopRef.current });
+    };
   }, [sessionId]);
+
+  // Restore scroll position after entries load (when autoScroll was false for this session)
+  useEffect(() => {
+    if (pendingScrollRestoreRef.current === null || entries.length === 0) return;
+    const scrollTarget = pendingScrollRestoreRef.current;
+    pendingScrollRestoreRef.current = null;
+
+    programmaticScrollRef.current = true;
+    const timer = setTimeout(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = scrollTarget;
+      requestAnimationFrame(() => {
+        programmaticScrollRef.current = false;
+      });
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      programmaticScrollRef.current = false;
+    };
+  }, [entries.length]);
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
@@ -649,20 +687,24 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     if (programmaticScrollRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
+    scrollTopRef.current = el.scrollTop;
     const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (!isAtBottom && autoScroll) {
+    const currentAutoScroll = useChatUiStore.getState().get(sessionId).autoScroll;
+    if (!isAtBottom && currentAutoScroll) {
       entriesAtPauseRef.current = entries.length;
     }
-    setAutoScroll(isAtBottom);
-  }, [autoScroll, entries.length]);
+    if (isAtBottom !== currentAutoScroll) {
+      useChatUiStore.getState().update(sessionId, { autoScroll: isAtBottom, scrollTop: el.scrollTop });
+    }
+  }, [sessionId, entries.length]);
 
   const scrollToBottom = useCallback(() => {
-    setAutoScroll(true);
+    useChatUiStore.getState().update(sessionId, { autoScroll: true });
     programmaticScrollRef.current = true;
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     setTimeout(() => { programmaticScrollRef.current = false; }, 500);
-  }, []);
+  }, [sessionId]);
 
   const handleApprovalResolve = useCallback(async (requestId: string, decision: "approve" | "deny") => {
     // Optimistically update the approval entry
@@ -715,7 +757,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
       body: text,
     };
     setEntries((prev) => [...prev, optimisticEntry]);
-    setAutoScroll(true);
+    useChatUiStore.getState().update(sessionId, { autoScroll: true });
 
     try {
       await withDashboardSpan(
