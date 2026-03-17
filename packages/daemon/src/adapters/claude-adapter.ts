@@ -117,6 +117,13 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const spawnEnv = buildAgentEnv(input.env);
         delete spawnEnv["CLAUDECODE"];
 
+        const supervised = input.permissionMode === "supervised";
+
+        // For supervised mode, write hook settings and inject env vars BEFORE spawning
+        if (supervised && input.cwd) {
+          setupSupervisedHookSettings(input.cwd, input.threadId, spawnEnv);
+        }
+
         const process = this.spawnProcess(command, {
           ...(input.cwd ? { cwd: input.cwd } : {}),
           stdin: "pipe",
@@ -127,13 +134,6 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         span.addEvent("process.spawned", { "orka.command": command.join(" ") });
         const stdout = process.stdout;
         const stdin = process.stdin;
-
-        const supervised = input.permissionMode === "supervised";
-
-        // For supervised mode, write hook settings and inject env vars
-        if (supervised && input.cwd) {
-          setupSupervisedHookSettings(input.cwd, input.threadId, spawnEnv);
-        }
 
         const meta: ClaudeHandleMeta = {
           process,
