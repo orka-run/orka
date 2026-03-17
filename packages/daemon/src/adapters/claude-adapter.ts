@@ -128,7 +128,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const stdout = process.stdout;
         const stdin = process.stdin;
 
-        const supervised = input.permissionMode === "supervised" || !input.permissionMode;
+        const supervised = input.permissionMode === "supervised";
 
         // For supervised mode, write hook settings and inject env vars
         if (supervised && input.cwd) {
@@ -971,8 +971,8 @@ function mapClaudePermissionMode(input: ProviderSessionStartInput): string {
     case "bypass":
       return "bypassPermissions";
     default:
-      // Default: supervised (hooks control approval)
-      return "bypassPermissions";
+      // Default: bypass for background (agents need autonomy), auto for interactive
+      return input.interactive ? "auto" : "bypassPermissions";
   }
 }
 
