@@ -145,10 +145,6 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
       </div>
       {sendError ? (
         <p className="mt-1 text-[11px] text-status-error">{sendError}</p>
-      ) : inputState === "busy" ? (
-        <p className="mt-1 animate-pulse text-[11px] text-accent-strong">
-          {STATE_MESSAGES.busy}
-        </p>
       ) : null}
     </div>
   );
