@@ -523,8 +523,10 @@ export function recoverStaleSessions(ctx: DaemonContext): number {
     for (const session of sessions) {
       if (ctx.providerService.getHandle(session.id)) continue;
 
-      // Idle sessions without a handle → hibernated (process was killed by daemon restart)
-      const newStatus = status === "idle" ? "hibernated" : "cancelled";
+      // Sessions with provider_session_id can be resumed → hibernated
+      // Sessions without it (old or preparing) → cancelled
+      const canResume = status !== "preparing" && session.providerSessionId;
+      const newStatus = canResume ? "hibernated" : "cancelled";
       ctx.db.updateSessionStatus(session.id, newStatus, newStatus === "cancelled" ? { finishedAt: now } : undefined);
 
       if (newStatus === "cancelled") {
