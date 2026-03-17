@@ -1,6 +1,5 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, Globe, LoaderCircle, RotateCcw, Search, Square, TerminalSquare, User, Wrench, Eye } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
@@ -525,11 +524,10 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     useChatUiStore.getState().update(sessionId, { expandedGroups: next });
   }, [sessionId]);
 
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   // Mutable refs for the push handler to accumulate deltas without re-subscribing
   const eventsRef = useRef<OrchestrationEvent[]>([]);
-  // Guard to prevent atBottomStateChange from recording pause when we programmatically scroll
-  const programmaticScrollRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
   // Stable refs for values used in effects without triggering re-runs
   const initialPromptRef = useRef(initialPrompt);
   initialPromptRef.current = initialPrompt;
@@ -603,28 +601,29 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     return unsubscribe;
   }, [sessionId, transport]);
 
-  // On session switch: reset programmatic scroll guard
+  // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
-    programmaticScrollRef.current = false;
-  }, [sessionId]);
+    if (autoScroll && entries.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    }
+  }, [entries.length, autoScroll]);
 
-  // Handle atBottom state changes from Virtuoso
-  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
-    if (programmaticScrollRef.current) return;
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     const currentAutoScroll = useChatUiStore.getState().get(sessionId).autoScroll;
-    if (!atBottom && currentAutoScroll) {
+    if (!isAtBottom && currentAutoScroll) {
       entriesAtPauseRef.current = entries.length;
     }
-    if (atBottom !== currentAutoScroll) {
-      useChatUiStore.getState().update(sessionId, { autoScroll: atBottom });
+    if (isAtBottom !== currentAutoScroll) {
+      useChatUiStore.getState().update(sessionId, { autoScroll: isAtBottom });
     }
   }, [sessionId, entries.length]);
 
   const scrollToBottom = useCallback(() => {
     useChatUiStore.getState().update(sessionId, { autoScroll: true });
-    programmaticScrollRef.current = true;
-    virtuosoRef.current?.scrollToIndex({ index: "LAST", behavior: "smooth" });
-    setTimeout(() => { programmaticScrollRef.current = false; }, 500);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [sessionId]);
 
   const handleApprovalResolve = useCallback(async (requestId: string, decision: "approve" | "deny") => {
@@ -742,42 +741,30 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   return (
     <div className={`flex h-full flex-col overflow-hidden ${isMobile ? "bg-surface" : "rounded-sm border border-border bg-surface"}`}>
       <div className="relative flex-1 overflow-hidden">
-        {entries.length === 0 ? (
-          <div className={`h-full overflow-y-auto ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}>
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className={`h-full overflow-y-auto ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}
+        >
+          {entries.length === 0 ? (
             <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
-          </div>
-        ) : (
-          <Virtuoso
-            ref={virtuosoRef}
-            data={entries}
-            className={isMobile ? "px-1 py-1" : "px-2 py-2"}
-            followOutput={(isAtBottom) => isAtBottom ? "smooth" : false}
-            initialTopMostItemIndex={entries.length - 1}
-            atBottomThreshold={40}
-            atBottomStateChange={handleAtBottomStateChange}
-            computeItemKey={(_index, entry) => entry.id}
-            overscan={{ main: 500, reverse: 1500 }}
-            increaseViewportBy={{ top: 1500, bottom: 500 }}
-            itemContent={(_index, entry) => (
-              <div className="pb-2">
+          ) : (
+            <div className="min-w-0 space-y-2">
+              {entries.map((entry) => (
                 <TimelineEntry
+                  key={entry.id}
                   entry={entry}
                   isExpanded={expandedGroups.has(entry.id)}
                   onToggleExpand={handleToggleGroup}
                   onApprovalResolve={handleApprovalResolve}
                   projectPath={session?.projectPath}
                 />
-              </div>
-            )}
-            {...(isRunning(activeSession.status)
-              ? {
-                  components: {
-                    Footer: () => <ThinkingIndicator state={deriveThinkingState(events)} />,
-                  },
-                }
-              : {})}
-          />
-        )}
+              ))}
+            </div>
+          )}
+          {isRunning(activeSession.status) ? <ThinkingIndicator state={deriveThinkingState(events)} /> : null}
+          <div ref={bottomRef} />
+        </div>
 
         {!autoScroll ? (() => {
           const newCount = Math.max(0, entries.length - entriesAtPauseRef.current);
@@ -853,12 +840,6 @@ const TimelineEntry = memo(function TimelineEntry({
   onApprovalResolve?: (requestId: string, decision: "approve" | "deny") => Promise<void>;
   projectPath?: string;
 }) {
-  const renderStart = performance.now();
-  useEffect(() => {
-    const dt = performance.now() - renderStart;
-    if (dt > 5) console.log(`[mount] ${entry.type}:${entry.id.slice(0, 20)} ${dt.toFixed(0)}ms`);
-  });
-
   if (entry.type === "approval" && onApprovalResolve) {
     return <ApprovalCard entry={entry} onResolve={onApprovalResolve} />;
   }
