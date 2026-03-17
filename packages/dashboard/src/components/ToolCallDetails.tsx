@@ -1,7 +1,10 @@
+import { resolvePath, getPathFromArgs, type ResolvedPath } from "../lib/pathUtils";
+
 interface ToolCallDetailsProps {
   title: string;
   details: string[];
   args?: unknown;
+  projectPath?: string | null;
 }
 
 type ParsedDetail =
@@ -44,7 +47,7 @@ const SEARCH_RESULT_RE = /^(.+?):(\d+)(?::(\d+))?:(.*)$/;
 const COMMON_COMMAND_RE =
   /^(?:\$ |>|bun\b|npm\b|pnpm\b|yarn\b|node\b|python(?:3)?\b|bash\b|sh\b|git\b|rg\b|grep\b|find\b|ls\b|cat\b|sed\b|awk\b|make\b|cargo\b|go\b|uv\b|pytest\b|docker\b|kubectl\b|terraform\b)/i;
 
-export function ToolCallDetails({ title, details, args }: ToolCallDetailsProps) {
+export function ToolCallDetails({ title, details, args, projectPath }: ToolCallDetailsProps) {
   const hasArgs = args != null && typeof args === "object" && Object.keys(args as Record<string, unknown>).length > 0;
   if (details.length === 0 && !hasArgs) {
     return (
@@ -54,11 +57,15 @@ export function ToolCallDetails({ title, details, args }: ToolCallDetailsProps) 
     );
   }
 
+  // Resolve the primary file path from args for indicator/tooltip in PathHeader
+  const absolutePath = getPathFromArgs(args);
+  const resolved = absolutePath ? resolvePath(absolutePath, projectPath ?? null) : null;
+
   const parsedDetails = details.map((detail, index) => parseDetail(title, detail, index));
 
   return (
     <div className="space-y-2">
-      {hasArgs ? <ArgsDetail args={args as Record<string, unknown>} /> : null}
+      {hasArgs ? <ArgsDetail args={args as Record<string, unknown>} projectPath={projectPath} /> : null}
       {parsedDetails.map((detail, index) => (
         <details
           key={`${detail.kind}-${detail.label}-${String(index)}`}
@@ -72,10 +79,10 @@ export function ToolCallDetails({ title, details, args }: ToolCallDetailsProps) 
             </span>
           </summary>
           <div className="border-t border-border">
-            {detail.kind === "read" ? <ReadDetail detail={detail} /> : null}
-            {detail.kind === "edit" ? <EditDetail detail={detail} /> : null}
+            {detail.kind === "read" ? <ReadDetail detail={detail} resolved={resolved} /> : null}
+            {detail.kind === "edit" ? <EditDetail detail={detail} resolved={resolved} /> : null}
             {detail.kind === "command" ? <CommandDetail detail={detail} /> : null}
-            {detail.kind === "search" ? <SearchDetail detail={detail} /> : null}
+            {detail.kind === "search" ? <SearchDetail detail={detail} projectPath={projectPath} /> : null}
             {detail.kind === "default" ? <DefaultDetail detail={detail} /> : null}
           </div>
         </details>
@@ -84,10 +91,10 @@ export function ToolCallDetails({ title, details, args }: ToolCallDetailsProps) 
   );
 }
 
-function ReadDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "read" }> }) {
+function ReadDetail({ detail, resolved }: { detail: Extract<ParsedDetail, { kind: "read" }>; resolved?: ResolvedPath | null }) {
   return (
     <div>
-      {detail.path ? <PathHeader path={detail.path} /> : null}
+      {detail.path ? <PathHeader path={detail.path} resolved={resolved} /> : null}
       {detail.content.trim() ? (
         <CodeBlock content={detail.content} />
       ) : (
@@ -97,13 +104,13 @@ function ReadDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "read" }
   );
 }
 
-function EditDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "edit" }> }) {
+function EditDetail({ detail, resolved }: { detail: Extract<ParsedDetail, { kind: "edit" }>; resolved?: ResolvedPath | null }) {
   const content = detail.content.trim();
   const isDiff = looksLikeDiff(content);
 
   return (
     <div>
-      {detail.path ? <PathHeader path={detail.path} /> : null}
+      {detail.path ? <PathHeader path={detail.path} resolved={resolved} /> : null}
       {content ? (
         isDiff ? <DiffBlock content={detail.content} /> : <CodeBlock content={detail.content} />
       ) : (
@@ -133,7 +140,7 @@ function CommandDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "comm
   );
 }
 
-function SearchDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "search" }> }) {
+function SearchDetail({ detail, projectPath }: { detail: Extract<ParsedDetail, { kind: "search" }>; projectPath?: string | null }) {
   return (
     <div>
       <div className="border-b border-border px-2 py-1.5">
@@ -143,7 +150,7 @@ function SearchDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "searc
       {detail.results.length > 0 ? (
         <div className="divide-y divide-border">
           {detail.results.map((result, index) => (
-            <SearchResultRow key={`${result}-${String(index)}`} result={result} />
+            <SearchResultRow key={`${result}-${String(index)}`} result={result} projectPath={projectPath} />
           ))}
         </div>
       ) : (
@@ -162,7 +169,7 @@ function DefaultDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "defa
 }
 
 /** Render tool input args as key-value pairs with syntax-aware formatting. */
-function ArgsDetail({ args }: { args: Record<string, unknown> }) {
+function ArgsDetail({ args, projectPath }: { args: Record<string, unknown>; projectPath?: string | null }) {
   // Filter out very long values for summary, show them expandable
   const entries = Object.entries(args).filter(([, v]) => v !== undefined && v !== null);
   if (entries.length === 0) return null;
@@ -174,19 +181,28 @@ function ArgsDetail({ args }: { args: Record<string, unknown> }) {
       </div>
       <div className="divide-y divide-border">
         {entries.map(([key, value]) => (
-          <ArgEntry key={key} name={key} value={value} />
+          <ArgEntry key={key} name={key} value={value} projectPath={projectPath} />
         ))}
       </div>
     </div>
   );
 }
 
-function ArgEntry({ name, value }: { name: string; value: unknown }) {
+/** Keys whose string values are file paths. */
+const PATH_ARG_KEYS = new Set(["file_path", "path"]);
+
+function ArgEntry({ name, value, projectPath }: { name: string; value: unknown; projectPath?: string | null }) {
   const str = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   const isLong = str.length > 120 || str.includes("\n");
   const isDiff = typeof value === "string" && (name === "old_string" || name === "new_string");
 
-  if (isLong) {
+  // Resolve file path args to relative display
+  const isPathArg = typeof value === "string" && PATH_ARG_KEYS.has(name) && value.startsWith("/");
+  const resolved = isPathArg ? resolvePath(value, projectPath ?? null) : null;
+  const displayStr = resolved ? resolved.display : str;
+  const tooltip = resolved ? resolved.full : undefined;
+
+  if (isLong && !resolved) {
     return (
       <details className="group">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1 [&::-webkit-details-marker]:hidden">
@@ -194,15 +210,9 @@ function ArgEntry({ name, value }: { name: string; value: unknown }) {
           <span className="truncate font-mono text-[11px] text-ink-muted">{str.slice(0, 80)}…</span>
         </summary>
         <div className="border-t border-border">
-          {isDiff ? (
-            <pre className="overflow-x-auto px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
-              <code>{str}</code>
-            </pre>
-          ) : (
-            <pre className="overflow-x-auto px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
-              <code>{str}</code>
-            </pre>
-          )}
+          <pre className="overflow-x-auto px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
+            <code>{str}</code>
+          </pre>
         </div>
       </details>
     );
@@ -211,16 +221,44 @@ function ArgEntry({ name, value }: { name: string; value: unknown }) {
   return (
     <div className="flex items-baseline gap-2 px-2 py-1">
       <span className="shrink-0 font-mono text-[10px] font-medium text-accent-strong">{name}</span>
-      <span className="min-w-0 break-all font-mono text-[11px] text-ink-secondary">{str}</span>
+      <span
+        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] ${resolved?.kind === "project" ? "text-status-warning" : resolved?.kind === "external" ? "text-status-error" : "text-ink-secondary"}`}
+        style={resolved ? { direction: "rtl", textAlign: "left" } : undefined}
+        title={tooltip}
+      >
+        {resolved ? (
+          <bdi>
+            {resolved.kind === "project" && "\u26A0 "}
+            {resolved.kind === "external" && "\u26A0 "}
+            {displayStr}
+          </bdi>
+        ) : displayStr}
+      </span>
     </div>
   );
 }
 
-function PathHeader({ path }: { path: string }) {
+function PathHeader({ path, resolved }: { path: string; resolved?: ResolvedPath | null }) {
+  const displayPath = resolved?.display ?? path;
+  const fullPath = resolved?.full ?? path;
+  const kind = resolved?.kind ?? (path.startsWith("/") ? "external" : "worktree");
+
   return (
     <div className="border-b border-border px-2 py-1.5">
       <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Path</p>
-      <p className="mt-0.5 break-all font-mono text-[11px] text-ink-muted">{path}</p>
+      <p
+        className={`mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] ${
+          kind === "project" ? "text-status-warning" : kind === "external" ? "text-status-error" : "text-ink-muted"
+        }`}
+        style={{ direction: "rtl", textAlign: "left" }}
+        title={fullPath}
+      >
+        <bdi>
+          {kind === "project" && "\u26A0 "}
+          {kind === "external" && "\u26A0 "}
+          {displayPath}
+        </bdi>
+      </p>
     </div>
   );
 }
@@ -284,7 +322,7 @@ function DiffBlock({ content }: { content: string }) {
   );
 }
 
-function SearchResultRow({ result }: { result: string }) {
+function SearchResultRow({ result, projectPath }: { result: string; projectPath?: string | null }) {
   const match = result.match(SEARCH_RESULT_RE);
 
   if (!match) {
@@ -293,15 +331,28 @@ function SearchResultRow({ result }: { result: string }) {
     );
   }
 
-  const [, path, line, column, rawSnippet] = match;
+  const [, rawPath, line, column, rawSnippet] = match;
   const safeLine = line ?? "";
   const location = column ? `${safeLine}:${column}` : safeLine;
   const snippet = rawSnippet ?? "";
+  const resolved = rawPath ? resolvePath(rawPath, projectPath ?? null) : null;
 
   return (
     <div className="px-2 py-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="break-all font-mono text-[11px] text-ink-muted">{path}</span>
+        <span
+          className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] ${
+            resolved?.kind === "project" ? "text-status-warning" : resolved?.kind === "external" ? "text-status-error" : "text-ink-muted"
+          }`}
+          style={{ direction: "rtl", textAlign: "left" }}
+          title={resolved?.full ?? rawPath}
+        >
+          <bdi>
+            {resolved?.kind === "project" && "\u26A0 "}
+            {resolved?.kind === "external" && "\u26A0 "}
+            {resolved?.display ?? rawPath}
+          </bdi>
+        </span>
         <span className="shrink-0 font-mono text-[10px] text-ink-muted">{location}</span>
       </div>
       {snippet.trim() ? (

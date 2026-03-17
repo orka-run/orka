@@ -130,7 +130,13 @@ export function DiffPanel({ sessionId, onSelectionLoadSettled }: DiffPanelProps)
                     <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
                   )}
                   <div className="min-w-0">
-                    <p className="truncate font-mono text-[11px] text-ink-secondary">{getFileLabel(file)}</p>
+                    <p
+                      className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-ink-secondary"
+                      style={{ direction: "rtl", textAlign: "left" }}
+                      title={getFileLabel(file)}
+                    >
+                      <bdi>{getFileLabel(file)}</bdi>
+                    </p>
                     <p className="mt-0.5 font-mono text-[10px] text-ink-muted">
                       --- {file.oldPath || "/dev/null"}  +++ {file.newPath || "/dev/null"}
                     </p>

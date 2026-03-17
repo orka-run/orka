@@ -16,6 +16,7 @@ import { useRpcClient } from "../lib/transportContext";
 import { useTimelineCache } from "../lib/timelineCache";
 import { useChatUiStore } from "../stores/chatUiStore";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
+import { shortenPaths } from "../lib/pathUtils";
 
 const EMPTY_SET = new Set<string>();
 
@@ -154,12 +155,9 @@ function toolIconEl(icon: ToolIcon, size: string): React.ReactElement {
   }
 }
 
-/** Shorten absolute paths by removing a workdir prefix. */
-function shortenPath(text: string, workDir?: string): string {
-  if (!workDir) return text;
-  // Replace absolute workdir paths with relative ones
-  const prefix = workDir.endsWith("/") ? workDir : workDir + "/";
-  return text.replaceAll(prefix, "");
+/** Shorten absolute paths by removing worktree and project prefixes. */
+function shortenPath(text: string, projectPath?: string): string {
+  return shortenPaths(text, projectPath ?? null);
 }
 
 /** Build a descriptive summary line for a collapsed tool group. */
@@ -848,6 +846,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
                         isExpanded={expandedGroups.has(entry.id)}
                         onToggleExpand={handleToggleGroup}
                         onApprovalResolve={handleApprovalResolve}
+                        projectPath={session?.projectPath}
                       />
                     </div>
                   </div>
@@ -925,11 +924,13 @@ function TimelineEntry({
   isExpanded,
   onToggleExpand,
   onApprovalResolve,
+  projectPath,
 }: {
   entry: ChatEntry;
   isExpanded?: boolean;
   onToggleExpand?: (groupId: string, isOpen: boolean) => void;
   onApprovalResolve?: (requestId: string, decision: "approve" | "deny") => Promise<void>;
+  projectPath?: string;
 }) {
   if (entry.type === "approval" && onApprovalResolve) {
     return <ApprovalCard entry={entry} onResolve={onApprovalResolve} />;
@@ -998,7 +999,7 @@ function TimelineEntry({
             </summary>
             {tool.details.length > 0 ? (
               <div className="border-t border-border/30 px-2 py-1">
-                <ToolCallDetails title={tool.title} details={tool.details} args={tool.args} />
+                <ToolCallDetails title={tool.title} details={tool.details} args={tool.args} projectPath={projectPath} />
               </div>
             ) : null}
           </details>
