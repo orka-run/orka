@@ -897,6 +897,11 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
         })() : null}
       </div>
       <div className="border-t border-border">
+        {isTerminal(activeSession.status) && (
+          <div className="px-2 py-1 text-[10px] text-ink-muted border-b border-border">
+            A new agent will continue in the same worktree with context from the previous session.
+          </div>
+        )}
         <ChatInputComposer
           sessionId={sessionId}
           inputState={isTerminal(activeSession.status) ? "waiting" : inputState}
