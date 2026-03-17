@@ -899,7 +899,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
       <div className="border-t border-border">
         {isTerminal(activeSession.status) && (
           <div className="px-2 py-1 text-[10px] text-ink-muted border-b border-border">
-            A new agent will continue in the same worktree with context from the previous session.
+            Send a follow-up to continue. The agent will pick up where it left off.
           </div>
         )}
         <ChatInputComposer

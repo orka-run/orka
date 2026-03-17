@@ -215,7 +215,10 @@ export async function continueSession(
           Bun.spawnSync(["git", "worktree", "add", session.workingDir, branchName], { cwd: session.projectPath });
           span.addEvent("worktree.recreated", { "orka.branch": branchName });
         } else {
-          throw new Error("Session worktree and branch no longer exist — was it merged?");
+          // Branch was merged/deleted — create fresh worktree from current HEAD
+          const freshBranch = `orka/${sessionId}-cont`;
+          Bun.spawnSync(["git", "worktree", "add", "-b", freshBranch, session.workingDir], { cwd: session.projectPath });
+          span.addEvent("worktree.created_fresh", { "orka.branch": freshBranch });
         }
       } catch (e) {
         if (e instanceof Error && e.message.includes("no longer exist")) throw e;
