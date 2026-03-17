@@ -541,11 +541,24 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const onSelectionLoadSettledRef = useRef(onSelectionLoadSettled);
   onSelectionLoadSettledRef.current = onSelectionLoadSettled;
 
+  // Cache measured element heights by entry ID for accurate size estimates
+  const sizeCacheRef = useRef(new Map<string, number>());
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 60,
-    overscan: 5,
+    estimateSize: (index) => {
+      const entry = entriesRef.current[index];
+      if (entry) {
+        const cached = sizeCacheRef.current.get(entry.id);
+        if (cached) return cached;
+      }
+      return 80;
+    },
+    overscan: 20,
+    getItemKey: (index) => entriesRef.current[index]?.id ?? String(index),
   });
 
   const getCachedTimeline = useTimelineCache((s) => s.get);
@@ -817,6 +830,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
         <div
           ref={scrollRef}
           onScroll={handleScroll}
+          style={{ overflowAnchor: "none" }}
           className={`h-full flex-1 overflow-y-auto overflow-x-hidden ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}
         >
           {entries.length === 0 ? (
@@ -830,7 +844,13 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
                   <div
                     key={entry.id}
                     data-index={virtualRow.index}
-                    ref={virtualizer.measureElement}
+                    ref={(el: HTMLDivElement | null) => {
+                      virtualizer.measureElement(el);
+                      if (el && entry) {
+                        const h = el.getBoundingClientRect().height;
+                        if (h > 0) sizeCacheRef.current.set(entry.id, h);
+                      }
+                    }}
                     style={{
                       position: "absolute",
                       top: 0,
