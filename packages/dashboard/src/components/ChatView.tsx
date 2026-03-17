@@ -756,8 +756,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
             atBottomThreshold={40}
             atBottomStateChange={handleAtBottomStateChange}
             computeItemKey={(_index, entry) => entry.id}
-            overscan={800}
-            increaseViewportBy={800}
+            overscan={{ main: 2000, reverse: 4000 }}
+            increaseViewportBy={{ top: 4000, bottom: 2000 }}
             itemContent={(_index, entry) => (
               <div className="pb-2">
                 <TimelineEntry
