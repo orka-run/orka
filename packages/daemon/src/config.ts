@@ -6,7 +6,6 @@ import { withSpanSync } from "./tracing";
 
 const DefaultsSchema = z.object({
   backend: z.string().default("claude-code"),
-  mode: z.string().default("background"),
   model: z.string().default(""),
   project: z.string().default("."),
   systemPrompt: z.string().default(""),
@@ -28,6 +27,7 @@ const LimitsSchema = z.object({
   maxConcurrent: z.number().default(5),
   sessionTimeoutMinutes: z.number().default(60),
   approvalTimeoutMinutes: z.number().default(5),
+  idleTimeoutMinutes: z.number().default(10),
 });
 
 const HookCommandSchema = z.object({
@@ -62,7 +62,6 @@ export type OrkaConfig = z.infer<typeof ConfigSchema>;
  */
 export interface ResolvedDefaults {
   backend: string;
-  mode: string;
   model: string;
   project: string;
   systemPrompt: string;
@@ -124,7 +123,6 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
         defaults !== undefined
           ? {
               backend: getString(defaults.backend),
-              mode: getString(defaults.mode),
               model: getString(defaults.model),
               project: getString(defaults.project),
               systemPrompt: getString(defaults.system_prompt ?? defaults.systemPrompt),
@@ -139,6 +137,7 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
               ...(limits.max_concurrent !== undefined ? { maxConcurrent: getNumber(limits.max_concurrent) } : {}),
               ...(limits.session_timeout_minutes !== undefined ? { sessionTimeoutMinutes: getNumber(limits.session_timeout_minutes) } : {}),
               ...(limits.approval_timeout_minutes !== undefined ? { approvalTimeoutMinutes: getNumber(limits.approval_timeout_minutes) } : {}),
+              ...(limits.idle_timeout_minutes !== undefined ? { idleTimeoutMinutes: getNumber(limits.idle_timeout_minutes) } : {}),
             }
           : undefined,
       hooks:
@@ -194,7 +193,6 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
   return {
     defaults: {
       backend: pickOverride(projDefaults.backend, userDefaults.backend, schemaDefaults.backend),
-      mode: pickOverride(projDefaults.mode, userDefaults.mode, schemaDefaults.mode),
       model: pickOverride(projDefaults.model, userDefaults.model, schemaDefaults.model),
       project: pickOverride(projDefaults.project, userDefaults.project, schemaDefaults.project),
       systemPrompt: pickOverride(projDefaults.systemPrompt, userDefaults.systemPrompt, schemaDefaults.systemPrompt),
@@ -214,6 +212,9 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
         approvalTimeoutMinutes: projectConfig.limits.approvalTimeoutMinutes !== ld.approvalTimeoutMinutes
           ? projectConfig.limits.approvalTimeoutMinutes
           : userConfig.limits.approvalTimeoutMinutes,
+        idleTimeoutMinutes: projectConfig.limits.idleTimeoutMinutes !== ld.idleTimeoutMinutes
+          ? projectConfig.limits.idleTimeoutMinutes
+          : userConfig.limits.idleTimeoutMinutes,
       };
     })(),
     hooks: {
@@ -264,7 +265,7 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
 export function resolveDefaults(
   config: OrkaConfig,
   backend: string,
-  envOverrides?: { backend?: string; model?: string; mode?: string },
+  envOverrides?: { backend?: string; model?: string },
 ): ResolvedDefaults {
   const base = { ...config.defaults };
   const bd = config.backendDefaults[backend];
@@ -277,7 +278,6 @@ export function resolveDefaults(
 
   if (envOverrides?.backend) base.backend = envOverrides.backend;
   if (envOverrides?.model) base.model = envOverrides.model;
-  if (envOverrides?.mode) base.mode = envOverrides.mode;
 
   return base;
 }

@@ -208,7 +208,6 @@ export function createAggregatingClient(
       id: s.id,
       status: s.status,
       backend: s.backend,
-      mode: "background",
       title: s.title,
       model: null,
       prompt: "",
@@ -220,6 +219,7 @@ export function createAggregatingClient(
       kept: false,
       autoMerge: false,
       parentSessionId: null,
+      permissionMode: null,
       tags: [],
     };
   }

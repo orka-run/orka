@@ -235,6 +235,10 @@ describe("consumeProviderEvents", () => {
     expect(statuses).toEqual([
       {
         sessionId: "sess-1",
+        status: "idle",
+      },
+      {
+        sessionId: "sess-1",
         status: "completed",
         extra: { finishedAt: "2026-03-11T00:00:04.000Z" },
       },
@@ -261,8 +265,10 @@ describe("consumeProviderEvents", () => {
     };
     const statuses: StatusUpdate[] = [];
 
+    let currentStatus = "running";
     const consumeTask = consumeProviderEvents("sess-merge", handle, new OrchestrationEngine(), {
       updateSessionStatus: (sessionId, status, extra) => {
+        currentStatus = status;
         recordStatusUpdate(statuses, sessionId, status, extra);
       },
       saveSessionDiff: () => {},
@@ -272,8 +278,18 @@ describe("consumeProviderEvents", () => {
       projectPath: repoPath,
       autoMerge: true,
       orkaHome: testHome,
+      getSession: () => ({ status: currentStatus } as any),
     });
 
+    // Auto-merge fires on first turn.completed (idle transition)
+    queue.push(
+      createEvent(
+        "turn.completed",
+        "thread-merge",
+        {},
+        { turnId: "turn-1", createdAt: "2026-03-11T00:00:59.000Z" },
+      ),
+    );
     queue.push(
       createEvent(
         "session.exited",
@@ -286,11 +302,16 @@ describe("consumeProviderEvents", () => {
 
     await consumeTask;
 
+    // Flow: idle (turn completed) → completed (auto-merge succeeded) → session.exited skipped (already completed)
     expect(statuses).toEqual([
       {
         sessionId: "sess-merge",
+        status: "idle",
+      },
+      {
+        sessionId: "sess-merge",
         status: "completed",
-        extra: { finishedAt: "2026-03-11T00:01:00.000Z" },
+        extra: { finishedAt: expect.any(String) },
       },
     ]);
     expect(readFileSync(join(repoPath, "tracked.txt"), "utf8")).toBe("base\nmerged\n");

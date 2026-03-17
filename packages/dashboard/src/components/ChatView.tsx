@@ -129,10 +129,6 @@ function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState {
   return "idle";
 }
 
-function isTerminal(status: SessionSummary["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
 /** Map an item type to an icon kind for tool entries. */
 function itemIcon(itemType: string): ToolIcon {
   switch (itemType) {
@@ -740,7 +736,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   }
 
   const activeSession = session;
-  const inputState = useInputState(events, activeSession.status, activeSession.backend, activeSession.mode);
+  const inputState = useInputState(events, activeSession.status, activeSession.backend);
 
   const [stopping, setStopping] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -779,25 +775,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     }
   }
 
-  async function handleContinue(text: string) {
-    setSendError(null);
-    const optimisticEntry: ChatEntry = {
-      id: `user-optimistic-${String(Date.now())}`,
-      type: "user",
-      timestamp: new Date().toISOString(),
-      body: text,
-    };
-    setEntries((prev) => [...prev, optimisticEntry]);
-    useChatUiStore.getState().update(sessionId, { autoScroll: true });
-
-    try {
-      await client.continueSession(sessionId, text);
-    } catch (err) {
-      setEntries((prev) => prev.filter((e) => e.id !== optimisticEntry.id));
-      setSendError(err instanceof Error ? err.message : "Failed to continue session");
-      throw err;
-    }
-  }
 
   async function handleStop() {
     setStopping(true);
@@ -897,20 +874,14 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
         })() : null}
       </div>
       <div className="border-t border-border">
-        {isTerminal(activeSession.status) && (
-          <div className="px-2 py-1 text-[10px] text-ink-muted border-b border-border">
-            Send a follow-up to continue. The agent will pick up where it left off.
-          </div>
-        )}
         <ChatInputComposer
           sessionId={sessionId}
-          inputState={isTerminal(activeSession.status) ? "waiting" : inputState}
-          onSend={isTerminal(activeSession.status) ? handleContinue : handleSend}
+          inputState={inputState}
+          onSend={handleSend}
           sendError={sendError}
           onClearError={() => { setSendError(null); }}
           onStop={isRunning(activeSession.status) ? () => { void handleStop(); } : undefined}
           isStopping={stopping}
-          placeholder={isTerminal(activeSession.status) ? "Continue this session..." : undefined}
         />
       </div>
     </div>

@@ -43,6 +43,8 @@ export interface ProviderEventConsumerCallbacks {
   respondToRequest?: (threadId: string, requestId: string, decision: ProviderApprovalDecision) => Promise<void>;
   /** Deny all pending hook-based approvals for a session (called on session exit). */
   denyHookApprovals?: (sessionId: string) => void;
+  /** Called when a turn completes and session transitions to idle. Used to start hibernate timer. */
+  onSessionIdle?: (sessionId: string) => void;
 }
 
 export async function consumeProviderEvents(
@@ -106,6 +108,7 @@ async function handleProviderEvent(
       return;
     case "turn.completed":
       persistUsageRecord(sessionId, handle, event, callbacks);
+      await handleTurnCompleted(sessionId, callbacks);
       return;
     case "session.exited":
       await finalizeSession(sessionId, event, callbacks);
@@ -203,18 +206,63 @@ function persistUsageRecord(
   });
 }
 
+/** Track whether auto-merge has already fired for a session (one-shot on first idle). */
+const autoMergeFired = new Set<string>();
+
+async function handleTurnCompleted(
+  sessionId: string,
+  callbacks: ProviderEventConsumerCallbacks,
+): Promise<void> {
+  // Transition session to "idle" — the turn is done, process is still alive
+  callbacks.updateSessionStatus(sessionId, "idle");
+  callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
+    sessionId,
+    status: "idle",
+  });
+
+  // Auto-merge fires on first idle transition (preserves old "background completes and merges" behavior)
+  if (callbacks.autoMerge && !autoMergeFired.has(sessionId)) {
+    autoMergeFired.add(sessionId);
+    await tryAutoMerge(sessionId, callbacks);
+    // After successful auto-merge, mark session as completed
+    const session = callbacks.getSession?.(sessionId);
+    if (session?.status === "idle") {
+      // Auto-merge succeeded — session is done
+      callbacks.updateSessionStatus(sessionId, "completed", { finishedAt: new Date().toISOString() });
+      callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
+        sessionId,
+        status: "completed",
+      });
+      return;
+    }
+  }
+
+  // Notify orchestrator to start idle timer
+  callbacks.onSessionIdle?.(sessionId);
+}
+
 async function finalizeSession(
   sessionId: string,
   event: ProviderRuntimeEventOf<"session.exited">,
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
+  // Clean up auto-merge tracking
+  autoMergeFired.delete(sessionId);
+
+  // Check current session state — if already hibernated (by idle timer), don't overwrite
+  const currentSession = callbacks.getSession?.(sessionId);
+  if (currentSession?.status === "hibernated" || currentSession?.status === "completed") {
+    // Process was killed for hibernation or session was already closed — don't change status
+    return;
+  }
+
   const status = getTerminalStatus(event);
   const finishedAt = event.createdAt;
 
   await captureSessionDiff(sessionId, callbacks);
 
   callbacks.updateSessionStatus(sessionId, status, { finishedAt });
-  recordSessionTerminalMetrics(callbacks.getSession?.(sessionId)?.startedAt ?? null, finishedAt, status);
+  recordSessionTerminalMetrics(currentSession?.startedAt ?? null, finishedAt, status);
 
   // Auto-deny any pending approvals — session is done, no one can approve anymore
   const pending = callbacks.approvalManager.getPendingForSession(sessionId);
@@ -228,11 +276,6 @@ async function finalizeSession(
     sessionId,
     status,
   });
-
-  if (status === "completed" && callbacks.autoMerge) {
-    await tryAutoMerge(sessionId, callbacks);
-    return;
-  }
 
   if (status === "cancelled") {
     await callbacks.cleanupWorktree?.();

@@ -1,7 +1,7 @@
 // Draft chat view: unified spawn UX with inline advanced options
 import { useState } from "react";
 import { Bot, LoaderCircle, MessageSquarePlus, User } from "lucide-react";
-import type { BackendKind, NodeInfo, OrchestrationEvent, PermissionMode, SessionMode, SpawnRequest } from "@orka/core";
+import type { BackendKind, NodeInfo, OrchestrationEvent, PermissionMode, SpawnRequest } from "@orka/core";
 import { ChatInputComposer } from "./ChatInputComposer";
 import { SpawnAdvancedPanel } from "./SpawnAdvancedPanel";
 import { useRpcClient } from "../lib/transportContext";
@@ -23,7 +23,6 @@ const MODELS = [
 ];
 
 const BACKENDS: readonly BackendKind[] = ["claude-code", "codex"];
-const MODES: readonly SessionMode[] = ["background", "interactive"];
 
 function parseTags(value: string): string[] {
   return Array.from(
@@ -43,7 +42,6 @@ export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftCha
   // Quick options (always visible)
   const [backend, setBackend] = useState<BackendKind>("claude-code");
   const [model, setModel] = useState("");
-  const [mode, setMode] = useState<SessionMode>("background");
 
   // Advanced options (collapsible)
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -73,7 +71,6 @@ export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftCha
         prompt: text,
         projectPath: defaultProjectPath,
         backend,
-        mode,
         permissionMode,
         autoMerge,
         ...(trimmedTitle ? { title: trimmedTitle } : {}),
@@ -87,7 +84,6 @@ export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftCha
         "orka.dashboard.draft.spawn",
         {
           "orka.backend": backend,
-          "orka.mode": mode,
           "orka.prompt.length": text.length,
           "orka.permission_mode": permissionMode,
           "orka.auto_merge": autoMerge,
@@ -133,7 +129,6 @@ export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftCha
               </option>
             ))}
           </select>
-          <MiniPills options={MODES} value={mode} onChange={setMode} />
         </div>
       </header>
 

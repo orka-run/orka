@@ -36,7 +36,7 @@ import type {
 import { generatePairingCode } from "@orka/core/crypto/protocol";
 import { EnrollmentStore } from "./pairing/enrollment-store";
 import type { DaemonContext } from "./daemon-context";
-import { spawnSession, continueSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
+import { spawnSession, closeSession, stopSession, reapSessions, cleanupOrphanedWorktrees, sendTurnToSession } from "./orchestrator";
 import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
 import {
@@ -96,8 +96,8 @@ class LocalClient implements OrkaService {
     };
   }
 
-  async continueSession(params: { sessionId: string; text: string }): Promise<SpawnResult> {
-    return continueSession(this.ctx, params.sessionId, params.text);
+  async closeSession(sessionId: string): Promise<void> {
+    return closeSession(this.ctx, sessionId);
   }
 
   async stop(sessionId: string): Promise<void> {
@@ -266,28 +266,7 @@ class LocalClient implements OrkaService {
   }
 
   async sendTurn(sessionId: string, text: string): Promise<void> {
-    const session = this.ctx.db.getSession(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
-
-    const handle = this.ctx.providerService.getHandle(sessionId);
-    if (!handle) {
-      throw new Error(`Session ${sessionId} is not running`);
-    }
-
-    const event: OrchestrationEvent = {
-      v: 1,
-      type: "user.input",
-      sessionId,
-      text,
-      timestamp: new Date().toISOString(),
-    };
-    this.ctx.db.insertOrchestrationEvent({
-      ...event,
-      provider: handle.provider,
-      eventId: generateId("evt"),
-    });
-    this.ctx.pushHub.broadcast("orchestration.event", event);
-    await this.ctx.providerService.sendTurn(sessionId, { input: text });
+    await sendTurnToSession(this.ctx, sessionId, text);
   }
 
   async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
@@ -891,7 +870,6 @@ function sessionToDetail(session: Session, task: Task | null, tags: string[]): S
     id: session.id,
     status: session.status,
     backend: session.backend,
-    mode: session.mode,
     title: task?.title ?? session.id,
     model: task?.model ?? null,
     prompt: task?.prompt ?? "",
@@ -918,7 +896,6 @@ function sessionItemToListResponse(item: SessionListItem, tags: string[]): Sessi
     id: item.id,
     status: item.status,
     backend: item.backend,
-    mode: item.mode,
     title: item.title ?? item.id,
     model: item.model ?? null,
     prompt: item.prompt ?? "",

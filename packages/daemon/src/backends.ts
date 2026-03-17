@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import type { BackendKind, SessionMode, ReasoningEffort } from "@orka/core";
+import type { BackendKind, ReasoningEffort } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
 export interface BackendCommand {
@@ -46,7 +46,6 @@ export function assertBackendInstalled(backend: BackendKind): void {
 export function buildBackendCommand(
   backend: BackendKind,
   prompt: string,
-  mode: SessionMode,
   opts?: BackendCommandOptions,
 ): BackendCommand {
   return withSpanSync("orka.backend.build_command", { "orka.backend": backend }, () => {
@@ -54,10 +53,10 @@ export function buildBackendCommand(
 
     switch (backend) {
       case "claude-code":
-        cmd = buildClaudeCode(prompt, mode, opts?.sessionId, opts?.model, opts?.systemPrompt, opts?.allowedTools);
+        cmd = buildClaudeCode(prompt, opts?.sessionId, opts?.model, opts?.systemPrompt, opts?.allowedTools);
         break;
       case "codex":
-        cmd = buildCodex(prompt, mode, opts?.model, opts?.reasoningEffort, opts?.projectPath, opts?.systemPrompt);
+        cmd = buildCodex(prompt, opts?.model, opts?.reasoningEffort, opts?.projectPath, opts?.systemPrompt);
         break;
     }
 
@@ -73,7 +72,6 @@ export function buildBackendCommand(
 
 function buildClaudeCode(
   prompt: string,
-  mode: SessionMode,
   sessionId?: string,
   model?: string,
   systemPrompt?: string,
@@ -87,33 +85,23 @@ function buildClaudeCode(
   if (allowedTools && allowedTools.length > 0) {
     parts.push(`--allowedTools ${shellEscape(allowedTools.join(","))}`);
   }
-  if (mode === "background") {
-    parts.push("-p --verbose --output-format stream-json --permission-mode auto");
-  }
+  parts.push("-p --verbose --output-format stream-json --permission-mode auto");
   parts.push(escaped);
   return parts.join(" ");
 }
 
 function buildCodex(
   prompt: string,
-  mode: SessionMode,
   model?: string,
   reasoningEffort?: ReasoningEffort,
   projectPath?: string,
   systemPrompt?: string,
 ): string {
   const escaped = shellEscape(prependSystemPrompt(prompt, systemPrompt));
-  const parts: string[] = ["codex"];
-
-  if (mode === "background") {
-    // Non-interactive: codex exec with full automation and no sandbox
-    // --dangerously-bypass-approvals-and-sandbox replaces --full-auto (they conflict)
-    // TODO(orka-bt3): re-enable sandbox with lifecycle hooks for dep install
-    parts[0] = "codex exec";
-    parts.push("--dangerously-bypass-approvals-and-sandbox");
-    parts.push("--json");
-    parts.push("--skip-git-repo-check");
-  }
+  const parts: string[] = ["codex exec"];
+  parts.push("--dangerously-bypass-approvals-and-sandbox");
+  parts.push("--json");
+  parts.push("--skip-git-repo-check");
 
   if (model) parts.push(`--model ${shellEscape(model)}`);
   if (reasoningEffort) parts.push(`--config model_reasoning_effort=${shellEscape(reasoningEffort)}`);

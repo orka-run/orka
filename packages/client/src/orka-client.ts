@@ -243,8 +243,8 @@ class OrkaClient implements OrkaService {
     return this.call("spawn", req);
   }
 
-  async continueSession(params: { sessionId: string; text: string }): Promise<SpawnResult> {
-    return this.call("continueSession", params);
+  async closeSession(sessionId: string): Promise<void> {
+    return this.call("closeSession", { sessionId });
   }
 
   async stop(sessionId: string): Promise<void> {

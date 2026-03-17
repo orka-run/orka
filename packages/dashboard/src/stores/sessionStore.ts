@@ -10,7 +10,6 @@ export interface SessionSummary {
   id: string;
   status: Session["status"];
   backend: Session["backend"];
-  mode: Session["mode"];
   title: string;
   model: string | null;
   createdAt: string;
@@ -52,7 +51,6 @@ function toSessionSummary(
     id: session.id,
     status: session.status,
     backend: session.backend,
-    mode: session.mode,
     title,
     model: session.model ?? null,
     createdAt: session.createdAt,
@@ -168,7 +166,6 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           id: result.id,
           status: result.status,
           backend: request.backend,
-          mode: request.mode,
           title: result.title || fallbackTitleFromRequest(request) || result.id,
           model: request.model ?? null,
           createdAt: new Date().toISOString(),

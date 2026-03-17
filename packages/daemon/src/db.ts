@@ -12,7 +12,7 @@ import type {
   UsageRecord,
   UsageSummary,
 } from "@orka/core";
-import { BackendKindSchema, SessionModeSchema, SessionStatusSchema, parseWireEvent } from "@orka/core";
+import { BackendKindSchema, SessionStatusSchema, parseWireEvent } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
 const TaskRowSchema = z.object({
@@ -20,7 +20,6 @@ const TaskRowSchema = z.object({
   title: z.string(),
   prompt: z.string(),
   backend: BackendKindSchema,
-  mode: SessionModeSchema,
   model: z.string().nullable().default(null),
   created_at: z.string(),
 });
@@ -31,7 +30,6 @@ const SessionRowSchema = z.object({
   workspace_id: z.string(),
   status: SessionStatusSchema,
   backend: BackendKindSchema,
-  mode: SessionModeSchema,
   project_path: z.string().default(""),
   working_dir: z.string(),
   log_file: z.string().default(""),
@@ -230,7 +228,7 @@ export class DatabaseRepository {
           $title: task.title,
           $prompt: task.prompt,
           $backend: task.backend,
-          $mode: task.mode,
+          $mode: "background",
           $model: task.model,
           $createdAt: task.createdAt,
         });
@@ -259,7 +257,7 @@ export class DatabaseRepository {
           $workspaceId: session.workspaceId,
           $status: session.status,
           $backend: session.backend,
-          $mode: session.mode,
+          $mode: "background",
           $projectPath: session.projectPath,
           $workingDir: session.workingDir,
           $logFile: session.logFile,
@@ -792,7 +790,6 @@ function rowToTask(row: unknown): Task {
     title: data.title,
     prompt: data.prompt,
     backend: data.backend,
-    mode: data.mode,
     model: data.model,
     createdAt: data.created_at,
   };
@@ -806,7 +803,6 @@ function rowToSession(row: unknown): Session {
     workspaceId: data.workspace_id,
     status: data.status,
     backend: data.backend,
-    mode: data.mode,
     projectPath: data.project_path,
     workingDir: data.working_dir,
     logFile: data.log_file,

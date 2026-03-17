@@ -186,11 +186,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
             rawEvents.push({ direction: "in", data: msg.trimEnd(), ts: new Date().toISOString() });
             await Promise.resolve(stdin.write(msg));
           }
-          // Close stdin for non-interactive (background) sessions so Claude Code exits after one turn.
-          // Keep open for interactive sessions to allow multi-turn via sendTurn().
-          if (!input.interactive) {
-            await Promise.resolve(stdin.end());
-          }
+          // stdin stays open for ALL sessions — multi-turn by default.
+          // Process stays alive after first turn, waiting for more input.
         } catch (error) {
           emitSessionExited(input.threadId, meta, "Claude Code prompt write failed", "error", span);
           closeEvents(meta);
@@ -978,8 +975,8 @@ function mapClaudePermissionMode(input: ProviderSessionStartInput): string {
     case "bypass":
       return "bypassPermissions";
     default:
-      // Default: bypass for background (agents need autonomy), auto for interactive
-      return input.interactive ? "auto" : "bypassPermissions";
+      // Default: bypass — agents need autonomy in the unified session model
+      return "bypassPermissions";
   }
 }
 

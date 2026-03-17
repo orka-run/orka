@@ -112,87 +112,72 @@ describe("buildEnvExports", () => {
 
 describe("buildBackendCommand", () => {
   describe("claude-code backend", () => {
-    test("builds background mode command", () => {
-      const { command } = buildBackendCommand("claude-code", "fix the bug", "background");
+    test("builds command with streaming flags", () => {
+      const { command } = buildBackendCommand("claude-code", "fix the bug");
       expect(command).toContain("claude");
       expect(command).toContain("-p --verbose --output-format stream-json --permission-mode auto");
       expect(command).toContain("'fix the bug'");
     });
 
-    test("builds interactive (foreground) mode command", () => {
-      const { command } = buildBackendCommand("claude-code", "fix the bug", "interactive");
-      expect(command).toContain("claude");
-      expect(command).not.toContain("-p");
-      expect(command).not.toContain("--output-format");
-      expect(command).toContain("'fix the bug'");
-    });
-
     test("includes model flag when specified", () => {
-      const { command } = buildBackendCommand("claude-code", "task", "background", {
+      const { command } = buildBackendCommand("claude-code", "task", {
         model: "claude-opus-4-6",
       });
       expect(command).toContain("--model 'claude-opus-4-6'");
     });
 
     test("includes system prompt flag", () => {
-      const { command } = buildBackendCommand("claude-code", "task", "background", {
+      const { command } = buildBackendCommand("claude-code", "task", {
         systemPrompt: "Be concise",
       });
       expect(command).toContain("--append-system-prompt 'Be concise'");
     });
 
     test("includes session ID as system prompt", () => {
-      const { command } = buildBackendCommand("claude-code", "task", "background", {
+      const { command } = buildBackendCommand("claude-code", "task", {
         sessionId: "sess-abc",
       });
       expect(command).toContain("--append-system-prompt '[orka session: sess-abc]'");
     });
 
     test("includes allowed tools", () => {
-      const { command } = buildBackendCommand("claude-code", "task", "background", {
+      const { command } = buildBackendCommand("claude-code", "task", {
         allowedTools: ["Bash", "Read", "Write"],
       });
       expect(command).toContain("--allowedTools 'Bash,Read,Write'");
     });
 
     test("escapes special characters in prompt", () => {
-      const { command } = buildBackendCommand("claude-code", "it's a \"test\" $HOME", "background");
+      const { command } = buildBackendCommand("claude-code", "it's a \"test\" $HOME");
       expect(command).toContain("'it'\\''s a \"test\" $HOME'");
     });
   });
 
   describe("codex backend", () => {
-    test("builds background mode command with exec", () => {
-      const { command } = buildBackendCommand("codex", "fix the bug", "background");
+    test("builds exec command with bypass flags", () => {
+      const { command } = buildBackendCommand("codex", "fix the bug");
       expect(command).toStartWith("codex exec");
       expect(command).toContain("--dangerously-bypass-approvals-and-sandbox");
       expect(command).toContain("--json");
       expect(command).toContain("--skip-git-repo-check");
     });
 
-    test("builds interactive mode command without exec", () => {
-      const { command } = buildBackendCommand("codex", "fix the bug", "interactive");
-      expect(command).toStartWith("codex ");
-      expect(command).not.toContain("exec");
-      expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
-    });
-
     test("includes model flag", () => {
-      const { command } = buildBackendCommand("codex", "task", "background", {
+      const { command } = buildBackendCommand("codex", "task", {
         model: "gpt-5.4",
       });
       expect(command).toContain("--model 'gpt-5.4'");
     });
 
     test("includes reasoning effort config", () => {
-      const { command } = buildBackendCommand("codex", "task", "background", {
+      const { command } = buildBackendCommand("codex", "task", {
         reasoningEffort: "high",
       });
       expect(command).toContain("--config model_reasoning_effort='high'");
     });
 
     test("prepends system prompt into the prompt text", () => {
-      const { command } = buildBackendCommand("codex", "do the thing", "background", {
+      const { command } = buildBackendCommand("codex", "do the thing", {
         systemPrompt: "Be thorough",
       });
       // Codex prepends system prompt to the prompt itself
@@ -203,7 +188,7 @@ describe("buildBackendCommand", () => {
 
   describe("log file wrapping", () => {
     test("wraps command with tee and exit code capture when logFile specified", () => {
-      const { command } = buildBackendCommand("claude-code", "echo hi", "background", {
+      const { command } = buildBackendCommand("claude-code", "echo hi", {
         logFile: "/tmp/test.log",
       });
       expect(command).toContain("tee '/tmp/test.log'");
@@ -211,7 +196,7 @@ describe("buildBackendCommand", () => {
     });
 
     test("escapes single quotes in log file path", () => {
-      const { command } = buildBackendCommand("claude-code", "echo hi", "background", {
+      const { command } = buildBackendCommand("claude-code", "echo hi", {
         logFile: "/tmp/it's a log.log",
       });
       expect(command).toContain("tee '/tmp/it'\\''s a log.log'");

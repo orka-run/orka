@@ -35,7 +35,6 @@ function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListR
     id: "sess-1",
     status: "queued",
     backend: "codex",
-    mode: "interactive",
     projectPath: "/tmp/project",
     createdAt: "2026-03-11T10:00:00.000Z",
     startedAt: null,
@@ -68,7 +67,6 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     title: "Dashboard task",
     prompt: "Build the dashboard session store",
     backend: "codex",
-    mode: "interactive",
     model: "gpt-5",
     createdAt: "2026-03-11T09:59:00.000Z",
     ...overrides,
@@ -88,8 +86,7 @@ describe("sessionStore", () => {
         id: "sess-1",
         status: "queued",
         backend: "codex",
-        mode: "interactive",
-        title: "First session",
+            title: "First session",
         model: "gpt-5",
         createdAt: "2026-03-11T10:00:00.000Z",
         startedAt: null,
@@ -126,7 +123,6 @@ describe("sessionStore", () => {
           id: session.id,
           status: session.status,
           backend: session.backend,
-          mode: session.mode,
           title: "First session",
           model: "gpt-5",
           createdAt: session.createdAt,
@@ -160,7 +156,6 @@ describe("sessionStore", () => {
           id: session.id,
           status: session.status,
           backend: session.backend,
-          mode: session.mode,
           title: "First session",
           model: "gpt-5",
           createdAt: session.createdAt,
@@ -201,8 +196,7 @@ describe("sessionStore", () => {
       title: "Ship dashboard store",
       projectPath: "/tmp/project",
       backend: "codex",
-      mode: "interactive",
-      model: "gpt-5",
+        model: "gpt-5",
       autoMerge: true,
       tags: ["dashboard", "polish"],
       systemPrompt: "Keep the response concise and implementation-focused.",
@@ -218,7 +212,6 @@ describe("sessionStore", () => {
     expect(sessions[0].id).toBe("sess-2");
     expect(sessions[0].status).toBe("queued");
     expect(sessions[0].backend).toBe("codex");
-    expect(sessions[0].mode).toBe("interactive");
     expect(sessions[0].title).toBe("Ship dashboard store");
     expect(sessions[0].model).toBe("gpt-5");
     expect(sessions[0].projectPath).toBe("/tmp/project");

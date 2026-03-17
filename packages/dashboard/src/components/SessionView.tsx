@@ -269,7 +269,6 @@ function OverviewTab({
             </div>
             <MetadataItem label="Backend" value={session.backend} />
             <MetadataItem label="Model" value={session.model ?? result?.model ?? "Default"} />
-            <MetadataItem label="Mode" value={session.mode} />
             {session.permissionMode && (
               <div>
                 <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Permissions</dt>

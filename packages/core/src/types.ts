@@ -18,9 +18,6 @@ export function generateId(prefix: string): string {
 export const BackendKindSchema = z.enum(["claude-code", "codex"]);
 export type BackendKind = z.infer<typeof BackendKindSchema>;
 
-export const SessionModeSchema = z.enum(["interactive", "background"]);
-export type SessionMode = z.infer<typeof SessionModeSchema>;
-
 export const PermissionModeSchema = z.enum(["bypass", "supervised", "auto"]);
 export type PermissionMode = z.infer<typeof PermissionModeSchema>;
 
@@ -28,6 +25,8 @@ export const SessionStatusSchema = z.enum([
   "queued",
   "preparing",
   "running",
+  "idle",
+  "hibernated",
   "completed",
   "failed",
   "cancelled",
@@ -44,7 +43,6 @@ export interface Task {
   title: string;
   prompt: string;
   backend: BackendKind;
-  mode: SessionMode;
   model: string | null;
   createdAt: string; // ISO 8601
 }
@@ -64,7 +62,6 @@ export interface Session {
   workspaceId: WorkspaceId;
   status: SessionStatus;
   backend: BackendKind;
-  mode: SessionMode;
   projectPath: string;
   workingDir: string;
   logFile: string;
@@ -162,7 +159,6 @@ export interface SpawnRequest {
   title?: string;
   projectPath: string;
   backend: BackendKind;
-  mode: SessionMode;
   branch?: string;
   model?: string;
   /** Reasoning effort for models that support it (codex: none/minimal/low/medium/high/xhigh). */

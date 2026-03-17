@@ -18,7 +18,7 @@ function mockDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
     id: overrides.id ?? "sess-local-1",
     status: "completed",
     backend: "claude-code",
-    mode: "background",
+
     title: "test session",
     model: null,
     prompt: "",
@@ -33,7 +33,9 @@ function mockDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
     parentSessionId: null,
     systemPrompt: null,
     allowedTools: null,
+    permissionMode: null,
     archivedAt: null,
+    providerSessionId: null,
     tags: [],
     ...overrides,
   };
@@ -44,7 +46,6 @@ function mockListResponse(overrides: Partial<SessionListResponse> = {}): Session
     id: overrides.id ?? "sess-local-1",
     status: "completed",
     backend: "claude-code",
-    mode: "background",
     title: "test session",
     model: null,
     prompt: "",
@@ -56,6 +57,7 @@ function mockListResponse(overrides: Partial<SessionListResponse> = {}): Session
     kept: false,
     autoMerge: false,
     parentSessionId: null,
+    permissionMode: null,
     tags: [],
     ...overrides,
   };
@@ -359,7 +361,7 @@ describe("AggregatingClient", () => {
         prompt: "test",
         projectPath: "/proj",
         backend: "claude-code",
-        mode: "background",
+    
         nodeId: "node-1",
       });
 
@@ -373,7 +375,7 @@ describe("AggregatingClient", () => {
         prompt: "test",
         projectPath: "/proj",
         backend: "claude-code",
-        mode: "background",
+    
       });
 
       expect(result.id).toBe("sess-new-local");
@@ -385,7 +387,7 @@ describe("AggregatingClient", () => {
         prompt: "test",
         projectPath: "/proj",
         backend: "claude-code",
-        mode: "background",
+    
         nodeId: "local",
       });
 

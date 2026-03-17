@@ -15,7 +15,6 @@ describe("ConfigSchema", () => {
   test("produces full defaults from empty input", () => {
     const config = ConfigSchema.parse({});
     expect(config.defaults.backend).toBe("claude-code");
-    expect(config.defaults.mode).toBe("background");
     expect(config.defaults.model).toBe("");
     expect(config.defaults.project).toBe(".");
     expect(config.limits.maxConcurrent).toBe(5);
@@ -27,7 +26,6 @@ describe("ConfigSchema", () => {
       defaults: { backend: "codex" },
     });
     expect(config.defaults.backend).toBe("codex");
-    expect(config.defaults.mode).toBe("background");
   });
 
   test("accepts limits section", () => {
@@ -49,8 +47,7 @@ describe("loadConfig", () => {
     try {
       const config = loadConfig(tempDir);
       expect(config.defaults.backend).toBe("claude-code");
-      expect(config.defaults.mode).toBe("background");
-      expect(config.limits.maxConcurrent).toBe(5);
+        expect(config.limits.maxConcurrent).toBe(5);
       expect(config.hooks.postWorktreeCreate).toEqual([]);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -86,7 +83,6 @@ describe("loadConfig", () => {
       [
         "[defaults]",
         'backend = "codex"',
-        'mode = "interactive"',
         'model = "gpt-5.4"',
         'project = "/home/user/project"',
       ].join("\n"),
@@ -95,7 +91,6 @@ describe("loadConfig", () => {
     try {
       const config = loadConfig(tempDir);
       expect(config.defaults.backend).toBe("codex");
-      expect(config.defaults.mode).toBe("interactive");
       expect(config.defaults.model).toBe("gpt-5.4");
       expect(config.defaults.project).toBe("/home/user/project");
     } finally {
@@ -204,8 +199,7 @@ describe("daemon config hooks", () => {
     try {
       const config = loadConfig(testHome);
       expect(config.defaults.backend).toBe("claude-code");
-      expect(config.defaults.mode).toBe("background");
-      expect(config.defaults.model).toBe("");
+        expect(config.defaults.model).toBe("");
       expect(config.defaults.tags).toEqual([]);
       expect(config.backendDefaults).toEqual({});
     } finally {
@@ -503,10 +497,8 @@ describe("resolveDefaults", () => {
 
     const resolved = resolveDefaults(config, "codex", {
       model: "gpt-4o",
-      mode: "interactive",
     });
     expect(resolved.model).toBe("gpt-4o");
-    expect(resolved.mode).toBe("interactive");
   });
 
   test("env overrides are skipped when undefined", () => {

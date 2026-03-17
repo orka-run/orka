@@ -100,13 +100,13 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             });
             return session;
           }
-          case "continueSession": {
-            const result = await svc.continueSession(params);
+          case "closeSession": {
+            await svc.closeSession(params.sessionId);
             pushHub.broadcast("orchestration.sessionUpdated", {
-              sessionId: result.id,
-              status: result.status,
+              sessionId: params.sessionId,
+              status: "completed",
             });
-            return result;
+            return null;
           }
           case "stop": {
             await svc.stop(params.sessionId);

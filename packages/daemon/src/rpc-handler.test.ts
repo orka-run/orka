@@ -21,7 +21,7 @@ function makeDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
     id: "sess-1",
     status: "running",
     backend: "codex",
-    mode: "interactive",
+
     title: "Test session",
     model: null,
     prompt: "echo hello",
@@ -36,7 +36,9 @@ function makeDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
     parentSessionId: null,
     systemPrompt: null,
     allowedTools: null,
+    permissionMode: null,
     archivedAt: null,
+    providerSessionId: null,
     tags: [],
     ...overrides,
   };

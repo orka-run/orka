@@ -31,7 +31,7 @@ function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
     title: `Task ${sessionId}`,
     prompt: "Fix issue",
     backend: "claude-code",
-    mode: "background",
+
     model: "claude-sonnet",
     createdAt: "2026-01-01T00:00:00.000Z",
   });
@@ -42,7 +42,7 @@ function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
     workspaceId: `ws-${sessionId}`,
     status: "completed",
     backend: "claude-code",
-    mode: "background",
+
     projectPath: "/tmp/project",
     workingDir: "/tmp/project",
     logFile: `/tmp/project/${sessionId}.log`,
@@ -62,7 +62,7 @@ describe("usage_log helpers", () => {
       title: "Task custom",
       prompt: "Fix issue",
       backend: "claude-code",
-      mode: "background",
+  
       model: "claude-sonnet",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -73,7 +73,7 @@ describe("usage_log helpers", () => {
       workspaceId: "ws-sess-custom-2",
       status: "completed",
       backend: "claude-code",
-      mode: "background",
+  
       projectPath: "/tmp/project",
       workingDir: "/tmp/project",
       logFile: "/tmp/project/sess-custom-2.log",
@@ -101,7 +101,7 @@ describe("usage_log helpers", () => {
       title: "Task 1",
       prompt: "Fix issue",
       backend: "claude-code",
-      mode: "background",
+  
       model: "claude-sonnet",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -110,7 +110,7 @@ describe("usage_log helpers", () => {
       title: "Task 2",
       prompt: "Refactor module",
       backend: "codex",
-      mode: "background",
+  
       model: "gpt-5-codex",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -121,7 +121,7 @@ describe("usage_log helpers", () => {
       workspaceId: "ws-1",
       status: "completed",
       backend: "claude-code",
-      mode: "background",
+  
       projectPath: "/tmp/project",
       workingDir: "/tmp/project",
       logFile: "/tmp/project/session-1.log",
@@ -138,7 +138,7 @@ describe("usage_log helpers", () => {
       workspaceId: "ws-2",
       status: "completed",
       backend: "codex",
-      mode: "background",
+  
       projectPath: "/tmp/project",
       workingDir: "/tmp/project",
       logFile: "/tmp/project/session-2.log",

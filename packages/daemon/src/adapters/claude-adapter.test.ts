@@ -223,8 +223,8 @@ describe("ClaudeCodeAdapter", () => {
       message: { role: "user", content: "Inspect the project" },
       parent_tool_use_id: null,
     });
-    // Non-interactive: stdin closed after initial prompt
-    expect(stdin.ended).toBe(true);
+    // Stdin stays open — all sessions are multi-turn
+    expect(stdin.ended).toBe(false);
 
     expect(events.map((event) => event.type)).toEqual([
       "session.started",

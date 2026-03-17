@@ -14,18 +14,117 @@ import { assertBackendInstalled } from "./backends";
 import type { DaemonContext } from "./daemon-context";
 import { getDaemonMetrics, withSpan } from "./tracing";
 
+// --- Idle timer management ---
+
+/** Per-session idle timers. When a session goes idle, a timer is started.
+ *  When it fires, the process is killed and the session is set to "hibernated". */
+const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearIdleTimer(sessionId: string): void {
+  const timer = idleTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    idleTimers.delete(sessionId);
+  }
+}
+
+function startIdleTimer(ctx: DaemonContext, sessionId: string): void {
+  clearIdleTimer(sessionId);
+
+  const timeoutMinutes = ctx.config.limits.idleTimeoutMinutes ?? 10;
+  if (timeoutMinutes <= 0) return; // 0 = no auto-hibernate
+
+  const timer = setTimeout(() => {
+    idleTimers.delete(sessionId);
+    void hibernateSession(ctx, sessionId);
+  }, timeoutMinutes * 60_000);
+  timer.unref(); // Don't prevent process exit
+
+  idleTimers.set(sessionId, timer);
+}
+
+/** Kill the process and set session to "hibernated". */
+async function hibernateSession(ctx: DaemonContext, sessionId: string): Promise<void> {
+  await withSpan("orka.hibernate", { "orka.session.id": sessionId }, async (span) => {
+    const session = ctx.db.getSession(sessionId);
+    if (!session || session.status !== "idle") return;
+
+    // Set status BEFORE killing process so the consumer's finalizeSession
+    // sees "hibernated" and skips overwriting it.
+    ctx.db.updateSessionStatus(sessionId, "hibernated");
+    ctx.pushHub.broadcast("orchestration.sessionUpdated", {
+      sessionId,
+      status: "hibernated",
+    });
+
+    const handle = ctx.providerService.getHandle(sessionId);
+    if (handle) {
+      await ctx.providerService.stopSession(sessionId);
+      span.addEvent("session.hibernated");
+    }
+  });
+}
+
+// --- Consumer callbacks factory ---
+
+function buildConsumerCallbacks(
+  ctx: DaemonContext,
+  sessionId: string,
+  opts: {
+    logFile: string;
+    rawLogPath: string;
+    workingDir: string;
+    projectPath: string;
+    autoMerge: boolean;
+    model: string | null;
+  },
+) {
+  const permissionRules =
+    ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0
+      ? { autoApprove: ctx.config.permissions.autoApprove, alwaysDeny: ctx.config.permissions.alwaysDeny }
+      : undefined;
+
+  return {
+    updateSessionStatus: (id: string, status: any, extra?: any) => ctx.db.updateSessionStatus(id, status, extra),
+    saveSessionDiff: (id: string, diff: string, status: string, extra?: any) => ctx.db.saveSessionDiff(id, diff, status, extra),
+    insertUsageRecord: (record: any) => ctx.db.insertUsageRecord(record),
+    approvalManager: ctx.approvalManager,
+    logFile: opts.logFile,
+    rawLogPath: opts.rawLogPath,
+    pushHub: ctx.pushHub,
+    workingDir: opts.workingDir,
+    projectPath: opts.projectPath,
+    autoMerge: opts.autoMerge,
+    model: opts.model,
+    orkaHome: ctx.orkaHome,
+    getSession: (id: string) => ctx.db.getSession(id),
+    permissionRules,
+    respondToRequest: (threadId: string, requestId: string, decision: any) =>
+      ctx.providerService.respondToRequest(threadId, requestId, decision),
+    denyHookApprovals: (id: string) => ctx.hookApprovalBridge.denyAllForSession(id),
+    cleanupWorktree: async () => {
+      const currentSession = ctx.db.getSession(sessionId);
+      if (currentSession) {
+        await tryCleanupWorktree(ctx, currentSession);
+      }
+    },
+    onSessionIdle: (id: string) => startIdleTimer(ctx, id),
+  };
+}
+
+// --- Spawn ---
+
 /** Spawn a new agent session. Returns the created session. */
 export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promise<Session> {
   return withSpan("orka.spawn", {
     "orka.backend": req.backend,
-    "orka.mode": req.mode,
     "orka.project": req.projectPath,
     ...(req.model ? { "orka.model": req.model } : {}),
   }, async (span) => {
     // Verify backend CLI is installed
     assertBackendInstalled(req.backend);
 
-    // Check concurrent session limit
+    // Check concurrent session limit (only "running" counts)
     const { maxConcurrent } = ctx.config.limits;
     if (maxConcurrent > 0) {
       const running = ctx.db.listSessions("running");
@@ -52,20 +151,19 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       title: req.title ?? req.prompt.slice(0, 80),
       prompt: req.prompt,
       backend: req.backend,
-      mode: req.mode,
       model: req.model ?? null,
       createdAt: now,
     };
     ctx.db.insertTask(task);
 
-    // 2. Prepare workspace — auto-worktree for background sessions
+    // 2. Prepare workspace — always create worktree for isolation
     let workingDir = projectPath;
     if (req.branch) {
       workingDir = await withSpan("orka.worktree.create", {
         "orka.session.id": sessionId,
         "orka.branch": req.branch,
       }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { branch: req.branch, config: ctx.config }));
-    } else if (req.mode === "background") {
+    } else {
       workingDir = await withSpan("orka.worktree.create", {
         "orka.session.id": sessionId,
         "orka.branch": `orka/${sessionId}`,
@@ -89,7 +187,6 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       workspaceId,
       status: "preparing",
       backend: req.backend,
-      mode: req.mode,
       projectPath,
       workingDir,
       logFile,
@@ -114,8 +211,6 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     }
 
     // 5. Start provider runtime session
-    // For supervised mode, inject permission rules into env so the hook script
-    // can evaluate rules locally without an HTTP roundtrip to the daemon.
     const supervisedEnv: Record<string, string> = {};
     if (req.permissionMode === "supervised") {
       const hasRules = ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0;
@@ -137,7 +232,6 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       env: { ...req.env, ...supervisedEnv },
-      interactive: req.mode === "interactive",
       ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
       ...(providerSessionId ? { providerSessionId } : {}),
     });
@@ -148,38 +242,22 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     ctx.db.updateSessionStatus(sessionId, "running", { startedAt });
     recordSessionStartedMetrics();
 
-    void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine, {
-      updateSessionStatus: (id, status, extra) => ctx.db.updateSessionStatus(id, status, extra),
-      saveSessionDiff: (id, diff, status, extra) => ctx.db.saveSessionDiff(id, diff, status, extra),
-      insertUsageRecord: (record) => ctx.db.insertUsageRecord(record),
-      approvalManager: ctx.approvalManager,
-      logFile,
-      rawLogPath,
-      pushHub: ctx.pushHub,
-      workingDir,
-      projectPath,
-      autoMerge: session.autoMerge,
-      model: req.model ?? null,
-      orkaHome: ctx.orkaHome,
-      getSession: (id) => ctx.db.getSession(id),
-      permissionRules: ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0
-        ? { autoApprove: ctx.config.permissions.autoApprove, alwaysDeny: ctx.config.permissions.alwaysDeny }
-        : undefined,
-      respondToRequest: (threadId, requestId, decision) =>
-        ctx.providerService.respondToRequest(threadId, requestId, decision),
-      denyHookApprovals: (id) => ctx.hookApprovalBridge.denyAllForSession(id),
-      cleanupWorktree: async () => {
-        const currentSession = ctx.db.getSession(sessionId);
-        if (currentSession) {
-          await tryCleanupWorktree(ctx, currentSession);
-        }
-      },
-    })
+    void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine,
+      buildConsumerCallbacks(ctx, sessionId, {
+        logFile,
+        rawLogPath,
+        workingDir,
+        projectPath,
+        autoMerge: session.autoMerge,
+        model: req.model ?? null,
+      }),
+    )
       .catch((error) => {
         console.error(`provider event consumer failed for session ${sessionId}`, error);
       })
       .finally(() => {
         ctx.providerService.clearHandle(sessionId);
+        clearIdleTimer(sessionId);
       });
 
     span.addEvent("session.started");
@@ -187,27 +265,21 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
   });
 }
 
-/** Continue a completed/failed session with a new user message. Reuses same worktree and conversation. */
-export async function continueSession(
+// --- Resume (for hibernated/completed sessions) ---
+
+/** Resume a hibernated or completed session with a new user message.
+ *  Spawns a new process with --resume and sends the message. */
+export async function resumeSession(
   ctx: DaemonContext,
   sessionId: string,
   prompt: string,
-): Promise<SpawnResult> {
-  return withSpan("orka.continue", { "orka.session.id": sessionId }, async (span) => {
+): Promise<void> {
+  await withSpan("orka.resume", { "orka.session.id": sessionId }, async (span) => {
     const session = ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    if (session.status !== "completed" && session.status !== "failed") {
-      throw new Error(`Cannot continue session in "${session.status}" state — only completed/failed sessions can be continued`);
-    }
-
-    if (session.backend !== "claude-code") {
-      throw new Error("Continue is only supported for claude-code sessions");
-    }
-
     // Recreate worktree if it was cleaned up but the branch still exists
     if (!existsSync(session.workingDir)) {
-      // Remove stale registration for THIS specific worktree path (if registered but missing)
       Bun.spawnSync(["git", "worktree", "remove", "--force", session.workingDir], { cwd: session.projectPath });
 
       const branchName = `orka/${sessionId}`;
@@ -218,9 +290,7 @@ export async function continueSession(
           Bun.spawnSync(["git", "worktree", "add", session.workingDir, branchName], { cwd: session.projectPath });
           span.addEvent("worktree.recreated", { "orka.branch": branchName });
         } else {
-          // Branch was merged/deleted — create fresh worktree from current HEAD
           const freshBranch = `orka/${sessionId}-cont`;
-          // Force in case branch already exists from previous failed attempt
           const addResult = Bun.spawnSync(["git", "worktree", "add", "-B", freshBranch, session.workingDir], { cwd: session.projectPath });
           if (addResult.exitCode !== 0) {
             throw new Error(`git worktree add failed: ${new TextDecoder().decode(addResult.stderr)}`);
@@ -233,14 +303,13 @@ export async function continueSession(
       }
     }
 
-    // Clear any stale provider handle (should already be cleared, but be safe)
+    // Clear any stale provider handle
     ctx.providerService.clearHandle(sessionId);
 
-    // Build context for continue
     const startedAt = new Date().toISOString();
-    let systemPrompt = session.systemPrompt ?? "";
+    const systemPrompt = session.systemPrompt ?? "";
 
-    // If no provider session ID (old sessions), prepend context to the user's prompt
+    // Build prompt — if no provider session ID (old sessions), prepend context
     let fullPrompt = prompt;
     if (!session.providerSessionId) {
       const task = ctx.db.getTask(session.taskId);
@@ -258,119 +327,153 @@ export async function continueSession(
       cwd: session.workingDir,
       prompt: fullPrompt,
       ...(session.providerSessionId ? { resumeSessionId: session.providerSessionId } : {}),
-      interactive: session.mode === "interactive",
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
     });
 
-    span.addEvent("session.continued");
+    span.addEvent("session.resumed");
 
-    // Emit user.input event so the user's follow-up appears in the timeline
+    // Emit user.input event
     ctx.orchestrationEngine.emitDirect({
       type: "user.input",
       sessionId,
       timestamp: startedAt,
-      text: prompt, // original user text, not the context-wrapped fullPrompt
+      text: prompt,
       v: 1,
     });
 
-    // Reset session status back to running
+    // Reset session status to running
     ctx.db.resetSessionForContinue(sessionId, startedAt);
     ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "running" });
     recordSessionStartedMetrics();
 
-    // Get task for title
     const task = ctx.db.getTask(session.taskId);
-
-    // Re-use the existing log file (append to it)
     const rawLogPath = session.rawLogFile ?? join(ctx.orkaHome, "logs", `${sessionId}.raw.jsonl`);
 
-    void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine, {
-      updateSessionStatus: (id, status, extra) => ctx.db.updateSessionStatus(id, status, extra),
-      saveSessionDiff: (id, diff, status, extra) => ctx.db.saveSessionDiff(id, diff, status, extra),
-      insertUsageRecord: (record) => ctx.db.insertUsageRecord(record),
-      approvalManager: ctx.approvalManager,
-      logFile: session.logFile,
-      rawLogPath,
-      pushHub: ctx.pushHub,
-      workingDir: session.workingDir,
-      projectPath: session.projectPath,
-      autoMerge: false, // Don't auto-merge on continuation — user merges explicitly
-      model: task?.model ?? null,
-      orkaHome: ctx.orkaHome,
-      getSession: (id) => ctx.db.getSession(id),
-      permissionRules: ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0
-        ? { autoApprove: ctx.config.permissions.autoApprove, alwaysDeny: ctx.config.permissions.alwaysDeny }
-        : undefined,
-      respondToRequest: (threadId, requestId, decision) =>
-        ctx.providerService.respondToRequest(threadId, requestId, decision),
-      denyHookApprovals: (id) => ctx.hookApprovalBridge.denyAllForSession(id),
-      cleanupWorktree: async () => {
-        const currentSession = ctx.db.getSession(sessionId);
-        if (currentSession) {
-          await tryCleanupWorktree(ctx, currentSession);
-        }
-      },
-    })
+    void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine,
+      buildConsumerCallbacks(ctx, sessionId, {
+        logFile: session.logFile,
+        rawLogPath,
+        workingDir: session.workingDir,
+        projectPath: session.projectPath,
+        autoMerge: false, // Don't auto-merge on resume — user merges explicitly
+        model: task?.model ?? null,
+      }),
+    )
       .catch((error) => {
-        console.error(`provider event consumer failed for continued session ${sessionId}`, error);
+        console.error(`provider event consumer failed for resumed session ${sessionId}`, error);
       })
       .finally(() => {
         ctx.providerService.clearHandle(sessionId);
+        clearIdleTimer(sessionId);
       });
-
-    ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "running" });
-    return { id: sessionId, status: "running" as const, title: task?.title ?? sessionId };
   });
 }
 
-/** Reap orphaned sessions — with provider-only runtime, sessions are managed
- *  by provider handles and reaped when the handle's event stream ends.
- *  This function is kept as a no-op entry point for CLI compatibility. */
-export async function reapSessions(): Promise<number> {
-  return withSpan("orka.reap", {}, async () => 0);
-}
+// --- Close ---
 
-/**
- * Detect sessions left in "running" or "preparing" status from a previous daemon
- * process and mark them as cancelled. Called once on daemon startup.
- */
-export function recoverStaleSessions(ctx: DaemonContext): number {
-  const staleStatuses: Array<"running" | "preparing"> = ["running", "preparing"];
-  let recovered = 0;
-  const now = new Date().toISOString();
+/** Explicitly close a session — marks it completed, kills process if alive. */
+export async function closeSession(ctx: DaemonContext, sessionId: string): Promise<void> {
+  await withSpan("orka.close", { "orka.session.id": sessionId }, async (span) => {
+    const session = ctx.db.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-  for (const status of staleStatuses) {
-    const sessions = ctx.db.listSessions(status);
-    for (const session of sessions) {
-      // If there's already a provider handle, it's a live session (shouldn't happen on startup)
-      if (ctx.providerService.getHandle(session.id)) continue;
+    clearIdleTimer(sessionId);
 
-      ctx.db.updateSessionStatus(session.id, "cancelled", { finishedAt: now });
-      ctx.orchestrationEngine.ingest(session.id, {
-        type: "session.exited",
-        threadId: session.id,
-        eventId: generateId("evt"),
-        createdAt: now,
-        provider: session.backend,
-        payload: { reason: "daemon_restart", exitKind: "error" },
-      });
-      recovered++;
+    // Kill process if alive
+    const handle = ctx.providerService.getHandle(sessionId);
+    if (handle) {
+      // Set status BEFORE killing so consumer doesn't overwrite
+      ctx.db.updateSessionStatus(sessionId, "completed", { finishedAt: new Date().toISOString() });
+      await ctx.providerService.stopSession(sessionId);
+    } else {
+      ctx.db.updateSessionStatus(sessionId, "completed", { finishedAt: new Date().toISOString() });
     }
-  }
 
-  if (recovered > 0) {
-    console.log(`recovered ${recovered} stale session(s) from previous daemon`);
-  }
+    ctx.pushHub.broadcast("orchestration.sessionUpdated", {
+      sessionId,
+      status: "completed",
+    });
 
-  return recovered;
+    span.addEvent("session.closed");
+  });
 }
 
-/** Stop a session via the provider runtime. */
+// --- Send Turn (unified: handles idle, hibernated, completed) ---
+
+/** Send a turn to a session. Handles all states transparently:
+ *  - idle: write to existing stdin (zero overhead)
+ *  - hibernated/completed: spawn --resume process, then send */
+export async function sendTurnToSession(
+  ctx: DaemonContext,
+  sessionId: string,
+  text: string,
+): Promise<void> {
+  return withSpan("orka.sendTurn", { "orka.session.id": sessionId }, async () => {
+    const session = ctx.db.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    // Cancel idle timer — user is sending input
+    clearIdleTimer(sessionId);
+
+    switch (session.status) {
+      case "running":
+      case "idle": {
+        // Process is alive — write to stdin directly
+        const handle = ctx.providerService.getHandle(sessionId);
+        if (!handle) {
+          // Process died but status wasn't updated — resume instead
+          await resumeSession(ctx, sessionId, text);
+          return;
+        }
+
+        // If idle, transition back to running
+        if (session.status === "idle") {
+          ctx.db.updateSessionStatus(sessionId, "running");
+          ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "running" });
+        }
+
+        // Emit user.input event
+        const event = {
+          v: 1 as const,
+          type: "user.input" as const,
+          sessionId,
+          text,
+          timestamp: new Date().toISOString(),
+        };
+        ctx.db.insertOrchestrationEvent({
+          ...event,
+          provider: handle.provider,
+          eventId: generateId("evt"),
+        });
+        ctx.pushHub.broadcast("orchestration.event", event);
+
+        await ctx.providerService.sendTurn(sessionId, { input: text });
+        return;
+      }
+
+      case "hibernated":
+      case "completed": {
+        // Process is dead — resume with --resume
+        await resumeSession(ctx, sessionId, text);
+        return;
+      }
+
+      default:
+        throw new Error(`Cannot send turn to session in "${session.status}" state`);
+    }
+  });
+}
+
+// --- Stop ---
+
+/** Stop a session via the provider runtime (sets cancelled). */
 export async function stopSession(ctx: DaemonContext, sessionId: string): Promise<void> {
   return withSpan("orka.stop", { "orka.session.id": sessionId }, async (span) => {
     const session = ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    clearIdleTimer(sessionId);
 
     // Deny all pending hook-based approvals so the hook scripts unblock
     ctx.hookApprovalBridge.denyAllForSession(sessionId);
@@ -382,16 +485,15 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
       return;
     }
 
-    if (session.status !== "running" && session.status !== "preparing") {
+    const activeStatuses = new Set(["running", "preparing", "idle"]);
+    if (!activeStatuses.has(session.status)) {
       span.addEvent("session.stop_skipped_terminal");
       return;
     }
 
-    // Session has no active provider handle but DB says running — mark cancelled
+    // Session has no active provider handle but DB says running/idle — mark cancelled
     const finishedAt = new Date().toISOString();
-    ctx.db.updateSessionStatus(sessionId, "cancelled", {
-      finishedAt,
-    });
+    ctx.db.updateSessionStatus(sessionId, "cancelled", { finishedAt });
     recordSessionTerminalMetrics(session.startedAt, finishedAt, "cancelled");
     ctx.pushHub.broadcast("orchestration.sessionUpdated", {
       sessionId,
@@ -403,6 +505,48 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
   });
 }
 
+// --- Reap / Recover ---
+
+/** Reap orphaned sessions — no-op with provider-only runtime. */
+export async function reapSessions(): Promise<number> {
+  return withSpan("orka.reap", {}, async () => 0);
+}
+
+/** Detect sessions left in active statuses from a previous daemon and mark them. */
+export function recoverStaleSessions(ctx: DaemonContext): number {
+  const staleStatuses: Array<"running" | "preparing" | "idle"> = ["running", "preparing", "idle"];
+  let recovered = 0;
+  const now = new Date().toISOString();
+
+  for (const status of staleStatuses) {
+    const sessions = ctx.db.listSessions(status);
+    for (const session of sessions) {
+      if (ctx.providerService.getHandle(session.id)) continue;
+
+      // Idle sessions without a handle → hibernated (process was killed by daemon restart)
+      const newStatus = status === "idle" ? "hibernated" : "cancelled";
+      ctx.db.updateSessionStatus(session.id, newStatus, newStatus === "cancelled" ? { finishedAt: now } : undefined);
+
+      if (newStatus === "cancelled") {
+        ctx.orchestrationEngine.ingest(session.id, {
+          type: "session.exited",
+          threadId: session.id,
+          eventId: generateId("evt"),
+          createdAt: now,
+          provider: session.backend,
+          payload: { reason: "daemon_restart", exitKind: "error" },
+        });
+      }
+      recovered++;
+    }
+  }
+
+  if (recovered > 0) {
+    console.log(`recovered ${recovered} stale session(s) from previous daemon`);
+  }
+
+  return recovered;
+}
 
 /** Stop a session and all its running children (cascading stop). */
 export async function stopWithChildren(ctx: DaemonContext, sessionId: string): Promise<void> {
@@ -413,33 +557,7 @@ export async function stopWithChildren(ctx: DaemonContext, sessionId: string): P
   });
 }
 
-/** Auto-merge worktree branch into parent repo on successful completion. */
-async function tryAutoMerge(ctx: DaemonContext, session: Session, parentSpan: any): Promise<void> {
-  const wtDir = getWorktreeDir(ctx.orkaHome);
-  if (!session.workingDir.startsWith(wtDir)) return;
-  if (!session.projectPath) return;
-
-  try {
-    const { branch, commits } = await worktreeMerge(session.projectPath, session.workingDir);
-    parentSpan.addEvent("session.auto_merged", {
-      "orka.session.id": session.id,
-      "orka.branch": branch,
-      "orka.commits": commits,
-    });
-    // Clean up worktree and branch after successful merge
-    try {
-      await worktreeRemove(session.projectPath, session.workingDir);
-      await deleteBranch(session.projectPath, branch);
-    } catch {
-      // Cleanup failure is non-fatal after merge
-    }
-  } catch {
-    // Merge failure — worktree preserved for manual resolution
-    parentSpan.addEvent("session.auto_merge_failed", {
-      "orka.session.id": session.id,
-    });
-  }
-}
+// --- Worktree helpers ---
 
 async function tryCleanupWorktree(ctx: DaemonContext, session: Session): Promise<void> {
   const wtDir = getWorktreeDir(ctx.orkaHome);
@@ -451,7 +569,6 @@ async function tryCleanupWorktree(ctx: DaemonContext, session: Session): Promise
     "orka.session.id": session.id,
     "orka.workdir": session.workingDir,
   }, async (span) => {
-    // Don't remove if explicitly kept or has valuable work
     if (session.kept) {
       span.setAttribute("orka.worktree.skip_reason", "kept");
       return;
@@ -470,6 +587,45 @@ async function tryCleanupWorktree(ctx: DaemonContext, session: Session): Promise
     // Cleanup failure should not break reap/stop
   });
 }
+
+/** Clean up orphaned worktree dirs that don't belong to any active session. */
+export async function cleanupOrphanedWorktrees(ctx: DaemonContext): Promise<number> {
+  return withSpan("orka.worktree.prune_orphans", {}, async (span) => {
+    const wtDir = getWorktreeDir(ctx.orkaHome);
+    if (!existsSync(wtDir)) return 0;
+
+    const allSessions = ctx.db.listSessions();
+    // Sessions that still need their worktrees
+    const activeStatuses = new Set(["running", "preparing", "idle", "hibernated"]);
+    const activeWorkdirs = new Set(
+      allSessions
+        .filter((s) => activeStatuses.has(s.status))
+        .map((s) => s.workingDir),
+    );
+
+    const entries = readdirSync(wtDir, { withFileTypes: true });
+    let cleaned = 0;
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const wtPath = join(wtDir, entry.name);
+      if (activeWorkdirs.has(wtPath)) continue;
+
+      try {
+        rmSync(wtPath, { recursive: true, force: true });
+        cleaned++;
+        span.addEvent("orphan.removed", { "orka.worktree.path": wtPath });
+      } catch {
+        span.addEvent("orphan.remove_failed", { "orka.worktree.path": wtPath });
+      }
+    }
+
+    span.setAttribute("orka.worktree.orphans_cleaned", cleaned);
+    return cleaned;
+  });
+}
+
+// --- Metrics ---
 
 function recordSessionStartedMetrics(): void {
   const metrics = getDaemonMetrics();
@@ -505,63 +661,5 @@ function recordSessionTerminalMetrics(
   const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
   if (Number.isFinite(durationMs) && durationMs >= 0) {
     metrics.sessionDuration.record(durationMs);
-  }
-}
-
-/** Clean up orphaned worktree dirs that don't belong to any active session. */
-export async function cleanupOrphanedWorktrees(ctx: DaemonContext): Promise<number> {
-  return withSpan("orka.worktree.prune_orphans", {}, async (span) => {
-    const wtDir = getWorktreeDir(ctx.orkaHome);
-    if (!existsSync(wtDir)) return 0;
-
-    const allSessions = ctx.db.listSessions();
-    const activeWorkdirs = new Set(
-      allSessions
-        .filter((s) => s.status === "running" || s.status === "preparing")
-        .map((s) => s.workingDir),
-    );
-
-    const entries = readdirSync(wtDir, { withFileTypes: true });
-    let cleaned = 0;
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const wtPath = join(wtDir, entry.name);
-      if (activeWorkdirs.has(wtPath)) continue;
-
-      try {
-        rmSync(wtPath, { recursive: true, force: true });
-        cleaned++;
-        span.addEvent("orphan.removed", { "orka.worktree.path": wtPath });
-      } catch {
-        span.addEvent("orphan.remove_failed", { "orka.worktree.path": wtPath });
-      }
-    }
-
-    span.setAttribute("orka.worktree.orphans_cleaned", cleaned);
-    return cleaned;
-  });
-}
-
-/** Capture committed changes on session branch vs parent. Best-effort. */
-async function captureBranchDiffForSession(
-  workingDir: string,
-  projectPath: string,
-): Promise<{ commitLog?: string; commitDiff?: string }> {
-  try {
-    const branch = (await $`git -C ${workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
-    if (!branch || branch === "HEAD") return {};
-
-    const mainHead = (await $`git -C ${projectPath} rev-parse HEAD`.quiet().text()).trim();
-    const mergeBase = (await $`git -C ${workingDir} merge-base ${mainHead} HEAD`.quiet().text()).trim();
-    if (!mergeBase) return {};
-
-    const log = (await $`git -C ${workingDir} log --oneline ${mergeBase}..HEAD`.quiet().text()).trim();
-    if (!log) return {};
-
-    const diff = (await $`git -C ${workingDir} diff ${mergeBase}..HEAD`.quiet().text()).trim();
-    return { commitLog: log, commitDiff: diff };
-  } catch {
-    return {};
   }
 }

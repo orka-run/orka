@@ -61,7 +61,7 @@ describe("LocalClient provider runtime support", () => {
   });
 
   test("uses provider handles for liveness and input routing", async () => {
-    seedSession("sess-live");
+    seedSession("sess-live", { status: "running" });
 
     const handle: ProviderSessionHandle = {
       threadId: "sess-live",
@@ -116,13 +116,12 @@ describe("LocalClient provider runtime support", () => {
   });
 });
 
-function seedSession(sessionId: string): void {
+function seedSession(sessionId: string, overrides?: { status?: string }): void {
   ctx.db.insertTask({
     id: `task-${sessionId}`,
     title: `Task ${sessionId}`,
     prompt: "Fix the provider runtime path",
     backend: "codex",
-    mode: "background",
     model: "gpt-5",
     createdAt: "2026-01-01T00:00:00.000Z",
   });
@@ -131,9 +130,8 @@ function seedSession(sessionId: string): void {
     id: sessionId,
     taskId: `task-${sessionId}`,
     workspaceId: `ws-${sessionId}`,
-    status: "completed",
+    status: (overrides?.status ?? "completed") as any,
     backend: "codex",
-    mode: "background",
     projectPath: "/tmp/project",
     workingDir: "/tmp/project",
     logFile: join(testHome, "logs", `${sessionId}.log`),

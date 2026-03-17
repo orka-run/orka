@@ -1,4 +1,4 @@
-import type { BackendKind, ChatEntry, NodeInfo, PermissionMode, Session, SessionId, SessionMode, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
+import type { BackendKind, ChatEntry, NodeInfo, PermissionMode, Session, SessionId, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -18,7 +18,6 @@ export interface SessionDetailResponse {
   id: SessionId;
   status: SessionStatus;
   backend: BackendKind;
-  mode: SessionMode;
   title: string;
   model: string | null;
   prompt: string;
@@ -48,7 +47,6 @@ export interface SessionListResponse {
   id: SessionId;
   status: SessionStatus;
   backend: BackendKind;
-  mode: SessionMode;
   title: string;
   model: string | null;
   prompt: string;
@@ -195,8 +193,8 @@ export interface PairWithNodeResult {
 export interface OrkaService {
   // --- Session lifecycle ---
   spawn(req: SpawnRequest): Promise<SpawnResult>;
-  /** Continue a completed/failed session with a new user message. Reuses same worktree and conversation. */
-  continueSession(params: { sessionId: string; text: string }): Promise<SpawnResult>;
+  /** Explicitly close a session — marks it completed, kills process if alive. */
+  closeSession(sessionId: string): Promise<void>;
   stop(sessionId: string): Promise<void>;
   reap(): Promise<number>;
 

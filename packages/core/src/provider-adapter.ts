@@ -19,8 +19,6 @@ export interface ProviderSessionStartInput {
   systemPrompt?: string;
   allowedTools?: string[];
   env?: Record<string, string>;
-  /** When true, keep stdin open for multi-turn (interactive mode). */
-  interactive?: boolean;
   /** Permission mode for tool execution. "supervised" enables dashboard approval flow. */
   permissionMode?: PermissionMode;
   /** Set the provider's own session ID (e.g. Claude Code --session-id). */

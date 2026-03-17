@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import type { BackendKind, PermissionMode, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
+import type { BackendKind, PermissionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
 import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
 import {
   ensureNoiseKeyPair,
@@ -64,9 +64,8 @@ function enumType<T extends string>(values: readonly T[]): Type<string, T> {
   };
 }
 
-const statusValues = ["running", "completed", "failed", "cancelled", "interrupted", "queued", "preparing"] as const;
+const statusValues = ["running", "idle", "hibernated", "completed", "failed", "cancelled", "interrupted", "queued", "preparing"] as const;
 const backendValues = ["claude-code", "codex"] as const;
-const modeValues = ["interactive", "background"] as const;
 const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
 
 // Check for --remote and --token flags before command
@@ -586,7 +585,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "stop",
   "diff",
   "retry",
-  "continue",
+  "close",
   "show",
   "workdir",
   "wait",
@@ -720,17 +719,16 @@ const spawnCmd = command({
   name: "spawn",
   description: "Spawn an agent session",
   examples: [
-    { description: "Background task with inline prompt", command: "orka spawn -m background fix the login bug" },
-    { description: "Interactive session with specific backend", command: "orka spawn -b codex 'refactor auth module'" },
+    { description: "Spawn with inline prompt", command: "orka spawn fix the login bug" },
+    { description: "Use specific backend", command: "orka spawn -b codex 'refactor auth module'" },
     { description: "Read prompt from file, auto-merge on success", command: "orka spawn --prompt-file task.md --auto-merge" },
-    { description: "Pipe prompt from stdin", command: "echo 'add tests' | orka spawn -m background" },
+    { description: "Pipe prompt from stdin", command: "echo 'add tests' | orka spawn" },
   ],
   args: {
     project: option({ type: optional(str), long: "project", short: "p", description: "Project directory or alias (default: current dir)" }),
     backend: option({ type: optional(enumType(backendValues)), long: "backend", short: "b", description: "Agent backend (default: claude-code)" }),
     prompt: option({ type: optional(str), long: "prompt", description: "Task prompt (or use positional args / stdin)" }),
     promptFile: option({ type: optional(str), long: "prompt-file", description: "Read prompt from a file" }),
-    mode: option({ type: optional(enumType(modeValues)), long: "mode", short: "m", description: "Session mode (default: background)" }),
     model: option({ type: optional(str), long: "model", description: "Model for the backend (e.g. sonnet, opus, haiku)" }),
     branch: option({ type: optional(str), long: "branch", description: "Git branch name (creates worktree)" }),
     title: option({ type: optional(str), long: "title", description: "Session title for display in orka ps" }),
@@ -763,7 +761,6 @@ const spawnCmd = command({
     const envOverrides = {
       backend: process.env.ORKA_BACKEND,
       model: process.env.ORKA_MODEL,
-      mode: process.env.ORKA_MODE,
     };
 
     // Determine backend early (CLI > env > config) so per-backend defaults apply
@@ -814,9 +811,8 @@ const spawnCmd = command({
       args.auto ? "auto" :
       (cfg.permissionMode as PermissionMode) || undefined;
 
-    // Determine if this spawn will result in bypass mode (explicit or default for background)
-    const effectiveMode = (args.mode ?? cfg.mode) as SessionMode;
-    const willBypass = effectivePermissionMode === "bypass" || (!effectivePermissionMode && effectiveMode === "background");
+    // Determine if this spawn will result in bypass mode
+    const willBypass = effectivePermissionMode === "bypass";
 
     // Bypass consent + warning
     if (willBypass) {
@@ -869,7 +865,6 @@ const spawnCmd = command({
       prompt,
       projectPath,
       backend,
-      mode: (args.mode ?? cfg.mode) as SessionMode,
       ...(args.title ? { title: args.title } : {}),
       ...(effectiveModel ? { model: effectiveModel } : {}),
       ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort as ReasoningEffort } : {}),
@@ -891,8 +886,7 @@ const spawnCmd = command({
 
     console.log(`spawned session ${session.id}`);
     console.log(`  backend:  ${spawnRequest.backend}`);
-    console.log(`  mode:     ${spawnRequest.mode}`);
-    console.log(`  permissions: ${effectivePermissionMode ?? (effectiveMode === "background" ? "bypass (default)" : "auto (default)")}`);
+    console.log(`  permissions: ${effectivePermissionMode ?? "bypass (default)"}`);
     if (args.tag.length > 0) {
       console.log(`  tags:     ${args.tag.join(", ")}`);
     }
@@ -1304,7 +1298,6 @@ const retryCmd = command({
       prompt: session.prompt,
       projectPath: session.projectPath || session.workingDir,
       backend: session.backend,
-      mode: session.mode,
       ...(session.title ? { title: session.title } : {}),
       ...(session.model ? { model: session.model } : {}),
       ...(session.tags.length > 0 ? { tags: session.tags } : {}),
@@ -1315,20 +1308,19 @@ const retryCmd = command({
 
     console.log(`retried session ${session.id} → ${newSession.id}`);
     console.log(`  backend:  ${retryRequest.backend}`);
-    console.log(`  mode:     ${retryRequest.mode}`);
   }),
 });
 
-const continueCmd = command({
-  name: "continue",
-  description: "Continue a completed session with a new message (resumes conversation in same worktree)",
+const closeCmd = command({
+  name: "close",
+  description: "Explicitly close a session — marks it completed and kills the process if still alive",
   args: {
     sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
-    text: restPositionals({ type: str, displayName: "text" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
   },
-  handler: async ({ sessionId, text }) => runCliCommand("continue", async () => {
+  handler: async ({ sessionId }) => runCliCommand("close", async () => {
     if (!sessionId) {
-      fail("usage: orka continue <session-id> <text...>");
+      fail("usage: orka close <session-id>");
     }
 
     const session = await findSession(sessionId);
@@ -1336,27 +1328,8 @@ const continueCmd = command({
       fail(`session not found: ${sessionId}`);
     }
 
-    if (session.status !== "completed" && session.status !== "failed") {
-      fail(`session ${session.id} is ${session.status} — can only continue completed or failed sessions`);
-    }
-
-    if (!session.providerSessionId) {
-      fail(`session ${session.id} has no provider session ID — cannot resume (was it created before continue support?)`);
-    }
-
-    if (session.backend !== "claude-code") {
-      fail(`continue is only supported for claude-code sessions (session uses ${session.backend})`);
-    }
-
-    const prompt = text.join(" ");
-    if (!prompt) {
-      fail("usage: orka continue <session-id> <text...>");
-    }
-
-    const result = await svc.continueSession({ sessionId: session.id, text: prompt });
-
-    console.log(`continued session ${result.id}`);
-    console.log(`  status: ${result.status}`);
+    await svc.closeSession(session.id);
+    console.log(`closed session ${session.id}`);
   }),
 });
 
@@ -1381,7 +1354,6 @@ const showCmd = command({
     console.log("");
     console.log(`  status:    ${session.status}`);
     console.log(`  backend:   ${session.backend}`);
-    console.log(`  mode:      ${session.mode}`);
     if (session.model) console.log(`  model:     ${session.model}`);
     console.log(`  project:   ${session.projectPath || "(unknown)"}`);
     console.log(`  workdir:   ${session.workingDir}`);
@@ -1446,7 +1418,7 @@ const waitCmd = command({
       fail("usage: orka wait <session-id...> | --all [--project <name>] | --tag <tag>");
     }
 
-    const terminalStatuses = new Set(["completed", "failed", "cancelled", "interrupted"]);
+    const terminalStatuses = new Set(["idle", "hibernated", "completed", "failed", "cancelled", "interrupted"]);
     let targets: string[];
 
     if (all || tag) {
@@ -2918,7 +2890,7 @@ const app = subcommands({
     stop: stopCmd,
     diff: diffCmd,
     retry: retryCmd,
-    continue: continueCmd,
+    close: closeCmd,
     show: showCmd,
     workdir: workdirCmd,
     wait: waitCmd,
@@ -3067,7 +3039,6 @@ function printUsage(): void {
   console.log("enum values:");
   console.log(`  --status   ${statusValues.join(", ")}`);
   console.log(`  --backend  ${backendValues.join(", ")}`);
-  console.log(`  --mode     ${modeValues.join(", ")}`);
   console.log("");
   console.log("global options:");
   console.log("  --remote <url>    Connect to remote daemon (ws://host:7394)");
