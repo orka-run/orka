@@ -758,17 +758,23 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
             computeItemKey={(_index, entry) => entry.id}
             overscan={{ main: 500, reverse: 1500 }}
             increaseViewportBy={{ top: 1500, bottom: 500 }}
-            itemContent={(_index, entry) => (
-              <div className="pb-2">
-                <TimelineEntry
-                  entry={entry}
-                  isExpanded={expandedGroups.has(entry.id)}
-                  onToggleExpand={handleToggleGroup}
-                  onApprovalResolve={handleApprovalResolve}
-                  projectPath={session?.projectPath}
-                />
-              </div>
-            )}
+            itemContent={(_index, entry) => {
+              const t0 = performance.now();
+              const el = (
+                <div className="pb-2">
+                  <TimelineEntry
+                    entry={entry}
+                    isExpanded={expandedGroups.has(entry.id)}
+                    onToggleExpand={handleToggleGroup}
+                    onApprovalResolve={handleApprovalResolve}
+                    projectPath={session?.projectPath}
+                  />
+                </div>
+              );
+              const dt = performance.now() - t0;
+              if (dt > 1) console.log(`[render] ${entry.type}:${entry.id.slice(0, 16)} ${dt.toFixed(1)}ms`);
+              return el;
+            }}
             {...(isRunning(activeSession.status)
               ? {
                   components: {
