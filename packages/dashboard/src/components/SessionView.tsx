@@ -190,25 +190,12 @@ export function SessionView({
     </header>
   );
 
-  // On mobile, show floating stop button only for running sessions (retry available via desktop header only)
-  const mobileFab = isMobile && isStoppable ? (
-    <div className="absolute bottom-2 right-2 z-10">
-      <button
-        type="button"
-        onClick={() => void handleStopSession()}
-        disabled={isStopping}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-status-error/30 bg-surface/90 text-status-error shadow-sm backdrop-blur transition active:bg-status-error/10 disabled:opacity-50"
-      >
-        {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
-      </button>
-    </div>
-  ) : null;
+  // Mobile stop is now in MobileHeader — no FAB needed
 
   return (
     <div className="flex h-full flex-col">
       {header}
       <div className="relative flex-1 overflow-hidden">
-        {mobileFab}
         <div className={`h-full ${activeTab === "chat" ? "" : "hidden"} ${isMobile ? "" : "p-3"}`}>
           <ChatView
             sessionId={sessionId}

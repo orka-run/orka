@@ -94,6 +94,7 @@ function AppShell({ transport, client }: AppShellProps) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [mobileActiveTab, setMobileActiveTab] = useState<MobileSessionTab>("chat");
   const [isDevOverlayOpen, setIsDevOverlayOpen] = useState(false);
+  const [isMobileStopping, setIsMobileStopping] = useState(false);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
@@ -458,8 +459,17 @@ function AppShell({ transport, client }: AppShellProps) {
     </div>
   );
 
-  // On mobile: show the session title in the header when a session is selected
   const mobileHeaderTitle = selectedSession?.title ?? null;
+  const isSelectedSessionStoppable = selectedSession != null && ["running", "queued", "preparing"].includes(selectedSession.status);
+  const handleMobileStop = useCallback(async () => {
+    if (!selectedId || isMobileStopping) return;
+    setIsMobileStopping(true);
+    try {
+      await transport.request("stop", { sessionId: selectedId });
+    } finally {
+      setIsMobileStopping(false);
+    }
+  }, [selectedId, isMobileStopping, transport]);
 
   // Show onboarding wizard as full-screen replacement
   if (showOnboarding) {
@@ -486,7 +496,12 @@ function AppShell({ transport, client }: AppShellProps) {
         <PendingApprovalBanner />
         {isMobile ? (
           <>
-            <MobileHeader title={mobileHeaderTitle} />
+            <MobileHeader
+              title={mobileHeaderTitle}
+              isStoppable={isSelectedSessionStoppable}
+              isStopping={isMobileStopping}
+              onStop={() => { void handleMobileStop(); }}
+            />
             <main className="flex-1 overflow-hidden">{mobileMainContent}</main>
             <MobileTabBar
               hasSelectedSession={!!selectedId}
