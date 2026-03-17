@@ -128,7 +128,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         const stdout = process.stdout;
         const stdin = process.stdin;
 
-        const supervised = input.permissionMode === "supervised";
+        const supervised = input.permissionMode === "supervised" || !input.permissionMode;
 
         // For supervised mode, write hook settings and inject env vars
         if (supervised && input.cwd) {
