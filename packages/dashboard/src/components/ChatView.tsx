@@ -512,6 +512,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const entriesAtPauseRef = useRef(0);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const handleToggleGroup = useCallback((groupId: string, isOpen: boolean) => {
@@ -649,8 +650,11 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     const el = scrollRef.current;
     if (!el) return;
     const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (!isAtBottom && autoScroll) {
+      entriesAtPauseRef.current = entries.length;
+    }
     setAutoScroll(isAtBottom);
-  }, []);
+  }, [autoScroll, entries.length]);
 
   const scrollToBottom = useCallback(() => {
     setAutoScroll(true);
@@ -816,16 +820,19 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           <div ref={bottomRef} />
         </div>
 
-        {!autoScroll ? (
-          <button
-            type="button"
-            onClick={scrollToBottom}
-            className="absolute bottom-2 right-4 flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink-secondary backdrop-blur transition hover:bg-surface-hover"
-          >
-            <ArrowDown className="h-3 w-3" />
-            Scroll to bottom
-          </button>
-        ) : null}
+        {!autoScroll ? (() => {
+          const newCount = Math.max(0, entries.length - entriesAtPauseRef.current);
+          return (
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              className="absolute bottom-2 right-4 flex items-center gap-1 rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink-secondary backdrop-blur transition hover:bg-surface-hover"
+            >
+              <ArrowDown className="h-3 w-3" />
+              {newCount > 0 ? `+${newCount} new` : "Bottom"}
+            </button>
+          );
+        })() : null}
       </div>
       {activeSession.mode === "interactive" ? (
         <div className="border-t border-border">
