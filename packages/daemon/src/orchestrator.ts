@@ -201,10 +201,6 @@ export async function continueSession(
       throw new Error(`Cannot continue session in "${session.status}" state — only completed/failed sessions can be continued`);
     }
 
-    if (!session.providerSessionId) {
-      throw new Error("Session has no provider session ID — cannot resume");
-    }
-
     if (session.backend !== "claude-code") {
       throw new Error("Continue is only supported for claude-code sessions");
     }
@@ -217,15 +213,22 @@ export async function continueSession(
     // Clear any stale provider handle (should already be cleared, but be safe)
     ctx.providerService.clearHandle(sessionId);
 
-    // Start provider with --resume
+    // Build context for continue
     const startedAt = new Date().toISOString();
+    let systemPrompt = session.systemPrompt ?? "";
+
+    // If no provider session ID (old sessions), give agent context via raw log
+    if (!session.providerSessionId && session.rawLogFile && existsSync(session.rawLogFile)) {
+      systemPrompt = `${systemPrompt}\n\nYou are continuing a previous session. The full transcript of your previous work is at: ${session.rawLogFile}\nRead it to understand what was done before. The worktree at ${session.workingDir} has all previous changes.`.trim();
+    }
+
     const handle = await ctx.providerService.startSession(session.backend, {
       threadId: sessionId,
       cwd: session.workingDir,
       prompt,
-      resumeSessionId: session.providerSessionId,
+      ...(session.providerSessionId ? { resumeSessionId: session.providerSessionId } : {}),
       interactive: session.mode === "interactive",
-      ...(session.systemPrompt ? { systemPrompt: session.systemPrompt } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
       ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
     });
 
