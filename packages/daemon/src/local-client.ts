@@ -36,7 +36,7 @@ import type {
 import { generatePairingCode } from "@orka/core/crypto/protocol";
 import { EnrollmentStore } from "./pairing/enrollment-store";
 import type { DaemonContext } from "./daemon-context";
-import { spawnSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
+import { spawnSession, continueSession, stopSession, reapSessions, cleanupOrphanedWorktrees } from "./orchestrator";
 import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
 import {
@@ -94,6 +94,10 @@ class LocalClient implements OrkaService {
       status: session.status,
       title: task?.title ?? req.title ?? req.prompt.slice(0, 80),
     };
+  }
+
+  async continueSession(params: { sessionId: string; text: string }): Promise<SpawnResult> {
+    return continueSession(this.ctx, params.sessionId, params.text);
   }
 
   async stop(sessionId: string): Promise<void> {
@@ -904,6 +908,7 @@ function sessionToDetail(session: Session, task: Task | null, tags: string[]): S
     allowedTools: session.allowedTools ?? null,
     permissionMode: session.permissionMode ?? null,
     archivedAt: session.archivedAt ?? null,
+    providerSessionId: session.providerSessionId ?? null,
     tags,
   };
 }

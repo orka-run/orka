@@ -36,6 +36,8 @@ export interface SessionDetailResponse {
   permissionMode: PermissionMode | null;
   archivedAt: string | null;
   tags: string[];
+  /** Provider-specific session ID (e.g. Claude Code UUID). Present when session is continuable. */
+  providerSessionId: string | null;
   // Deliberately omitted: env, logFile, rawLogFile, workspaceId, taskId
 }
 
@@ -193,6 +195,8 @@ export interface PairWithNodeResult {
 export interface OrkaService {
   // --- Session lifecycle ---
   spawn(req: SpawnRequest): Promise<SpawnResult>;
+  /** Continue a completed/failed session with a new user message. Reuses same worktree and conversation. */
+  continueSession(params: { sessionId: string; text: string }): Promise<SpawnResult>;
   stop(sessionId: string): Promise<void>;
   reap(): Promise<number>;
 

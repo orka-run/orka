@@ -715,6 +715,13 @@ function buildClaudeCommand(input: ProviderSessionStartInput): string[] {
   const permissionMode = mapClaudePermissionMode(input);
   const command = ["claude", "-p", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json", "--permission-mode", permissionMode];
 
+  // Resume a previous session (--resume) or set a specific session ID (--session-id)
+  if (input.resumeSessionId) {
+    command.push("--resume", input.resumeSessionId);
+  } else if (input.providerSessionId) {
+    command.push("--session-id", input.providerSessionId);
+  }
+
   if (input.model) {
     command.push("--model", input.model);
   }

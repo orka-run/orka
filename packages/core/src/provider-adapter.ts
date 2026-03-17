@@ -23,6 +23,10 @@ export interface ProviderSessionStartInput {
   interactive?: boolean;
   /** Permission mode for tool execution. "supervised" enables dashboard approval flow. */
   permissionMode?: PermissionMode;
+  /** Set the provider's own session ID (e.g. Claude Code --session-id). */
+  providerSessionId?: string;
+  /** Resume a previous provider session by its ID (e.g. Claude Code --resume). */
+  resumeSessionId?: string;
 }
 
 export interface ProviderSendTurnInput {

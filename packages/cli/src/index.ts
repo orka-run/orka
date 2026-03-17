@@ -586,6 +586,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "stop",
   "diff",
   "retry",
+  "continue",
   "show",
   "workdir",
   "wait",
@@ -1315,6 +1316,47 @@ const retryCmd = command({
     console.log(`retried session ${session.id} → ${newSession.id}`);
     console.log(`  backend:  ${retryRequest.backend}`);
     console.log(`  mode:     ${retryRequest.mode}`);
+  }),
+});
+
+const continueCmd = command({
+  name: "continue",
+  description: "Continue a completed session with a new message (resumes conversation in same worktree)",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    text: restPositionals({ type: str, displayName: "text" }),
+  },
+  handler: async ({ sessionId, text }) => runCliCommand("continue", async () => {
+    if (!sessionId) {
+      fail("usage: orka continue <session-id> <text...>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    if (session.status !== "completed" && session.status !== "failed") {
+      fail(`session ${session.id} is ${session.status} — can only continue completed or failed sessions`);
+    }
+
+    if (!session.providerSessionId) {
+      fail(`session ${session.id} has no provider session ID — cannot resume (was it created before continue support?)`);
+    }
+
+    if (session.backend !== "claude-code") {
+      fail(`continue is only supported for claude-code sessions (session uses ${session.backend})`);
+    }
+
+    const prompt = text.join(" ");
+    if (!prompt) {
+      fail("usage: orka continue <session-id> <text...>");
+    }
+
+    const result = await svc.continueSession({ sessionId: session.id, text: prompt });
+
+    console.log(`continued session ${result.id}`);
+    console.log(`  status: ${result.status}`);
   }),
 });
 
@@ -2876,6 +2918,7 @@ const app = subcommands({
     stop: stopCmd,
     diff: diffCmd,
     retry: retryCmd,
+    continue: continueCmd,
     show: showCmd,
     workdir: workdirCmd,
     wait: waitCmd,

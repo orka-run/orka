@@ -6,6 +6,7 @@ import {
   type Session,
   type Task,
   type SpawnRequest,
+  type SpawnResult,
 } from "@orka/core";
 import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, deleteBranch } from "./worktree";
@@ -79,6 +80,9 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     const logFile = join(logsDir, `${sessionId}.log`);
 
     // 4. Create session record
+    // Generate a stable provider session ID for claude-code (used for --resume on continuation)
+    const providerSessionId = req.backend === "claude-code" ? crypto.randomUUID() : undefined;
+
     const session: Session = {
       id: sessionId,
       taskId,
@@ -99,7 +103,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(req.env ? { env: req.env } : {}),
-      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      ...(providerSessionId ? { providerSessionId } : {}),
     };
     ctx.db.insertSession(session);
 
@@ -135,6 +139,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       env: { ...req.env, ...supervisedEnv },
       interactive: req.mode === "interactive",
       ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      ...(providerSessionId ? { providerSessionId } : {}),
     });
 
     const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
@@ -179,6 +184,99 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
 
     span.addEvent("session.started");
     return { ...session, status: "running", startedAt };
+  });
+}
+
+/** Continue a completed/failed session with a new user message. Reuses same worktree and conversation. */
+export async function continueSession(
+  ctx: DaemonContext,
+  sessionId: string,
+  prompt: string,
+): Promise<SpawnResult> {
+  return withSpan("orka.continue", { "orka.session.id": sessionId }, async (span) => {
+    const session = ctx.db.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    if (session.status !== "completed" && session.status !== "failed") {
+      throw new Error(`Cannot continue session in "${session.status}" state — only completed/failed sessions can be continued`);
+    }
+
+    if (!session.providerSessionId) {
+      throw new Error("Session has no provider session ID — cannot resume");
+    }
+
+    if (session.backend !== "claude-code") {
+      throw new Error("Continue is only supported for claude-code sessions");
+    }
+
+    // Check that the worktree still exists
+    if (!existsSync(session.workingDir)) {
+      throw new Error("Session worktree no longer exists — was it merged or pruned?");
+    }
+
+    // Clear any stale provider handle (should already be cleared, but be safe)
+    ctx.providerService.clearHandle(sessionId);
+
+    // Start provider with --resume
+    const startedAt = new Date().toISOString();
+    const handle = await ctx.providerService.startSession(session.backend, {
+      threadId: sessionId,
+      cwd: session.workingDir,
+      prompt,
+      resumeSessionId: session.providerSessionId,
+      interactive: session.mode === "interactive",
+      ...(session.systemPrompt ? { systemPrompt: session.systemPrompt } : {}),
+      ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
+    });
+
+    span.addEvent("session.continued");
+
+    // Reset session status back to running
+    ctx.db.resetSessionForContinue(sessionId, startedAt);
+    recordSessionStartedMetrics();
+
+    // Get task for title
+    const task = ctx.db.getTask(session.taskId);
+
+    // Re-use the existing log file (append to it)
+    const rawLogPath = session.rawLogFile ?? join(ctx.orkaHome, "logs", `${sessionId}.raw.jsonl`);
+
+    void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine, {
+      updateSessionStatus: (id, status, extra) => ctx.db.updateSessionStatus(id, status, extra),
+      saveSessionDiff: (id, diff, status, extra) => ctx.db.saveSessionDiff(id, diff, status, extra),
+      insertUsageRecord: (record) => ctx.db.insertUsageRecord(record),
+      approvalManager: ctx.approvalManager,
+      logFile: session.logFile,
+      rawLogPath,
+      pushHub: ctx.pushHub,
+      workingDir: session.workingDir,
+      projectPath: session.projectPath,
+      autoMerge: false, // Don't auto-merge on continuation — user merges explicitly
+      model: task?.model ?? null,
+      orkaHome: ctx.orkaHome,
+      getSession: (id) => ctx.db.getSession(id),
+      permissionRules: ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0
+        ? { autoApprove: ctx.config.permissions.autoApprove, alwaysDeny: ctx.config.permissions.alwaysDeny }
+        : undefined,
+      respondToRequest: (threadId, requestId, decision) =>
+        ctx.providerService.respondToRequest(threadId, requestId, decision),
+      denyHookApprovals: (id) => ctx.hookApprovalBridge.denyAllForSession(id),
+      cleanupWorktree: async () => {
+        const currentSession = ctx.db.getSession(sessionId);
+        if (currentSession) {
+          await tryCleanupWorktree(ctx, currentSession);
+        }
+      },
+    })
+      .catch((error) => {
+        console.error(`provider event consumer failed for continued session ${sessionId}`, error);
+      })
+      .finally(() => {
+        ctx.providerService.clearHandle(sessionId);
+      });
+
+    ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "running" });
+    return { id: sessionId, status: "running" as const, title: task?.title ?? sessionId };
   });
 }
 

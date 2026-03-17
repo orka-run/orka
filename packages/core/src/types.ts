@@ -81,6 +81,8 @@ export interface Session {
   allowedTools?: string[];
   env?: Record<string, string>;
   archivedAt?: string;
+  /** Provider-specific session ID (e.g. Claude Code UUID), used for --resume on continuation. */
+  providerSessionId?: string;
 }
 
 /** Denormalized session with task fields inlined. Returned by listSessions API
