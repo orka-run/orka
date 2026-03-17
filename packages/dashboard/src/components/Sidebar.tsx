@@ -296,6 +296,8 @@ const STATUS_CONFIG: Record<
   { dotClass: string; label: string }
 > = {
   running: { dotClass: "bg-status-running animate-pulse", label: "Running" },
+  idle: { dotClass: "bg-accent", label: "Idle" },
+  hibernated: { dotClass: "bg-ink-muted", label: "Paused" },
   queued: { dotClass: "bg-accent animate-pulse", label: "Queued" },
   preparing: { dotClass: "bg-accent animate-pulse", label: "Preparing" },
   completed: { dotClass: "bg-ink-muted", label: "Done" },

@@ -2,7 +2,7 @@ import type { OrchestrationEvent } from "@orka/core";
 
 export type InputState = "disabled" | "waiting" | "busy" | "not_started";
 
-const ACTIVE_SESSION_STATUSES = new Set(["queued", "preparing", "running", "idle"]);
+const ACTIVE_SESSION_STATUSES = new Set(["queued", "preparing", "running", "idle", "hibernated"]);
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const PRESTART_SESSION_STATUSES = new Set(["queued", "preparing"]);
 
