@@ -22,7 +22,7 @@ import { saveNoiseKey } from "../lib/noiseKeys";
 import { savePairedNode } from "../lib/nodeRegistry";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
 import { useMode } from "../hooks/useMode";
-import { useTransport } from "../lib/transportContext";
+import { useRpcClient } from "../lib/transportContext";
 import { DEFAULT_RELAY_URL, DEFAULT_RELAY_NAME } from "../lib/constants";
 import { PairingCodeInput, isValidPairingCode } from "./PairingCodeInput";
 
@@ -47,7 +47,7 @@ interface OnboardingWizardProps {
 export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) {
   const relayUrlId = useId();
   const { mode } = useMode();
-  const transport = useTransport();
+  const client = useRpcClient();
   const setEndpoint = useConnectionSettingsStore((s) => s.setEndpoint);
 
   const [phase, setPhase] = useState<WizardPhase>("welcome");
@@ -120,7 +120,7 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
     }
 
     try {
-      const res = await transport.request<PairWithNodeResult>("pairWithNode", {
+      const res = await client.pairWithNode({
         pairingCode: code.replace(/-/g, ""),
         relayUrl: trimmedRelay,
       });

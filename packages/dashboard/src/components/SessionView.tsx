@@ -9,12 +9,11 @@ import { LogPanel } from "./LogPanel";
 import { withDashboardSpan } from "../lib/tracing";
 import { formatDateTime, formatDuration } from "../lib/sessionUi";
 import { useSessionStore, type SessionSummary } from "../stores/sessionStore";
-import type { WsTransport } from "../lib/wsTransport";
+import { useRpcClient } from "../lib/transportContext";
 import type { MobileSessionTab } from "./MobileTabBar";
 
 interface SessionViewProps {
   sessionId: string;
-  transport: WsTransport;
   onSelectionLoadSettled: (sessionId: string, status: "ok" | "error", error?: unknown) => void;
   isMobile?: boolean;
   /** On mobile, the active tab is owned by App and driven via MobileTabBar */
@@ -65,12 +64,12 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
 
 export function SessionView({
   sessionId,
-  transport,
   onSelectionLoadSettled,
   isMobile = false,
   mobileActiveTab,
   onMobileTabChange: _onMobileTabChange,
 }: SessionViewProps) {
+  const client = useRpcClient();
   // Desktop uses its own local tab state; mobile tab is driven externally via MobileTabBar
   const [desktopTab, setDesktopTab] = useState<"overview" | "chat" | "logs" | "diff">("chat");
   const [isStopping, setIsStopping] = useState(false);
@@ -117,7 +116,7 @@ export function SessionView({
         { "orka.session.id": activeSession.id },
         async (span) => {
           span.addEvent("session.stop_clicked");
-          await stopSession(transport, activeSession.id);
+          await stopSession(client, activeSession.id);
           span.addEvent("session.stop_confirmed");
         },
       );
@@ -131,7 +130,7 @@ export function SessionView({
   async function handleRetrySession() {
     setIsRetrying(true);
     try {
-      await transport.request("retrySession", { sessionId });
+      await client.retrySession(sessionId);
     } finally {
       setIsRetrying(false);
     }
@@ -223,13 +222,11 @@ export function SessionView({
             {activeTab === "logs" ? (
               <LogPanel
                 sessionId={sessionId}
-                transport={transport}
                 onInitialLoadSettled={reportSelectionLoad}
               />
             ) : activeTab === "overview" ? (
               <OverviewTab
                 session={session}
-                transport={transport}
                 onSelectionLoadSettled={reportSelectionLoad}
               />
             ) : (
@@ -244,19 +241,18 @@ export function SessionView({
 
 function OverviewTab({
   session,
-  transport,
   onSelectionLoadSettled,
 }: {
   session: SessionSummary;
-  transport: WsTransport;
   onSelectionLoadSettled: (status: "ok" | "error", error?: unknown) => void;
 }) {
+  const client = useRpcClient();
   const [promptExpanded, setPromptExpanded] = useState(false);
   const isFinished = session.status === "completed" || session.status === "failed" || session.status === "cancelled";
 
   const resultQuery = useQuery({
     queryKey: ["session-result", session.id],
-    queryFn: () => transport.request<SessionResult | null>("getResult", { sessionId: session.id }),
+    queryFn: () => client.getResult(session.id),
     enabled: isFinished,
     staleTime: Infinity,
   });

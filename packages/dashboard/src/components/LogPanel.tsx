@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoaderCircle, ArrowDown } from "lucide-react";
 import type { SessionLogLineData } from "@orka/core";
-import type { WsTransport } from "../lib/wsTransport";
 import { parseAnsiIncremental, createAnsiContext } from "../lib/ansiParser";
 import type { AnsiSpan } from "../lib/ansiParser";
+import { useTransport, useRpcClient } from "../lib/transportContext";
 import { useSessionStore } from "../stores/sessionStore";
 
 const encoder = new TextEncoder();
 
 interface LogPanelProps {
   sessionId: string;
-  transport: WsTransport;
   onInitialLoadSettled?: (status: "ok" | "error", error?: unknown) => void;
 }
 
-export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPanelProps) {
+export function LogPanel({ sessionId, onInitialLoadSettled }: LogPanelProps) {
+  const transport = useTransport();
+  const client = useRpcClient();
   const session = useSessionStore((state) => state.sessions.find((s) => s.id === sessionId) ?? null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +88,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
       setError(null);
 
       try {
-        const content = await transport.request<string | null>("getLogContent", { sessionId });
+        const content = await client.getLogContent(sessionId);
         if (cancelled) return;
 
         resetContent(content ?? "");
@@ -106,7 +107,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
     return () => {
       cancelled = true;
     };
-  }, [onInitialLoadSettled, sessionId, transport, resetContent]);
+  }, [onInitialLoadSettled, sessionId, client, resetContent]);
 
   // Subscribe to real-time log updates
   useEffect(() => {
@@ -130,7 +131,7 @@ export function LogPanel({ sessionId, transport, onInitialLoadSettled }: LogPane
       if (logLine.offset === expectedOffset) {
         appendDelta(content);
       } else if (logLine.offset > expectedOffset) {
-        void transport.request<string | null>("getLogContent", { sessionId }).then((fullContent) => {
+        void client.getLogContent(sessionId).then((fullContent) => {
           resetContent(fullContent ?? "");
         });
       }

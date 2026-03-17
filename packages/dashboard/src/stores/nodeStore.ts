@@ -1,6 +1,6 @@
 import type { NodeInfo, StoredNode } from "@orka/core";
 import { create } from "zustand";
-import type { WsTransport } from "../lib/wsTransport";
+import type { RpcClient } from "../lib/rpcClient";
 
 export interface PairedNodeInfo extends StoredNode {
   /** Live connection status from fleet.nodeUpdated push */
@@ -12,12 +12,12 @@ export interface NodeState {
   pairedNodes: PairedNodeInfo[];
   selectedNodeId: string | null; // null = "all nodes"
   isLoading: boolean;
-  fetchNodes: (transport: WsTransport) => Promise<void>;
-  fetchPairedNodes: (transport: WsTransport) => Promise<void>;
+  fetchNodes: (client: RpcClient) => Promise<void>;
+  fetchPairedNodes: (client: RpcClient) => Promise<void>;
   selectNode: (nodeId: string | null) => void;
-  removeNode: (transport: WsTransport, nodeId: string) => Promise<void>;
-  connectNode: (transport: WsTransport, nodeId: string) => Promise<void>;
-  disconnectNode: (transport: WsTransport, nodeId: string) => Promise<void>;
+  removeNode: (client: RpcClient, nodeId: string) => Promise<void>;
+  connectNode: (client: RpcClient, nodeId: string) => Promise<void>;
+  disconnectNode: (client: RpcClient, nodeId: string) => Promise<void>;
   updateNodeStatus: (nodeId: string, status: "online" | "offline" | "error") => void;
 }
 
@@ -27,19 +27,19 @@ export const useNodeStore = create<NodeState>((set, get) => ({
   selectedNodeId: null,
   isLoading: false,
 
-  fetchNodes: async (transport) => {
+  fetchNodes: async (client) => {
     set({ isLoading: true });
     try {
-      const nodes = await transport.request<NodeInfo[]>("listNodes");
+      const nodes = await client.listNodes();
       set({ nodes, isLoading: false });
     } catch {
       set({ isLoading: false });
     }
   },
 
-  fetchPairedNodes: async (transport) => {
+  fetchPairedNodes: async (client) => {
     try {
-      const stored = await transport.request<StoredNode[]>("listPairedNodes");
+      const stored = await client.listPairedNodes();
       // Preserve existing connectionStatus from current state
       const current = get().pairedNodes;
       const statusMap = new Map(current.map((n) => [n.nodeId, n.connectionStatus]));
@@ -57,8 +57,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
     set({ selectedNodeId: nodeId });
   },
 
-  removeNode: async (transport, nodeId) => {
-    await transport.request("removePairedNode", { nodeId });
+  removeNode: async (client, nodeId) => {
+    await client.removePairedNode(nodeId);
     set((state) => ({
       pairedNodes: state.pairedNodes.filter((n) => n.nodeId !== nodeId),
       nodes: state.nodes.filter((n) => n.id !== nodeId),
@@ -66,12 +66,12 @@ export const useNodeStore = create<NodeState>((set, get) => ({
     }));
   },
 
-  connectNode: async (transport, nodeId) => {
-    await transport.request("connectNode", { nodeId });
+  connectNode: async (client, nodeId) => {
+    await client.connectNode(nodeId);
   },
 
-  disconnectNode: async (transport, nodeId) => {
-    await transport.request("disconnectNode", { nodeId });
+  disconnectNode: async (client, nodeId) => {
+    await client.disconnectNode(nodeId);
   },
 
   updateNodeStatus: (nodeId, status) => {

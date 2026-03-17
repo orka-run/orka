@@ -12,6 +12,7 @@ import { ChatInputComposer } from "./ChatInputComposer";
 import { useInputState } from "../hooks/useInputState";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTransport } from "../lib/transportContext";
+import { useRpcClient } from "../lib/transportContext";
 import { useTimelineCache } from "../lib/timelineCache";
 import { formatDateTime, formatRelativeTime } from "../lib/sessionUi";
 
@@ -504,6 +505,7 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
 export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const transport = useTransport();
+  const client = useRpcClient();
 
   const [events, setEvents] = useState<OrchestrationEvent[]>([]);
   const [entries, setEntries] = useState<ChatEntry[]>([]);
@@ -570,10 +572,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     // Always fetch fresh data (stale-while-revalidate for running sessions)
     async function load() {
       try {
-        const response = await transport.request<{ events: OrchestrationEvent[]; total: number }>(
-          "getSessionTimeline",
-          { sessionId },
-        );
+        const response = await client.getSessionTimeline({ sessionId });
         if (cancelled) return;
 
         const timeline = response.events;
@@ -597,7 +596,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
     void load();
     return () => { cancelled = true; };
-  }, [sessionId, transport]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, client]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to real-time orchestration events
   useEffect(() => {
@@ -672,7 +671,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     );
 
     try {
-      await transport.request("resolveApproval", { requestId, decision });
+      await client.resolveApproval(requestId, decision);
     } catch (err) {
       // Rollback on error
       setEntries((prev) =>
@@ -684,7 +683,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
       );
       throw err;
     }
-  }, [transport]);
+  }, [client]);
 
   if (!session) {
     return (
@@ -723,7 +722,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           "orka.input.length": text.length,
         },
         async () => {
-          await transport.request("sendTurn", { sessionId, text });
+          await client.sendTurn(sessionId, text);
         },
       );
     } catch (err) {
@@ -737,7 +736,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   async function handleStop() {
     setStopping(true);
     try {
-      await transport.request("stopSession", { sessionId });
+      await client.stopSession(sessionId);
     } finally {
       setStopping(false);
     }
@@ -746,7 +745,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   async function handleRetry() {
     setRetrying(true);
     try {
-      await transport.request("retrySession", { sessionId });
+      await client.retrySession(sessionId);
     } finally {
       setRetrying(false);
     }

@@ -11,7 +11,7 @@ import { saveNoiseKey } from "../lib/noiseKeys";
 import { savePairedNode } from "../lib/nodeRegistry";
 import { useConnectionSettingsStore } from "../stores/connectionSettingsStore";
 import { useMode } from "../hooks/useMode";
-import { useTransport } from "../lib/transportContext";
+import { useRpcClient } from "../lib/transportContext";
 import { DEFAULT_RELAY_URL } from "../lib/constants";
 import { PairingCodeInput, isValidPairingCode } from "./PairingCodeInput";
 
@@ -36,7 +36,7 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
   const currentEndpoint = useConnectionSettingsStore((s) => s.endpointUrl);
   const setEndpoint = useConnectionSettingsStore((s) => s.setEndpoint);
   const { mode } = useMode();
-  const transport = useTransport();
+  const client = useRpcClient();
 
   const [code, setCode] = useState("");
   const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY_URL);
@@ -105,7 +105,7 @@ export function PairNodeDialog({ open, onClose }: PairNodeDialogProps) {
     }
 
     try {
-      const res = await transport.request<PairWithNodeResult>("pairWithNode", {
+      const res = await client.pairWithNode({
         pairingCode: code.replace(/-/g, ""),
         relayUrl: trimmedRelay,
       });

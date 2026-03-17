@@ -1,10 +1,10 @@
 // Draft chat view: unified spawn UX with inline advanced options
 import { useState } from "react";
 import { Bot, LoaderCircle, MessageSquarePlus, User } from "lucide-react";
-import type { BackendKind, NodeInfo, PermissionMode, SessionMode, SpawnRequest } from "@orka/core";
+import type { BackendKind, NodeInfo, OrchestrationEvent, PermissionMode, SessionMode, SpawnRequest } from "@orka/core";
 import { ChatInputComposer } from "./ChatInputComposer";
 import { SpawnAdvancedPanel } from "./SpawnAdvancedPanel";
-import { useTransport } from "../lib/transportContext";
+import { useRpcClient } from "../lib/transportContext";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTimelineCache } from "../lib/timelineCache";
 import { withDashboardSpan } from "../lib/tracing";
@@ -37,7 +37,7 @@ function parseTags(value: string): string[] {
 }
 
 export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftChatViewProps) {
-  const transport = useTransport();
+  const client = useRpcClient();
   const spawnSession = useSessionStore((state) => state.spawnSession);
 
   // Quick options (always visible)
@@ -93,17 +93,18 @@ export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftCha
           "orka.auto_merge": autoMerge,
         },
         async () => {
-          return await spawnSession(transport, request);
+          return await spawnSession(client, request);
         },
       );
 
       // Optimistic timeline seed: show user's prompt instantly in ChatView
-      useTimelineCache.getState().set(sessionId, [{
+      const seedEvent: OrchestrationEvent = {
         type: "user.input",
         sessionId,
         text,
         timestamp: new Date().toISOString(),
-      } as any]);
+      };
+      useTimelineCache.getState().set(sessionId, [seedEvent]);
 
       onSpawned();
     } catch (err) {

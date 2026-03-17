@@ -1,6 +1,6 @@
 import type { OrchestrationEvent } from "@orka/core";
 import { create } from "zustand";
-import type { WsTransport } from "./wsTransport";
+import type { RpcClient } from "./rpcClient";
 
 interface TimelineCacheState {
   /** sessionId → cached events */
@@ -8,7 +8,7 @@ interface TimelineCacheState {
   /** sessionIds currently being fetched */
   inflight: Set<string>;
   /** Prefetch a session's timeline in the background */
-  prefetch: (transport: WsTransport, sessionId: string) => void;
+  prefetch: (client: RpcClient, sessionId: string) => void;
   /** Get cached timeline or null */
   get: (sessionId: string) => OrchestrationEvent[] | null;
   /** Store a fetched timeline (e.g. after ChatView loads it) */
@@ -19,7 +19,7 @@ export const useTimelineCache = create<TimelineCacheState>((set, get) => ({
   entries: {},
   inflight: new Set(),
 
-  prefetch: (transport, sessionId) => {
+  prefetch: (client, sessionId) => {
     const state = get();
     if (state.entries[sessionId] || state.inflight.has(sessionId)) return;
 
@@ -27,8 +27,8 @@ export const useTimelineCache = create<TimelineCacheState>((set, get) => ({
     nextInflight.add(sessionId);
     set({ inflight: nextInflight });
 
-    transport
-      .request<{ events: OrchestrationEvent[]; total: number }>("getSessionTimeline", { sessionId })
+    client
+      .getSessionTimeline({ sessionId })
       .then((resp) => {
         const events = resp.events;
         const s = get();

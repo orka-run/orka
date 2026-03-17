@@ -26,7 +26,8 @@ import { SessionView } from "./components/SessionView";
 import { StatusBar } from "./components/StatusBar";
 import { useMobileBreakpoint } from "./hooks/useMobileBreakpoint";
 import { getTracer, initDashboardTracing } from "./lib/tracing";
-import { TransportContext } from "./lib/transportContext";
+import { TransportContext, RpcClientContext } from "./lib/transportContext";
+import { createRpcClient } from "./lib/rpcClient";
 import { loadNoiseKey, hexToBytes } from "./lib/noiseKeys";
 import { loadPairedNode } from "./lib/nodeRegistry";
 import { createDashboardTransport, type WsTransport } from "./lib/wsTransport";
@@ -78,9 +79,10 @@ function getEffectiveUrl(endpointUrl: string | null, authToken: string | null): 
 
 interface AppShellProps {
   transport: WsTransport;
+  client: ReturnType<typeof createRpcClient>;
 }
 
-function AppShell({ transport }: AppShellProps) {
+function AppShell({ transport, client }: AppShellProps) {
   const { mode } = useMode();
   const { isMobile } = useMobileBreakpoint();
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
@@ -243,7 +245,7 @@ function AppShell({ transport }: AppShellProps) {
   const fetchSessionsWithNodes = useEffectEvent(() => {
     const currentNodes = useNodeStore.getState().nodes;
     const nodeIds = currentNodes.length > 1 ? currentNodes.map((n) => n.id) : undefined;
-    void fetchSessions(transport, nodeIds);
+    void fetchSessions(client, nodeIds);
   });
 
   useEffect(() => {
@@ -313,17 +315,17 @@ function AppShell({ transport }: AppShellProps) {
       if (update.nodeId && update.status) {
         updateNodeStatus(update.nodeId, update.status);
         // Refresh full node list on status changes
-        void fetchNodes(transport);
+        void fetchNodes(client);
       }
     });
 
     // Fire sessions fetch immediately for faster first paint
-    void fetchSessions(transport).then(() => {
+    void fetchSessions(client).then(() => {
       setInitialLoadDone(true);
     });
 
     // Fetch nodes in parallel; re-fetch sessions with node IDs if multi-node
-    void fetchNodes(transport).then(() => {
+    void fetchNodes(client).then(() => {
       const currentNodes = useNodeStore.getState().nodes;
       if (currentNodes.length > 1) {
         fetchSessionsWithNodes();
@@ -332,12 +334,12 @@ function AppShell({ transport }: AppShellProps) {
 
     // Fetch paired nodes in local mode
     if (mode === "local") {
-      void fetchPairedNodes(transport);
+      void fetchPairedNodes(client);
     }
 
     // Periodically refresh node list (every 10s for fresher status)
     const nodeRefreshTimer = setInterval(() => {
-      void fetchNodes(transport);
+      void fetchNodes(client);
     }, 10_000);
 
     return () => {
@@ -359,16 +361,16 @@ function AppShell({ transport }: AppShellProps) {
       unsubscribeState();
       transport.disconnect();
     };
-  }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus, incrementPending, decrementPending]);
+  }, [transport, client, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus, incrementPending, decrementPending]);
 
   const handleOnboardingComplete = useCallback(() => {
     setShowOnboarding(false);
     setOnboardingDismissed(true);
     try { localStorage.setItem("orka-onboarding-dismissed", "1"); } catch { /* ignore */ }
-    void fetchSessions(transport);
-    void fetchNodes(transport);
-    if (mode === "local") void fetchPairedNodes(transport);
-  }, [transport, mode, fetchSessions, fetchNodes, fetchPairedNodes]);
+    void fetchSessions(client);
+    void fetchNodes(client);
+    if (mode === "local") void fetchPairedNodes(client);
+  }, [client, mode, fetchSessions, fetchNodes, fetchPairedNodes]);
 
   const handleOnboardingSkip = useCallback(() => {
     setShowOnboarding(false);
@@ -392,7 +394,7 @@ function AppShell({ transport }: AppShellProps) {
       handleSelectSession(id);
     },
     onHover: (id: string) => {
-      prefetchTimeline(transport, id);
+      prefetchTimeline(client, id);
     },
     onSelectDraft: activateDraft,
     onNewSession: activateDraft,
@@ -405,7 +407,6 @@ function AppShell({ transport }: AppShellProps) {
   const mobileMainContent = selectedId ? (
     <SessionView
       sessionId={selectedId}
-      transport={transport}
       onSelectionLoadSettled={handleSelectionLoadSettled}
       isMobile
       mobileActiveTab={mobileActiveTab}
@@ -439,7 +440,6 @@ function AppShell({ transport }: AppShellProps) {
   const desktopMainContent = selectedId ? (
     <SessionView
       sessionId={selectedId}
-      transport={transport}
       onSelectionLoadSettled={handleSelectionLoadSettled}
     />
   ) : isDraftActive ? (
@@ -465,18 +465,21 @@ function AppShell({ transport }: AppShellProps) {
   if (showOnboarding) {
     return (
       <TransportContext.Provider value={transport}>
-        <div className="flex h-dvh flex-col bg-surface">
-          <OnboardingWizard
-            onComplete={handleOnboardingComplete}
-            onSkip={handleOnboardingSkip}
-          />
-        </div>
+        <RpcClientContext.Provider value={client}>
+          <div className="flex h-dvh flex-col bg-surface">
+            <OnboardingWizard
+              onComplete={handleOnboardingComplete}
+              onSkip={handleOnboardingSkip}
+            />
+          </div>
+        </RpcClientContext.Provider>
       </TransportContext.Provider>
     );
   }
 
   return (
     <TransportContext.Provider value={transport}>
+      <RpcClientContext.Provider value={client}>
       <div className="flex h-dvh flex-col">
         <ConnectionBanner />
         <NotificationPermissionBanner />
@@ -526,7 +529,7 @@ function AppShell({ transport }: AppShellProps) {
           onClose={() => {
             setIsPairNodeOpen(false);
             // Refresh paired nodes after pairing dialog closes (new node may have been paired)
-            if (mode === "local") void fetchPairedNodes(transport);
+            if (mode === "local") void fetchPairedNodes(client);
           }}
         />
         {mode === "local" && (
@@ -536,16 +539,16 @@ function AppShell({ transport }: AppShellProps) {
             pairedNodes={pairedNodes}
             liveNodes={nodes}
             onRemoveNode={async (nodeId) => {
-              await useNodeStore.getState().removeNode(transport, nodeId);
-              void fetchNodes(transport);
+              await useNodeStore.getState().removeNode(client, nodeId);
+              void fetchNodes(client);
             }}
             onConnectNode={async (nodeId) => {
-              await useNodeStore.getState().connectNode(transport, nodeId);
-              void fetchNodes(transport);
+              await useNodeStore.getState().connectNode(client, nodeId);
+              void fetchNodes(client);
             }}
             onDisconnectNode={async (nodeId) => {
-              await useNodeStore.getState().disconnectNode(transport, nodeId);
-              void fetchNodes(transport);
+              await useNodeStore.getState().disconnectNode(client, nodeId);
+              void fetchNodes(client);
             }}
             onPairNode={() => {
               setIsNodeManagementOpen(false);
@@ -554,6 +557,7 @@ function AppShell({ transport }: AppShellProps) {
           />
         )}
       </div>
+      </RpcClientContext.Provider>
     </TransportContext.Provider>
   );
 }
@@ -602,6 +606,7 @@ export function App() {
     transportRef.current = { key: transportKey, transport: createTransport(effectiveUrl, noiseConfig) };
   }
   const transport = transportRef.current.transport;
+  const client = useMemo(() => createRpcClient(transport), [transport]);
 
   const reportedErrors = useRef(new Map<string, number>());
   const reportError = async (report: ClientErrorReport): Promise<void> => {
@@ -615,12 +620,12 @@ export function App() {
     // Deduplicate: same error at most once per 60s
     if (reportedErrors.current.has(key)) return;
     reportedErrors.current.set(key, now);
-    await transport.request("reportClientError", report).catch(() => undefined);
+    await client.reportClientError(report).catch(() => undefined);
   };
 
   return (
     <ErrorBoundary reportError={reportError}>
-      <AppShell key={transportKey} transport={transport} />
+      <AppShell key={transportKey} transport={transport} client={client} />
     </ErrorBoundary>
   );
 }

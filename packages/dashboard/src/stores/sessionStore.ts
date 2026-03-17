@@ -1,8 +1,7 @@
 import type { Session, SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
-import type { RequestOptions } from "../lib/wsTransport";
-import { WsTransport } from "../lib/wsTransport";
+import type { RpcClient } from "../lib/rpcClient";
 
 const FALLBACK_TITLE_LENGTH = 80;
 const SELECTED_SESSION_KEY = "orka:selectedSession";
@@ -34,10 +33,10 @@ export interface SessionState {
   error: string | null;
   selectSession: (id: string | null) => void;
   /** Fetch sessions. If nodeIds provided, fetches from each node in parallel and tags results. */
-  fetchSessions: (transport: WsTransport, nodeIds?: string[]) => Promise<void>;
-  spawnSession: (transport: WsTransport, request: SpawnRequest) => Promise<string>;
-  stopSession: (transport: WsTransport, sessionId: string) => Promise<void>;
-  deleteSession: (transport: WsTransport, sessionId: string) => Promise<void>;
+  fetchSessions: (client: RpcClient, nodeIds?: string[]) => Promise<void>;
+  spawnSession: (client: RpcClient, request: SpawnRequest) => Promise<string>;
+  stopSession: (client: RpcClient, sessionId: string) => Promise<void>;
+  deleteSession: (client: RpcClient, sessionId: string) => Promise<void>;
   handleSessionUpdated: (data: SessionUpdatedData) => void;
   handleSessionDeleted: (data: SessionDeletedData) => void;
 }
@@ -118,7 +117,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
         // localStorage unavailable
       }
     },
-    fetchSessions: async (transport, nodeIds?) => {
+    fetchSessions: async (client, nodeIds?) => {
       // Only show loading spinner when there are no cached sessions (stale-while-revalidate)
       set((state) => ({ isLoading: state.sessions.length === 0, error: null }));
 
@@ -129,14 +128,13 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           // Multi-node: fetch from each node in parallel, tag with nodeId
           const results = await Promise.all(
             nodeIds.map(async (nodeId) => {
-              const reqOpts: RequestOptions = { node: nodeId };
-              const sessions = await transport.request<SessionListResponse[]>("listSessions", undefined, reqOpts);
+              const sessions = await client.listSessions(undefined, { node: nodeId });
               return sessions.map((session) => toSessionSummary(session, { nodeId }));
             }),
           );
           allSummaries = results.flat();
         } else {
-          const sessions = await transport.request<SessionListResponse[]>("listSessions");
+          const sessions = await client.listSessions();
           allSummaries = sessions.map((session) => toSessionSummary(session));
         }
 
@@ -155,12 +153,12 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
         });
       }
     },
-    spawnSession: async (transport, request) => {
+    spawnSession: async (client, request) => {
       set({ error: null });
 
       try {
-        const reqOpts: RequestOptions | undefined = request.nodeId ? { node: request.nodeId } : undefined;
-        const result = await transport.request<SpawnResult>("spawn", request, reqOpts);
+        const reqOpts = request.nodeId ? { node: request.nodeId } : undefined;
+        const result = await client.spawn(request, reqOpts);
 
         // Build a minimal summary from SpawnResult + request data.
         // The next fetchSessions will fill in the full SessionListItem fields.
@@ -197,22 +195,22 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
         throw error;
       }
     },
-    stopSession: async (transport, sessionId) => {
+    stopSession: async (client, sessionId) => {
       set({ error: null });
 
       try {
-        await transport.request("stop", { sessionId });
+        await client.stop(sessionId);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to stop session";
         set({ error: message });
         throw error;
       }
     },
-    deleteSession: async (transport, sessionId) => {
+    deleteSession: async (client, sessionId) => {
       set({ error: null });
 
       try {
-        await transport.request("deleteSessions", { ids: [sessionId] });
+        await client.deleteSessions([sessionId]);
         set((state) => {
           const wasSelected = state.selectedId === sessionId;
           if (wasSelected) clearSelectedStorage();

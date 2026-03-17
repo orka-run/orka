@@ -2,43 +2,32 @@ import type { SessionListResponse, SpawnRequest, SpawnResult, Task } from "@orka
 import { describe, expect, test } from "bun:test";
 import { createSessionStore } from "./sessionStore";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
-import type { WsTransport } from "../lib/wsTransport";
+import type { RpcClient } from "../lib/rpcClient";
 
-class MockWsTransport {
+class MockRpcClient {
   sessions: SessionListResponse[] = [];
   tasks = new Map<string, Task>();
   spawnResult: SpawnResult | null = null;
   spawnParams: SpawnRequest | null = null;
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
-    switch (method) {
-      case "listSessions":
-        return this.sessions as T;
-      case "getTask": {
-        const taskId = (params as { id: string }).id;
-        return (this.tasks.get(taskId) ?? null) as T;
-      }
-      case "spawn":
-        if (!this.spawnResult) {
-          throw new Error("Missing spawn result");
-        }
-        this.spawnParams = params as SpawnRequest;
-        return this.spawnResult as T;
-      case "stop":
-        return undefined as T;
-      case "deleteSessions": {
-        const ids = new Set((params as { ids: string[] }).ids);
-        this.sessions = this.sessions.filter((session) => !ids.has(session.id));
-        return undefined as T;
-      }
-      default:
-        throw new Error(`Unexpected method: ${method}`);
-    }
-  }
+  listSessions = async () => this.sessions;
+
+  spawn = async (req: SpawnRequest) => {
+    if (!this.spawnResult) throw new Error("Missing spawn result");
+    this.spawnParams = req;
+    return this.spawnResult;
+  };
+
+  stop = async () => {};
+
+  deleteSessions = async (ids: string[]) => {
+    const idSet = new Set(ids);
+    this.sessions = this.sessions.filter((session) => !idSet.has(session.id));
+  };
 }
 
-function asTransport(transport: MockWsTransport): WsTransport {
-  return transport as unknown as WsTransport;
+function asClient(mock: MockRpcClient): RpcClient {
+  return mock as unknown as RpcClient;
 }
 
 function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListResponse {
@@ -88,10 +77,10 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 describe("sessionStore", () => {
   test("fetchSessions populates store", async () => {
     const store = createSessionStore();
-    const transport = new MockWsTransport();
+    const transport = new MockRpcClient();
     transport.sessions = [makeSession({ title: "First session", model: "gpt-5", prompt: "Build the dashboard session store" })];
 
-    await store.getState().fetchSessions(asTransport(transport));
+    await store.getState().fetchSessions(asClient(transport));
 
     expect(store.getState().sessions).toEqual([
       {
@@ -196,7 +185,7 @@ describe("sessionStore", () => {
 
   test("spawnSession adds new session", async () => {
     const store = createSessionStore();
-    const transport = new MockWsTransport();
+    const transport = new MockRpcClient();
     transport.spawnResult = makeSpawnResult({
       id: "sess-2",
       status: "queued",
@@ -215,7 +204,7 @@ describe("sessionStore", () => {
       systemPrompt: "Keep the response concise and implementation-focused.",
     };
 
-    const sessionId = await store.getState().spawnSession(asTransport(transport), request);
+    const sessionId = await store.getState().spawnSession(asClient(transport), request);
 
     expect(sessionId).toBe("sess-2");
     expect(transport.spawnParams).toEqual(request);

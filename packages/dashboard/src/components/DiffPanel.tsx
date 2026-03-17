@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, FileDiff, LoaderCircle, RefreshCw } from "lucide-react";
 import type { DiffResult } from "@orka/core";
 import { parseDiff, type DiffFile, type DiffLine } from "../lib/parseDiff";
-import { useTransport } from "../lib/transportContext";
+import { useRpcClient } from "../lib/transportContext";
 import { useSessionStore } from "../stores/sessionStore";
 
 interface DiffPanelProps {
@@ -16,14 +16,14 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
 const AUTO_REFRESH_MS = 5_000;
 
 export function DiffPanel({ sessionId, onSelectionLoadSettled }: DiffPanelProps) {
-  const transport = useTransport();
+  const client = useRpcClient();
   const queryClient = useQueryClient();
   const session = useSessionStore((state) => state.sessions.find((s) => s.id === sessionId));
   const isActive = session ? ACTIVE_STATUSES.has(session.status) : false;
 
   const diffQuery = useQuery({
     queryKey: ["session-diff", sessionId],
-    queryFn: () => transport.request<DiffResult>("getDiff", { sessionId }),
+    queryFn: () => client.getDiff(sessionId),
     refetchInterval: isActive ? AUTO_REFRESH_MS : false,
   });
 
