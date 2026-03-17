@@ -205,9 +205,22 @@ export async function continueSession(
       throw new Error("Continue is only supported for claude-code sessions");
     }
 
-    // Check that the worktree still exists
+    // Recreate worktree if it was cleaned up but the branch still exists
     if (!existsSync(session.workingDir)) {
-      throw new Error("Session worktree no longer exists — was it merged or pruned?");
+      const branchName = `orka/${sessionId}`;
+      try {
+        const result = Bun.spawnSync(["git", "branch", "--list", branchName], { cwd: session.projectPath });
+        const branchExists = new TextDecoder().decode(result.stdout).trim().length > 0;
+        if (branchExists) {
+          Bun.spawnSync(["git", "worktree", "add", session.workingDir, branchName], { cwd: session.projectPath });
+          span.addEvent("worktree.recreated", { "orka.branch": branchName });
+        } else {
+          throw new Error("Session worktree and branch no longer exist — was it merged?");
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.includes("no longer exist")) throw e;
+        throw new Error("Failed to recreate session worktree");
+      }
     }
 
     // Clear any stale provider handle (should already be cleared, but be safe)
