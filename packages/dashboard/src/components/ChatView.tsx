@@ -555,7 +555,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
       const filtered = cached.filter((e) => e.sessionId === sessionId);
       eventsRef.current = filtered;
       setEvents(filtered);
-      setEntries(eventsToEntries(filtered, initialPromptRef.current, session?.workingDir));
+      setEntries(eventsToEntries(filtered, initialPromptRef.current, session?.projectPath));
       setIsLoading(false);
       onSelectionLoadSettledRef.current?.("ok");
     } else {
