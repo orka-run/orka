@@ -566,17 +566,17 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     // Correct scroll position when items above viewport are measured
     // This prevents the "jump" when scrolling up and new items get real heights
     onChange: (instance) => {
-      if (!isScrollingUpRef.current || programmaticScrollRef.current) return;
       const el = scrollRef.current;
       if (!el) return;
-      // If virtualizer's total size changed and we're scrolling up,
-      // the scroll offset may have shifted. Restore the visual position
-      // by adjusting scrollTop to compensate.
       const currentScrollTop = el.scrollTop;
-      const diff = currentScrollTop - lastScrollTopRef.current;
+      const saved = lastScrollTopRef.current;
+      const diff = currentScrollTop - saved;
+      const totalSize = instance.getTotalSize();
+      console.log(`[virt] onChange: scrollTop=${Math.round(currentScrollTop)} saved=${Math.round(saved)} diff=${Math.round(diff)} totalSize=${totalSize} up=${isScrollingUpRef.current} programmatic=${programmaticScrollRef.current} items=${instance.getVirtualItems().length}`);
+      if (!isScrollingUpRef.current || programmaticScrollRef.current) return;
       if (Math.abs(diff) > 2 && Math.abs(diff) < 500) {
-        // Virtualizer adjusted layout — compensate
-        el.scrollTop = lastScrollTopRef.current;
+        console.log(`[virt] CORRECTING scrollTop ${Math.round(currentScrollTop)} → ${Math.round(saved)}`);
+        el.scrollTop = saved;
       }
     },
   });
@@ -713,9 +713,13 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     if (programmaticScrollRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
-    isScrollingUpRef.current = el.scrollTop < lastScrollTopRef.current;
+    const prev = lastScrollTopRef.current;
+    isScrollingUpRef.current = el.scrollTop < prev;
     lastScrollTopRef.current = el.scrollTop;
     scrollTopRef.current = el.scrollTop;
+    if (isScrollingUpRef.current) {
+      console.log(`[scroll] UP: ${Math.round(prev)} → ${Math.round(el.scrollTop)} (delta ${Math.round(el.scrollTop - prev)})`);
+    }
     const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     const currentAutoScroll = useChatUiStore.getState().get(sessionId).autoScroll;
     if (!isAtBottom && currentAutoScroll) {
