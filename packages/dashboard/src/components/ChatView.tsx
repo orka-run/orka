@@ -656,19 +656,18 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     if (!autoScroll || entries.length === 0) return;
 
     programmaticScrollRef.current = true;
-    // Use virtualizer.scrollToIndex for reliable scrolling with dynamic item heights —
-    // it handles iterative measurement corrections that scrollIntoView cannot.
-    virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
 
-    // After virtualizer measurement passes settle, ensure absolute bottom is visible
-    // (past any content after the virtualizer like ThinkingIndicator)
+    // Simple approach: just scroll the container to the bottom.
+    // Virtualizer renders items based on scroll position, so this works.
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+
+    // Virtualizer may re-measure and adjust layout — scroll again after settle
     const timer = setTimeout(() => {
-      const el = scrollRef.current;
       if (el) el.scrollTop = el.scrollHeight;
-      requestAnimationFrame(() => {
-        programmaticScrollRef.current = false;
-      });
-    }, 100);
+      // Keep guard active a bit longer to absorb virtualizer re-measure scrolls
+      setTimeout(() => { programmaticScrollRef.current = false; }, 50);
+    }, 150);
 
     return () => {
       clearTimeout(timer);
