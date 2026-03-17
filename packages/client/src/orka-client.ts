@@ -281,7 +281,7 @@ class OrkaClient implements OrkaService {
 
   async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
     const raw: any = await this.call("getSessionTimeline", params);
-    const rawEvents: unknown[] = Array.isArray(raw?.events) ? raw.events : (Array.isArray(raw) ? raw : []);
+    const rawEvents: unknown[] = Array.isArray(raw?.events) ? raw.events : [];
     const events: OrchestrationEvent[] = [];
     for (const item of rawEvents) {
       const event = parseWireEvent(item);

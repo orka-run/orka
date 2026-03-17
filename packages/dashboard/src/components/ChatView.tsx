@@ -574,7 +574,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
         );
         if (cancelled) return;
 
-        const timeline = Array.isArray(response) ? response : (response?.events ?? []);
+        const timeline = response.events;
         const filtered = timeline.filter((e: OrchestrationEvent) => e.sessionId === sessionId);
         eventsRef.current = filtered;
         setEvents(filtered);

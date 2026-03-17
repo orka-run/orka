@@ -28,10 +28,9 @@ export const useTimelineCache = create<TimelineCacheState>((set, get) => ({
     set({ inflight: nextInflight });
 
     transport
-      .request<{ events: OrchestrationEvent[]; total: number } | OrchestrationEvent[]>("getSessionTimeline", { sessionId })
+      .request<{ events: OrchestrationEvent[]; total: number }>("getSessionTimeline", { sessionId })
       .then((resp) => {
-        // Handle both old (array) and new ({ events, total }) response formats
-        const events = Array.isArray(resp) ? resp : resp.events;
+        const events = resp.events;
         const s = get();
         const nextInflight = new Set(s.inflight);
         nextInflight.delete(sessionId);
