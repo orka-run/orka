@@ -233,15 +233,23 @@ export async function continueSession(
     const startedAt = new Date().toISOString();
     let systemPrompt = session.systemPrompt ?? "";
 
-    // If no provider session ID (old sessions), give agent context via raw log
-    if (!session.providerSessionId && session.rawLogFile && existsSync(session.rawLogFile)) {
-      systemPrompt = `${systemPrompt}\n\nYou are continuing a previous session. The full transcript of your previous work is at: ${session.rawLogFile}\nRead it to understand what was done before. The worktree at ${session.workingDir} has all previous changes.`.trim();
+    // If no provider session ID (old sessions), prepend context to the user's prompt
+    let fullPrompt = prompt;
+    if (!session.providerSessionId) {
+      const task = ctx.db.getTask(session.taskId);
+      const originalPrompt = task?.prompt ?? "(unknown)";
+      let contextBlock = `[CONTEXT: You are continuing a previous session. The original task was:\n${originalPrompt}\n\nThe agent completed that task. The worktree at ${session.workingDir} has all previous changes.`;
+      if (session.rawLogFile && existsSync(session.rawLogFile)) {
+        contextBlock += `\nFull transcript of previous work is at: ${session.rawLogFile} — read it if you need details.`;
+      }
+      contextBlock += `]\n\nNew request from user:\n`;
+      fullPrompt = contextBlock + prompt;
     }
 
     const handle = await ctx.providerService.startSession(session.backend, {
       threadId: sessionId,
       cwd: session.workingDir,
-      prompt,
+      prompt: fullPrompt,
       ...(session.providerSessionId ? { resumeSessionId: session.providerSessionId } : {}),
       interactive: session.mode === "interactive",
       ...(systemPrompt ? { systemPrompt } : {}),
