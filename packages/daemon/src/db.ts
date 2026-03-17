@@ -117,6 +117,8 @@ const MIGRATIONS = [
   { version: 26, sql: `ALTER TABLE sessions DROP COLUMN tmux_session_name` },
   { version: 27, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_archived_at ON sessions(archived_at)` },
   { version: 28, sql: `ALTER TABLE sessions ADD COLUMN provider_session_id TEXT` },
+  { version: 29, sql: `ALTER TABLE sessions DROP COLUMN mode` },
+  { version: 30, sql: `ALTER TABLE tasks DROP COLUMN mode` },
 ];
 
 function migrate(db: Database): void {
@@ -220,15 +222,14 @@ export class DatabaseRepository {
     withSpanSync("orka.db.insertTask", { "orka.task.id": task.id }, () => {
       this.db
         .prepare(
-          `INSERT INTO tasks (id, title, prompt, backend, mode, model, created_at)
-           VALUES ($id, $title, $prompt, $backend, $mode, $model, $createdAt)`,
+          `INSERT INTO tasks (id, title, prompt, backend, model, created_at)
+           VALUES ($id, $title, $prompt, $backend, $model, $createdAt)`,
         )
         .run({
           $id: task.id,
           $title: task.title,
           $prompt: task.prompt,
           $backend: task.backend,
-          $mode: "background",
           $model: task.model,
           $createdAt: task.createdAt,
         });
@@ -248,8 +249,8 @@ export class DatabaseRepository {
     withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
       this.db
         .prepare(
-          `INSERT INTO sessions (id, task_id, workspace_id, status, backend, mode, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id, provider_session_id)
-           VALUES ($id, $taskId, $workspaceId, $status, $backend, $mode, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId, $providerSessionId)`,
+          `INSERT INTO sessions (id, task_id, workspace_id, status, backend, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id, provider_session_id)
+           VALUES ($id, $taskId, $workspaceId, $status, $backend, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId, $providerSessionId)`,
         )
         .run({
           $id: session.id,
@@ -257,7 +258,6 @@ export class DatabaseRepository {
           $workspaceId: session.workspaceId,
           $status: session.status,
           $backend: session.backend,
-          $mode: "background",
           $projectPath: session.projectPath,
           $workingDir: session.workingDir,
           $logFile: session.logFile,
