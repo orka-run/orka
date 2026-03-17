@@ -322,6 +322,11 @@ export async function resumeSession(
       fullPrompt = contextBlock + prompt;
     }
 
+    // Detect if session was supervised by checking for hook settings in worktree
+    const hookSettingsPath = join(session.workingDir, ".claude", "settings.json");
+    const wasSupervisedSession = existsSync(hookSettingsPath);
+    const permissionMode = wasSupervisedSession ? "supervised" : undefined;
+
     const handle = await ctx.providerService.startSession(session.backend, {
       threadId: sessionId,
       cwd: session.workingDir,
@@ -329,6 +334,7 @@ export async function resumeSession(
       ...(session.providerSessionId ? { resumeSessionId: session.providerSessionId } : {}),
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
     });
 
     span.addEvent("session.resumed");
