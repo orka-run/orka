@@ -182,14 +182,14 @@ function EditorInner({
       <PlainTextPlugin
         contentEditable={
           <ContentEditable
-            className={`block min-h-[34px] w-full resize-none bg-transparent py-1.5 px-2 text-[12px] leading-normal text-ink outline-none ${className ?? ""}`}
+            className={`block w-full bg-transparent py-1.5 px-2 text-sm text-ink outline-none ${className ?? ""}`}
             aria-label="Chat message"
             aria-placeholder={placeholder}
             placeholder={<span />}
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 px-2 py-1.5 text-[12px] leading-normal text-ink-muted">
+          <div className="pointer-events-none absolute inset-0 px-2 py-1.5 text-sm text-ink-muted">
             {placeholder}
           </div>
         }
@@ -208,6 +208,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
       () => ({
         namespace: "orka-composer",
         editable: !props.disabled,
+        theme: { paragraph: "m-0" },
         nodes: [],
         editorState: () => {
           if (props.initialText) {
