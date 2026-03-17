@@ -971,8 +971,8 @@ function mapClaudePermissionMode(input: ProviderSessionStartInput): string {
     case "bypass":
       return "bypassPermissions";
     default:
-      // No explicit permission mode — use the legacy defaults.
-      return input.interactive ? "auto" : "bypassPermissions";
+      // Default: supervised (hooks control approval)
+      return "bypassPermissions";
   }
 }
 

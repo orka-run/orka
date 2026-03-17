@@ -49,7 +49,7 @@ export function NewSessionDialog({
   const [autoMerge, setAutoMerge] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [targetNode, setTargetNode] = useState("");
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>("bypass");
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("supervised");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);

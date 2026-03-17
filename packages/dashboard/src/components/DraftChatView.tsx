@@ -51,6 +51,7 @@ export function DraftChatView({ defaultProjectPath, onSpawned, onOpenAdvanced }:
         projectPath: defaultProjectPath,
         backend,
         mode,
+        permissionMode: "supervised",
         autoMerge: false,
         ...(model ? { model } : {}),
       };
