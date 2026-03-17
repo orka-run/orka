@@ -108,7 +108,6 @@ class SimpleGauge {
 
 export const metrics = {
   // Counters
-  requestsTotal: new SimpleCounter(),
   bytesIn: new SimpleCounter(),
   bytesOut: new SimpleCounter(),
   connectionsOpened: new SimpleCounter(),
@@ -116,10 +115,6 @@ export const metrics = {
   authFailures: new SimpleCounter(),
   rateLimitHits: new SimpleCounter(),
   abuseDetections: new SimpleCounter(),
-
-  // Histograms
-  requestDuration: new SimpleHistogram(),
-  messageSize: new SimpleHistogram(),
 
   // Gauges
   activeConnections: new SimpleGauge(),

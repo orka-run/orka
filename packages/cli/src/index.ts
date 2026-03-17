@@ -2168,18 +2168,15 @@ const relayServeCmd = command({
   description: "Start relay WebSocket router for multi-machine setups",
   args: {
     port: option({ type: optional(str), long: "port", description: "Port to listen on (default: 7390)" }),
-    token: option({ type: optional(str), long: "token", description: "Auth token for connections" }),
   },
-  handler: async ({ port, token }) => runCliCommand("relay", async () => {
+  handler: async ({ port }) => runCliCommand("relay", async () => {
     const parsedPort = parseInt(port ?? "7390", 10);
-    const relayToken = token ?? process.env["ORKA_TOKEN"];
     const handle = startRelay({
       port: parsedPort,
-      ...(relayToken ? { token: relayToken } : {}),
     });
     console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
     console.log("  nodes register at:  /register?node=<id>");
-    console.log("  clients connect at: /ws");
+    console.log("  clients connect at: /ws (Noise transport required)");
 
     let shuttingDown = false;
     for (const signal of ["SIGTERM", "SIGINT"] as const) {

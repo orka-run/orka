@@ -1,11 +1,11 @@
 # Relay
 
 The relay is a transparent WebSocket router between CLI clients and daemon nodes.
-It knows nothing about Noise encryption or RPC payload contents — it only reads
-routing fields from the JSON-RPC envelope and forwards messages.
+Clients must use Noise NK encrypted transport — the relay forwards opaque frames
+without inspecting payload content.
 
 ```
-CLI --WS--> Relay --WS--> Node (daemon)
+CLI ──WS──▶ Relay ──WS──▶ Node (daemon)
 ```
 
 ---
@@ -13,7 +13,7 @@ CLI --WS--> Relay --WS--> Node (daemon)
 ## Starting
 
 ```bash
-orka relay --port 7390 --token mysecret
+orka relay --port 7390
 ```
 
 Configuration is loaded from `ORKA_RELAY_CONFIG` (TOML) or defaults.
@@ -25,22 +25,22 @@ Data (SQLite) is stored in `ORKA_RELAY_DATA` (default `~/.orka-relay/`).
 
 ### `/register?node=<nodeId>` — node registration
 
-The daemon connects and becomes the RPC recipient for its `nodeId`.
+The daemon connects and becomes available for transport binding.
 Requires an API key with `node` permission.
 
 ```bash
-orka serve --relay ws://relay:7390 --node-id node1 --relay-token mysecret
+orka serve --relay ws://relay:7390 --node-id node1 --relay-token <node_api_key>
 ```
 
 The daemon automatically reconnects on disconnection (exponential backoff).
 
 ### `/ws` (or `/`) — client connection
 
-The CLI connects and sends JSON-RPC requests.
+The CLI connects and must initiate a Noise NK handshake (client_hello).
 Requires an API key with `client` permission.
 
 ```bash
-orka --remote ws://relay:7390/ws --token <api_key> ps
+orka --remote ws://relay:7390/ws --token <api_key> --encrypt ps
 ```
 
 ### `/v1/pair/<enrollId>` — pairing
@@ -57,26 +57,26 @@ begins forwarding all frames in both directions without inspecting content.
 
 ## Message Routing
 
-### Client -> Node
+### Transport Mode (Noise NK)
 
-1. Parses from JSON-RPC envelope: `id`, `method`, `node`.
-2. Validates `method` against the allowlist (40+ permitted methods).
-3. Applies rate limits (per-account + global).
-4. Selects a node:
-   - If `node` is specified — routes there.
-   - Otherwise — picks the **least-loaded** node (fewest active requests).
-5. Forwards the raw message in its entirety to the node.
-6. Records a PendingRequest: `accountId:requestId -> { client, node, timestamp }`.
+All client-to-node communication uses Noise NK encrypted transport:
 
-### Node -> Client
+1. Client sends `client_hello` with `node_id` to the relay.
+2. Relay looks up the node within the client's account scope.
+3. Relay creates a transport binding (client ↔ node) with a relay client ID (`_rc`).
+4. Relay adds `_rc` to the client_hello and forwards to the node.
+5. All subsequent messages from the client are forwarded to the bound node (with `_rc` injected).
+6. Node responses include `_rc` for reverse routing — relay strips `_rc` and forwards to the client.
 
-1. Parses `id` from the response.
-2. Looks up PendingRequest by `accountId:requestId`.
-3. Forwards the raw response to the client.
-4. Decrements the node's activeRequests counter.
+**Key principle**: the relay never reads encrypted payload content.
+It only reads `_rc` (relay client ID) and `t` (message type) fields for routing.
+This ensures E2E encryption works and protocol changes don't require relay updates.
 
-**Key principle**: the relay never reads `params`, `result`, or `_enc`.
-This allows E2E encryption to work and protocol changes to happen without relay updates.
+### Node → Client
+
+1. Parses `_rc` (relay client ID) from the message.
+2. Looks up the client WebSocket by `accountId:relayCid`.
+3. Strips `_rc` and forwards the message to the client.
 
 ---
 
@@ -98,11 +98,6 @@ Format: `ork_live_<32 random base62 characters>`.
 | `client` | Connect as CLI client (/ws) |
 | `node` | Register as daemon node (/register) |
 | `admin` | Access to admin API |
-
-### Legacy Token
-
-Optional fallback — a single token set in the config.
-Creates a synthetic auth context on the fly.
 
 ---
 
@@ -166,8 +161,7 @@ Buffer-and-flush pattern:
 - Flush every 5 seconds or when the buffer fills.
 - Retention: 90 days (daily cleanup).
 
-Event types: `request`, `response`, `ws_connect`, `ws_disconnect`,
-`node_connect`, `node_disconnect`.
+Event types: `ws_connect`, `ws_disconnect`, `node_connect`, `node_disconnect`.
 
 ---
 
@@ -240,10 +234,9 @@ SQLite at `ORKA_RELAY_DATA/relay.db`.
 
 ### Metrics (in-memory)
 
-- **Counters**: requestsTotal, bytesIn, bytesOut, connectionsOpened/Closed,
+- **Counters**: bytesIn, bytesOut, connectionsOpened/Closed,
   authFailures, rateLimitHits, abuseDetections
-- **Histograms**: requestDuration, messageSize
-- **Gauges**: activeConnections, registeredNodes, activeAccounts
+- **Gauges**: activeConnections, registeredNodes, activeAccounts, activeTransportSessions
 
 ### Tracing (OpenTelemetry)
 
@@ -252,51 +245,28 @@ SQLite at `ORKA_RELAY_DATA/relay.db`.
 - **OTLP**: via `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
 Instrumented operations: auth, rate limiting, abuse detection,
-metering, DB operations, API endpoints, WS message routing.
+metering, DB operations, API endpoints, transport binding.
 
 ---
 
 ## Graceful Shutdown
 
 1. `draining = true` — new connections rejected, health still responds.
-2. Wait for in-flight requests to complete (up to timeout).
-3. Flush subsystems:
+2. Flush subsystems:
    - Auth: flush lastUsedAt queue.
    - Metering: flush buffer.
    - Pairing: close all slots.
-4. Close DB.
-5. Stop server.
-6. Shutdown tracing.
-
----
-
-## Method Allowlist
-
-The relay only forwards known JSON-RPC methods. Unknown methods
-receive `-32601` from the relay itself.
-
-Allowed categories:
-- Session lifecycle: `spawn`, `stop`, `reap`
-- Queries: `getSession`, `listSessions`, `getChildSessions`, `getTask`
-- Properties: `setKept`, `getTags`
-- Output: `getResult`, `getSessionTimeline`, `getChatMessages`, `getUsage`,
-  `captureOutput`, `getLogContent`, `isAlive`, `sendTurn`
-- Worktree: `getDiff`, `merge`
-- Bulk: `deleteSessions`, `pruneSessions`
-- Archive: `archiveSession`, `unarchiveSession`
-- Approvals: `getPendingApprovals`, `resolveApproval`
-- Events: `reportEventGap`, `backfillSession`
-- Metrics: `getMetrics`, `queryTraces`
-- Terminal: `terminalOpen`, `terminalWrite`, `terminalResize`, `terminalClose`, `terminalList`
-- Errors: `reportClientError`, `listClientErrors`
+3. Close DB.
+4. Stop server.
+5. Shutdown tracing.
 
 ---
 
 ## Multi-Tenant Isolation
 
 - A client can only see nodes belonging to its own account.
-- PendingRequest key: `"accountId:requestId"` — the same request ID can exist
-  across different accounts without conflict.
+- Transport bindings are scoped by account ID — the same relay client ID
+  can exist across different accounts without conflict.
 - Rate limits are per-account, not per-node.
 
 ---
@@ -305,8 +275,8 @@ Allowed categories:
 
 | File | Contents |
 |------|----------|
-| `packages/relay/src/index.ts` | Composition root: startRelay(), shutdown, WS routing |
-| `packages/relay/src/state.ts` | RelayState: nodes, clients, pending requests |
+| `packages/relay/src/index.ts` | Composition root: startRelay(), shutdown, transport routing |
+| `packages/relay/src/state.ts` | RelayState: nodes, clients, transport bindings |
 | `packages/relay/src/auth.ts` | Authentication, cache, API key generation |
 | `packages/relay/src/rate-limiter.ts` | Per-account and global rate limiting |
 | `packages/relay/src/abuse.ts` | Abuse detection and escalation |

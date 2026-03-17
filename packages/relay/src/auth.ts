@@ -198,28 +198,6 @@ export class AuthManager {
       // DB lookup
       const keyRecord = getApiKeyByHash(this.db, keyHash);
       if (!keyRecord) {
-        // Check legacy token
-        if (this.config.auth.legacyToken && key === this.config.auth.legacyToken) {
-          // Legacy token: create a synthetic auth context
-          const ctx: AuthContext = {
-            accountId: "__legacy__",
-            account: {
-              id: "__legacy__",
-              email: "legacy@localhost",
-              name: "Legacy Token",
-              status: "active",
-              tier: "pro",
-              createdAt: "",
-              updatedAt: "",
-            },
-            permissions: "client",
-            tier: "pro",
-            rateLimits: DEFAULT_RATE_LIMITS,
-            keyHash,
-          };
-          this.cache.set(keyHash, ctx);
-          return { success: true, ctx } as AuthResult;
-        }
         return { success: false, error: "Invalid API key", code: 401 } as AuthResult;
       }
 

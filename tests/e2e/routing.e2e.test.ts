@@ -1,8 +1,8 @@
 /**
- * E2E tests for relay: routing, auth, API endpoints, rate limiting.
+ * E2E tests for relay: auth, API endpoints, rate limiting, transport enforcement.
  *
- * Tests the complete RPC path through the relay to a real daemon,
- * plus relay HTTP API endpoints (signup, keys, usage, admin).
+ * Tests the relay HTTP API endpoints (signup, keys, usage, admin)
+ * and verifies that plain JSON-RPC is rejected (Noise transport required).
  * Runs relay + daemon in-process (no Docker needed).
  *
  * Run with: bun test tests/e2e/routing.e2e.test.ts
@@ -25,26 +25,6 @@ import type { DaemonContext } from "@orka/daemon";
 import type { OrkaService } from "@orka/core";
 import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
 
-/** Send JSON-RPC via WebSocket and wait for response. */
-function rpc(ws: WebSocket, method: string, params: any = {}, id?: string): Promise<any> {
-  const reqId = id ?? `${method}-${Date.now()}`;
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`RPC ${method} timeout`)), 10_000);
-    const handler = (event: MessageEvent) => {
-      try {
-        const resp = JSON.parse(String(event.data));
-        if (resp.id === reqId) {
-          clearTimeout(timer);
-          ws.removeEventListener("message", handler);
-          resolve(resp);
-        }
-      } catch {}
-    };
-    ws.addEventListener("message", handler);
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: reqId, method, params }));
-  });
-}
-
 function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
   return new Promise((resolve, reject) => {
     if (ws.readyState === WebSocket.OPEN) return resolve();
@@ -54,7 +34,32 @@ function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
   });
 }
 
-describe("Full-Stack Routing", () => {
+/** Wait for a specific message matching a predicate. */
+function waitForMessage(
+  ws: WebSocket,
+  predicate: (data: any) => boolean,
+  timeoutMs = 5000,
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.removeEventListener("message", handler);
+      reject(new Error("waitForMessage timeout"));
+    }, timeoutMs);
+    const handler = (event: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(String(event.data));
+        if (predicate(parsed)) {
+          clearTimeout(timer);
+          ws.removeEventListener("message", handler);
+          resolve(parsed);
+        }
+      } catch {}
+    };
+    ws.addEventListener("message", handler);
+  });
+}
+
+describe("Relay Routing & Auth", () => {
   let relay: RelayHandle;
   let ctx: DaemonContext;
   let daemonServer: any;
@@ -152,104 +157,38 @@ describe("Full-Stack Routing", () => {
     expect(body.status).toBe("ok");
   });
 
-  // ---- RPC Routing ----
+  // ---- Transport Enforcement ----
 
-  test("listSessions routes through relay to daemon", async () => {
+  test("plain JSON-RPC message is rejected with transport_required", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
     await waitForOpen(ws);
 
-    const resp = await rpc(ws, "listSessions", { filters: {} });
-    expect(resp.error).toBeUndefined();
-    expect(resp.result).toBeInstanceOf(Array);
+    // Send a plain JSON-RPC message (not transport)
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: "test-1", method: "listSessions", params: {} }));
+
+    const resp = await waitForMessage(ws, (m: any) => m?.t === "transport_error");
+    expect(resp.t).toBe("transport_error");
+    expect(resp.code).toBe("transport_required");
 
     ws.close();
   });
 
-  test("reap routes through relay to daemon", async () => {
+  test("non-JSON message is rejected with parse_error", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
     await waitForOpen(ws);
 
-    const resp = await rpc(ws, "reap");
-    expect(resp.error).toBeUndefined();
-    expect(typeof resp.result).toBe("number");
+    ws.send("not valid json {{{");
 
-    ws.close();
-  });
-
-  test("spawn routes through relay and creates a session", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
-    await waitForOpen(ws);
-
-    const resp = await rpc(ws, "spawn", {
-      prompt: "echo 'routed-spawn'",
-      backend: "shell",
-      mode: "background",
-      projectPath: testRepo,
-      title: "E2E routing spawn",
-    });
-
-    expect(resp.error).toBeUndefined();
-    expect(resp.result.id).toMatch(/^sess-/);
-    expect(resp.result.status).toBe("running");
-
-    // Verify we can read the session back through the relay
-    const getResp = await rpc(ws, "getSession", { id: resp.result.id });
-    expect(getResp.error).toBeUndefined();
-    expect(getResp.result.id).toBe(resp.result.id);
-
-    ws.close();
-  });
-
-  test("getTags routes through relay", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
-    await waitForOpen(ws);
-
-    // First list sessions to get a session ID
-    const listResp = await rpc(ws, "listSessions", { filters: {} });
-    expect(listResp.result.length).toBeGreaterThan(0);
-    const sessionId = listResp.result[0].id;
-
-    const tagsResp = await rpc(ws, "getTags", { sessionId });
-    expect(tagsResp.error).toBeUndefined();
-    expect(tagsResp.result).toBeInstanceOf(Array);
-
-    ws.close();
-  });
-
-  test("stop routes through relay and cancels session", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
-    await waitForOpen(ws);
-
-    // Spawn a long-running session
-    const spawnResp = await rpc(ws, "spawn", {
-      prompt: "sleep 600",
-      backend: "shell",
-      mode: "background",
-      projectPath: testRepo,
-    });
-    const sessionId = spawnResp.result.id;
-
-    // Stop it through the relay
-    const stopResp = await rpc(ws, "stop", { sessionId });
-    expect(stopResp.error).toBeUndefined();
-
-    // Wait for the async event consumer to finalize status
-    const deadline = Date.now() + 5_000;
-    let status = "running";
-    while (Date.now() < deadline) {
-      const getResp = await rpc(ws, "getSession", { id: sessionId });
-      status = getResp.result.status;
-      if (status === "cancelled" || status === "completed" || status === "failed") break;
-      await Bun.sleep(200);
-    }
-    expect(status).toBe("cancelled");
+    const resp = await waitForMessage(ws, (m: any) => m?.t === "transport_error");
+    expect(resp.t).toBe("transport_error");
+    expect(resp.code).toBe("parse_error");
 
     ws.close();
   });
 
   // ---- Account Isolation ----
 
-  test("second account cannot see first account's sessions", async () => {
+  test("second account cannot reach first account's nodes", async () => {
     const signup2 = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -260,25 +199,24 @@ describe("Full-Stack Routing", () => {
     const ws2 = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${key2}&role=client`);
     await waitForOpen(ws2);
 
-    const resp = await rpc(ws2, "listSessions", { filters: {} });
-    expect(resp.error).toBeTruthy();
-    expect(resp.error).not.toBeNull();
-    expect(resp.error!.code).toBe(503);
+    // Try client_hello with a node that belongs to account 1
+    ws2.send(JSON.stringify({
+      t: "client_hello",
+      v: 1,
+      noise_suites: ["Noise_NK_25519_ChaChaPoly_SHA256"],
+      node_id: "test-daemon",
+      expected_key_id: "sha256:fake",
+      app_protocols: ["jsonrpc-2.0"],
+      features: [],
+    }));
+
+    const resp = await waitForMessage(ws2, (m: any) => m?.t === "transport_error");
+    expect(resp.code).toBe("node_not_found");
 
     ws2.close();
   });
 
   // ---- Error handling ----
-
-  test("unknown RPC method returns error", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
-    await waitForOpen(ws);
-
-    const resp = await rpc(ws, "nonExistentMethod", {});
-    expect(resp.error).toBeTruthy();
-
-    ws.close();
-  });
 
   test("invalid token rejects WebSocket", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=ork_live_invalid&role=client`);
@@ -288,21 +226,6 @@ describe("Full-Stack Routing", () => {
     });
     const code = await closed;
     expect(code).not.toBe(1000);
-  });
-
-  // ---- Multiple RPC calls on same connection ----
-
-  test("multiple sequential RPCs on same WebSocket", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${clientApiKey}&role=client`);
-    await waitForOpen(ws);
-
-    for (let i = 0; i < 5; i++) {
-      const resp = await rpc(ws, "listSessions", { filters: {} }, `batch-${i}`);
-      expect(resp.error).toBeUndefined();
-      expect(resp.id).toBe(`batch-${i}`);
-    }
-
-    ws.close();
   });
 
   // ---- Auth Flow ----

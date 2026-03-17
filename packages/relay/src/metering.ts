@@ -43,29 +43,6 @@ export class UsageMeter {
     });
   }
 
-  recordRequest(accountId: string, method: string, bytesIn: number, nodeId?: string): void {
-    this.record({
-      accountId,
-      eventType: "request",
-      bytesIn,
-      bytesOut: 0,
-      ...(nodeId ? { nodeId } : {}),
-      requestMethod: method,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  recordResponse(accountId: string, bytesOut: number, nodeId?: string): void {
-    this.record({
-      accountId,
-      eventType: "response",
-      bytesIn: 0,
-      bytesOut,
-      ...(nodeId ? { nodeId } : {}),
-      timestamp: new Date().toISOString(),
-    });
-  }
-
   recordConnection(accountId: string, eventType: "ws_connect" | "ws_disconnect" | "node_connect" | "node_disconnect", nodeId?: string): void {
     this.record({
       accountId,

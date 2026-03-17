@@ -71,14 +71,13 @@ describe("RelayConfigSchema", () => {
   test("full config round-trip", () => {
     const input = {
       server: { port: 9000, hostname: "127.0.0.1" },
-      auth: { signupEnabled: false, requireEmailVerification: true, legacyToken: "tok" },
+      auth: { signupEnabled: false, requireEmailVerification: true },
       rateLimits: { defaultRequestsPerMinute: 30 },
       abuse: { maxNodesPerAccount: 5 },
       observability: { traceFile: "/tmp/traces.jsonl" },
     };
     const config = RelayConfigSchema.parse(input);
     expect(config.server.port).toBe(9000);
-    expect(config.auth.legacyToken).toBe("tok");
     expect(config.observability.traceFile).toBe("/tmp/traces.jsonl");
   });
 });

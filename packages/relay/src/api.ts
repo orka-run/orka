@@ -218,7 +218,7 @@ export async function handleApiRequest(
       }
 
       if (path === "/v1/admin/stats" && method === "GET") {
-        const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
+        const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalTransportBindings: 0, accounts: 0 };
         return json({
           accountCount: getAccountCount(db),
           ...stats,
@@ -226,10 +226,10 @@ export async function handleApiRequest(
       }
 
       if (path === "/v1/admin/health" && method === "GET") {
-        const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalPending: 0, accounts: 0 };
+        const stats = state?.getGlobalStats() ?? { totalNodes: 0, totalClients: 0, totalTransportBindings: 0, accounts: 0 };
         const accounts = listAccounts(db);
         const accountDetails = accounts.map((a) => {
-          const acctStats = state?.getAccountStats(a.id) ?? { nodes: 0, clients: 0, pending: 0 };
+          const acctStats = state?.getAccountStats(a.id) ?? { nodes: 0, clients: 0, transportBindings: 0 };
           const limits = getRateLimits(db, a.id);
           return {
             id: a.id,

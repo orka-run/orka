@@ -12,8 +12,6 @@ const AuthSchema = z.object({
   signupEnabled: z.boolean().default(true),
   requireEmailVerification: z.boolean().default(false),
   adminToken: z.string().optional(),
-  /** Legacy shared token for backward compatibility */
-  legacyToken: z.string().optional(),
 });
 
 const RateLimitsSchema = z.object({
@@ -73,7 +71,6 @@ export function loadRelayConfig(dataDir?: string, configPath?: string): RelayCon
         signup_enabled: { key: "signupEnabled", type: "boolean" },
         require_email_verification: { key: "requireEmailVerification", type: "boolean" },
         admin_token: { key: "adminToken", type: "string" },
-        legacy_token: { key: "legacyToken", type: "string" },
       }),
       rateLimits: parseSection(toml["rate_limits"], {
         default_requests_per_minute: { key: "defaultRequestsPerMinute", type: "number" },

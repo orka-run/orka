@@ -51,7 +51,7 @@ retry   — Re-run a session with same prompt/model/title/tags
 project — Register/list/remove project aliases
 prune   — Remove old completed sessions (--age, --project)
 serve   — Start daemon WS server (--port, --relay, --node-id, --encrypt)
-relay   — Start relay WS router for multi-machine (--port, --token)
+relay   — Start relay WS router for multi-machine (--port)
 keygen  — Manage E2E encryption keys (client, node, save-server, show)
 ```
 
@@ -75,19 +75,23 @@ keygen  — Manage E2E encryption keys (client, node, save-server, show)
 
 ```bash
 # Start relay (central router)
-orka relay --port 7390 --token mysecret
+orka relay --port 7390
 
-# Start daemon nodes with E2E encryption (register with relay)
-orka serve --encrypt --port 7394 --relay ws://relay:7390 --node-id node1 --relay-token mysecret
+# Sign up for an API key
+curl -X POST http://relay:7390/v1/signup -d '{"email":"user@example.com","name":"User"}'
+# Returns: { "apiKey": "ork_live_...", ... }
 
-# CLI: generate keys and save server's public key
-orka keygen client
-orka keygen save-server $(curl -s http://node1:7394/health | jq -r .publicKey)
+# Create a node API key
+curl -X POST http://relay:7390/v1/keys -H "Authorization: Bearer ork_live_..." \
+  -d '{"label":"node1","permissions":"node"}'
 
-# CLI connects via relay with E2E encryption
-orka --remote ws://relay:7390/ws --token mysecret --encrypt ps
+# Start daemon node with Noise encryption (register with relay)
+orka serve --encrypt --port 7394 --relay ws://relay:7390 --node-id node1 --relay-token <node_api_key>
+
+# CLI connects via relay with Noise encryption
+orka --remote ws://relay:7390/ws --token <client_api_key> --encrypt ps
 # Or via env vars
-ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=mysecret ORKA_ENCRYPT=1 orka ps
+ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=<client_api_key> ORKA_ENCRYPT=1 orka ps
 ```
 
 ## Import Policy
@@ -143,20 +147,17 @@ The **OrkaService** interface (`@orka/core/service.ts`) is the contract between 
 
 **Protocol:** JSON-RPC 2.0 over WebSocket. Request envelope includes optional `node` field for relay routing. Supports E2E encryption (see below).
 
-**Relay** (`@orka/relay`) — transparent WS router. Reads only `id` and `node` from envelope, forwards payload as-is. Supports:
-- Least-loaded node scheduling (tracks active requests per node)
-- Auth tokens via `?token=` query param
+**Relay** (`@orka/relay`) — transparent WS router for Noise NK encrypted transport. Forwards opaque frames between bound client↔node pairs. Supports:
+- Transport binding via client_hello (client specifies target node_id)
+- API key auth via `?token=` query param or `Authorization: Bearer` header
 - Auto-reconnect for daemon nodes (5s backoff)
 - `/health` endpoint with node status
 
-**E2E Encryption** (`@orka/core/crypto.ts`):
-- X25519 ECDH key exchange + HKDF-SHA256 key derivation + AES-256-GCM symmetric encryption
-- Only `params` (request) and `result` (response) are encrypted into `_enc` field
-- Envelope fields (jsonrpc, id, method, node) stay plaintext for relay routing
+**E2E Encryption** (Noise NK via `@orka/core/transport`):
+- Noise NK handshake: X25519 key exchange + ChaChaPoly encryption
+- Relay forwards opaque transport frames — only routing fields (`_rc`, `t`) are visible
 - User-owned keys — relay operator has zero access to payload content
-- Keys stored at `~/.orka/keys/` (client.pub/key, node.pub/key, server.pub)
-- Server exposes public key via `/health` endpoint for client discovery
-- Post-quantum ready: cipher field (`c`) enables future algorithm negotiation (hybrid X25519+Kyber768)
+- Server exposes Noise public key via `/health` endpoint for client discovery
 
 ## Observability
 
@@ -273,7 +274,7 @@ Run `bun run lint:di` to check for DI violations. See `scripts/lint-di.ts`.
 - **zod/v4 default gotcha**: When using `.default({})` on nested zod objects, inner field defaults are NOT applied. Always use `Schema.default(Schema.parse({}))` pattern (see config.ts).
 - **Timer unref**: Any `setInterval`/`setTimeout` at module scope in library code MUST call `.unref()` so the process can exit when imported in ad-hoc scripts/tests.
 - **Bun SQLite multi-statement**: `db.exec()` with multiple statements separated by `;` can fail with foreign key constraints. Split into individual `db.exec()` calls per statement.
-- **Relay transparency**: Relay routes by `node` field in JSON-RPC envelope, never parses `params`/`result`. Protocol changes don't require relay updates.
+- **Relay transparency**: Relay forwards opaque Noise transport frames between bound client↔node pairs. Only `_rc` (relay client ID) and `t` (message type) fields are read for routing. Protocol changes don't require relay updates.
 
 ## Testing
 

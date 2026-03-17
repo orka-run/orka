@@ -4,8 +4,8 @@
  * Architecture:
  *   CLI ──WS──▶ Relay ──WS──▶ Node (daemon)
  *
- * The relay reads only `id`, `node`, and `method` from the JSON-RPC envelope for
- * routing. The `params`/`result` payload is forwarded as-is (E2E encrypted).
+ * The relay forwards opaque Noise-encrypted transport frames between clients
+ * and daemon nodes. It never inspects payload content.
  *
  * Multi-tenant: each account has isolated nodes. Clients can only reach their own nodes.
  * Auth: API keys (SHA-256 hashed, cached in memory).
@@ -30,45 +30,11 @@ import { SingleInstanceCluster } from "./cluster";
 import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync } from "./tracing";
 import { PairingRouter } from "./pairing";
 
-// --- Allowed Methods (service enforcement) ---
-
-const ALLOWED_METHODS = new Set([
-  // Session lifecycle
-  "spawn", "stop", "reap",
-  // Queries
-  "getSession", "listSessions", "getChildSessions", "getTask",
-  // Session properties
-  "setKept", "getTags",
-  // Session output
-  "getResult", "getSessionTimeline", "getChatMessages", "getUsage",
-  "captureOutput", "getLogContent", "isAlive", "sendTurn",
-  // Worktree
-  "getDiff", "merge",
-  // Bulk operations
-  "deleteSessions", "pruneSessions",
-  // Archive
-  "archiveSession", "unarchiveSession",
-  // Approvals
-  "getPendingApprovals", "resolveApproval",
-  // Event gap / backfill
-  "reportEventGap", "backfillSession",
-  // Metrics & observability
-  "getMetrics", "queryTraces",
-  // Terminal PTY
-  "terminalOpen", "terminalWrite", "terminalResize", "terminalClose", "terminalList",
-  // Client error reporting
-  "reportClientError", "listClientErrors",
-  // Fleet
-  "listNodes",
-]);
-
 // --- Relay Options ---
 
 export interface RelayOptions {
   port: number;
   hostname?: string;
-  /** Legacy shared token (backward compat). */
-  token?: string;
   /** Path to config TOML. */
   configPath?: string;
   /** Override data directory (default: ORKA_RELAY_DATA or ~/.orka-relay). */
@@ -104,11 +70,6 @@ export function startRelay(opts: RelayOptions): RelayHandle {
     const startTime = Date.now();
     let draining = false;
 
-    // Apply legacy token from opts to config
-    if (opts.token && !config.auth.legacyToken) {
-      config.auth.legacyToken = opts.token;
-    }
-
     const authManager = new AuthManager(db, config);
 
     const server = Bun.serve<AnySocketData>({
@@ -134,7 +95,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
               const nodes = state.getAccountNodes(auth.ctx.accountId);
               return jsonResponse({
                 status,
-                version: "0.2.0",
+                version: "0.3.0",
                 uptime,
                 account: {
                   id: auth.ctx.accountId,
@@ -145,7 +106,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
               });
             }
           }
-          return jsonResponse({ status, version: "0.2.0", uptime });
+          return jsonResponse({ status, version: "0.3.0", uptime });
         }
 
         // Reject all other requests when draining
@@ -350,27 +311,9 @@ export function startRelay(opts: RelayOptions): RelayHandle {
           data.bytesIn += bytes;
 
           if (data.role === "client") {
-            // Fast path: client already bound in transport mode → forward all messages
-            const binding = state.getTransportBinding(ws as ServerWebSocket<SocketData>);
-            if (binding) {
-              forwardClientTransport(ws as ServerWebSocket<SocketData>, raw, bytes, data, binding, state, meter);
-              return;
-            }
-
-            // Detect transport init (client_hello) — avoid full JSON parse for most messages
-            if (raw.includes('"client_hello"')) {
-              try {
-                const parsed = JSON.parse(raw);
-                if (parsed?.t === "client_hello") {
-                  handleTransportInit(ws as ServerWebSocket<SocketData>, parsed, bytes, data, state, rateLimiter, globalLimiter, config, meter);
-                  return;
-                }
-              } catch { /* fall through to JSON-RPC */ }
-            }
-
             handleClientMessage(ws as ServerWebSocket<SocketData>, raw, bytes, data, state, rateLimiter, globalLimiter, config, meter);
           } else if (data.role === "node") {
-            handleNodeMessage(ws as ServerWebSocket<SocketData>, raw, bytes, data, state, meter);
+            handleNodeMessage(ws as ServerWebSocket<SocketData>, raw, bytes, data, state);
           }
         },
 
@@ -398,17 +341,6 @@ export function startRelay(opts: RelayOptions): RelayHandle {
                 state.removeTransportClient(clientWs);
                 metrics.activeTransportSessions.dec({ account_id: data.accountId });
               }
-              // Fail pending JSON-RPC requests for this node
-              const failed = state.failRequestsForNode(data.accountId, data.nodeId!);
-              for (const pr of failed) {
-                try {
-                  pr.client.send(JSON.stringify({
-                    jsonrpc: "2.0",
-                    id: pr.requestId,
-                    error: { code: 503, message: `Node ${data.nodeId} disconnected` },
-                  }));
-                } catch { /* client gone */ }
-              }
               state.removeNode(data.accountId, data.nodeId!);
               metrics.connectionsClosed.inc({ account_id: data.accountId, role: "node" });
               metrics.registeredNodes.dec({ account_id: data.accountId });
@@ -420,7 +352,6 @@ export function startRelay(opts: RelayOptions): RelayHandle {
                 metrics.activeTransportSessions.dec({ account_id: data.accountId });
               }
               state.removeTransportClient(ws as ServerWebSocket<SocketData>);
-              state.failRequestsForClient(ws as ServerWebSocket<SocketData>);
               state.removeClient(data.accountId, ws as ServerWebSocket<SocketData>);
               metrics.connectionsClosed.inc({ account_id: data.accountId, role: "client" });
               meter.recordConnection(data.accountId, "ws_disconnect");
@@ -436,19 +367,8 @@ export function startRelay(opts: RelayOptions): RelayHandle {
       await withSpan("orka.relay.shutdown", {
         "orka.drain_timeout_ms": timeout,
       }, async () => {
-        console.log("relay: shutting down, draining requests...");
+        console.log("relay: shutting down...");
         draining = true;
-
-        // Wait for in-flight requests to drain
-        const start = Date.now();
-        while (state.getGlobalStats().totalPending > 0 && Date.now() - start < timeout) {
-          await Bun.sleep(100);
-        }
-
-        const remaining = state.getGlobalStats().totalPending;
-        if (remaining > 0) {
-          console.log(`relay: drain timeout, ${remaining} requests still pending`);
-        }
 
         // Flush all subsystems
         authManager.shutdown();
@@ -472,6 +392,12 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 
 // --- Message Handlers ---
 
+/**
+ * Handle all client messages. Clients must use Noise transport:
+ * - client_hello initiates a transport binding to a node
+ * - Once bound, all subsequent messages are forwarded to the bound node
+ * - Non-transport messages are rejected
+ */
 function handleClientMessage(
   ws: ServerWebSocket<SocketData>,
   raw: string,
@@ -483,167 +409,51 @@ function handleClientMessage(
   config: any,
   meter: UsageMeter,
 ): void {
-  // Parse envelope (plaintext fields only)
-  let requestId: string | number | undefined;
-  let requestedNode: string | undefined;
-  let method: string | undefined;
-
-  try {
-    const envelope = JSON.parse(raw);
-
-    // Validate JSON-RPC structure — accept string or number IDs per JSON-RPC spec
-    if (envelope.jsonrpc !== "2.0" || (typeof envelope.id !== "string" && typeof envelope.id !== "number")) {
-      ws.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id: envelope.id ?? null,
-        error: { code: -32600, message: "Invalid JSON-RPC request" },
-      }));
-      return;
-    }
-
-    requestId = envelope.id;
-    requestedNode = envelope.node;
-    method = envelope.method;
-  } catch {
-    ws.send(JSON.stringify({
-      jsonrpc: "2.0",
-      id: null,
-      error: { code: -32700, message: "Relay: parse error" },
-    }));
+  // Fast path: client already bound in transport mode → forward all messages
+  const binding = state.getTransportBinding(ws);
+  if (binding) {
+    forwardClientTransport(ws, raw, bytes, data, binding, state);
     return;
   }
 
-  withSpanSync("orka.relay.client_message", {
-    "orka.account.id": data.accountId,
-    "orka.method": method ?? "",
-    "orka.request.id": requestId !== undefined ? String(requestId) : "",
-    "orka.bytes.in": bytes,
-  }, (span) => {
-    // Service enforcement: method must be in allowed set
-    if (method && !ALLOWED_METHODS.has(method)) {
-      ws.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id: requestId ?? null,
-        error: { code: -32601, message: `Method not allowed: ${method}` },
-      }));
-      return;
-    }
+  // Only accept transport init (client_hello)
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    ws.send(JSON.stringify({ t: "transport_error", code: "parse_error" }));
+    return;
+  }
 
-    // Global rate limit
-    if (!globalLimiter.check()) {
-      ws.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id: requestId ?? null,
-        error: { code: 503, message: "Relay overloaded. Try again later." },
-      }));
-      return;
-    }
+  if (parsed?.t === "client_hello") {
+    handleTransportInit(ws, parsed, bytes, data, state, rateLimiter, globalLimiter, config, meter);
+    return;
+  }
 
-    // Per-account rate limit
-    // Rate limits are loaded from config defaults; the auth context was validated on WS upgrade
-    const limits = config.rateLimits;
-    {
-      const accountLimits = {
-        accountId: data.accountId,
-        requestsPerMinute: limits.defaultRequestsPerMinute,
-        requestsPerHour: limits.defaultRequestsPerHour,
-        concurrentConnections: limits.defaultConcurrentConnections,
-        maxMessageBytes: limits.defaultMaxMessageBytes,
-      };
-      // Message size check
-      if (!rateLimiter.checkMessageSize(accountLimits, bytes)) {
-        ws.send(JSON.stringify({
-          jsonrpc: "2.0",
-          id: requestId ?? null,
-          error: { code: 413, message: "Message too large" },
-        }));
-        return;
-      }
-
-      const result = rateLimiter.check(data.accountId, accountLimits);
-      if (!result.allowed) {
-        metrics.rateLimitHits.inc({ account_id: data.accountId, limit_type: "request" });
-        ws.send(JSON.stringify({
-          jsonrpc: "2.0",
-          id: requestId ?? null,
-          error: { code: 429, message: "Rate limit exceeded", data: { retryAfter: result.retryAfter } },
-        }));
-        return;
-      }
-    }
-
-    // Relay-intercepted methods: respond directly without forwarding to a node
-    if (method === "listNodes") {
-      const nodes = state.getAccountNodes(data.accountId).map((n) => ({
-        ...n,
-        status: "online" as const,
-      }));
-      ws.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id: requestId,
-        result: nodes,
-      }));
-      return;
-    }
-
-    // Pick node within account scope
-    const node = state.pickNode(data.accountId, requestedNode);
-    if (!node) {
-      ws.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id: requestId ?? null,
-        error: {
-          code: 503,
-          message: requestedNode
-            ? `Node not found: ${requestedNode}`
-            : "No nodes available",
-        },
-      }));
-      return;
-    }
-
-    // Track request — convert ID to string for map keying (supports string | number IDs)
-    if (requestId !== undefined) {
-      state.trackRequest(data.accountId, String(requestId), {
-        client: ws,
-        nodeId: node.id,
-        accountId: data.accountId,
-        method: method ?? "unknown",
-        requestId,
-        bytesIn: bytes,
-        startedAt: Date.now(),
-      });
-    }
-
-    // Forward to node as-is
-    span.addEvent("orka.relay.forward", { "orka.node.id": node.id });
-    node.ws.send(raw);
-
-    // Metrics + metering
-    metrics.requestsTotal.inc({ account_id: data.accountId, method: method ?? "unknown" });
-    metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
-    metrics.messageSize.record({ account_id: data.accountId, direction: "client" }, bytes);
-    meter.recordRequest(data.accountId, method ?? "unknown", bytes, node.id);
-  });
+  // Reject non-transport messages — clients must use Noise transport
+  ws.send(JSON.stringify({ t: "transport_error", code: "transport_required" }));
 }
 
+/**
+ * Handle all node messages. Nodes send transport frames with _rc field
+ * for routing back to the bound client.
+ */
 function handleNodeMessage(
   _ws: ServerWebSocket<SocketData>,
   raw: string,
   bytes: number,
   data: SocketData,
   state: RelayState,
-  meter: UsageMeter,
 ): void {
   let envelope: any;
   try {
     envelope = JSON.parse(raw);
   } catch {
-    return; // Can't route unparseable response
+    return; // Can't route unparseable message
   }
 
-  // --- Transport message from node (has _rc field) → route to bound client ---
-  if (envelope && typeof envelope._rc === "string" && typeof envelope.t === "string") {
+  // Transport message from node (has _rc field) → route to bound client
+  if (envelope && typeof envelope._rc === "string") {
     const relayCid: string = envelope._rc;
     const clientWs = state.getTransportClientWs(data.accountId, relayCid);
     if (!clientWs) return;
@@ -654,37 +464,7 @@ function handleNodeMessage(
       clientWs.send(JSON.stringify(clientMsg));
     } catch { /* client gone */ }
     metrics.bytesOut.inc({ account_id: data.accountId, direction: "node" }, bytes);
-    return;
   }
-
-  // --- JSON-RPC response ---
-  const responseId: string | number | undefined = envelope.id;
-  if (responseId === undefined || responseId === null) return;
-
-  withSpanSync("orka.relay.node_message", {
-    "orka.account.id": data.accountId,
-    "orka.node.id": data.nodeId ?? "",
-    "orka.request.id": String(responseId),
-    "orka.bytes.out": bytes,
-  }, () => {
-    const pr = state.resolveRequest(data.accountId, String(responseId!));
-    if (!pr) return;
-
-    // Compute latency
-    const latencyMs = Date.now() - pr.startedAt;
-
-    // Forward to client
-    try {
-      pr.client.send(raw);
-    } catch {
-      // Client disconnected
-    }
-
-    // Metrics + metering
-    metrics.requestDuration.record({ account_id: data.accountId, method: pr.method }, latencyMs);
-    metrics.bytesOut.inc({ account_id: data.accountId, direction: "node" }, bytes);
-    meter.recordResponse(data.accountId, bytes, data.nodeId);
-  });
 }
 
 // --- Transport Message Handlers ---
@@ -704,7 +484,7 @@ function handleTransportInit(
   config: any,
   meter: UsageMeter,
 ): void {
-  // Rate limiting (same checks as JSON-RPC)
+  // Rate limiting
   if (!globalLimiter.check()) {
     ws.send(JSON.stringify({ t: "transport_error", code: "rate_limited" }));
     return;
@@ -731,18 +511,16 @@ function handleTransportInit(
   const nodeId = parsed.node_id;
   if (!nodeId || typeof nodeId !== "string") {
     ws.send(JSON.stringify({ t: "transport_error", code: "missing_node_id" }));
-    metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_error" });
     return;
   }
 
   const node = state.getNode(data.accountId, nodeId);
   if (!node) {
     ws.send(JSON.stringify({ t: "transport_error", code: "node_not_found" }));
-    metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_error" });
     return;
   }
 
-  // Create transport binding (client ↔ node)
+  // Create transport binding (client <-> node)
   const relayCid = state.bindTransportClient(ws, data.accountId, nodeId);
   metrics.activeTransportSessions.inc({ account_id: data.accountId });
 
@@ -756,8 +534,8 @@ function handleTransportInit(
   parsed._rc = relayCid;
   node.ws.send(JSON.stringify(parsed));
 
-  metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_init" });
-  meter.recordRequest(data.accountId, "transport_init", bytes, nodeId);
+  metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
+  meter.recordConnection(data.accountId, "ws_connect");
 }
 
 /**
@@ -771,12 +549,10 @@ function forwardClientTransport(
   data: SocketData,
   binding: TransportBinding,
   state: RelayState,
-  meter: UsageMeter,
 ): void {
   const node = state.getNode(data.accountId, binding.nodeId);
   if (!node) {
     ws.send(JSON.stringify({ t: "transport_error", code: "node_disconnected" }));
-    metrics.requestsTotal.inc({ account_id: data.accountId, method: "transport_error" });
     return;
   }
 
@@ -809,7 +585,7 @@ if (import.meta.main) {
   console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
   console.log("  signup:           POST /v1/signup");
   console.log("  nodes register:   /register?node=<id>");
-  console.log("  clients connect:  /ws");
+  console.log("  clients connect:  /ws (Noise transport required)");
 
   // Graceful shutdown on SIGTERM/SIGINT
   let shuttingDown = false;

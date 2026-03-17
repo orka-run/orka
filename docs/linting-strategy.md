@@ -137,14 +137,13 @@
 **Rules to enforce**:
 
 1. **RPC ↔ Service sync**: Every method in `OrkaService` interface must have a `case` in `rpc-handler.ts` dispatch switch, and vice versa.
-2. **Relay allowlist sync**: Every method in `OrkaService` (except explicitly excluded local-only methods) must be in the relay's `ALLOWED_METHODS` set.
-3. **Push channel liveness**: Every channel in `PushChannelSchema` must have at least one `pushHub.broadcast()` or `pushHub.send()` call somewhere in daemon code.
-4. **Event type coverage**: Every variant in `KnownOrchestrationEventTypeSchema` must be emitted somewhere.
+2. **Push channel liveness**: Every channel in `PushChannelSchema` must have at least one `pushHub.broadcast()` or `pushHub.send()` call somewhere in daemon code.
+3. **Event type coverage**: Every variant in `KnownOrchestrationEventTypeSchema` must be emitted somewhere.
 
-**Implementation**: AST-light script that extracts method names from the interface (regex on `service.ts`), case labels from `rpc-handler.ts`, allowed methods from relay, and push/broadcast calls from daemon. ~150 lines.
+**Implementation**: AST-light script that extracts method names from the interface (regex on `service.ts`), case labels from `rpc-handler.ts`, and push/broadcast calls from daemon. ~150 lines.
 
 **Complexity**: M
-**Priority**: P1 — the relay allowlist gap is a real bug (pairing methods silently fail through relay)
+**Priority**: P2 — relay no longer has an allowlist (Noise transport only), so the main risk is RPC/Service sync
 **False positive risk**: Low — comparing concrete string sets
 
 ---

@@ -17,21 +17,11 @@ describe("UsageMeter", () => {
   test("record buffers events", () => {
     meter.record({
       accountId: "acc-1",
-      eventType: "request",
-      bytesIn: 100,
+      eventType: "ws_connect",
+      bytesIn: 0,
       bytesOut: 0,
       timestamp: new Date().toISOString(),
     });
-  });
-
-  test("recordRequest creates event with correct shape", () => {
-    meter.recordRequest("acc-1", "tools/call", 256, "node-1");
-    meter.flush();
-  });
-
-  test("recordResponse creates event with correct shape", () => {
-    meter.recordResponse("acc-1", 1024, "node-1");
-    meter.flush();
   });
 
   test("recordConnection creates connection events", () => {
@@ -48,7 +38,7 @@ describe("UsageMeter", () => {
   });
 
   test("shutdown flushes remaining events", () => {
-    meter.recordRequest("acc-1", "test", 50);
+    meter.recordConnection("acc-1", "ws_connect");
     meter.shutdown();
   });
 });

@@ -270,21 +270,7 @@ describe("Noise NK through Relay", () => {
     rmSync(relayHome, { recursive: true, force: true });
   });
 
-  // ---- Test 1: Unencrypted RPC routes through relay ----
-
-  test("unencrypted RPC routes through relay to daemon", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/ws?token=${clientApiKey}`);
-    await waitForOpen(ws);
-    try {
-      const resp = await plainRpc(ws, "listSessions", { filters: {} });
-      expect(resp["error"]).toBeUndefined();
-      expect(resp["result"]).toBeInstanceOf(Array);
-    } finally {
-      ws.close();
-    }
-  });
-
-  // ---- Test 2: Noise NK encrypted RPC end-to-end ----
+  // ---- Test 1: Noise NK encrypted RPC end-to-end ----
 
   test("Noise NK encrypted RPC routes through relay", async () => {
     // Connect directly to daemon A. The relay URL is passed as relayOrigin
