@@ -1,22 +1,18 @@
-// Draft chat view: empty chat that spawns a session on first message
+// Draft chat view: unified spawn UX with inline advanced options
 import { useState } from "react";
-import { Bot, LoaderCircle, MessageSquarePlus, Settings2, User } from "lucide-react";
-import type { BackendKind, SessionMode, SpawnRequest } from "@orka/core";
+import { Bot, LoaderCircle, MessageSquarePlus, User } from "lucide-react";
+import type { BackendKind, NodeInfo, PermissionMode, SessionMode, SpawnRequest } from "@orka/core";
 import { ChatInputComposer } from "./ChatInputComposer";
+import { SpawnAdvancedPanel } from "./SpawnAdvancedPanel";
 import { useTransport } from "../lib/transportContext";
 import { useSessionStore } from "../stores/sessionStore";
+import { useTimelineCache } from "../lib/timelineCache";
 import { withDashboardSpan } from "../lib/tracing";
-
-export interface DraftSettings {
-  backend: BackendKind;
-  model: string;
-  mode: SessionMode;
-}
 
 interface DraftChatViewProps {
   defaultProjectPath: string;
+  nodes: NodeInfo[];
   onSpawned: () => void;
-  onOpenAdvanced: (settings: DraftSettings) => void;
 }
 
 const MODELS = [
@@ -29,13 +25,36 @@ const MODELS = [
 const BACKENDS: readonly BackendKind[] = ["claude-code", "codex", "shell"];
 const MODES: readonly SessionMode[] = ["background", "interactive"];
 
-export function DraftChatView({ defaultProjectPath, onSpawned, onOpenAdvanced }: DraftChatViewProps) {
+function parseTags(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftChatViewProps) {
   const transport = useTransport();
   const spawnSession = useSessionStore((state) => state.spawnSession);
 
+  // Quick options (always visible)
   const [backend, setBackend] = useState<BackendKind>("claude-code");
   const [model, setModel] = useState("");
   const [mode, setMode] = useState<SessionMode>("background");
+
+  // Advanced options (collapsible)
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [title, setTitle] = useState("");
+  const [tags, setTags] = useState("");
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("supervised");
+  const [autoMerge, setAutoMerge] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [nodeId, setNodeId] = useState("");
+
+  // Spawn state
   const [isSpawning, setIsSpawning] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [spawnError, setSpawnError] = useState<string | null>(null);
@@ -46,27 +65,45 @@ export function DraftChatView({ defaultProjectPath, onSpawned, onOpenAdvanced }:
     setIsSpawning(true);
 
     try {
+      const trimmedTitle = title.trim();
+      const trimmedSystemPrompt = systemPrompt.trim();
+      const parsedTags = parseTags(tags);
+
       const request: SpawnRequest = {
         prompt: text,
         projectPath: defaultProjectPath,
         backend,
         mode,
-        permissionMode: "supervised",
-        autoMerge: false,
+        permissionMode,
+        autoMerge,
+        ...(trimmedTitle ? { title: trimmedTitle } : {}),
         ...(model ? { model } : {}),
+        ...(parsedTags.length > 0 ? { tags: parsedTags } : {}),
+        ...(trimmedSystemPrompt ? { systemPrompt: trimmedSystemPrompt } : {}),
+        ...(nodeId ? { nodeId } : {}),
       };
 
-      await withDashboardSpan(
+      const sessionId = await withDashboardSpan(
         "orka.dashboard.draft.spawn",
         {
           "orka.backend": backend,
           "orka.mode": mode,
           "orka.prompt.length": text.length,
+          "orka.permission_mode": permissionMode,
+          "orka.auto_merge": autoMerge,
         },
         async () => {
-          await spawnSession(transport, request);
+          return await spawnSession(transport, request);
         },
       );
+
+      // Optimistic timeline seed: show user's prompt instantly in ChatView
+      useTimelineCache.getState().set(sessionId, [{
+        type: "user.input",
+        sessionId,
+        text,
+        timestamp: new Date().toISOString(),
+      } as any]);
 
       onSpawned();
     } catch (err) {
@@ -96,16 +133,26 @@ export function DraftChatView({ defaultProjectPath, onSpawned, onOpenAdvanced }:
             ))}
           </select>
           <MiniPills options={MODES} value={mode} onChange={setMode} />
-          <button
-            type="button"
-            onClick={() => onOpenAdvanced({ backend, model, mode })}
-            className="ml-auto flex items-center gap-1 text-[11px] text-ink-muted transition hover:text-ink-secondary"
-          >
-            <Settings2 className="h-3 w-3" />
-            Advanced…
-          </button>
         </div>
       </header>
+
+      <SpawnAdvancedPanel
+        open={showAdvanced}
+        onToggle={() => setShowAdvanced((v) => !v)}
+        title={title}
+        onTitleChange={setTitle}
+        tags={tags}
+        onTagsChange={setTags}
+        permissionMode={permissionMode}
+        onPermissionModeChange={setPermissionMode}
+        autoMerge={autoMerge}
+        onAutoMergeChange={setAutoMerge}
+        systemPrompt={systemPrompt}
+        onSystemPromptChange={setSystemPrompt}
+        nodeId={nodeId}
+        onNodeIdChange={setNodeId}
+        nodes={nodes}
+      />
 
       <div className="flex-1 overflow-hidden p-3">
         <div className="flex h-full flex-col overflow-hidden rounded-sm border border-border bg-surface">

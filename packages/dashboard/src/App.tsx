@@ -12,12 +12,11 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { ConnectionSettingsDialog } from "./components/ConnectionSettingsDialog";
 import { DevOverlay } from "./components/DevOverlay";
-import { DraftChatView, type DraftSettings } from "./components/DraftChatView";
+import { DraftChatView } from "./components/DraftChatView";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { MobileHeader } from "./components/MobileHeader";
 import { MobileSidebarDrawer } from "./components/MobileSidebarDrawer";
 import { MobileTabBar, type MobileSessionTab } from "./components/MobileTabBar";
-import { NewSessionDialog } from "./components/NewSessionDialog";
 import { NodeManagementDialog } from "./components/NodeManagementDialog";
 import { NotificationPermissionBanner, PendingApprovalBanner } from "./components/NotificationBanner";
 import { OnboardingWizard } from "./components/OnboardingWizard";
@@ -87,14 +86,12 @@ function AppShell({ transport }: AppShellProps) {
   const selectionSpanRef = useRef<PendingSelectionSpan | null>(null);
   const hasRestoredRef = useRef(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
-  const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
   const [isPairNodeOpen, setIsPairNodeOpen] = useState(false);
   const [isNodeManagementOpen, setIsNodeManagementOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [mobileActiveTab, setMobileActiveTab] = useState<MobileSessionTab>("chat");
   const [isDevOverlayOpen, setIsDevOverlayOpen] = useState(false);
-  const [advancedDefaults, setAdvancedDefaults] = useState<DraftSettings | null>(null);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
@@ -175,14 +172,8 @@ function AppShell({ transport }: AppShellProps) {
     setIsMobileSidebarOpen(false);
   }, [selectSession]);
 
-  const handleOpenAdvanced = (settings: DraftSettings) => {
-    setAdvancedDefaults(settings);
-    setIsNewSessionOpen(true);
-  };
-
   const handleDraftSpawned = () => {
     setIsDraftActive(false);
-    setAdvancedDefaults(null);
   };
 
   // Restore selection from URL hash or localStorage after initial session load
@@ -423,8 +414,8 @@ function AppShell({ transport }: AppShellProps) {
   ) : isDraftActive ? (
     <DraftChatView
       defaultProjectPath={defaultProjectPath}
+      nodes={nodes}
       onSpawned={handleDraftSpawned}
-      onOpenAdvanced={handleOpenAdvanced}
     />
   ) : (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
@@ -454,8 +445,8 @@ function AppShell({ transport }: AppShellProps) {
   ) : isDraftActive ? (
     <DraftChatView
       defaultProjectPath={defaultProjectPath}
+      nodes={nodes}
       onSpawned={handleDraftSpawned}
-      onOpenAdvanced={handleOpenAdvanced}
     />
   ) : (
     <div className="flex h-full items-center justify-center text-ink-muted text-[12px]">
@@ -525,18 +516,6 @@ function AppShell({ transport }: AppShellProps) {
             </div>
           </>
         )}
-        <NewSessionDialog
-          open={isNewSessionOpen}
-          transport={transport}
-          defaultProjectPath={defaultProjectPath}
-          nodes={nodes}
-          onClose={() => {
-            setIsNewSessionOpen(false);
-            setAdvancedDefaults(null);
-          }}
-          onSpawned={handleDraftSpawned}
-          {...(advancedDefaults ? { initialValues: advancedDefaults } : {})}
-        />
         <ConnectionSettingsDialog
           open={isConnectionSettingsOpen}
           onClose={() => setIsConnectionSettingsOpen(false)}
