@@ -354,7 +354,7 @@ describe("consumeProviderEvents", () => {
       "sess-failed",
       {
         threadId: "thread-failed",
-        provider: "shell" as const,
+        provider: "claude-code" as const,
         events: queue,
         meta: {},
       },

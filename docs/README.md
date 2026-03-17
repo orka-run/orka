@@ -1,6 +1,6 @@
 # Orka Docs
 
-Orka is an agent session orchestrator for AI coding agents. It lets you run Claude Code, Codex, or plain shell tasks as isolated sessions, watch them live, and merge useful results back into your repo.
+Orka is an agent session orchestrator for AI coding agents. It lets you run Claude Code or Codex as isolated sessions, watch them live, and merge useful results back into your repo.
 
 ## What Orka does
 
@@ -19,7 +19,7 @@ Normal CLI commands talk to the daemon over WebSocket JSON-RPC.
 orka CLI
   -> local or remote daemon
   -> provider runtime / backend adapters
-  -> agent process (claude-code, codex, shell)
+  -> agent process (claude-code, codex)
 ```
 
 Key flow:
@@ -52,7 +52,6 @@ The daemon is the source of truth for orchestration, SQLite state, worktree life
 
 - `claude-code` — Anthropic Claude Code CLI
 - `codex` — OpenAI Codex CLI
-- `shell` — plain shell command execution
 
 `providers.use_runtime = true` is the default, so Orka normally uses the provider runtime instead of the legacy tmux path.
 

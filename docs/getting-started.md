@@ -95,7 +95,7 @@ orka spawn -m background --auto-merge "Update the release notes and commit the c
 Useful `spawn` options:
 
 - `--project` project path or alias
-- `--backend` `claude-code|codex|shell`
+- `--backend` `claude-code|codex`
 - `--mode` `interactive|background`
 - `--model` backend model name
 - `--branch` use or create a specific branch for the worktree

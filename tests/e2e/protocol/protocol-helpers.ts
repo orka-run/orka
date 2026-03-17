@@ -60,8 +60,11 @@ export async function startDaemonWithNoise(opts?: {
     "../../../packages/core/src/crypto"
   );
 
+  const { registerTestAdapter } = await import("../helpers/test-adapter");
+
   const nodeId = opts?.nodeId ?? "test-node";
   const ctx = createDaemonContext();
+  registerTestAdapter(ctx);
   const svc = createLocalClient(ctx);
 
   const noiseKeyInfo = ensureNoiseKeyPair(ctx.orkaHome, "node");

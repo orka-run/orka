@@ -142,11 +142,11 @@ The dashboard is a stateful push-subscribed client. It:
 ### Event Pipeline
 
 ```
-Provider (Claude Code / Codex / Shell)
+Provider (Claude Code / Codex)
   │
   │  raw JSON lines (provider-specific format)
   ▼
-Adapter (claude-adapter.ts, codex-adapter.ts, shell-adapter.ts)
+Adapter (claude-adapter.ts, codex-adapter.ts)
   │
   │  ProviderRuntimeEvent (canonical, provider-agnostic)
   ▼
@@ -220,7 +220,7 @@ Daemons advertise capabilities in `/health` and `server.welcome`:
     "resume": false,
     "encryption": "x25519-aes256gcm",
     "multiTurn": true,
-    "adapters": ["claude-code", "codex", "shell"],
+    "adapters": ["claude-code", "codex"],
     "maxConcurrent": 5,
     "terminal": true
   }

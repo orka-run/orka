@@ -38,17 +38,17 @@ describe("ProviderAdapterRegistry", () => {
   test("lists registered backends in insertion order", () => {
     const registry = new ProviderAdapterRegistry();
 
-    registry.register("shell", createAdapter("shell"));
+    registry.register("claude-code", createAdapter("claude-code"));
     registry.register("codex", createAdapter("codex"));
 
-    expect(registry.list()).toEqual(["shell", "codex"]);
+    expect(registry.list()).toEqual(["claude-code", "codex"]);
   });
 
   test("throws when adapter kind does not match registration key", () => {
     const registry = new ProviderAdapterRegistry();
 
-    expect(() => registry.register("shell", createAdapter("codex"))).toThrow(
-      'Provider adapter kind mismatch: expected "shell", received "codex"',
+    expect(() => registry.register("claude-code", createAdapter("codex"))).toThrow(
+      'Provider adapter kind mismatch: expected "claude-code", received "codex"',
     );
   });
 

@@ -201,22 +201,9 @@ describe("buildBackendCommand", () => {
     });
   });
 
-  describe("shell backend", () => {
-    test("returns prompt as-is", () => {
-      const { command } = buildBackendCommand("shell", "echo hello", "background");
-      expect(command).toBe("echo hello");
-    });
-
-    test("does not escape or modify the command", () => {
-      const cmd = 'ls -la && echo "done"';
-      const { command } = buildBackendCommand("shell", cmd, "background");
-      expect(command).toBe(cmd);
-    });
-  });
-
   describe("log file wrapping", () => {
     test("wraps command with tee and exit code capture when logFile specified", () => {
-      const { command } = buildBackendCommand("shell", "echo hi", "background", {
+      const { command } = buildBackendCommand("claude-code", "echo hi", "background", {
         logFile: "/tmp/test.log",
       });
       expect(command).toContain("tee '/tmp/test.log'");
@@ -224,7 +211,7 @@ describe("buildBackendCommand", () => {
     });
 
     test("escapes single quotes in log file path", () => {
-      const { command } = buildBackendCommand("shell", "echo hi", "background", {
+      const { command } = buildBackendCommand("claude-code", "echo hi", "background", {
         logFile: "/tmp/it's a log.log",
       });
       expect(command).toContain("tee '/tmp/it'\\''s a log.log'");

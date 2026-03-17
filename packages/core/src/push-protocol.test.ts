@@ -79,7 +79,7 @@ describe("ServerCapabilitiesSchema", () => {
       resume: true,
       encryption: "noise",
       multiTurn: true,
-      adapters: ["claude-code", "codex", "shell"],
+      adapters: ["claude-code", "codex"],
       maxConcurrent: 5,
       terminal: false,
     });

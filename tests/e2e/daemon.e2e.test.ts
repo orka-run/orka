@@ -1,7 +1,7 @@
 /**
  * E2E tests for daemon session lifecycle.
  *
- * Uses shell backend (Bun.spawn) for fast, deterministic tests.
+ * Uses TestShellAdapter for fast, deterministic tests without real AI backends.
  *
  * Run with: bun test tests/e2e/daemon.e2e.test.ts
  */
@@ -20,6 +20,7 @@ writeFileSync(join(testHome, "config.toml"), "[limits]\nmax_concurrent = 0\n");
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, SessionDetailResponse } from "@orka/core";
+import { registerTestAdapter } from "./helpers/test-adapter";
 
 /** Poll until predicate is true, or timeout. */
 async function waitFor(
@@ -65,6 +66,7 @@ describe("Daemon Session Lifecycle", () => {
     await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
 
     ctx = createDaemonContext(testHome);
+    registerTestAdapter(ctx);
     client = createLocalClient(ctx);
   }, 30_000);
 
@@ -84,7 +86,7 @@ describe("Daemon Session Lifecycle", () => {
   test("spawn returns a running session with correct fields", async () => {
     const result = await client.spawn({
       prompt: "echo 'hello orka'",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       title: "E2E test session",
@@ -99,7 +101,7 @@ describe("Daemon Session Lifecycle", () => {
     // Full session details available via getSession
     const session = await client.getSession(result.id);
     expect(session).not.toBeNull();
-    expect(session!.backend).toBe("shell");
+    expect(session!.backend).toBe("claude-code");
     expect(session!.mode).toBe("background");
     expect(session!.projectPath).toBe(testRepo);
     expect(session!.startedAt).toBeTruthy();
@@ -111,7 +113,7 @@ describe("Daemon Session Lifecycle", () => {
   test("getSession returns the spawned session", async () => {
     const spawned = await client.spawn({
       prompt: "echo 'getSession-test'",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       tags: ["e2e"],
@@ -122,7 +124,7 @@ describe("Daemon Session Lifecycle", () => {
 
     expect(session).not.toBeNull();
     expect(session!.id).toBe(spawned.id);
-    expect(session!.backend).toBe("shell");
+    expect(session!.backend).toBe("claude-code");
     expect(session!.mode).toBe("background");
     expect(session!.status).toBe("running");
     expect(session!.projectPath).toBe(testRepo);
@@ -136,7 +138,7 @@ describe("Daemon Session Lifecycle", () => {
   test("listSessions supports status filter", async () => {
     const session = await client.spawn({
       prompt: "sleep 300",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -158,7 +160,7 @@ describe("Daemon Session Lifecycle", () => {
   test("getTags returns session tags", async () => {
     const spawned = await client.spawn({
       prompt: "echo 'tags-test'",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       tags: ["e2e", "test"],
@@ -174,7 +176,7 @@ describe("Daemon Session Lifecycle", () => {
   test("listSessions supports tag filter", async () => {
     const spawned = await client.spawn({
       prompt: "echo 'tag-filter-test'",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       tags: ["e2e-filter"],
@@ -184,7 +186,7 @@ describe("Daemon Session Lifecycle", () => {
     const byTag = await client.listSessions({ tag: "e2e-filter" });
     expect(byTag.length).toBeGreaterThanOrEqual(1);
     expect(byTag.some((s) => s.id === spawned.id)).toBe(true);
-    expect(byTag[0]?.backend).toBe("shell");
+    expect(byTag[0]?.backend).toBe("claude-code");
   });
 
   // ---- Keep ----
@@ -192,7 +194,7 @@ describe("Daemon Session Lifecycle", () => {
   test("setKept marks session as kept", async () => {
     const spawned = await client.spawn({
       prompt: "echo 'kept-test'",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -214,7 +216,7 @@ describe("Daemon Session Lifecycle", () => {
   test("stop cancels a running session", async () => {
     const session = await client.spawn({
       prompt: "sleep 600",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -235,10 +237,10 @@ describe("Daemon Session Lifecycle", () => {
   // ---- Logs ----
 
   test("getLogContent returns output from completed session", async () => {
-    // Use exit 0 to ensure process completes (shell adapter appends exec bash -i)
+    // Use exit 0 to ensure process completes (test adapter appends exec bash -i)
     const session = await client.spawn({
       prompt: "echo 'log-test-marker-42' && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -253,7 +255,7 @@ describe("Daemon Session Lifecycle", () => {
   test("captureOutput works on running session", async () => {
     const session = await client.spawn({
       prompt: "echo 'capture-marker'; sleep 300",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -273,7 +275,7 @@ describe("Daemon Session Lifecycle", () => {
   test("sendTurn delivers text to running session", async () => {
     const session = await client.spawn({
       prompt: "read -p '> ' line && echo \"GOT: $line\" && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -299,7 +301,7 @@ describe("Daemon Session Lifecycle", () => {
 
     const session = await client.spawn({
       prompt: "sleep 300",
-      backend: "shell",
+      backend: "claude-code",
       mode: "interactive",
       projectPath: pruneRepo,
     });
@@ -350,7 +352,7 @@ describe("Daemon Session Lifecycle", () => {
   test("deleteSessions removes sessions from DB", async () => {
     const session = await client.spawn({
       prompt: "echo 'delete-me' && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "interactive",
       projectPath: testRepo,
     });

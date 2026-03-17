@@ -18,7 +18,6 @@ const TRACE_SKIP_ALLOWLIST = new Set([
   "adapters/claude-adapter.ts:ClaudeCodeAdapter.respondToRequest",
   "adapters/claude-adapter.ts:ClaudeCodeAdapter.sendTurn",
   "adapters/codex-adapter.ts:CodexAdapter.replayRawLog",
-  "adapters/shell-adapter.ts:ShellAdapter.replayRawLog",
   "rpc-handler.ts:handleRpcRequest",
   "tracing.ts:shutdownTracing",
   "tracing.ts:withSpan",

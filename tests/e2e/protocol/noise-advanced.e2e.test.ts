@@ -205,10 +205,10 @@ describe("Noise NK Transport — Advanced", () => {
       ws.addEventListener("message", handler);
     });
 
-    // Spawn a shell session to trigger a sessionUpdated push event
+    // Spawn a session to trigger a sessionUpdated push event
     const spawnResp = await encryptedRpc(transport, ws, "spawn", {
       prompt: "echo push-test",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       title: "Push event test",
@@ -351,7 +351,7 @@ describe("Noise NK Transport — Advanced", () => {
       "spawn",
       {
         prompt: largePrompt,
-        backend: "shell",
+        backend: "claude-code",
         mode: "background",
         projectPath: testRepo,
         title: "Large payload Noise test",
@@ -372,7 +372,7 @@ describe("Noise NK Transport — Advanced", () => {
     expect(getResp.error).toBeUndefined();
     const fetched = getResp.result as Record<string, unknown>;
     expect(fetched.id).toBe(session.id);
-    expect(fetched.backend).toBe("shell");
+    expect(fetched.backend).toBe("claude-code");
 
     // Verify the large prompt was stored correctly (now inline in SessionDetailResponse)
     expect(fetched.prompt).toBe(largePrompt);

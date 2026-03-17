@@ -91,7 +91,7 @@ describe("eventsToChat", () => {
   test("entries are sorted by timestamp", () => {
     const events: OrchestrationEvent[] = [
       { type: "session.started", sessionId: "s1", timestamp: "2026-01-01T00:00:01Z" },
-      { type: "session.created", sessionId: "s1", threadId: "t1", backend: "shell", timestamp: "2026-01-01T00:00:00Z" },
+      { type: "session.created", sessionId: "s1", threadId: "t1", backend: "claude-code", timestamp: "2026-01-01T00:00:00Z" },
       { type: "content.delta", sessionId: "s1", turnId: "t1", streamKind: "assistant_text", delta: "hi", timestamp: "2026-01-01T00:00:02Z" },
     ];
     const entries = eventsToChat(events);

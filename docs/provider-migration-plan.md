@@ -25,7 +25,7 @@ For a normal local CLI command:
 For a spawned session on the default path:
 
 1. `spawnSession()` creates the task/session records, worktree, and log file.
-2. `ProviderService` starts the adapter for `claude-code`, `codex`, or `shell`.
+2. `ProviderService` starts the adapter for `claude-code` or `codex`.
 3. `consumeProviderEvents()` feeds provider events into `OrchestrationEngine`.
 4. Orchestration events are persisted in SQLite.
 5. Session output is reconstructed from persisted orchestration events, while logs remain available for diagnostics and streaming.

@@ -62,9 +62,9 @@ describe("ProviderService", () => {
   test("starts sessions with the correct adapter and tracks the handle", async () => {
     const registry = new ProviderAdapterRegistry();
     const codex = new MockAdapter("codex");
-    const shell = new MockAdapter("shell");
+    const claudeCode = new MockAdapter("claude-code");
     registry.register("codex", codex);
-    registry.register("shell", shell);
+    registry.register("claude-code", claudeCode);
     const service = new ProviderService(registry);
 
     const handle = await service.startSession("codex", {
@@ -74,7 +74,7 @@ describe("ProviderService", () => {
     });
 
     expect(codex.startCalls).toEqual([{ threadId: "thread-1", cwd: "/tmp/project", prompt: "hello" }]);
-    expect(shell.startCalls).toEqual([]);
+    expect(claudeCode.startCalls).toEqual([]);
     expect(handle.provider).toBe("codex");
     expect(service.getHandle("thread-1")).toBe(handle);
     expect(service.listActiveSessions()).toEqual([handle]);

@@ -355,7 +355,7 @@ The most common workflow is `orka spawn ... && orka logs -f <id>`. There's no co
 
 The entire CLI (20 commands, argument parsing, daemon lifecycle, dashboard management) is in one monolithic file with no test coverage. This is the primary user-facing interface.
 
-**Recommendation**: Extract commands into individual modules. Add integration tests using the shell backend (which doesn't require real AI API keys).
+**Recommendation**: Extract commands into individual modules. Add integration tests using a test adapter (which doesn't require real AI API keys).
 
 ---
 

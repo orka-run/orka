@@ -64,7 +64,7 @@ function enumType<T extends string>(values: readonly T[]): Type<string, T> {
 }
 
 const statusValues = ["running", "completed", "failed", "cancelled", "interrupted", "queued", "preparing"] as const;
-const backendValues = ["claude-code", "codex", "shell"] as const;
+const backendValues = ["claude-code", "codex"] as const;
 const modeValues = ["interactive", "background"] as const;
 const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
 

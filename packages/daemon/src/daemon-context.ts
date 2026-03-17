@@ -2,7 +2,7 @@ import type { OrkaConfig } from "./config";
 import { loadConfig } from "./config";
 import { DatabaseRepository, getOrkaHome, openDb } from "./db";
 import { ApprovalManager } from "./approval-manager";
-import { ClaudeCodeAdapter, CodexAdapter, ShellAdapter } from "./adapters";
+import { ClaudeCodeAdapter, CodexAdapter } from "./adapters";
 import { HookApprovalBridge } from "./hook-approval-bridge";
 import { OrchestrationEngine } from "./orchestration/engine";
 import { ProviderAdapterRegistry } from "./provider-registry";
@@ -48,7 +48,6 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
   const providerAdapterRegistry = new ProviderAdapterRegistry();
   providerAdapterRegistry.register("claude-code", new ClaudeCodeAdapter());
   providerAdapterRegistry.register("codex", new CodexAdapter());
-  providerAdapterRegistry.register("shell", new ShellAdapter());
 
   const providerService = new ProviderService(providerAdapterRegistry);
 

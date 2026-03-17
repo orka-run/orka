@@ -22,7 +22,7 @@ const MODELS = [
   { value: "claude-haiku-4-5-20251001", label: "claude-haiku-4-5" },
 ];
 
-const BACKENDS: readonly BackendKind[] = ["claude-code", "codex", "shell"];
+const BACKENDS: readonly BackendKind[] = ["claude-code", "codex"];
 const MODES: readonly SessionMode[] = ["background", "interactive"];
 
 function parseTags(value: string): string[] {

@@ -358,7 +358,7 @@ describe("mergeConfigs", () => {
 
   test("project config overrides user config defaults", () => {
     const user = emptyConfig();
-    user.defaults.backend = "shell";
+    user.defaults.backend = "claude-code";
     user.defaults.model = "gpt-4";
 
     const project = emptyConfig();

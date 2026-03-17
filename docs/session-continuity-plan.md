@@ -378,7 +378,7 @@ Response: same as `spawn` — returns `SpawnResult` with session ID and status.
 
 - Background vs interactive distinction remains (controls stdin behavior within a single turn)
 - Interactive sessions already support multi-turn via `orka send` — continue is for completed sessions
-- Codex and shell backends don't support continue (no session persistence)
+- Codex backend doesn't support continue (no session persistence)
 - Session status model: no new states added. "completed" → "running" → "completed" is a valid transition
 - Worktree lifecycle: unchanged. Background sessions still auto-create worktrees
 - Retry: still creates a new session from scratch (useful for "start over" vs "keep going")

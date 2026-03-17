@@ -137,10 +137,10 @@ describe("Noise NK Transport", () => {
       daemon.nodeId,
     );
 
-    // Spawn a shell session
+    // Spawn a session
     const spawnResp = await encryptedRpc(transport, ws, "spawn", {
       prompt: "echo noise-test-session",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       title: "Noise E2E spawn test",
@@ -159,7 +159,7 @@ describe("Noise NK Transport", () => {
     expect(getResp.error).toBeUndefined();
     const fetched = getResp.result as Record<string, unknown>;
     expect(fetched.id).toBe(session.id);
-    expect(fetched.backend).toBe("shell");
+    expect(fetched.backend).toBe("claude-code");
 
     ws.close();
   }, 15_000);

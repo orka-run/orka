@@ -29,7 +29,7 @@ Rationale:
 ```
 +--[ Sidebar ]--+--[ Main Content ]----------------------------+
 |               |                                               |
-| Sessions...   |  [claude-code|codex|shell] [model v] [bg|int] |
+| Sessions...   |  [claude-code|codex] [model v] [bg|int] |
 |               |                         [Options v] ← toggle  |
 |               |                                               |
 |               |         +-----------------------------+       |
@@ -49,7 +49,7 @@ Rationale:
 ```
 +--[ Sidebar ]--+--[ Main Content ]----------------------------+
 |               |                                               |
-|               |  [claude-code|codex|shell] [model v] [bg|int] |
+|               |  [claude-code|codex] [model v] [bg|int] |
 |               |                         [Options ^] ← toggle  |
 |               |  +------------------------------------------+ |
 |               |  | Title: [optional________________]         | |
@@ -117,7 +117,7 @@ Rationale:
 +-----------------------------------------------+
 | Orka                                          |
 +-----------------------------------------------+
-| [claude-code|codex|shell] [model] [bg|int]    |
+| [claude-code|codex] [model] [bg|int]    |
 |                              [Options v]      |
 +-----------------------------------------------+
 |                                               |
@@ -138,7 +138,7 @@ Rationale:
 +-----------------------------------------------+
 | Orka                                          |
 +-----------------------------------------------+
-| [claude-code|codex|shell] [model] [bg|int]    |
+| [claude-code|codex] [model] [bg|int]    |
 |                              [Options ^]      |
 +-----------------------------------------------+
 | Title: [optional_________________]            |

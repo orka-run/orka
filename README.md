@@ -1,7 +1,7 @@
 # Orka
 
-Agent session orchestrator for AI coding agents. Run Claude Code, Codex, or shell
-tasks as isolated sessions, watch them live, and merge results back into your repo.
+Agent session orchestrator for AI coding agents. Run Claude Code or Codex
+as isolated sessions, watch them live, and merge results back into your repo.
 
 > **WARNING: Early development — no security hardening yet.**
 >
@@ -17,7 +17,7 @@ tasks as isolated sessions, watch them live, and merge results back into your re
 
 ## Features
 
-- **Multiple backends** — Claude Code (Opus), Codex (GPT), or plain shell
+- **Multiple backends** — Claude Code (Opus), Codex (GPT)
 - **Parallel sessions** — run many agents simultaneously with isolated git worktrees
 - **Live streaming** — attach to running sessions, stream logs and structured events
 - **Smart worktree management** — auto-create, protect uncommitted work, merge on completion
@@ -56,8 +56,7 @@ orka merge <session-id>
 orka CLI ──WS──▶ Daemon ──▶ Provider Runtime ──▶ Agent Process
                    │              │
                    │              ├── ClaudeCodeAdapter
-                   │              ├── CodexAdapter
-                   │              └── ShellAdapter
+                   │              └── CodexAdapter
                    │
                    ├── SQLite (sessions, events, config)
                    ├── Git worktrees (~/.orka/worktrees/)
@@ -135,7 +134,7 @@ orka spawn --tag migration --auto-merge "migrate users table to new schema"
 orka spawn --prompt-file tasks/refactor.md
 
 # Piped prompt
-cat spec.md | orka spawn -b shell
+cat spec.md | orka spawn
 
 # Specific branch name
 orka spawn --branch feat/new-api "build the new REST API"

@@ -19,6 +19,7 @@ process.env["ORKA_HOME"] = testHome;
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, SessionDetailResponse } from "@orka/core";
+import { registerTestAdapter } from "./helpers/test-adapter";
 
 /** Wait for a session to reach a terminal status. */
 async function waitForTerminal(
@@ -53,6 +54,7 @@ describe("Worktree Management", () => {
     await $`git -C ${testRepo} commit -m "init"`.quiet();
 
     ctx = createDaemonContext(testHome);
+    registerTestAdapter(ctx);
     client = createLocalClient(ctx);
   }, 30_000);
 
@@ -70,7 +72,7 @@ describe("Worktree Management", () => {
   test("background session auto-creates worktree with named branch", async () => {
     const result = await client.spawn({
       prompt: "echo 'wt-auto' && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -94,7 +96,7 @@ describe("Worktree Management", () => {
   test("interactive session does NOT create a worktree", async () => {
     const result = await client.spawn({
       prompt: "echo 'no-wt' && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "interactive",
       projectPath: testRepo,
     });
@@ -111,7 +113,7 @@ describe("Worktree Management", () => {
   test("custom branch creates worktree on specified branch", async () => {
     const result = await client.spawn({
       prompt: "echo 'custom-branch' && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       branch: "feat/custom-test",
@@ -131,7 +133,7 @@ describe("Worktree Management", () => {
     // Keep the session alive so the worktree is not cleaned up before getDiff
     const result = await client.spawn({
       prompt: "echo 'diff-content' > test-file.txt && sleep 300",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -151,7 +153,7 @@ describe("Worktree Management", () => {
     // Git config must be set inside the prompt.
     const result = await client.spawn({
       prompt: 'git config user.email "test@orka.dev" && git config user.name "Orka Test" && echo \'merge-test-content\' > merge-test.txt && git add merge-test.txt && git commit -m \'add merge-test\' && sleep 300',
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -187,7 +189,7 @@ describe("Worktree Management", () => {
     // Keep the session alive so worktree is not cleaned up
     const result = await client.spawn({
       prompt: "echo 'no-commit' && sleep 300",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });
@@ -207,7 +209,7 @@ describe("Worktree Management", () => {
   test("keep protects worktree from cleanup on stop", async () => {
     const result = await client.spawn({
       prompt: "sleep 600",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
     });

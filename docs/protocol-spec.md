@@ -43,7 +43,7 @@ All communication uses WebSocket (RFC 6455) over TCP.
     resume: boolean,
     encryption: string | false,           // e.g., "x25519-aes256gcm" or false
     multiTurn: boolean,
-    adapters: string[],                   // e.g., ["claude-code", "codex", "shell"]
+    adapters: string[],                   // e.g., ["claude-code", "codex"]
     maxConcurrent: number,                // 0 = unlimited
     terminal: boolean,
   }

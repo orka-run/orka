@@ -86,10 +86,10 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       daemon.nodeId,
     );
 
-    // Spawn a shell session with a long-running command so we can stop it
+    // Spawn a session with a long-running command so we can stop it
     const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
       prompt: "sleep 60",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       title: "lifecycle-full-test",
@@ -112,7 +112,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     const sessions = listResp.result as Array<Record<string, unknown>>;
     const found = sessions.find((s) => s.id === sessionId);
     expect(found).toBeDefined();
-    expect(found!.backend).toBe("shell");
+    expect(found!.backend).toBe("claude-code");
 
     // Get session details
     const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
@@ -121,7 +121,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     expect(getResp.error).toBeUndefined();
     const detail = getResp.result as Record<string, unknown>;
     expect(detail.id).toBe(sessionId);
-    expect(detail.backend).toBe("shell");
+    expect(detail.backend).toBe("claude-code");
     expect(detail.mode).toBe("background");
     expect(detail.projectPath).toBe(testRepo);
 
@@ -156,12 +156,12 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       daemon.nodeId,
     );
 
-    // Spawn a short-lived shell session that exits cleanly.
-    // The shell adapter appends `exec bash -i` after the command, so we
+    // Spawn a short-lived session that exits cleanly.
+    // The test adapter appends `exec bash -i` after the command, so we
     // must `exit 0` explicitly to prevent the interactive shell from starting.
     const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
       prompt: "echo done && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       title: "lifecycle-result-test",
@@ -181,7 +181,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       sessionId,
     });
     expect(resultResp.error).toBeUndefined();
-    // getResult may return null for shell sessions that complete too quickly
+    // getResult may return null for sessions that complete too quickly
     // for the runtime to capture structured output. The call succeeding without
     // error is what we verify; if a result is present, check its shape.
     if (resultResp.result !== null) {
@@ -204,7 +204,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     // Spawn a session that produces output and exits cleanly
     const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
       prompt: "echo lifecycle-log-test-output && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       title: "lifecycle-log-test",
@@ -248,7 +248,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     for (let i = 1; i <= 3; i++) {
       const resp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
         prompt: "sleep 30",
-        backend: "shell",
+        backend: "claude-code",
         mode: "background",
         projectPath: testRepo,
         title: `lifecycle-concurrent-${i}`,
@@ -274,7 +274,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     for (const id of sessionIds) {
       const found = allSessions.find((s) => s.id === id);
       expect(found).toBeDefined();
-      expect(found!.backend).toBe("shell");
+      expect(found!.backend).toBe("claude-code");
     }
 
     // Stop any that are still running
@@ -318,7 +318,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     // Spawn a session that exits cleanly
     const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
       prompt: "echo delete-me && exit 0",
-      backend: "shell",
+      backend: "claude-code",
       mode: "background",
       projectPath: testRepo,
       title: "lifecycle-delete-test",

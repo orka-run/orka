@@ -87,7 +87,7 @@ The spec requires per-type migration when old event versions are read (`docs/pro
 
 17. Capability negotiation is stricter than the spec in places where it should be open-ended.
 
-The spec models `capabilities.adapters` as `string[]` (`docs/protocol-spec.md:42-49`). The implementation validates it as `z.array(BackendKindSchema)`, which is a closed enum of `claude-code | codex | shell` (`packages/core/src/push-protocol.ts:50-57`, `packages/core/src/types.ts:18-19`). A newer daemon advertising a new adapter would fail older client parsing rather than degrade gracefully.
+The spec models `capabilities.adapters` as `string[]` (`docs/protocol-spec.md:42-49`). The implementation validates it as `z.array(BackendKindSchema)`, which is a closed enum of `claude-code | codex` (`packages/core/src/push-protocol.ts:50-57`, `packages/core/src/types.ts:18-19`). A newer daemon advertising a new adapter would fail older client parsing rather than degrade gracefully.
 
 18. Protocol-version parsing is exact-match only at the schema layer.
 

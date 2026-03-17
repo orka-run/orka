@@ -69,7 +69,7 @@ keygen  — Manage E2E encryption keys (client, node, save-server, show)
 - `--prompt "text"` — inline prompt
 - `--prompt-file path` — read prompt from file
 - Positional args — `orka spawn do the thing`
-- Piped stdin — `echo "task" | orka spawn --backend shell`
+- Piped stdin — `echo "task" | orka spawn`
 
 ### Multi-Machine Mode
 
@@ -123,7 +123,7 @@ ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=<client_api_key> ORKA_ENCRYPT=1 orka p
 - **Language**: TypeScript (strict mode)
 - **Validation**: zod/v4 — import as `import { z } from "zod/v4"`. Enum schemas in core/types.ts, config validation, DB row parsing
 - **Storage**: SQLite via bun:sqlite (~/.orka/orka.db), versioned migrations in db.ts, `PRAGMA busy_timeout = 5000`
-- **Session runtime**: provider runtime with adapter registry (`ClaudeCodeAdapter`, `CodexAdapter`, `ShellAdapter`) and persisted orchestration events
+- **Session runtime**: provider runtime with adapter registry (`ClaudeCodeAdapter`, `CodexAdapter`) and persisted orchestration events
 - **Worktrees**: ~/.orka/worktrees/<session-id> (OUTSIDE main repo for isolation)
 - **Logs**: ~/.orka/logs/<session-id>.log
 - **Config**: ~/.orka/config.toml (optional, TOML with [defaults], [limits], and [hooks] sections)
@@ -365,7 +365,7 @@ When spawning agents, always use `--reasoning-effort high` for codex.
 ## Agent Sessions
 
 - All sessions run through the provider runtime, which is event-sourced inside the daemon.
-- The provider runtime registers `ClaudeCodeAdapter`, `CodexAdapter`, and `ShellAdapter`, and persists orchestration events for output/result reconstruction.
+- The provider runtime registers `ClaudeCodeAdapter` and `CodexAdapter`, and persists orchestration events for output/result reconstruction.
 - Logs are still written to `~/.orka/logs/` for diagnostics and streaming.
 - Background sessions automatically get isolated worktrees with named branches.
 - Use `orka result <id>` to extract final output, cost, and token usage from the runtime timeline.

@@ -26,7 +26,7 @@ const BACKEND_CLI: Record<string, string> = {
 export function assertBackendInstalled(backend: BackendKind): void {
   withSpanSync("orka.backend.assert_installed", { "orka.backend": backend }, () => {
     const bin = BACKEND_CLI[backend];
-    if (!bin) return; // shell backend — no binary to check
+    if (!bin) return;
 
     try {
       execSync(`command -v ${bin}`, { stdio: "ignore" });
@@ -58,9 +58,6 @@ export function buildBackendCommand(
         break;
       case "codex":
         cmd = buildCodex(prompt, mode, opts?.model, opts?.reasoningEffort, opts?.projectPath, opts?.systemPrompt);
-        break;
-      case "shell":
-        cmd = prompt;
         break;
     }
 
