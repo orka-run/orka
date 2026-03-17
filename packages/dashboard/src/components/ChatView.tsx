@@ -1,5 +1,5 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, Globe, LoaderCircle, RotateCcw, Search, Square, TerminalSquare, User, Wrench, Eye } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
@@ -756,8 +756,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
             atBottomThreshold={40}
             atBottomStateChange={handleAtBottomStateChange}
             computeItemKey={(_index, entry) => entry.id}
-            overscan={{ main: 2000, reverse: 4000 }}
-            increaseViewportBy={{ top: 4000, bottom: 2000 }}
+            overscan={{ main: 500, reverse: 1500 }}
+            increaseViewportBy={{ top: 1500, bottom: 500 }}
             itemContent={(_index, entry) => (
               <div className="pb-2">
                 <TimelineEntry
@@ -840,7 +840,7 @@ function ThinkingIndicator({ state }: { state: ThinkingState }) {
   return null;
 }
 
-function TimelineEntry({
+const TimelineEntry = memo(function TimelineEntry({
   entry,
   isExpanded,
   onToggleExpand,
@@ -1006,4 +1006,4 @@ function TimelineEntry({
       </div>
     </div>
   );
-}
+});
