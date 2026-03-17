@@ -265,6 +265,14 @@ export async function continueSession(
 
     span.addEvent("session.continued");
 
+    // Emit user.input event so the user's follow-up appears in the timeline
+    ctx.orchestrationEngine.ingest({
+      type: "user.input",
+      sessionId,
+      timestamp: startedAt,
+      text: prompt, // original user text, not the context-wrapped fullPrompt
+    });
+
     // Reset session status back to running
     ctx.db.resetSessionForContinue(sessionId, startedAt);
     recordSessionStartedMetrics();
