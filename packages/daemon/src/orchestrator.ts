@@ -207,6 +207,9 @@ export async function continueSession(
 
     // Recreate worktree if it was cleaned up but the branch still exists
     if (!existsSync(session.workingDir)) {
+      // Clean stale worktree registrations first
+      Bun.spawnSync(["git", "worktree", "prune"], { cwd: session.projectPath });
+
       const branchName = `orka/${sessionId}`;
       try {
         const result = Bun.spawnSync(["git", "branch", "--list", branchName], { cwd: session.projectPath });
@@ -217,7 +220,11 @@ export async function continueSession(
         } else {
           // Branch was merged/deleted — create fresh worktree from current HEAD
           const freshBranch = `orka/${sessionId}-cont`;
-          Bun.spawnSync(["git", "worktree", "add", "-b", freshBranch, session.workingDir], { cwd: session.projectPath });
+          // Force in case branch already exists from previous failed attempt
+          const addResult = Bun.spawnSync(["git", "worktree", "add", "-B", freshBranch, session.workingDir], { cwd: session.projectPath });
+          if (addResult.exitCode !== 0) {
+            throw new Error(`git worktree add failed: ${new TextDecoder().decode(addResult.stderr)}`);
+          }
           span.addEvent("worktree.created_fresh", { "orka.branch": freshBranch });
         }
       } catch (e) {
