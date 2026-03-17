@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, Globe, LoaderCircle, RotateCcw, Search, Square, TerminalSquare, User, Wrench, Eye } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
@@ -513,10 +513,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const autoScroll = useChatUiStore((s) => s.sessions[sessionId]?.autoScroll ?? true);
   const expandedGroups = useChatUiStore((s) => s.sessions[sessionId]?.expandedGroups ?? EMPTY_SET);
   const entriesAtPauseRef = useRef(0);
-  // Track scroll position in a ref to avoid store updates on every scroll event
-  const scrollTopRef = useRef(0);
-  // Pending scroll restoration after session switch (when autoScroll was false)
-  const pendingScrollRestoreRef = useRef<number | null>(null);
 
   const handleToggleGroup = useCallback((groupId: string, isOpen: boolean) => {
     const current = useChatUiStore.getState().get(sessionId);
@@ -529,58 +525,16 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     useChatUiStore.getState().update(sessionId, { expandedGroups: next });
   }, [sessionId]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   // Mutable refs for the push handler to accumulate deltas without re-subscribing
   const eventsRef = useRef<OrchestrationEvent[]>([]);
-  // Guard to prevent handleScroll from disabling autoScroll during programmatic scrolls
+  // Guard to prevent atBottomStateChange from recording pause when we programmatically scroll
   const programmaticScrollRef = useRef(false);
   // Stable refs for values used in effects without triggering re-runs
   const initialPromptRef = useRef(initialPrompt);
   initialPromptRef.current = initialPrompt;
   const onSelectionLoadSettledRef = useRef(onSelectionLoadSettled);
   onSelectionLoadSettledRef.current = onSelectionLoadSettled;
-
-  // Cache measured element heights by entry ID for accurate size estimates
-  const sizeCacheRef = useRef(new Map<string, number>());
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
-
-  // Track whether user is scrolling up to apply scroll correction
-  const isScrollingUpRef = useRef(false);
-  const lastScrollTopRef = useRef(0);
-
-  const virtualizer = useVirtualizer({
-    count: entries.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => {
-      const entry = entriesRef.current[index];
-      if (entry) {
-        const cached = sizeCacheRef.current.get(entry.id);
-        if (cached) return cached;
-      }
-      return 80;
-    },
-    overscan: 20,
-    getItemKey: (index) => entriesRef.current[index]?.id ?? String(index),
-    // Correct scroll position when items above viewport are measured
-    // This prevents the "jump" when scrolling up and new items get real heights
-    onChange: () => {
-      if (!isScrollingUpRef.current || programmaticScrollRef.current) return;
-      const el = scrollRef.current;
-      if (!el) return;
-      const currentScrollTop = el.scrollTop;
-      const saved = lastScrollTopRef.current;
-      const diff = currentScrollTop - saved;
-      if (diff > 2 && diff < 500) {
-        // Virtualizer pushed scrollTop down after measuring items above.
-        // Correct it back, but set programmatic guard to prevent loop.
-        programmaticScrollRef.current = true;
-        el.scrollTop = saved;
-        requestAnimationFrame(() => { programmaticScrollRef.current = false; });
-      }
-    },
-  });
 
   const getCachedTimeline = useTimelineCache((s) => s.get);
   const setCachedTimeline = useTimelineCache((s) => s.set);
@@ -649,89 +603,27 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     return unsubscribe;
   }, [sessionId, transport]);
 
-  // On session switch: check if scroll position needs restoring, and save outgoing session's scrollTop
+  // On session switch: reset programmatic scroll guard
   useEffect(() => {
     programmaticScrollRef.current = false;
-    const state = useChatUiStore.getState().get(sessionId);
-    if (!state.autoScroll) {
-      pendingScrollRestoreRef.current = state.scrollTop;
-    } else {
-      pendingScrollRestoreRef.current = null;
-    }
-    return () => {
-      // Save scroll position of the session we're leaving
-      useChatUiStore.getState().update(sessionId, { scrollTop: scrollTopRef.current });
-    };
   }, [sessionId]);
 
-  // Restore scroll position after entries load (when autoScroll was false for this session)
-  useEffect(() => {
-    if (pendingScrollRestoreRef.current === null || entries.length === 0) return;
-    const scrollTarget = pendingScrollRestoreRef.current;
-    pendingScrollRestoreRef.current = null;
-
-    programmaticScrollRef.current = true;
-    const timer = setTimeout(() => {
-      const el = scrollRef.current;
-      if (el) el.scrollTop = scrollTarget;
-      requestAnimationFrame(() => {
-        programmaticScrollRef.current = false;
-      });
-    }, 100);
-
-    return () => {
-      clearTimeout(timer);
-      programmaticScrollRef.current = false;
-    };
-  }, [entries.length]);
-
-  // Auto-scroll to bottom when new entries arrive
-  useEffect(() => {
-    if (!autoScroll || entries.length === 0) return;
-
-    programmaticScrollRef.current = true;
-
-    // Simple approach: just scroll the container to the bottom.
-    // Virtualizer renders items based on scroll position, so this works.
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-
-    // Virtualizer may re-measure and adjust layout — scroll again after settle
-    const timer = setTimeout(() => {
-      if (el) el.scrollTop = el.scrollHeight;
-      // Keep guard active a bit longer to absorb virtualizer re-measure scrolls
-      setTimeout(() => { programmaticScrollRef.current = false; }, 50);
-    }, 150);
-
-    return () => {
-      clearTimeout(timer);
-      programmaticScrollRef.current = false;
-    };
-  }, [entries.length, autoScroll]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Detect manual scroll to pause auto-scroll
-  const handleScroll = useCallback(() => {
+  // Handle atBottom state changes from Virtuoso
+  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
     if (programmaticScrollRef.current) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    isScrollingUpRef.current = el.scrollTop < lastScrollTopRef.current;
-    lastScrollTopRef.current = el.scrollTop;
-    scrollTopRef.current = el.scrollTop;
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     const currentAutoScroll = useChatUiStore.getState().get(sessionId).autoScroll;
-    if (!isAtBottom && currentAutoScroll) {
+    if (!atBottom && currentAutoScroll) {
       entriesAtPauseRef.current = entries.length;
     }
-    if (isAtBottom !== currentAutoScroll) {
-      useChatUiStore.getState().update(sessionId, { autoScroll: isAtBottom, scrollTop: el.scrollTop });
+    if (atBottom !== currentAutoScroll) {
+      useChatUiStore.getState().update(sessionId, { autoScroll: atBottom });
     }
   }, [sessionId, entries.length]);
 
   const scrollToBottom = useCallback(() => {
     useChatUiStore.getState().update(sessionId, { autoScroll: true });
     programmaticScrollRef.current = true;
-    const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", behavior: "smooth" });
     setTimeout(() => { programmaticScrollRef.current = false; }, 500);
   }, [sessionId]);
 
@@ -850,55 +742,42 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   return (
     <div className={`flex h-full flex-col overflow-hidden ${isMobile ? "bg-surface" : "rounded-sm border border-border bg-surface"}`}>
       <div className="relative flex-1 overflow-hidden">
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          style={{ overflowAnchor: "none" }}
-          className={`h-full flex-1 overflow-y-auto overflow-x-hidden ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}
-        >
-          {entries.length === 0 ? (
+        {entries.length === 0 ? (
+          <div className={`h-full overflow-y-auto ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}>
             <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
-          ) : (
-            <div className="min-w-0" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-              {virtualizer.getVirtualItems().map((virtualRow) => {
-                const entry = entries[virtualRow.index];
-                if (!entry) return null;
-                return (
-                  <div
-                    key={entry.id}
-                    data-index={virtualRow.index}
-                    ref={(el: HTMLDivElement | null) => {
-                      virtualizer.measureElement(el);
-                      if (el && entry) {
-                        const h = el.getBoundingClientRect().height;
-                        if (h > 0) sizeCacheRef.current.set(entry.id, h);
-                      }
-                    }}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                  >
-                    <div className="pb-2">
-                      <TimelineEntry
-                        entry={entry}
-                        isExpanded={expandedGroups.has(entry.id)}
-                        onToggleExpand={handleToggleGroup}
-                        onApprovalResolve={handleApprovalResolve}
-                        projectPath={session?.projectPath}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {isRunning(activeSession.status) ? <ThinkingIndicator state={deriveThinkingState(events)} /> : null}
-          <div ref={bottomRef} />
-        </div>
+          </div>
+        ) : (
+          <Virtuoso
+            ref={virtuosoRef}
+            data={entries}
+            className={isMobile ? "px-1 py-1" : "px-2 py-2"}
+            followOutput={(isAtBottom) => isAtBottom ? "smooth" : false}
+            initialTopMostItemIndex={entries.length - 1}
+            atBottomThreshold={40}
+            atBottomStateChange={handleAtBottomStateChange}
+            computeItemKey={(_index, entry) => entry.id}
+            overscan={800}
+            increaseViewportBy={800}
+            itemContent={(_index, entry) => (
+              <div className="pb-2">
+                <TimelineEntry
+                  entry={entry}
+                  isExpanded={expandedGroups.has(entry.id)}
+                  onToggleExpand={handleToggleGroup}
+                  onApprovalResolve={handleApprovalResolve}
+                  projectPath={session?.projectPath}
+                />
+              </div>
+            )}
+            {...(isRunning(activeSession.status)
+              ? {
+                  components: {
+                    Footer: () => <ThinkingIndicator state={deriveThinkingState(events)} />,
+                  },
+                }
+              : {})}
+          />
+        )}
 
         {!autoScroll ? (() => {
           const newCount = Math.max(0, entries.length - entriesAtPauseRef.current);
