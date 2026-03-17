@@ -1,12 +1,8 @@
-import { Square, LoaderCircle } from "lucide-react";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useNotificationStore } from "../stores/notificationStore";
 
 interface MobileHeaderProps {
   title?: string | null;
-  isStoppable?: boolean;
-  isStopping?: boolean;
-  onStop?: () => void;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -16,7 +12,7 @@ const STATUS_DOT: Record<string, string> = {
   disconnected: "bg-status-error",
 };
 
-export function MobileHeader({ title, isStoppable, isStopping, onStop }: MobileHeaderProps) {
+export function MobileHeader({ title }: MobileHeaderProps) {
   const status = useConnectionStore((s) => s.status);
   const pendingCount = useNotificationStore((s) => s.pendingCount);
   const dotClass = STATUS_DOT[status] ?? "bg-ink-muted";
@@ -32,17 +28,6 @@ export function MobileHeader({ title, isStoppable, isStopping, onStop }: MobileH
         <span className="flex h-4 w-4 items-center justify-center rounded-sm bg-status-warning text-[9px] font-bold text-white">
           {pendingCount}
         </span>
-      )}
-      {isStoppable && onStop && (
-        <button
-          type="button"
-          onClick={onStop}
-          disabled={isStopping}
-          className="inline-flex items-center justify-center p-1 text-status-error transition active:opacity-70 disabled:opacity-50"
-          aria-label="Stop session"
-        >
-          {isStopping ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
-        </button>
       )}
     </header>
   );

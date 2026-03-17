@@ -521,12 +521,7 @@ function AppShell({ transport, client }: AppShellProps) {
         <BypassBanner sessions={sessions} />
         {isMobile ? (
           <>
-            <MobileHeader
-              title={mobileHeaderTitle}
-              isStoppable={isSelectedSessionStoppable}
-              isStopping={isMobileStopping}
-              onStop={() => { void handleMobileStop(); }}
-            />
+            <MobileHeader title={mobileHeaderTitle} />
             <main className="flex-1 overflow-hidden">{mobileMainContent}</main>
             <MobileTabBar
               hasSelectedSession={!!selectedId}
