@@ -207,8 +207,8 @@ export async function continueSession(
 
     // Recreate worktree if it was cleaned up but the branch still exists
     if (!existsSync(session.workingDir)) {
-      // Clean stale worktree registrations first
-      Bun.spawnSync(["git", "worktree", "prune"], { cwd: session.projectPath });
+      // Remove stale registration for THIS specific worktree path (if registered but missing)
+      Bun.spawnSync(["git", "worktree", "remove", "--force", session.workingDir], { cwd: session.projectPath });
 
       const branchName = `orka/${sessionId}`;
       try {
