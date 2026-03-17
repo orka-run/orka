@@ -1,4 +1,4 @@
-import type { BackendKind, ChatEntry, NodeInfo, Session, SessionId, SessionMode, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
+import type { BackendKind, ChatEntry, NodeInfo, PermissionMode, Session, SessionId, SessionMode, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -33,6 +33,7 @@ export interface SessionDetailResponse {
   parentSessionId: string | null;
   systemPrompt: string | null;
   allowedTools: string[] | null;
+  permissionMode: PermissionMode | null;
   archivedAt: string | null;
   tags: string[];
   // Deliberately omitted: env, logFile, rawLogFile, workspaceId, taskId
@@ -57,6 +58,7 @@ export interface SessionListResponse {
   kept: boolean;
   autoMerge: boolean;
   parentSessionId: string | null;
+  permissionMode: PermissionMode | null;
   tags: string[];
   // No: workspaceId, logFile, rawLogFile, taskId, workingDir, systemPrompt, allowedTools, env
 }

@@ -1,7 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, ScrollText, Shield, ShieldOff, Square } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, ScrollText, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
 import type { SessionResult } from "@orka/core";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
@@ -270,6 +270,14 @@ function OverviewTab({
             <MetadataItem label="Backend" value={session.backend} />
             <MetadataItem label="Model" value={session.model ?? result?.model ?? "Default"} />
             <MetadataItem label="Mode" value={session.mode} />
+            {session.permissionMode && (
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Permissions</dt>
+                <dd className="mt-1">
+                  <PermissionBadge mode={session.permissionMode} />
+                </dd>
+              </div>
+            )}
             <MetadataItem label="Created" value={formatDateTime(session.createdAt)} />
             <MetadataItem
               label="Duration"
@@ -349,6 +357,31 @@ function OverviewTab({
       )}
     </div>
   );
+}
+
+function PermissionBadge({ mode }: { mode: string }) {
+  switch (mode) {
+    case "bypass":
+      return (
+        <span className="inline-flex items-center gap-1 rounded-sm bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-400">
+          <AlertTriangle className="h-3 w-3" /> Bypass
+        </span>
+      );
+    case "supervised":
+      return (
+        <span className="inline-flex items-center gap-1 rounded-sm bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-400">
+          <ShieldCheck className="h-3 w-3" /> Supervised
+        </span>
+      );
+    case "auto":
+      return (
+        <span className="inline-flex items-center gap-1 rounded-sm bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-400">
+          <Shield className="h-3 w-3" /> Auto
+        </span>
+      );
+    default:
+      return <span className="text-[11px] text-ink-muted">{mode}</span>;
+  }
 }
 
 function MetadataItem({

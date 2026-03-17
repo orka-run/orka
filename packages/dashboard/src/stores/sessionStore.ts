@@ -1,4 +1,4 @@
-import type { Session, SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
+import type { PermissionMode, Session, SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RpcClient } from "../lib/rpcClient";
@@ -22,6 +22,7 @@ export interface SessionSummary {
   autoMerge: boolean;
   prompt: string | null;
   parentSessionId: string | null;
+  permissionMode: PermissionMode | null;
   tags: string[];
   nodeId: string | null;
 }
@@ -63,6 +64,7 @@ function toSessionSummary(
     autoMerge: session.autoMerge,
     prompt: session.prompt ?? null,
     parentSessionId: session.parentSessionId ?? null,
+    permissionMode: session.permissionMode ?? null,
     tags: session.tags ?? [],
     nodeId: options?.nodeId ?? null,
   };
@@ -178,6 +180,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           autoMerge: request.autoMerge ?? false,
           prompt: request.prompt,
           parentSessionId: request.parentSessionId ?? null,
+          permissionMode: request.permissionMode ?? null,
           tags: request.tags ?? [],
           nodeId: request.nodeId ?? null,
         };

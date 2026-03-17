@@ -99,6 +99,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(req.env ? { env: req.env } : {}),
+      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
     };
     ctx.db.insertSession(session);
 

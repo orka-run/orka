@@ -1,7 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useId, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
+import { AlertTriangle, Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
 import type { NodeInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
@@ -197,6 +197,11 @@ export function Sidebar({
                             {session.backend}
                           </span>
                           <StatusPill status={session.status} />
+                          {session.permissionMode === "bypass" ? (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] text-red-400" title="Bypass permissions">
+                              <AlertTriangle className="h-2.5 w-2.5" />
+                            </span>
+                          ) : null}
                           {session.nodeId && showNodeSelector ? (
                             <NodeBadge nodeId={session.nodeId} />
                           ) : null}

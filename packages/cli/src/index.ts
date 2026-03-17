@@ -21,6 +21,7 @@ import {
   loadProjectConfig,
   mergeConfigs,
   resolveDefaults,
+  writeBypassConsent,
   getOrkaHome,
   initTracing,
   shutdownTracing,
@@ -738,6 +739,9 @@ const spawnCmd = command({
     reasoningEffort: option({ type: optional(str), long: "reasoning-effort", description: "Reasoning effort level (low, medium, high)" }),
     autoMerge: flag({ long: "auto-merge", description: "Auto-merge worktree on successful completion" }),
     supervised: flag({ long: "supervised", description: "Supervised mode — tool executions require dashboard approval" }),
+    bypass: flag({ long: "bypass", description: "Bypass mode — agent runs without permission checks (full system access)" }),
+    auto: flag({ long: "auto", description: "Auto mode — agent auto-approves safe operations" }),
+    yes: flag({ long: "yes", short: "y", description: "Skip bypass consent prompt" }),
     watch: flag({ long: "watch", short: "w", description: "Stream session output after spawn (Ctrl+C stops streaming, not the session)" }),
     tag: multioption({ type: array(str), long: "tag", description: "Tag the session (repeatable)" }),
     parent: option({ type: optional(str), long: "parent", description: "Parent session ID (creates child session)" }),
@@ -801,9 +805,65 @@ const spawnCmd = command({
 
     const allowedTools = parseAllowedTools(args.allowedTools);
     const env = parseEnvAssignments(args.env);
-    const effectivePermissionMode: PermissionMode | undefined = args.supervised
-      ? "supervised"
-      : (cfg.permissionMode as PermissionMode) || undefined;
+
+    // Permission mode resolution: CLI flag > config > undefined (falls through to adapter default)
+    let effectivePermissionMode: PermissionMode | undefined =
+      args.bypass ? "bypass" :
+      args.supervised ? "supervised" :
+      args.auto ? "auto" :
+      (cfg.permissionMode as PermissionMode) || undefined;
+
+    // Determine if this spawn will result in bypass mode (explicit or default for background)
+    const effectiveMode = (args.mode ?? cfg.mode) as SessionMode;
+    const willBypass = effectivePermissionMode === "bypass" || (!effectivePermissionMode && effectiveMode === "background");
+
+    // Bypass consent + warning
+    if (willBypass) {
+      const bypassConsented = merged.permissions.bypassConsent;
+      if (!bypassConsented && !args.yes) {
+        if (process.stdin.isTTY) {
+          console.error("");
+          console.error("\x1b[33m⚠  Bypass Permission Mode\x1b[0m");
+          console.error("");
+          console.error("  Bypass mode gives the agent unrestricted access to your system:");
+          console.error("  • Read, write, and delete any file");
+          console.error("  • Execute arbitrary commands");
+          console.error("  • Access network and environment variables");
+          console.error("");
+          console.error("  This is powerful but dangerous. Only use bypass for trusted prompts.");
+          console.error("");
+          process.stderr.write("  Do you want to enable bypass mode? [y/N] ");
+          const answer = await new Promise<string>((resolve) => {
+            let buf = "";
+            process.stdin.setRawMode?.(false);
+            process.stdin.resume();
+            process.stdin.once("data", (data) => {
+              buf = data.toString().trim().toLowerCase();
+              resolve(buf);
+            });
+          });
+          if (answer !== "y" && answer !== "yes") {
+            console.error("");
+            console.error("  Running in auto mode instead.");
+            console.error("  Use --bypass explicitly or pass --yes / -y to skip this prompt.");
+            // Fall through with auto mode
+            effectivePermissionMode = "auto";
+          } else {
+            writeBypassConsent(getOrkaHome());
+            console.error("  Consent recorded. Future bypass spawns will skip this prompt.");
+            console.error("");
+          }
+        } else {
+          // Non-TTY: require --yes flag
+          fail("error: bypass mode requires first-time consent. Run interactively or pass --yes / -y to acknowledge.");
+        }
+      }
+
+      if (willBypass && effectivePermissionMode !== "auto") {
+        console.error("\x1b[33m⚠  Running with bypass permissions — agent has full system access\x1b[0m");
+      }
+    }
+
     const spawnRequest: SpawnRequest = {
       prompt,
       projectPath,
@@ -831,9 +891,7 @@ const spawnCmd = command({
     console.log(`spawned session ${session.id}`);
     console.log(`  backend:  ${spawnRequest.backend}`);
     console.log(`  mode:     ${spawnRequest.mode}`);
-    if (effectivePermissionMode) {
-      console.log(`  permissions: ${effectivePermissionMode}`);
-    }
+    console.log(`  permissions: ${effectivePermissionMode ?? (effectiveMode === "background" ? "bypass (default)" : "auto (default)")}`);
     if (args.tag.length > 0) {
       console.log(`  tags:     ${args.tag.join(", ")}`);
     }

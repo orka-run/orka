@@ -902,6 +902,7 @@ function sessionToDetail(session: Session, task: Task | null, tags: string[]): S
     parentSessionId: session.parentSessionId ?? null,
     systemPrompt: session.systemPrompt ?? null,
     allowedTools: session.allowedTools ?? null,
+    permissionMode: session.permissionMode ?? null,
     archivedAt: session.archivedAt ?? null,
     tags,
   };
@@ -924,6 +925,7 @@ function sessionItemToListResponse(item: SessionListItem, tags: string[]): Sessi
     kept: item.kept,
     autoMerge: item.autoMerge,
     parentSessionId: item.parentSessionId ?? null,
+    permissionMode: item.permissionMode ?? null,
     tags,
   };
 }

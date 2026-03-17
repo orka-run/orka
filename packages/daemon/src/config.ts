@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { readFileSync, existsSync } from "node:fs";
-import { parse, type TomlTable, type TomlValue } from "smol-toml";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { parse, stringify, type TomlTable, type TomlValue } from "smol-toml";
 import { z } from "zod/v4";
 import { withSpanSync } from "./tracing";
 
@@ -43,6 +43,7 @@ const PermissionsSchema = z.object({
   autoApprove: z.array(z.string()).default([]),
   alwaysDeny: z.array(z.string()).default([]),
   approvalTimeout: z.number().default(0),
+  bypassConsent: z.boolean().default(false),
 });
 
 export const ConfigSchema = z.object({
@@ -157,6 +158,9 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
               ...(getNumber(permissions.approval_timeout ?? permissions.approvalTimeout) !== undefined
                 ? { approvalTimeout: getNumber(permissions.approval_timeout ?? permissions.approvalTimeout) }
                 : {}),
+              ...(getBoolean(permissions.bypass_consent ?? permissions.bypassConsent) !== undefined
+                ? { bypassConsent: getBoolean(permissions.bypass_consent ?? permissions.bypassConsent) }
+                : {}),
             }
           : undefined,
       backendDefaults:
@@ -232,6 +236,7 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
         approvalTimeout: projectConfig.permissions.approvalTimeout !== pd.approvalTimeout
           ? projectConfig.permissions.approvalTimeout
           : userConfig.permissions.approvalTimeout,
+        bypassConsent: userConfig.permissions.bypassConsent || projectConfig.permissions.bypassConsent,
       };
     })(),
     backendDefaults: {
@@ -304,6 +309,10 @@ function getNumber(value: TomlValue | undefined): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
+function getBoolean(value: TomlValue | undefined): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function getStringArray(value: TomlValue | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) return undefined;
@@ -329,4 +338,28 @@ function normalizeHookCommands(value: TomlValue | undefined): string[] | undefin
   }
 
   return z.array(HookCommandSchema).parse(value).map((item) => item.run);
+}
+
+/**
+ * Write bypass_consent = true into the [permissions] section of config.toml.
+ * Creates the file if it doesn't exist. Preserves existing content.
+ */
+export function writeBypassConsent(orkaHome: string): void {
+  const configPath = join(orkaHome, "config.toml");
+  let toml: Record<string, any> = {};
+
+  if (existsSync(configPath)) {
+    try {
+      toml = parse(readFileSync(configPath, "utf-8")) as Record<string, any>;
+    } catch {
+      // If parse fails, start fresh
+    }
+  }
+
+  if (!toml.permissions || typeof toml.permissions !== "object") {
+    toml.permissions = {};
+  }
+  (toml.permissions as Record<string, any>).bypass_consent = true;
+
+  writeFileSync(configPath, stringify(toml as any), "utf-8");
 }

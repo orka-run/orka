@@ -74,6 +74,7 @@ export interface Session {
   exitCode: number | null;
   kept: boolean;
   autoMerge: boolean;
+  permissionMode?: PermissionMode;
   parentSessionId?: string;
   rawLogFile?: string;
   systemPrompt?: string;
