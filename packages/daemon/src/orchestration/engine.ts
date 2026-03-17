@@ -90,6 +90,26 @@ export class OrchestrationEngine {
     );
   }
 
+  /** Emit an OrchestrationEvent directly (not from a ProviderRuntimeEvent).
+   *  Persists, pushes to listeners and PushHub. Used for synthetic events like
+   *  user.input on session continue. */
+  emitDirect(event: OrchestrationEvent): void {
+    const versionedEvent: OrchestrationEvent = { ...event, v: event.v ?? 1 };
+
+    this.options.persistEvent?.({
+      ...versionedEvent,
+      provider: "orka",
+      eventId: `direct-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+    this.log.push(versionedEvent);
+
+    for (const listener of this.listeners) {
+      listener(versionedEvent);
+    }
+
+    this.options.pushHub?.broadcast("orchestration.event", versionedEvent);
+  }
+
   onEvent(listener: (event: OrchestrationEvent) => void): () => void {
     return withSpanSync("orka.orchestration.on_event", {}, () => {
       this.listeners.push(listener);
