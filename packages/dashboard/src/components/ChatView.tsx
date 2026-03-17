@@ -779,6 +779,26 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     }
   }
 
+  async function handleContinue(text: string) {
+    setSendError(null);
+    const optimisticEntry: ChatEntry = {
+      id: `user-optimistic-${String(Date.now())}`,
+      type: "user",
+      timestamp: new Date().toISOString(),
+      body: text,
+    };
+    setEntries((prev) => [...prev, optimisticEntry]);
+    useChatUiStore.getState().update(sessionId, { autoScroll: true });
+
+    try {
+      await client.continueSession(sessionId, text);
+    } catch (err) {
+      setEntries((prev) => prev.filter((e) => e.id !== optimisticEntry.id));
+      setSendError(err instanceof Error ? err.message : "Failed to continue session");
+      throw err;
+    }
+  }
+
   async function handleStop() {
     setStopping(true);
     try {
@@ -876,21 +896,18 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           );
         })() : null}
       </div>
-      {activeSession.mode === "interactive" ? (
-        <div className="border-t border-border">
-          <ChatInputComposer
-            sessionId={sessionId}
-            inputState={inputState}
-            onSend={handleSend}
-            sendError={sendError}
-            onClearError={() => { setSendError(null); }}
-            onStop={isRunning(activeSession.status) ? () => { void handleStop(); } : undefined}
-            onRetry={isTerminal(activeSession.status) ? () => { void handleRetry(); } : undefined}
-            isStopping={stopping}
-            isRetrying={retrying}
-          />
-        </div>
-      ) : null}
+      <div className="border-t border-border">
+        <ChatInputComposer
+          sessionId={sessionId}
+          inputState={isTerminal(activeSession.status) ? "waiting" : inputState}
+          onSend={isTerminal(activeSession.status) ? handleContinue : handleSend}
+          sendError={sendError}
+          onClearError={() => { setSendError(null); }}
+          onStop={isRunning(activeSession.status) ? () => { void handleStop(); } : undefined}
+          isStopping={stopping}
+          placeholder={isTerminal(activeSession.status) ? "Continue this session..." : undefined}
+        />
+      </div>
     </div>
   );
 }

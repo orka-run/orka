@@ -73,6 +73,8 @@ export function createRpcClient(ws: WsTransport) {
       rpc<boolean>("isAlive", { sessionId }, options),
     sendTurn: (sessionId: string, text: string, options?: RequestOptions) =>
       rpc<void>("sendTurn", { sessionId, text }, options),
+    continueSession: (sessionId: string, text: string, options?: RequestOptions) =>
+      rpc<void>("continueSession", { sessionId, text }, options),
 
     // --- Worktree ---
     getDiff: (sessionId: string, options?: RequestOptions) =>
