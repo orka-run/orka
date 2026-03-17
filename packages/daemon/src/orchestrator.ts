@@ -276,6 +276,7 @@ export async function continueSession(
 
     // Reset session status back to running
     ctx.db.resetSessionForContinue(sessionId, startedAt);
+    ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "running" });
     recordSessionStartedMetrics();
 
     // Get task for title
