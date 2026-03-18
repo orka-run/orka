@@ -4,6 +4,7 @@ import type {
   ServerWelcomeData,
   SessionDeletedData,
   SessionUpdatedData,
+  WorkspaceSettings,
 } from "@orka/core";
 import { parseWireEvent } from "@orka/core";
 import { appendAuthToken, type NoiseConfig } from "@orka/client";
@@ -24,6 +25,7 @@ import { PairNodeDialog } from "./components/PairNodeDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { StatusBar } from "./components/StatusBar";
+import { WorkspaceDetailView } from "./components/WorkspaceDetailView";
 import { useMobileBreakpoint } from "./hooks/useMobileBreakpoint";
 import { getTracer, initDashboardTracing } from "./lib/tracing";
 import { TransportContext, RpcClientContext } from "./lib/transportContext";
@@ -37,6 +39,7 @@ import { useMode } from "./hooks/useMode";
 import { useNodeStore } from "./stores/nodeStore";
 import { useNotificationStore } from "./stores/notificationStore";
 import { SELECTED_SESSION_KEY, useSessionStore } from "./stores/sessionStore";
+import { useWorkspaceStore } from "./stores/workspaceStore";
 import { useTimelineCache } from "./lib/timelineCache";
 import {
   captureBaseTitle,
@@ -80,6 +83,18 @@ function getEffectiveUrl(endpointUrl: string | null, authToken: string | null): 
 interface AppShellProps {
   transport: WsTransport;
   client: ReturnType<typeof createRpcClient>;
+}
+
+function getWorkspaceProjectPath(
+  workspace: { paths: Array<{ nodeId: string | null; projectPath: string }> },
+  selectedNodeId: string | null,
+): string | undefined {
+  if (selectedNodeId) {
+    const match = workspace.paths.find((p) => p.nodeId === selectedNodeId);
+    if (match) return match.projectPath;
+  }
+  const noNode = workspace.paths.find((p) => p.nodeId === null);
+  return noNode?.projectPath ?? workspace.paths[0]?.projectPath;
 }
 
 function BypassBanner({ sessions }: { sessions: Array<{ status: string; permissionMode: string | null }> }) {
@@ -138,13 +153,26 @@ function AppShell({ transport, client }: AppShellProps) {
   const fetchPairedNodes = useNodeStore((state) => state.fetchPairedNodes);
   const selectNode = useNodeStore((state) => state.selectNode);
   const updateNodeStatus = useNodeStore((state) => state.updateNodeStatus);
+  const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const fetchWorkspaces = useWorkspaceStore((state) => state.fetchWorkspaces);
+  const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
+  const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
+  const updateWorkspace = useWorkspaceStore((state) => state.updateWorkspace);
+  const activeWorkspace = activeWorkspaceId
+    ? workspaces.find((w) => w.id === activeWorkspaceId) ?? null
+    : null;
   const setConnectionStatus = useConnectionStore((state) => state.setStatus);
   const setProtocolMismatch = useConnectionStore((state) => state.setProtocolMismatch);
   const prefetchTimeline = useTimelineCache((s) => s.prefetch);
   const incrementPending = useNotificationStore((s) => s.incrementPending);
   const decrementPending = useNotificationStore((s) => s.decrementPending);
   const selectedSession = sessions.find((session) => session.id === selectedId) ?? null;
-  const defaultProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
+  const baseProjectPath = selectedSession?.projectPath ?? sessions[0]?.projectPath ?? "";
+  // Use workspace path when a workspace is active
+  const defaultProjectPath = activeWorkspace
+    ? getWorkspaceProjectPath(activeWorkspace, selectedNodeId) ?? baseProjectPath
+    : baseProjectPath;
 
   const handleSelectSession = (id: string) => {
     const pendingSelection = selectionSpanRef.current;
@@ -344,10 +372,11 @@ function AppShell({ transport, client }: AppShellProps) {
       }
     });
 
-    // Fire sessions fetch immediately for faster first paint
+    // Fire sessions + workspaces fetch immediately for faster first paint
     void fetchSessions(client).then(() => {
       setInitialLoadDone(true);
     });
+    void fetchWorkspaces(client);
 
     // Fetch nodes in parallel; re-fetch sessions with node IDs if multi-node
     void fetchNodes(client).then(() => {
@@ -386,7 +415,7 @@ function AppShell({ transport, client }: AppShellProps) {
       unsubscribeState();
       transport.disconnect();
     };
-  }, [transport, client, mode, fetchSessions, fetchNodes, fetchPairedNodes, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus, incrementPending, decrementPending]);
+  }, [transport, client, mode, fetchSessions, fetchNodes, fetchPairedNodes, fetchWorkspaces, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus, incrementPending, decrementPending]);
 
   const handleOnboardingComplete = useCallback(() => {
     setShowOnboarding(false);
@@ -394,8 +423,9 @@ function AppShell({ transport, client }: AppShellProps) {
     try { localStorage.setItem("orka-onboarding-dismissed", "1"); } catch { /* ignore */ }
     void fetchSessions(client);
     void fetchNodes(client);
+    void fetchWorkspaces(client);
     if (mode === "local") void fetchPairedNodes(client);
-  }, [client, mode, fetchSessions, fetchNodes, fetchPairedNodes]);
+  }, [client, mode, fetchSessions, fetchNodes, fetchPairedNodes, fetchWorkspaces]);
 
   const handleOnboardingSkip = useCallback(() => {
     setShowOnboarding(false);
@@ -409,12 +439,34 @@ function AppShell({ transport, client }: AppShellProps) {
     setShowOnboarding(true);
   }, []);
 
+  const handleCreateWorkspace = useCallback(async (name: string) => {
+    const ws = await createWorkspace(client, {
+      name,
+      paths: defaultProjectPath ? [{ path: defaultProjectPath }] : undefined,
+    });
+    setActiveWorkspace(ws.id);
+  }, [client, createWorkspace, setActiveWorkspace, defaultProjectPath]);
+
+  const handleUpdateWorkspaceSettings = useCallback(async (settings: WorkspaceSettings) => {
+    if (!activeWorkspaceId) return;
+    await updateWorkspace(client, activeWorkspaceId, { settings });
+  }, [client, activeWorkspaceId, updateWorkspace]);
+
+  const handleArchiveWorkspace = useCallback(async () => {
+    if (!activeWorkspaceId) return;
+    await updateWorkspace(client, activeWorkspaceId, {
+      archivedAt: activeWorkspace?.archivedAt ? null : new Date().toISOString(),
+    });
+  }, [client, activeWorkspaceId, activeWorkspace?.archivedAt, updateWorkspace]);
+
   const sidebarProps = {
     sessions,
     selectedId,
     isDraftActive,
     nodes,
     selectedNodeId,
+    workspaces,
+    activeWorkspaceId,
     onSelect: (id: string) => {
       handleSelectSession(id);
     },
@@ -424,11 +476,13 @@ function AppShell({ transport, client }: AppShellProps) {
     onSelectDraft: activateDraft,
     onNewSession: activateDraft,
     onSelectNode: selectNode,
+    onSelectWorkspace: setActiveWorkspace,
+    onCreateWorkspace: handleCreateWorkspace,
     onPairNode: () => setIsPairNodeOpen(true),
     onManageNodes: mode === "local" && pairedNodes.length > 0 ? () => setIsNodeManagementOpen(true) : undefined,
   };
 
-  // Mobile main content: show SessionView, DraftChatView, or empty state
+  // Mobile main content: show SessionView, DraftChatView, WorkspaceDetailView, or empty state
   const mobileMainContent = selectedId ? (
     <SessionView
       sessionId={selectedId}
@@ -439,9 +493,18 @@ function AppShell({ transport, client }: AppShellProps) {
     />
   ) : isDraftActive ? (
     <DraftChatView
+      key={activeWorkspaceId ?? "all"}
       defaultProjectPath={defaultProjectPath}
       nodes={nodes}
+      activeWorkspace={activeWorkspace}
       onSpawned={handleDraftSpawned}
+    />
+  ) : activeWorkspace ? (
+    <WorkspaceDetailView
+      workspace={activeWorkspace}
+      onNewSession={activateDraft}
+      onUpdateSettings={handleUpdateWorkspaceSettings}
+      onArchive={handleArchiveWorkspace}
     />
   ) : (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
@@ -469,9 +532,18 @@ function AppShell({ transport, client }: AppShellProps) {
     />
   ) : isDraftActive ? (
     <DraftChatView
+      key={activeWorkspaceId ?? "all"}
       defaultProjectPath={defaultProjectPath}
       nodes={nodes}
+      activeWorkspace={activeWorkspace}
       onSpawned={handleDraftSpawned}
+    />
+  ) : activeWorkspace ? (
+    <WorkspaceDetailView
+      workspace={activeWorkspace}
+      onNewSession={activateDraft}
+      onUpdateSettings={handleUpdateWorkspaceSettings}
+      onArchive={handleArchiveWorkspace}
     />
   ) : (
     <div className="flex h-full items-center justify-center text-ink-muted text-[12px]">

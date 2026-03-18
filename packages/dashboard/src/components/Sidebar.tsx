@@ -1,8 +1,8 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useId, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertTriangle, Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
-import type { NodeInfo } from "@orka/core";
+import { AlertTriangle, Layers, Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
+import type { NodeInfo, WorkspaceInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
 
@@ -15,12 +15,16 @@ interface SidebarProps {
   isDraftActive?: boolean;
   nodes: NodeInfo[];
   selectedNodeId: string | null;
+  workspaces: WorkspaceInfo[];
+  activeWorkspaceId: string | null;
   fullWidth?: boolean;
   onSelect: (id: string) => void;
   onHover?: (id: string) => void;
   onNewSession: () => void;
   onSelectDraft?: () => void;
   onSelectNode: (nodeId: string | null) => void;
+  onSelectWorkspace: (id: string | null) => void;
+  onCreateWorkspace: (name: string) => Promise<void>;
   onPairNode?: () => void;
   onManageNodes?: () => void;
 }
@@ -31,12 +35,16 @@ export function Sidebar({
   isDraftActive,
   nodes,
   selectedNodeId,
+  workspaces,
+  activeWorkspaceId,
   fullWidth,
   onSelect,
   onHover,
   onNewSession,
   onSelectDraft,
   onSelectNode,
+  onSelectWorkspace,
+  onCreateWorkspace,
   onPairNode,
   onManageNodes,
 }: SidebarProps) {
@@ -45,6 +53,7 @@ export function Sidebar({
   const normalizedQuery = query.trim().toLowerCase();
   const now = Date.now();
   const showNodeSelector = nodes.length > 1;
+  const showWorkspaceSwitcher = workspaces.length > 0;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Filter by selected node
@@ -52,8 +61,21 @@ export function Sidebar({
     ? sessions.filter((s) => s.nodeId === selectedNodeId)
     : sessions;
 
-  const runningCount = nodeFilteredSessions.filter((session) => isActive(session.status)).length;
-  const filteredSessions = nodeFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
+  // Filter by active workspace
+  const activeWorkspace = activeWorkspaceId
+    ? workspaces.find((w) => w.id === activeWorkspaceId) ?? null
+    : null;
+
+  const workspaceFilteredSessions = activeWorkspace
+    ? nodeFilteredSessions.filter((s) =>
+        activeWorkspace.paths.some(
+          (p) => p.projectPath === s.projectPath && (p.nodeId === null || p.nodeId === s.nodeId),
+        ),
+      )
+    : nodeFilteredSessions;
+
+  const runningCount = workspaceFilteredSessions.filter((session) => isActive(session.status)).length;
+  const filteredSessions = workspaceFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
 
   const virtualizer = useVirtualizer({
     count: filteredSessions.length,
@@ -76,7 +98,7 @@ export function Sidebar({
           <div>
             <h1 className="text-[13px] font-semibold text-ink">orka</h1>
             <p className="mt-0.5 text-[11px] text-ink-muted">
-              {runningCount} active / {nodeFilteredSessions.length} total
+              {runningCount} active / {workspaceFilteredSessions.length} total
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -110,6 +132,14 @@ export function Sidebar({
             )}
           </div>
         </div>
+        {showWorkspaceSwitcher ? (
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+            onSelectWorkspace={onSelectWorkspace}
+            onCreateWorkspace={onCreateWorkspace}
+          />
+        ) : null}
         {showNodeSelector ? (
           <NodeSelector
             nodes={nodes}
@@ -216,6 +246,106 @@ export function Sidebar({
         )}
       </div>
     </aside>
+  );
+}
+
+function WorkspaceSwitcher({
+  workspaces,
+  activeWorkspaceId,
+  onSelectWorkspace,
+  onCreateWorkspace,
+}: {
+  workspaces: WorkspaceInfo[];
+  activeWorkspaceId: string | null;
+  onSelectWorkspace: (id: string | null) => void;
+  onCreateWorkspace: (name: string) => Promise<void>;
+}) {
+  const [isCreating, setIsCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isCreating) inputRef.current?.focus();
+  }, [isCreating]);
+
+  async function handleCreate() {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    await onCreateWorkspace(trimmed);
+    setNewName("");
+    setIsCreating(false);
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-1">
+      <Layers className="h-3 w-3 shrink-0 text-ink-muted" />
+      <div className="flex flex-1 flex-wrap gap-1">
+        <button
+          type="button"
+          onClick={() => onSelectWorkspace(null)}
+          className={`rounded-sm px-1.5 py-0.5 text-[10px] font-medium transition ${
+            activeWorkspaceId === null
+              ? "bg-accent-strong text-white"
+              : "bg-surface-alt text-ink-muted hover:text-ink-secondary"
+          }`}
+        >
+          All
+        </button>
+        {workspaces.map((ws) => (
+          <button
+            key={ws.id}
+            type="button"
+            onClick={() => onSelectWorkspace(ws.id)}
+            className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium transition ${
+              activeWorkspaceId === ws.id
+                ? "bg-accent-strong text-white"
+                : "bg-surface-alt text-ink-muted hover:text-ink-secondary"
+            }`}
+          >
+            {ws.metadata?.color ? (
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-sm"
+                style={{ backgroundColor: ws.metadata.color }}
+              />
+            ) : null}
+            {ws.name}
+            {ws.activeCount > 0 ? (
+              <span className="text-[9px] opacity-60">{ws.activeCount}</span>
+            ) : null}
+          </button>
+        ))}
+        {isCreating ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleCreate();
+              if (e.key === "Escape") {
+                setIsCreating(false);
+                setNewName("");
+              }
+            }}
+            onBlur={() => {
+              setIsCreating(false);
+              setNewName("");
+            }}
+            placeholder="Name…"
+            className="w-20 rounded-sm border border-accent bg-surface-alt px-1.5 py-0.5 text-[10px] text-ink outline-none"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsCreating(true)}
+            className="rounded-sm px-1 py-0.5 text-ink-muted transition hover:bg-surface-alt hover:text-ink-secondary"
+            title="Create workspace"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

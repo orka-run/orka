@@ -24,6 +24,9 @@ import type {
   TimelineParams,
   TimelineResponse,
   UsageSummary,
+  WorkspaceInfo,
+  WorkspaceMetadata,
+  WorkspaceSettings,
 } from "@orka/core";
 
 export function createRpcClient(ws: WsTransport) {
@@ -141,6 +144,22 @@ export function createRpcClient(ws: WsTransport) {
       rpc<void>("terminalClose", { termId }, options),
     terminalList: (sessionId: string, options?: RequestOptions) =>
       rpc<Array<{ id: string; cols: number; rows: number }>>("terminalList", { sessionId }, options),
+
+    // --- Workspaces ---
+    listWorkspaces: (opts?: { includeArchived?: boolean }, options?: RequestOptions) =>
+      rpc<WorkspaceInfo[]>("listWorkspaces", opts, options),
+    getWorkspace: (id: string, options?: RequestOptions) =>
+      rpc<WorkspaceInfo>("getWorkspace", { id }, options),
+    createWorkspace: (opts: { name: string; paths?: Array<{ nodeId?: string; path: string }>; settings?: WorkspaceSettings; metadata?: WorkspaceMetadata }, options?: RequestOptions) =>
+      rpc<WorkspaceInfo>("createWorkspace", opts, options),
+    updateWorkspace: (id: string, opts: Partial<{ name: string; settings: WorkspaceSettings; metadata: WorkspaceMetadata; archivedAt: string | null }>, options?: RequestOptions) =>
+      rpc<void>("updateWorkspace", { id, ...opts }, options),
+    deleteWorkspace: (id: string, options?: RequestOptions) =>
+      rpc<void>("deleteWorkspace", { id }, options),
+    addWorkspacePath: (workspaceId: string, path: string, nodeId?: string, options?: RequestOptions) =>
+      rpc<void>("addWorkspacePath", { workspaceId, path, nodeId }, options),
+    removeWorkspacePath: (workspaceId: string, path: string, nodeId?: string, options?: RequestOptions) =>
+      rpc<void>("removeWorkspacePath", { workspaceId, path, nodeId }, options),
 
     // --- Dashboard-specific (not in OrkaService) ---
     retrySession: (sessionId: string, options?: RequestOptions) =>

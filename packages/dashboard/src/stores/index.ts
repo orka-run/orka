@@ -4,3 +4,4 @@ export * from "./connectionStore";
 export * from "./nodeStore";
 export * from "./notificationStore";
 export * from "./sessionStore";
+export * from "./workspaceStore";

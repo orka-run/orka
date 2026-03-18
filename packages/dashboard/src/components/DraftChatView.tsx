@@ -1,7 +1,7 @@
 // Draft chat view: unified spawn UX with inline advanced options
 import { useState } from "react";
 import { Bot, LoaderCircle, MessageSquarePlus, User } from "lucide-react";
-import type { BackendKind, NodeInfo, OrchestrationEvent, PermissionMode, SpawnRequest } from "@orka/core";
+import type { BackendKind, NodeInfo, OrchestrationEvent, PermissionMode, SpawnRequest, WorkspaceInfo } from "@orka/core";
 import { ChatInputComposer } from "./ChatInputComposer";
 import { SpawnAdvancedPanel } from "./SpawnAdvancedPanel";
 import { useRpcClient } from "../lib/transportContext";
@@ -12,6 +12,7 @@ import { withDashboardSpan } from "../lib/tracing";
 interface DraftChatViewProps {
   defaultProjectPath: string;
   nodes: NodeInfo[];
+  activeWorkspace?: WorkspaceInfo | null;
   onSpawned: () => void;
 }
 
@@ -35,21 +36,28 @@ function parseTags(value: string): string[] {
   );
 }
 
-export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftChatViewProps) {
+export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSpawned }: DraftChatViewProps) {
   const client = useRpcClient();
   const spawnSession = useSessionStore((state) => state.spawnSession);
 
+  // Derive defaults from workspace settings
+  const wsDefaults = activeWorkspace?.settings?.defaults;
+
   // Quick options (always visible)
-  const [backend, setBackend] = useState<BackendKind>("claude-code");
-  const [model, setModel] = useState("");
+  const [backend, setBackend] = useState<BackendKind>(
+    (wsDefaults?.backend as BackendKind) ?? "claude-code",
+  );
+  const [model, setModel] = useState(wsDefaults?.model ?? "");
 
   // Advanced options (collapsible)
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [title, setTitle] = useState("");
-  const [tags, setTags] = useState("");
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>("supervised");
+  const [tags, setTags] = useState(wsDefaults?.tags?.join(", ") ?? "");
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(
+    (wsDefaults?.permissionMode as PermissionMode) ?? "supervised",
+  );
   const [autoMerge, setAutoMerge] = useState(false);
-  const [systemPrompt, setSystemPrompt] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState(wsDefaults?.systemPrompt ?? "");
   const [nodeId, setNodeId] = useState("");
 
   // Spawn state
@@ -117,6 +125,17 @@ export function DraftChatView({ defaultProjectPath, nodes, onSpawned }: DraftCha
     <div className="flex h-full flex-col">
       <header className="border-b border-border px-3 py-1.5">
         <div className="flex flex-wrap items-center gap-2">
+          {activeWorkspace ? (
+            <span className="inline-flex items-center gap-1 rounded-sm border border-accent/20 bg-accent/5 px-1.5 py-0.5 text-[10px] font-medium text-accent-strong">
+              {activeWorkspace.metadata?.color ? (
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-sm"
+                  style={{ backgroundColor: activeWorkspace.metadata.color }}
+                />
+              ) : null}
+              {activeWorkspace.name}
+            </span>
+          ) : null}
           <MiniPills options={BACKENDS} value={backend} onChange={setBackend} />
           <select
             value={model}
