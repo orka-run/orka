@@ -60,7 +60,7 @@ Key insight: the temp index means the agent's actual staging area is never touch
 
 ### 1. Database Schema
 
-New migration (version 32):
+New Kysely migration (`003_checkpoints.ts`):
 
 ```sql
 CREATE TABLE checkpoints (
@@ -265,7 +265,7 @@ Checkpoint refs accumulate over time. Cleanup strategy:
 
 ## Task Breakdown
 
-1. **DB migration** — Add `checkpoints` table (migration v32)
+1. **DB migration** — Add `checkpoints` table (Kysely migration `003_checkpoints`)
 2. **checkpoint.ts module** — Implement `captureCheckpoint()` with isolated git index
 3. **Consumer integration** — Add `captureCheckpoint` callback, wire through DaemonContext, call on `turn.completed` and `session.started` (baseline)
 4. **Per-session serialization** — Mutex to prevent overlapping captures
