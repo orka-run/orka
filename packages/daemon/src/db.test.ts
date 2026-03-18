@@ -389,3 +389,45 @@ describe("orchestration event helpers", () => {
     expect(db.getOrchestrationEvents("sess-1")).toEqual([]);
   });
 });
+
+describe("checkpoint helpers", () => {
+  test("stores, reads, and deletes checkpoints", () => {
+    seedSession("sess-checkpoints");
+
+    db.insertCheckpoint({
+      id: "chk-1",
+      sessionId: "sess-checkpoints",
+      turnSeq: 0,
+      gitRef: "refs/orka/checkpoints/sess-checkpoints/0",
+      status: "ready",
+      files: [{ path: "notes.txt", additions: 3, deletions: 1 }],
+      createdAt: "2026-01-01T00:03:00.000Z",
+    });
+    db.insertCheckpoint({
+      id: "chk-2",
+      sessionId: "sess-checkpoints",
+      turnSeq: 1,
+      gitRef: "refs/orka/checkpoints/sess-checkpoints/1",
+      status: "oversized",
+      files: null,
+      createdAt: "2026-01-01T00:04:00.000Z",
+    });
+
+    expect(db.getCheckpoint("sess-checkpoints", 0)).toEqual({
+      id: "chk-1",
+      sessionId: "sess-checkpoints",
+      turnSeq: 0,
+      gitRef: "refs/orka/checkpoints/sess-checkpoints/0",
+      status: "ready",
+      files: [{ path: "notes.txt", additions: 3, deletions: 1 }],
+      createdAt: "2026-01-01T00:03:00.000Z",
+    });
+    expect(db.getCheckpoints("sess-checkpoints").map((checkpoint) => checkpoint.turnSeq)).toEqual([0, 1]);
+
+    db.deleteCheckpoints("sess-checkpoints", 0);
+    expect(db.getCheckpoints("sess-checkpoints").map((checkpoint) => checkpoint.turnSeq)).toEqual([0]);
+
+    db.deleteCheckpoints("sess-checkpoints");
+    expect(db.getCheckpoints("sess-checkpoints")).toEqual([]);
+  });
+});

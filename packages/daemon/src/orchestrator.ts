@@ -12,6 +12,7 @@ import {
   type SpawnRequest,
   type SpawnResult,
 } from "@orka/core";
+import { captureCheckpoint } from "./checkpointing";
 import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, deleteBranch } from "./worktree";
 import { assertBackendInstalled } from "./backends";
@@ -65,6 +66,45 @@ async function hibernateSession(ctx: DaemonContext, sessionId: string): Promise<
   });
 }
 
+function getNextCheckpointTurnSeq(ctx: DaemonContext, sessionId: string): number {
+  const current = ctx.sessionRuntime.turnCounts.get(sessionId);
+  if (current !== undefined) {
+    const next = current + 1;
+    ctx.sessionRuntime.turnCounts.set(sessionId, next);
+    return next;
+  }
+
+  const last = ctx.db.getCheckpoints(sessionId).at(-1)?.turnSeq ?? -1;
+  const next = last + 1;
+  ctx.sessionRuntime.turnCounts.set(sessionId, next);
+  return next;
+}
+
+function queueCheckpointCapture(
+  ctx: DaemonContext,
+  sessionId: string,
+  turnSeq: number,
+  workingDir: string,
+): void {
+  const previous = ctx.sessionRuntime.checkpointCaptureChains.get(sessionId) ?? Promise.resolve();
+  const captureTask = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const checkpoint = await captureCheckpoint(workingDir, sessionId, turnSeq);
+      ctx.db.insertCheckpoint(checkpoint);
+    })
+    .catch((error) => {
+      console.error(`checkpoint capture failed for session ${sessionId} turn ${turnSeq}`, error);
+    });
+
+  ctx.sessionRuntime.checkpointCaptureChains.set(sessionId, captureTask);
+  void captureTask.finally(() => {
+    if (ctx.sessionRuntime.checkpointCaptureChains.get(sessionId) === captureTask) {
+      ctx.sessionRuntime.checkpointCaptureChains.delete(sessionId);
+    }
+  });
+}
+
 // --- Consumer callbacks factory ---
 
 function buildConsumerCallbacks(
@@ -109,6 +149,10 @@ function buildConsumerCallbacks(
       }
     },
     onSessionIdle: (id: string) => startIdleTimer(ctx, id),
+    onTurnCheckpoint: (id: string, turnSeq: number, workingDir: string) => {
+      queueCheckpointCapture(ctx, id, turnSeq, workingDir);
+    },
+    getNextTurnSeq: (id: string) => getNextCheckpointTurnSeq(ctx, id),
     autoMergeFired: ctx.sessionRuntime.autoMergeFired,
   };
 }
@@ -287,6 +331,8 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     ctx.db.updateSessionRawLogFile(sessionId, rawLogPath);
 
     ctx.db.updateSessionStatus(sessionId, "running", { startedAt });
+    ctx.sessionRuntime.turnCounts.set(sessionId, 0);
+    queueCheckpointCapture(ctx, sessionId, 0, workingDir);
     recordSessionStartedMetrics();
 
     // Emit user.input event for the initial prompt

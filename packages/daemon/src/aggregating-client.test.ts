@@ -119,6 +119,9 @@ function createMockLocalClient(): OrkaService {
     getLogContent: mock(async () => "log"),
     isAlive: mock(async () => true),
     sendTurn: mock(async () => {}),
+    getCheckpoints: mock(async () => []),
+    getTurnDiff: mock(async () => ({ diff: "" })),
+    revertToCheckpoint: mock(async () => {}),
     getDiff: mock(async () => ({ status: "clean", diff: "" })),
     merge: mock(async () => ({ branch: "main", commits: 1, cleaned: true })),
     startPairing: mock(async () => ({

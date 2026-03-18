@@ -1,5 +1,6 @@
 import type {
   ChatEntry,
+  Checkpoint,
   NodeInfo,
   OrchestrationEvent,
   OrkaService,
@@ -20,9 +21,12 @@ import type {
   ApprovalRequest,
   ApprovalDecision,
   PushChannel,
+  PairWithNodeParams,
+  PairWithNodeResult,
   DataFrame,
   StartPairingParams,
   StartPairingResult,
+  StoredNode,
   WorkspaceInfo,
   WorkspaceMetadata,
   WorkspaceSettings,
@@ -321,8 +325,40 @@ class OrkaClient implements OrkaService {
     return this.call("sendTurn", { sessionId, text });
   }
 
+  async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {
+    return this.call("getCheckpoints", { sessionId });
+  }
+
+  async getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }> {
+    return this.call("getTurnDiff", { sessionId, fromTurn, toTurn });
+  }
+
+  async revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void> {
+    return this.call("revertToCheckpoint", { sessionId, turnSeq });
+  }
+
   async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
     return this.call("startPairing", params);
+  }
+
+  async pairWithNode(params: PairWithNodeParams): Promise<PairWithNodeResult> {
+    return this.call("pairWithNode", params);
+  }
+
+  async listPairedNodes(): Promise<StoredNode[]> {
+    return this.call("listPairedNodes");
+  }
+
+  async removePairedNode(params: { nodeId: string }): Promise<void> {
+    return this.call("removePairedNode", params);
+  }
+
+  async connectNode(params: { nodeId: string }): Promise<void> {
+    return this.call("connectNode", params);
+  }
+
+  async disconnectNode(params: { nodeId: string }): Promise<void> {
+    return this.call("disconnectNode", params);
   }
 
   async getDiff(sessionId: string): Promise<DiffResult> {

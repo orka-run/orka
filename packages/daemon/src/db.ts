@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { z } from "zod/v4";
 import type {
+  Checkpoint,
   OrchestrationEvent,
   PersistedOrchestrationEvent,
   Session,
@@ -67,6 +68,22 @@ const UsageLogRowSchema = z.object({
 
 const OrchestrationEventRowSchema = z.object({
   payload: z.string(),
+});
+
+const CheckpointFileSchema = z.object({
+  path: z.string(),
+  additions: z.number(),
+  deletions: z.number(),
+});
+
+const CheckpointRowSchema = z.object({
+  id: z.string(),
+  session_id: z.string(),
+  turn_seq: z.number(),
+  git_ref: z.string(),
+  status: z.enum(["ready", "missing", "error", "oversized"]),
+  files: z.string().nullable().default(null),
+  created_at: z.string(),
 });
 
 const ORKA_DIR = ".orka";
@@ -296,6 +313,55 @@ export class DatabaseRepository {
       .get(sessionId) as { last_diff: string | null } | undefined;
     if (!row?.last_diff) return null;
     return JSON.parse(row.last_diff);
+  }
+
+  insertCheckpoint(checkpoint: Checkpoint): void {
+    withSpanSync("orka.db.insertCheckpoint", { "orka.session.id": checkpoint.sessionId, "orka.turn.seq": checkpoint.turnSeq }, () => {
+      this.db
+        .prepare(
+          `INSERT INTO checkpoints (id, session_id, turn_seq, git_ref, status, files, created_at)
+           VALUES ($id, $sessionId, $turnSeq, $gitRef, $status, $files, $createdAt)`,
+        )
+        .run({
+          $id: checkpoint.id,
+          $sessionId: checkpoint.sessionId,
+          $turnSeq: checkpoint.turnSeq,
+          $gitRef: checkpoint.gitRef,
+          $status: checkpoint.status,
+          $files: checkpoint.files ? JSON.stringify(checkpoint.files) : null,
+          $createdAt: checkpoint.createdAt,
+        });
+    });
+  }
+
+  getCheckpoints(sessionId: string): Checkpoint[] {
+    return withSpanSync("orka.db.getCheckpoints", { "orka.session.id": sessionId }, () => {
+      const rows = this.db
+        .prepare("SELECT * FROM checkpoints WHERE session_id = ? ORDER BY turn_seq ASC")
+        .all(sessionId) as unknown[];
+      return rows.map(rowToCheckpoint);
+    });
+  }
+
+  getCheckpoint(sessionId: string, turnSeq: number): Checkpoint | null {
+    return withSpanSync("orka.db.getCheckpoint", { "orka.session.id": sessionId, "orka.turn.seq": turnSeq }, () => {
+      const row = this.db
+        .prepare("SELECT * FROM checkpoints WHERE session_id = ? AND turn_seq = ?")
+        .get(sessionId, turnSeq) as unknown;
+      return row ? rowToCheckpoint(row) : null;
+    });
+  }
+
+  deleteCheckpoints(sessionId: string, afterTurnSeq?: number): void {
+    withSpanSync("orka.db.deleteCheckpoints", { "orka.session.id": sessionId }, () => {
+      if (afterTurnSeq === undefined) {
+        this.db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run(sessionId);
+        return;
+      }
+      this.db
+        .prepare("DELETE FROM checkpoints WHERE session_id = ? AND turn_seq > ?")
+        .run(sessionId, afterTurnSeq);
+    });
   }
 
   getSession(id: string): Session | null {
@@ -941,6 +1007,19 @@ function rowToOrchestrationEvent(row: unknown): OrchestrationEvent {
     throw new Error("Invalid orchestration event payload: failed wire schema validation");
   }
   return event;
+}
+
+function rowToCheckpoint(row: unknown): Checkpoint {
+  const data = CheckpointRowSchema.parse(row);
+  return {
+    id: data.id,
+    sessionId: data.session_id,
+    turnSeq: data.turn_seq,
+    gitRef: data.git_ref,
+    status: data.status,
+    files: data.files ? z.array(CheckpointFileSchema).parse(JSON.parse(data.files)) : null,
+    createdAt: data.created_at,
+  };
 }
 
 // --- Session state machine ---

@@ -2,6 +2,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   ChatEntry,
+  Checkpoint,
   DiffResult,
   MergeResult,
   NodeInfo,
@@ -156,6 +157,12 @@ export function createAggregatingClient(
         return svc.stop(params.sessionId);
       case "sendTurn":
         return svc.sendTurn(params.sessionId, params.text);
+      case "getCheckpoints":
+        return svc.getCheckpoints(params["sessionId"]);
+      case "getTurnDiff":
+        return svc.getTurnDiff(params["sessionId"], params["fromTurn"], params["toTurn"]);
+      case "revertToCheckpoint":
+        return svc.revertToCheckpoint(params["sessionId"], params["turnSeq"]);
       case "setKept":
         return svc.setKept(params.sessionId, params.kept);
       case "merge":
@@ -395,6 +402,18 @@ export function createAggregatingClient(
 
     async sendTurn(sessionId: string, text: string): Promise<void> {
       return routeBySession<void>(sessionId, "sendTurn", { sessionId, text });
+    },
+
+    async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {
+      return routeBySession<Checkpoint[]>(sessionId, "getCheckpoints", { sessionId });
+    },
+
+    async getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }> {
+      return routeBySession<{ diff: string }>(sessionId, "getTurnDiff", { sessionId, fromTurn, toTurn });
+    },
+
+    async revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void> {
+      return routeBySession<void>(sessionId, "revertToCheckpoint", { sessionId, turnSeq });
     },
 
     async setKept(sessionId: string, kept: boolean): Promise<void> {
