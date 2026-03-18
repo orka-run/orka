@@ -128,7 +128,7 @@ const MIGRATIONS = [
   { version: 31, sql: `ALTER TABLE sessions ADD COLUMN permission_mode TEXT` },
   { version: 32, sql: `ALTER TABLE sessions ADD COLUMN no_worktree INTEGER NOT NULL DEFAULT 0` },
   { version: 33, sql: `CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, archived_at TEXT, settings TEXT, metadata TEXT)` },
-  { version: 34, sql: `CREATE TABLE IF NOT EXISTS workspace_paths (workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, node_id TEXT, project_path TEXT NOT NULL, PRIMARY KEY (workspace_id, COALESCE(node_id, ''), project_path))` },
+  { version: 34, sql: `CREATE TABLE IF NOT EXISTS workspace_paths (workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, node_id TEXT NOT NULL DEFAULT '', project_path TEXT NOT NULL, PRIMARY KEY (workspace_id, node_id, project_path))` },
   { version: 35, sql: `CREATE INDEX IF NOT EXISTS idx_workspace_paths_path ON workspace_paths(project_path)` },
   { version: 36, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)` },
 ];
@@ -188,7 +188,18 @@ function migrate(db: Database): void {
 
   for (const { version, sql } of MIGRATIONS) {
     if (!check.get(version)) {
-      try { db.exec(sql); } catch { /* column may already exist from pre-versioned migration */ }
+      try {
+        db.exec(sql);
+      } catch (err) {
+        // Only swallow "duplicate column" errors from ALTER TABLE ADD COLUMN
+        // (pre-versioned migrations may have already added these columns)
+        const msg = String(err);
+        if (msg.includes("duplicate column") || msg.includes("already exists")) {
+          // Safe to ignore — column/table was already created before we had versioned migrations
+        } else {
+          throw err; // Re-throw real errors (CREATE TABLE, CREATE INDEX, etc.)
+        }
+      }
       insert.run(version, new Date().toISOString());
     }
   }
