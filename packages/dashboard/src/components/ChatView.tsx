@@ -26,6 +26,10 @@ function isRunning(status: SessionSummary["status"]): boolean {
   return status === "queued" || status === "preparing" || status === "running";
 }
 
+function canStop(status: SessionSummary["status"]): boolean {
+  return status === "queued" || status === "preparing" || status === "running" || status === "rate_limited";
+}
+
 export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const client = useRpcClient();
@@ -172,7 +176,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onSend={handleSend}
           sendError={sendError}
           onClearError={() => { setSendError(null); }}
-          {...(isRunning(session.status) ? { onStop: () => { void handleStop(); } } : {})}
+          {...(canStop(session.status) ? { onStop: () => { void handleStop(); } } : {})}
           isStopping={stopping}
         />
       </div>

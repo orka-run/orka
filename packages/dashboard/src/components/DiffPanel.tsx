@@ -38,7 +38,7 @@ interface FileSidebarItem {
   diffFile: DiffFile | null;
 }
 
-const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
+const ACTIVE_STATUSES = new Set(["queued", "preparing", "running", "rate_limited"]);
 const AUTO_REFRESH_MS = 5_000;
 const VIEW_MODES: Array<{ id: DiffViewMode; label: string }> = [
   { id: "full", label: "Full Session" },

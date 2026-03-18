@@ -20,6 +20,10 @@ export interface SessionRuntimeState {
   idleTimers: Map<string, ReturnType<typeof setTimeout>>;
   /** Per-session follow-up messages queued while the agent is still finishing the current turn. */
   pendingMessages: Map<string, string[]>;
+  /** Per-session rate-limit resume timers. */
+  rateLimitTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Latest rejected rate-limit reset info observed for a session. */
+  pendingRateLimits: Map<string, { rateLimitType: string; resetsAt: number }>;
   /** Tracks which sessions have already auto-merged (one-shot on first idle). */
   autoMergeFired: Set<string>;
   /** Per-session checkpoint turn counters. */
@@ -88,6 +92,8 @@ export async function createDaemonContext(orkaHome?: string): Promise<DaemonCont
   const sessionRuntime: SessionRuntimeState = {
     idleTimers: new Map(),
     pendingMessages: new Map(),
+    rateLimitTimers: new Map(),
+    pendingRateLimits: new Map(),
     autoMergeFired: new Set(),
     turnCounts: new Map(),
     checkpointCaptureChains: new Map(),

@@ -558,7 +558,7 @@ function AppShell({ transport, client }: AppShellProps) {
   );
 
   const mobileHeaderTitle = selectedSession?.title ?? null;
-  const isSelectedSessionStoppable = selectedSession != null && ["running", "queued", "preparing"].includes(selectedSession.status);
+  const isSelectedSessionStoppable = selectedSession != null && ["running", "queued", "preparing", "rate_limited"].includes(selectedSession.status);
   const handleMobileStop = useCallback(async () => {
     if (!selectedId || isMobileStopping) return;
     setIsMobileStopping(true);

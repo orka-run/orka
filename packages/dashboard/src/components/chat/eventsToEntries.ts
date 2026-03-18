@@ -54,6 +54,7 @@ export interface RateLimitEntry {
   title: string;
   body: string;
   tone: "warning" | "error";
+  scheduledResumeAt?: string;
 }
 
 export interface ApiRetryEntry {
@@ -192,6 +193,13 @@ export function eventsToEntries(
   initialPrompt?: string,
   workDir?: string,
 ): ChatEntry[] {
+  const scheduledRateLimitKeys = new Set(
+    events
+      .filter((event): event is Extract<OrchestrationEvent, { type: "session.rate_limited" }> =>
+        event.type === "session.rate_limited" && typeof event.scheduledResumeAt === "string",
+      )
+      .map((event) => `${event.rateLimitType}:${String(event.resetsAt)}`),
+  );
   const completedItemIds = new Set<string>();
   const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
 
@@ -518,7 +526,24 @@ export function eventsToEntries(
         });
         break;
       case "session.rate_limited": {
-        if (event.status === "allowed") {
+        if (event.scheduledResumeAt) {
+          entries.push({
+            id: `rate-limit-${event.timestamp}`,
+            type: "rate-limit",
+            timestamp: event.timestamp,
+            title: "Rate limit reached",
+            body: `Rate limit reached - auto-resuming at ${formatResetAt(event.resetsAt)}`,
+            tone: "warning",
+            scheduledResumeAt: event.scheduledResumeAt,
+          });
+          break;
+        }
+
+        if (!event.status || event.status === "allowed") {
+          break;
+        }
+
+        if (event.status === "rejected" && scheduledRateLimitKeys.has(`${event.rateLimitType}:${String(event.resetsAt)}`)) {
           break;
         }
 
@@ -537,6 +562,7 @@ export function eventsToEntries(
               ? `Rate limit exceeded - ${resetText}`
               : `Rate limit: ${formatPercent(event.utilization) ?? "warning"} used (${resetText})`,
           tone: event.status === "rejected" ? "error" : "warning",
+          ...(event.scheduledResumeAt ? { scheduledResumeAt: event.scheduledResumeAt } : {}),
         });
         break;
       }

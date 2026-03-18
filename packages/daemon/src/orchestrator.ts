@@ -6,6 +6,7 @@ import {
   type BackendKind,
   type PermissionMode,
   type ProviderSessionHandle,
+  type RateLimitInfo,
   type ReasoningEffort,
   type Session,
   type Task,
@@ -20,6 +21,8 @@ import type { DaemonContext } from "./daemon-context";
 import { getDaemonMetrics, withSpan } from "./tracing";
 
 // --- Idle timer management ---
+
+const AUTO_RESUME_PROMPT = "Please continue from where you left off after the rate limit reset.";
 
 function clearIdleTimer(ctx: DaemonContext, sessionId: string): void {
   const timer = ctx.sessionRuntime.idleTimers.get(sessionId);
@@ -42,6 +45,113 @@ function startIdleTimer(ctx: DaemonContext, sessionId: string): void {
   timer.unref(); // Don't prevent process exit
 
   ctx.sessionRuntime.idleTimers.set(sessionId, timer);
+}
+
+function clearRateLimitTimer(ctx: DaemonContext, sessionId: string): void {
+  const timer = ctx.sessionRuntime.rateLimitTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    ctx.sessionRuntime.rateLimitTimers.delete(sessionId);
+  }
+}
+
+function clearPendingRateLimit(ctx: DaemonContext, sessionId: string): void {
+  ctx.sessionRuntime.pendingRateLimits.delete(sessionId);
+}
+
+function clearRateLimitState(ctx: DaemonContext, sessionId: string): void {
+  clearRateLimitTimer(ctx, sessionId);
+  clearPendingRateLimit(ctx, sessionId);
+}
+
+function rememberRateLimitEvent(ctx: DaemonContext, sessionId: string, info: RateLimitInfo): void {
+  if (info.status === "rejected") {
+    ctx.sessionRuntime.pendingRateLimits.set(sessionId, {
+      rateLimitType: info.rateLimitType,
+      resetsAt: info.resetsAt,
+    });
+    return;
+  }
+
+  clearPendingRateLimit(ctx, sessionId);
+}
+
+function consumePendingRateLimit(
+  ctx: DaemonContext,
+  sessionId: string,
+): { rateLimitType: string; resetsAt: number } | null {
+  const info = ctx.sessionRuntime.pendingRateLimits.get(sessionId) ?? null;
+  clearPendingRateLimit(ctx, sessionId);
+  return info;
+}
+
+function scheduleRateLimitResume(
+  ctx: DaemonContext,
+  sessionId: string,
+  rateLimit: { rateLimitType: string; resetsAt: number },
+): string {
+  clearRateLimitTimer(ctx, sessionId);
+
+  const scheduledResumeAt = new Date(rateLimit.resetsAt * 1000).toISOString();
+  const delayMs = Math.max(0, rateLimit.resetsAt * 1000 - Date.now());
+  const timer = setTimeout(() => {
+    ctx.sessionRuntime.rateLimitTimers.delete(sessionId);
+    void withSpan("orka.resume.rate_limit_auto", {
+      "orka.session.id": sessionId,
+      "orka.rate_limit.type": rateLimit.rateLimitType,
+      "orka.rate_limit.resets_at": rateLimit.resetsAt,
+    }, async (span) => {
+      const session = ctx.db.getSession(sessionId);
+      if (!session || session.status !== "rate_limited") {
+        span.addEvent("auto_resume.skipped");
+        return;
+      }
+
+      try {
+        await resumeSession(ctx, sessionId, AUTO_RESUME_PROMPT, { emitUserInput: false });
+        span.addEvent("auto_resume.completed");
+      } catch (error) {
+        span.recordException(error as Error);
+        console.error(`auto-resume failed for session ${sessionId}`, error);
+
+        const current = ctx.db.getSession(sessionId);
+        if (current?.status === "rate_limited") {
+          ctx.db.updateSessionStatus(sessionId, "hibernated");
+          ctx.pushHub.broadcast("orchestration.sessionUpdated", {
+            sessionId,
+            status: "hibernated",
+          });
+        }
+      }
+    });
+  }, delayMs);
+  timer.unref();
+
+  ctx.sessionRuntime.rateLimitTimers.set(sessionId, timer);
+  return scheduledResumeAt;
+}
+
+function markSessionRateLimited(
+  ctx: DaemonContext,
+  sessionId: string,
+  rateLimit: { rateLimitType: string; resetsAt: number },
+  timestamp: string,
+): void {
+  ctx.db.updateSessionStatus(sessionId, "rate_limited");
+  const scheduledResumeAt = scheduleRateLimitResume(ctx, sessionId, rateLimit);
+  ctx.orchestrationEngine.emitDirect({
+    type: "session.rate_limited",
+    sessionId,
+    rateLimitType: rateLimit.rateLimitType,
+    resetsAt: rateLimit.resetsAt,
+    scheduledResumeAt,
+    timestamp,
+    v: 1,
+  });
+  ctx.pushHub.broadcast("orchestration.sessionUpdated", {
+    sessionId,
+    status: "rate_limited",
+  });
 }
 
 /** Kill the process and set session to "hibernated". */
@@ -177,6 +287,12 @@ function buildConsumerCallbacks(
       queueCheckpointCapture(ctx, id, turnSeq, workingDir);
     },
     getNextTurnSeq: (id: string) => getNextCheckpointTurnSeq(ctx, id),
+    rememberRateLimitEvent: (id: string, info: RateLimitInfo) => rememberRateLimitEvent(ctx, id, info),
+    consumePendingRateLimit: (id: string) => consumePendingRateLimit(ctx, id),
+    clearPendingRateLimit: (id: string) => clearPendingRateLimit(ctx, id),
+    onSessionRateLimited: (id: string, rateLimit: { rateLimitType: string; resetsAt: number }, timestamp: string) => {
+      markSessionRateLimited(ctx, id, rateLimit, timestamp);
+    },
     autoMergeFired: ctx.sessionRuntime.autoMergeFired,
     clearPendingMessages: (id: string) => {
       ctx.sessionRuntime.pendingMessages.delete(id);
@@ -347,6 +463,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(inPlace ? { noWorktree: true } : {}),
     };
     ctx.db.insertSession(session);
+    clearRateLimitState(ctx, sessionId);
 
     // 4b. Store tags
     if (req.tags && req.tags.length > 0) {
@@ -418,10 +535,12 @@ export async function resumeSession(
   ctx: DaemonContext,
   sessionId: string,
   prompt: string,
+  options: { emitUserInput?: boolean } = {},
 ): Promise<void> {
   await withSpan("orka.resume", { "orka.session.id": sessionId }, async (span) => {
     const session = ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const emitUserInput = options.emitUserInput ?? true;
 
     // Recreate worktree if it was cleaned up but the branch still exists
     // In-place sessions have no worktree to recreate
@@ -451,6 +570,7 @@ export async function resumeSession(
 
     // Clear any stale provider handle
     ctx.providerService.clearHandle(sessionId);
+    clearRateLimitState(ctx, sessionId);
 
     const startedAt = new Date().toISOString();
 
@@ -495,13 +615,15 @@ export async function resumeSession(
     span.addEvent("session.resumed");
 
     // Emit user.input event
-    ctx.orchestrationEngine.emitDirect({
-      type: "user.input",
-      sessionId,
-      timestamp: startedAt,
-      text: prompt,
-      v: 1,
-    });
+    if (emitUserInput) {
+      ctx.orchestrationEngine.emitDirect({
+        type: "user.input",
+        sessionId,
+        timestamp: startedAt,
+        text: prompt,
+        v: 1,
+      });
+    }
 
     // Reset session status to running
     ctx.db.resetSessionForContinue(sessionId, startedAt);
@@ -540,6 +662,7 @@ export async function closeSession(ctx: DaemonContext, sessionId: string): Promi
 
     clearIdleTimer(ctx, sessionId);
     ctx.sessionRuntime.pendingMessages.delete(sessionId);
+    clearRateLimitState(ctx, sessionId);
 
     // Kill process if alive
     const handle = ctx.providerService.getHandle(sessionId);
@@ -609,6 +732,7 @@ export async function sendTurnToSession(
         return;
       }
 
+      case "rate_limited":
       case "hibernated":
       case "completed": {
         // Process is dead — resume with --resume
@@ -632,6 +756,7 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
 
     clearIdleTimer(ctx, sessionId);
     ctx.sessionRuntime.pendingMessages.delete(sessionId);
+    clearRateLimitState(ctx, sessionId);
 
     // Deny all pending hook-based approvals so the hook scripts unblock
     ctx.hookApprovalBridge.denyAllForSession(sessionId);
@@ -643,7 +768,7 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
       return;
     }
 
-    const activeStatuses = new Set(["running", "preparing", "idle"]);
+    const activeStatuses = new Set(["running", "preparing", "idle", "rate_limited"]);
     if (!activeStatuses.has(session.status)) {
       span.addEvent("session.stop_skipped_terminal");
       return;
@@ -672,7 +797,7 @@ export async function reapSessions(): Promise<number> {
 
 /** Detect sessions left in active statuses from a previous daemon and mark them. */
 export function recoverStaleSessions(ctx: DaemonContext): number {
-  const staleStatuses: Array<"running" | "preparing" | "idle"> = ["running", "preparing", "idle"];
+  const staleStatuses: Array<"running" | "preparing" | "idle" | "rate_limited"> = ["running", "preparing", "idle", "rate_limited"];
   let recovered = 0;
   const now = new Date().toISOString();
 
@@ -683,7 +808,9 @@ export function recoverStaleSessions(ctx: DaemonContext): number {
 
       // Sessions with provider_session_id can be resumed → hibernated
       // Sessions without it (old or preparing) → cancelled
-      const canResume = status !== "preparing" && session.providerSessionId;
+      clearRateLimitTimer(ctx, session.id);
+      clearPendingRateLimit(ctx, session.id);
+      const canResume = status !== "preparing" && (status === "rate_limited" || !!session.providerSessionId);
       const newStatus = canResume ? "hibernated" : "cancelled";
       ctx.db.updateSessionStatus(session.id, newStatus, newStatus === "cancelled" ? { finishedAt: now } : undefined);
 
@@ -756,7 +883,7 @@ export async function cleanupOrphanedWorktrees(ctx: DaemonContext): Promise<numb
 
     const allSessions = ctx.db.listSessions();
     // Sessions that still need their worktrees
-    const activeStatuses = new Set(["running", "preparing", "idle", "hibernated"]);
+    const activeStatuses = new Set(["running", "preparing", "idle", "rate_limited", "hibernated"]);
     const activeWorkdirs = new Set(
       allSessions
         .filter((s) => activeStatuses.has(s.status))

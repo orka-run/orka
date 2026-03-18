@@ -26,6 +26,7 @@ export const SessionStatusSchema = z.enum([
   "preparing",
   "running",
   "idle",
+  "rate_limited",
   "hibernated",
   "completed",
   "failed",

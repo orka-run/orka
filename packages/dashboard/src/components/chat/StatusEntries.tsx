@@ -1,13 +1,50 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
-import { formatDateTime } from "../../lib/sessionUi";
+import { formatDateTime, formatRelativeTime } from "../../lib/sessionUi";
 import type {
   ApiRetryEntry as ApiRetryEntryData,
   ErrorEntry as ErrorEntryData,
   RateLimitEntry as RateLimitEntryData,
 } from "./eventsToEntries";
 
+function formatCountdown(value: string, now = Date.now()): string | null {
+  const target = new Date(value).getTime();
+  if (!Number.isFinite(target)) {
+    return null;
+  }
+
+  const remainingMs = target - now;
+  if (remainingMs <= 0) {
+    return "now";
+  }
+
+  const totalMinutes = Math.ceil(remainingMs / 60_000);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
 export const RateLimitEntry = memo(function RateLimitEntry({ entry }: { entry: RateLimitEntryData }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!entry.scheduledResumeAt) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [entry.scheduledResumeAt]);
+
   const toneClasses =
     entry.tone === "error"
       ? {
@@ -23,12 +60,16 @@ export const RateLimitEntry = memo(function RateLimitEntry({ entry }: { entry: R
           body: "text-status-warning/80",
         };
 
+  const body = entry.scheduledResumeAt
+    ? `Rate limit reached - auto-resuming at ${formatRelativeTime(entry.scheduledResumeAt, now)} (${formatCountdown(entry.scheduledResumeAt, now) ?? "scheduled"})`
+    : entry.body;
+
   return (
     <div className={`flex items-start gap-2 rounded-sm border px-2 py-1.5 ${toneClasses.container}`}>
       <AlertTriangle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${toneClasses.icon}`} />
       <div>
         <p className={`text-[12px] font-medium ${toneClasses.title}`}>{entry.title}</p>
-        <p className={`mt-0.5 text-[11px] ${toneClasses.body}`}>{entry.body}</p>
+        <p className={`mt-0.5 text-[11px] ${toneClasses.body}`}>{body}</p>
         <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
       </div>
     </div>

@@ -3,6 +3,7 @@ import { $ } from "bun";
 import type {
   ApprovalRequest,
   ProviderApprovalDecision,
+  RateLimitInfo,
   RawProviderLine,
   ProviderRuntimeEvent,
   ProviderRuntimeEventOf,
@@ -53,6 +54,18 @@ export interface ProviderEventConsumerCallbacks {
   onTurnCheckpoint?: (sessionId: string, turnSeq: number, workingDir: string) => void;
   /** Returns the next checkpoint turn sequence for a session. */
   getNextTurnSeq?: (sessionId: string) => number;
+  /** Track the latest provider rate-limit exhaustion signal for this session. */
+  rememberRateLimitEvent?: (sessionId: string, info: RateLimitInfo) => void;
+  /** Consume the pending rejected rate-limit info, if any. */
+  consumePendingRateLimit?: (sessionId: string) => { rateLimitType: string; resetsAt: number } | null;
+  /** Clear stale rejected rate-limit info after a successful turn. */
+  clearPendingRateLimit?: (sessionId: string) => void;
+  /** Transition the session into rate_limited and schedule auto-resume. */
+  onSessionRateLimited?: (
+    sessionId: string,
+    rateLimit: { rateLimitType: string; resetsAt: number },
+    timestamp: string,
+  ) => void;
   /** Shared set tracking which sessions have already auto-merged (injected from DaemonContext). */
   autoMergeFired?: Set<string>;
 }
@@ -119,6 +132,9 @@ async function handleProviderEvent(
     case "turn.completed":
       persistUsageRecord(sessionId, handle, event, callbacks);
       await handleTurnCompleted(sessionId, callbacks);
+      return;
+    case "rate.limit":
+      callbacks.rememberRateLimitEvent?.(sessionId, event.payload.rateLimitInfo);
       return;
     case "session.exited":
       await finalizeSession(sessionId, event, callbacks);
@@ -220,6 +236,7 @@ async function handleTurnCompleted(
   sessionId: string,
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
+  callbacks.clearPendingRateLimit?.(sessionId);
   const workingDir = callbacks.workingDir;
   const turnSeq = callbacks.getNextTurnSeq?.(sessionId);
   if (workingDir && turnSeq !== undefined) {
@@ -280,6 +297,21 @@ async function finalizeSession(
   const finishedAt = event.createdAt;
 
   await captureSessionDiff(sessionId, callbacks);
+
+  if (status === "failed") {
+    const rateLimit = callbacks.consumePendingRateLimit?.(sessionId);
+    if (rateLimit) {
+      callbacks.onSessionRateLimited?.(sessionId, rateLimit, finishedAt);
+      recordSessionTerminalMetrics(currentSession?.startedAt ?? null, finishedAt, "rate_limited");
+
+      const pending = callbacks.approvalManager.getPendingForSession(sessionId);
+      for (const req of pending) {
+        callbacks.approvalManager.resolve(req.id, "deny");
+      }
+      callbacks.denyHookApprovals?.(sessionId);
+      return;
+    }
+  }
 
   callbacks.updateSessionStatus(sessionId, status, { finishedAt });
   recordSessionTerminalMetrics(currentSession?.startedAt ?? null, finishedAt, status);
@@ -418,7 +450,7 @@ function recordSessionTerminalMetrics(
   finishedAt: string,
   status: SessionStatus,
 ): void {
-  if (status !== "completed" && status !== "failed" && status !== "cancelled") {
+  if (status !== "completed" && status !== "failed" && status !== "cancelled" && status !== "rate_limited") {
     return;
   }
 
@@ -433,6 +465,8 @@ function recordSessionTerminalMetrics(
       break;
     case "cancelled":
       metrics.sessionsCancelled.add(1);
+      break;
+    case "rate_limited":
       break;
   }
 

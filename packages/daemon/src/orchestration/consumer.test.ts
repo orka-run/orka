@@ -499,6 +499,92 @@ describe("consumeProviderEvents", () => {
     ]);
   });
 
+  test("transitions failed sessions to rate_limited when the provider exhausts a rate limit", async () => {
+    const repoPath = await createRepo();
+    const queue = new AsyncEventQueue<ProviderRuntimeEvent>();
+    const statuses: StatusUpdate[] = [];
+    const scheduled: Array<{ sessionId: string; rateLimitType: string; resetsAt: number; timestamp: string }> = [];
+
+    const consumeTask = consumeProviderEvents(
+      "sess-rate-limited",
+      {
+        threadId: "thread-rate-limited",
+        provider: "claude-code" as const,
+        events: queue,
+        meta: {},
+      },
+      new OrchestrationEngine(),
+      {
+        updateSessionStatus: (sessionId, status, extra) => {
+          recordStatusUpdate(statuses, sessionId, status, extra);
+        },
+        saveSessionDiff: () => {},
+        insertUsageRecord: () => {},
+        approvalManager: new ApprovalManager(),
+        workingDir: repoPath,
+        getSession: () => ({
+          startedAt: "2026-03-11T00:00:00.000Z",
+          status: "running",
+        } as any),
+        rememberRateLimitEvent: () => {},
+        consumePendingRateLimit: () => ({
+          rateLimitType: "five_hour",
+          resetsAt: 1_773_990_000,
+        }),
+        onSessionRateLimited: (sessionId, rateLimit, timestamp) => {
+          scheduled.push({ sessionId, ...rateLimit, timestamp });
+          recordStatusUpdate(statuses, sessionId, "rate_limited");
+        },
+      },
+    );
+
+    queue.push(
+      createEvent(
+        "rate.limit",
+        "thread-rate-limited",
+        {
+          rateLimitInfo: {
+            status: "rejected",
+            resetsAt: 1_773_990_000,
+            rateLimitType: "five_hour",
+            isUsingOverage: false,
+          },
+        },
+        {
+          createdAt: "2026-03-11T00:04:00.000Z",
+        },
+      ),
+    );
+    queue.push(
+      createEvent(
+        "session.exited",
+        "thread-rate-limited",
+        { exitKind: "error", reason: "rate_limit" },
+        {
+          createdAt: "2026-03-11T00:05:00.000Z",
+        },
+      ),
+    );
+    queue.close();
+
+    await consumeTask;
+
+    expect(statuses).toEqual([
+      {
+        sessionId: "sess-rate-limited",
+        status: "rate_limited",
+      },
+    ]);
+    expect(scheduled).toEqual([
+      {
+        sessionId: "sess-rate-limited",
+        rateLimitType: "five_hour",
+        resetsAt: 1_773_990_000,
+        timestamp: "2026-03-11T00:05:00.000Z",
+      },
+    ]);
+  });
+
   test("marks the session failed when the consumer loop throws", async () => {
     const queue = new AsyncEventQueue<ProviderRuntimeEvent>();
     const statuses: StatusUpdate[] = [];

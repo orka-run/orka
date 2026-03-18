@@ -126,12 +126,13 @@ export type OrchestrationEvent =
       message: string;
     }>
   | OrchestrationEventEnvelope<"session.rate_limited", {
-      status: string;
-      resetsAt: number;
       rateLimitType: string;
+      resetsAt: number;
+      scheduledResumeAt?: string;
+      status?: string;
       utilization?: number;
       surpassedThreshold?: number;
-      isUsingOverage: boolean;
+      isUsingOverage?: boolean;
     }>
   | OrchestrationEventEnvelope<"session.api_retry", {
       attempt: number;
@@ -337,12 +338,13 @@ const WireEventVariants: Record<string, z.ZodType> = {
 
   "session.rate_limited": WireEventBaseSchema.extend({
     type: z.literal("session.rate_limited"),
-    status: z.string(),
-    resetsAt: z.number(),
     rateLimitType: z.string(),
+    resetsAt: z.number(),
+    scheduledResumeAt: z.string().optional(),
+    status: z.string().optional(),
     utilization: z.number().optional(),
     surpassedThreshold: z.number().optional(),
-    isUsingOverage: z.boolean(),
+    isUsingOverage: z.boolean().optional(),
   }).passthrough(),
 
   "session.api_retry": WireEventBaseSchema.extend({

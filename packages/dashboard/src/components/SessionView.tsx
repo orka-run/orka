@@ -25,13 +25,14 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
   running: { bg: "bg-accent/10", text: "text-accent-strong", dot: "bg-accent" },
   queued: { bg: "bg-status-warning/10", text: "text-status-warning", dot: "bg-status-warning" },
   preparing: { bg: "bg-status-warning/10", text: "text-status-warning", dot: "bg-status-warning" },
+  rate_limited: { bg: "bg-status-warning/10", text: "text-status-warning", dot: "bg-status-warning" },
   completed: { bg: "bg-emerald-600/10", text: "text-emerald-700", dot: "bg-emerald-600" },
   failed: { bg: "bg-status-error/10", text: "text-status-error", dot: "bg-status-error" },
   cancelled: { bg: "bg-surface-alt", text: "text-ink-muted", dot: "bg-ink-muted" },
   interrupted: { bg: "bg-orange-500/10", text: "text-orange-600", dot: "bg-orange-500" },
 };
 
-const ACTIVE_STATUSES = new Set(["queued", "preparing", "running"]);
+const ACTIVE_STATUSES = new Set(["queued", "preparing", "running", "rate_limited"]);
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function StatusBadge({ status }: { status: string }) {
