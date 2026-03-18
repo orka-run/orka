@@ -365,6 +365,19 @@ export class DatabaseRepository {
     });
   }
 
+  /** Read session env vars from DB. Separate from getSession() because env
+   *  contains secrets and must never cross the RPC wire. Used internally
+   *  by the daemon for resume/continuation. */
+  getSessionEnv(id: string): Record<string, string> | null {
+    return withSpanSync("orka.db.getSessionEnv", { "orka.session.id": id }, () => {
+      const row = this.db
+        .prepare("SELECT env_json FROM sessions WHERE id = ?")
+        .get(id) as { env_json: string | null } | undefined;
+      if (!row?.env_json) return null;
+      return JSON.parse(row.env_json) as Record<string, string>;
+    });
+  }
+
   listSessions(status?: SessionStatus, includeArchived = false): Session[] {
     return withSpanSync("orka.db.listSessions", {}, () => {
       const archiveFilter = includeArchived ? "" : " AND archived_at IS NULL";

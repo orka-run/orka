@@ -286,6 +286,15 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     ctx.db.updateSessionStatus(sessionId, "running", { startedAt });
     recordSessionStartedMetrics();
 
+    // Emit user.input event for the initial prompt
+    ctx.orchestrationEngine.emitDirect({
+      type: "user.input",
+      sessionId,
+      timestamp: startedAt,
+      text: req.prompt,
+      v: 1,
+    });
+
     void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine,
       buildConsumerCallbacks(ctx, sessionId, {
         logFile,
@@ -351,12 +360,14 @@ export async function resumeSession(
     ctx.providerService.clearHandle(sessionId);
 
     const startedAt = new Date().toISOString();
-    const systemPrompt = session.systemPrompt ?? "";
+
+    // Restore env vars, model, and task from DB for the resumed process
+    const sessionEnv = ctx.db.getSessionEnv(sessionId) ?? undefined;
+    const task = ctx.db.getTask(session.taskId);
 
     // Build prompt — if no provider session ID (old sessions), prepend context
     let fullPrompt = prompt;
     if (!session.providerSessionId) {
-      const task = ctx.db.getTask(session.taskId);
       const originalPrompt = task?.prompt ?? "(unknown)";
       let contextBlock = `[CONTEXT: You are continuing a previous session. The original task was:\n${originalPrompt}\n\nThe agent completed that task. The worktree at ${session.workingDir} has all previous changes.`;
       if (session.rawLogFile && existsSync(session.rawLogFile)) {
@@ -383,7 +394,9 @@ export async function resumeSession(
       permissionMode,
       systemPrompt: session.systemPrompt,
       allowedTools: session.allowedTools,
+      model: task?.model ?? undefined,
       resumeSessionId: session.providerSessionId,
+      env: sessionEnv,
     });
 
     span.addEvent("session.resumed");
@@ -402,7 +415,6 @@ export async function resumeSession(
     ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "running" });
     recordSessionStartedMetrics();
 
-    const task = ctx.db.getTask(session.taskId);
     const rawLogPath = session.rawLogFile ?? join(ctx.orkaHome, "logs", `${sessionId}.raw.jsonl`);
 
     void consumeProviderEvents(sessionId, handle, ctx.orchestrationEngine,
