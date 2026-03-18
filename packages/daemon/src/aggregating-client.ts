@@ -220,6 +220,7 @@ export function createAggregatingClient(
       autoMerge: false,
       parentSessionId: null,
       permissionMode: null,
+      noWorktree: false,
       tags: [],
     };
   }

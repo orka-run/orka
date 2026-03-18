@@ -36,6 +36,7 @@ function mockDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
     permissionMode: null,
     archivedAt: null,
     providerSessionId: null,
+    noWorktree: false,
     tags: [],
     ...overrides,
   };
@@ -58,6 +59,7 @@ function mockListResponse(overrides: Partial<SessionListResponse> = {}): Session
     autoMerge: false,
     parentSessionId: null,
     permissionMode: null,
+    noWorktree: false,
     tags: [],
     ...overrides,
   };

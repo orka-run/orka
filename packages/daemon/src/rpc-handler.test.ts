@@ -39,6 +39,7 @@ function makeDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
     permissionMode: null,
     archivedAt: null,
     providerSessionId: null,
+    noWorktree: false,
     tags: [],
     ...overrides,
   };

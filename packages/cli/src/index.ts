@@ -742,6 +742,7 @@ const spawnCmd = command({
     auto: flag({ long: "auto", description: "Auto mode — agent auto-approves safe operations" }),
     yes: flag({ long: "yes", short: "y", description: "Skip bypass consent prompt" }),
     watch: flag({ long: "watch", short: "w", description: "Stream session output after spawn (Ctrl+C stops streaming, not the session)" }),
+    noWorktree: flag({ long: "no-worktree", description: "Run in project directory without creating a git worktree" }),
     tag: multioption({ type: array(str), long: "tag", description: "Tag the session (repeatable)" }),
     parent: option({ type: optional(str), long: "parent", description: "Parent session ID (creates child session)" }),
     words: restPositionals({ type: str, displayName: "prompt" }),
@@ -876,6 +877,7 @@ const spawnCmd = command({
       ...(allowedTools ? { allowedTools } : {}),
       ...(env ? { env } : {}),
       ...(effectivePermissionMode ? { permissionMode: effectivePermissionMode } : {}),
+      ...(args.noWorktree ? { noWorktree: true } : {}),
     };
     let session;
     try {

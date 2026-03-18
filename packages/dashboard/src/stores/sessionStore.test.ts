@@ -47,6 +47,7 @@ function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListR
     prompt: "Build the dashboard session store",
     parentSessionId: null,
     permissionMode: null,
+    noWorktree: false,
     tags: [],
     ...overrides,
   };

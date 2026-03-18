@@ -419,9 +419,11 @@ class LocalClient implements OrkaService {
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
     try {
-      const status = (await $`git -C ${session.workingDir} status`.text()).trim();
-      const diff = (await $`git -C ${session.workingDir} diff`.text()).trim();
-      const branchDiff = await captureBranchDiff(session.workingDir, session.projectPath);
+      const dir = session.workingDir;
+      const status = (await $`git -C ${dir} status`.text()).trim();
+      const diff = (await $`git -C ${dir} diff`.text()).trim();
+      // In-place sessions have no separate branch, so skip branch diff
+      const branchDiff = session.noWorktree ? {} : await captureBranchDiff(dir, session.projectPath);
       return { status, diff, ...branchDiff };
     } catch {
       const saved = this.ctx.db.getSessionDiff(sessionId);
@@ -433,6 +435,10 @@ class LocalClient implements OrkaService {
   async merge(sessionId: string, cleanup = true): Promise<MergeResult> {
     const session = this.ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    if (session.noWorktree) {
+      throw new Error(`Session ${sessionId} ran in-place — no merge needed, changes are already in the project directory`);
+    }
 
     const wtDir = getWorktreeDir(this.ctx.orkaHome);
     if (!session.workingDir.startsWith(wtDir)) {
@@ -887,6 +893,7 @@ function sessionToDetail(session: Session, task: Task | null, tags: string[]): S
     permissionMode: session.permissionMode ?? null,
     archivedAt: session.archivedAt ?? null,
     providerSessionId: session.providerSessionId ?? null,
+    noWorktree: session.noWorktree ?? false,
     tags,
   };
 }
@@ -908,6 +915,7 @@ function sessionItemToListResponse(item: SessionListItem, tags: string[]): Sessi
     autoMerge: item.autoMerge,
     parentSessionId: item.parentSessionId ?? null,
     permissionMode: item.permissionMode ?? null,
+    noWorktree: item.noWorktree ?? false,
     tags,
   };
 }

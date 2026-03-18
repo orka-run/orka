@@ -200,18 +200,21 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     };
     ctx.db.insertTask(task);
 
-    // 2. Prepare workspace — always create worktree for isolation
+    // 2. Prepare workspace — create worktree for isolation (unless --no-worktree)
     let workingDir = projectPath;
-    if (req.branch) {
-      workingDir = await withSpan("orka.worktree.create", {
-        "orka.session.id": sessionId,
-        "orka.branch": req.branch,
-      }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { branch: req.branch, config: ctx.config }));
-    } else {
-      workingDir = await withSpan("orka.worktree.create", {
-        "orka.session.id": sessionId,
-        "orka.branch": `orka/${sessionId}`,
-      }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { config: ctx.config }));
+    const inPlace = req.noWorktree === true;
+    if (!inPlace) {
+      if (req.branch) {
+        workingDir = await withSpan("orka.worktree.create", {
+          "orka.session.id": sessionId,
+          "orka.branch": req.branch,
+        }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { branch: req.branch, config: ctx.config }));
+      } else {
+        workingDir = await withSpan("orka.worktree.create", {
+          "orka.session.id": sessionId,
+          "orka.branch": `orka/${sessionId}`,
+        }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { config: ctx.config }));
+      }
     }
 
     span.setAttribute("orka.workdir", workingDir);
@@ -246,6 +249,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.env ? { env: req.env } : {}),
       ...(providerSessionId ? { providerSessionId } : {}),
       ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      ...(inPlace ? { noWorktree: true } : {}),
     };
     ctx.db.insertSession(session);
 
@@ -323,7 +327,8 @@ export async function resumeSession(
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
     // Recreate worktree if it was cleaned up but the branch still exists
-    if (!existsSync(session.workingDir)) {
+    // In-place sessions have no worktree to recreate
+    if (!session.noWorktree && !existsSync(session.workingDir)) {
       Bun.spawnSync(["git", "worktree", "remove", "--force", session.workingDir], { cwd: session.projectPath });
 
       const branchName = `orka/${sessionId}`;

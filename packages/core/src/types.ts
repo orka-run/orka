@@ -80,6 +80,8 @@ export interface Session {
   archivedAt?: string;
   /** Provider-specific session ID (e.g. Claude Code UUID), used for --resume on continuation. */
   providerSessionId?: string;
+  /** True if session runs in-place (no worktree). */
+  noWorktree?: boolean;
 }
 
 /** Denormalized session with task fields inlined. Returned by listSessions API
@@ -173,4 +175,6 @@ export interface SpawnRequest {
   nodeId?: string;
   /** Permission mode: bypass (all tools auto-approved), supervised (dashboard approval), auto (Claude auto-approves). */
   permissionMode?: PermissionMode;
+  /** Run in-place in the project directory without creating a git worktree. */
+  noWorktree?: boolean;
 }

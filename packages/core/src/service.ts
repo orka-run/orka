@@ -37,6 +37,8 @@ export interface SessionDetailResponse {
   tags: string[];
   /** Provider-specific session ID (e.g. Claude Code UUID). Present when session is continuable. */
   providerSessionId: string | null;
+  /** True if session runs in-place (no worktree). */
+  noWorktree: boolean;
   // Deliberately omitted: env, logFile, rawLogFile, workspaceId, taskId
 }
 
@@ -60,6 +62,8 @@ export interface SessionListResponse {
   parentSessionId: string | null;
   permissionMode: PermissionMode | null;
   tags: string[];
+  /** True if session runs in-place (no worktree). */
+  noWorktree: boolean;
   // No: workspaceId, logFile, rawLogFile, taskId, workingDir, systemPrompt, allowedTools, env
 }
 

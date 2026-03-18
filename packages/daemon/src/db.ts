@@ -47,6 +47,7 @@ const SessionRowSchema = z.object({
   archived_at: z.string().nullable().default(null),
   provider_session_id: z.string().nullable().default(null),
   permission_mode: PermissionModeSchema.nullable().default(null),
+  no_worktree: z.number().default(0),
 });
 
 const UsageLogRowSchema = z.object({
@@ -121,6 +122,7 @@ const MIGRATIONS = [
   { version: 29, sql: `ALTER TABLE sessions DROP COLUMN mode` },
   { version: 30, sql: `ALTER TABLE tasks DROP COLUMN mode` },
   { version: 31, sql: `ALTER TABLE sessions ADD COLUMN permission_mode TEXT` },
+  { version: 32, sql: `ALTER TABLE sessions ADD COLUMN no_worktree INTEGER NOT NULL DEFAULT 0` },
 ];
 
 function migrate(db: Database): void {
@@ -251,8 +253,8 @@ export class DatabaseRepository {
     withSpanSync("orka.db.insertSession", { "orka.session.id": session.id }, () => {
       this.db
         .prepare(
-          `INSERT INTO sessions (id, task_id, workspace_id, status, backend, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id, provider_session_id, permission_mode)
-           VALUES ($id, $taskId, $workspaceId, $status, $backend, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId, $providerSessionId, $permissionMode)`,
+          `INSERT INTO sessions (id, task_id, workspace_id, status, backend, project_path, working_dir, log_file, created_at, started_at, finished_at, exit_code, kept, auto_merge, system_prompt, allowed_tools, env_json, raw_log_file, parent_session_id, provider_session_id, permission_mode, no_worktree)
+           VALUES ($id, $taskId, $workspaceId, $status, $backend, $projectPath, $workingDir, $logFile, $createdAt, $startedAt, $finishedAt, $exitCode, $kept, $autoMerge, $systemPrompt, $allowedTools, $envJson, $rawLogFile, $parentSessionId, $providerSessionId, $permissionMode, $noWorktree)`,
         )
         .run({
           $id: session.id,
@@ -276,6 +278,7 @@ export class DatabaseRepository {
           $parentSessionId: session.parentSessionId ?? null,
           $providerSessionId: session.providerSessionId ?? null,
           $permissionMode: session.permissionMode ?? null,
+          $noWorktree: session.noWorktree ? 1 : 0,
         });
     });
   }
@@ -848,6 +851,7 @@ function rowToSession(row: unknown): Session {
     ...(data.archived_at ? { archivedAt: data.archived_at } : {}),
     ...(data.provider_session_id ? { providerSessionId: data.provider_session_id } : {}),
     ...(data.permission_mode ? { permissionMode: data.permission_mode } : {}),
+    ...(data.no_worktree === 1 ? { noWorktree: true } : {}),
   };
 }
 
