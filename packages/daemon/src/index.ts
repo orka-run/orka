@@ -12,13 +12,9 @@ export type { OrkaConfig, ResolvedDefaults, PerBackendDefaults } from "./config"
 export { initTracing, shutdownTracing, getTracer, getMeter, getDaemonMetrics, queryMetricSnapshot, withSpan, withSpanSync, setLogLevel } from "./tracing";
 export type { DaemonMetrics, LogLevel, MetricSnapshot } from "./tracing";
 export {
-  addProject,
-  removeProject,
-  listProjects,
   resolveProject,
   projectNameForPath,
 } from "./projects";
-export type { ProjectEntry } from "./projects";
 export { getOrkaHome } from "./db";
 export { createNodeRegistry } from "./node-registry";
 export type { NodeRegistry } from "./node-registry";

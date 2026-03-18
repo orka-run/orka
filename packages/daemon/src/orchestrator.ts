@@ -183,8 +183,16 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     const projectPath = resolve(req.projectPath);
     const taskId = generateId("task");
     const sessionId = generateId("sess");
-    const workspaceId = generateId("ws");
     const now = new Date().toISOString();
+
+    // Resolve or auto-create workspace for this project path
+    let workspaceId = ctx.db.resolveWorkspaceForPath(projectPath);
+    if (!workspaceId) {
+      workspaceId = generateId("ws");
+      const { basename } = require("node:path");
+      ctx.db.insertWorkspace({ id: workspaceId, name: basename(projectPath), createdAt: now });
+      ctx.db.addWorkspacePath(workspaceId, projectPath);
+    }
 
     span.setAttribute("orka.session.id", sessionId);
     span.setAttribute("orka.task.id", taskId);

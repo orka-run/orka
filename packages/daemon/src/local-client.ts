@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { $ } from "bun";
 import { generateId } from "@orka/core";
 import type {
@@ -32,6 +32,9 @@ import type {
   StartPairingResult,
   PairWithNodeParams,
   PairWithNodeResult,
+  WorkspaceInfo,
+  WorkspaceMetadata,
+  WorkspaceSettings,
 } from "@orka/core";
 import { generatePairingCode } from "@orka/core/crypto/protocol";
 import { EnrollmentStore } from "./pairing/enrollment-store";
@@ -689,6 +692,61 @@ class LocalClient implements OrkaService {
       activeRequests: 0,
       registeredAt: Date.now(),
     }];
+  }
+
+  // --- Workspaces ---
+
+  async listWorkspaces(opts?: { includeArchived?: boolean }): Promise<WorkspaceInfo[]> {
+    return this.ctx.db.listWorkspaces(opts?.includeArchived ?? false);
+  }
+
+  async getWorkspace(id: string): Promise<WorkspaceInfo> {
+    const ws = this.ctx.db.getWorkspace(id);
+    if (!ws) throw new Error(`Workspace not found: ${id}`);
+    return ws;
+  }
+
+  async createWorkspace(opts: { name: string; paths?: Array<{ nodeId?: string; path: string }>; settings?: WorkspaceSettings; metadata?: WorkspaceMetadata }): Promise<WorkspaceInfo> {
+    const id = generateId("ws");
+    const now = new Date().toISOString();
+    this.ctx.db.insertWorkspace({
+      id,
+      name: opts.name,
+      createdAt: now,
+      settings: opts.settings ? JSON.stringify(opts.settings) : null,
+      metadata: opts.metadata ? JSON.stringify(opts.metadata) : null,
+    });
+    if (opts.paths) {
+      for (const p of opts.paths) {
+        this.ctx.db.addWorkspacePath(id, resolve(p.path), p.nodeId);
+      }
+    }
+    return this.ctx.db.getWorkspace(id)!;
+  }
+
+  async updateWorkspace(id: string, opts: Partial<{ name: string; settings: WorkspaceSettings; metadata: WorkspaceMetadata; archivedAt: string | null }>): Promise<void> {
+    const ws = this.ctx.db.getWorkspace(id);
+    if (!ws) throw new Error(`Workspace not found: ${id}`);
+    this.ctx.db.updateWorkspace(id, {
+      ...(opts.name !== undefined ? { name: opts.name } : {}),
+      ...(opts.settings !== undefined ? { settings: JSON.stringify(opts.settings) } : {}),
+      ...(opts.metadata !== undefined ? { metadata: JSON.stringify(opts.metadata) } : {}),
+      ...(opts.archivedAt !== undefined ? { archivedAt: opts.archivedAt } : {}),
+    });
+  }
+
+  async deleteWorkspace(id: string): Promise<void> {
+    this.ctx.db.deleteWorkspace(id);
+  }
+
+  async addWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
+    const ws = this.ctx.db.getWorkspace(workspaceId);
+    if (!ws) throw new Error(`Workspace not found: ${workspaceId}`);
+    this.ctx.db.addWorkspacePath(workspaceId, resolve(path), nodeId);
+  }
+
+  async removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
+    this.ctx.db.removeWorkspacePath(workspaceId, resolve(path), nodeId);
   }
 }
 

@@ -25,6 +25,9 @@ import type {
   TimelineParams,
   TimelineResponse,
   UsageSummary,
+  WorkspaceInfo,
+  WorkspaceMetadata,
+  WorkspaceSettings,
 } from "@orka/core";
 import type { RemoteNodeManager } from "./remote-nodes";
 import type { SessionCache } from "./session-cache";
@@ -632,6 +635,29 @@ export function createAggregatingClient(
         "terminalList",
         { sessionId },
       );
+    },
+
+    // --- Workspaces (local only) ---
+    async listWorkspaces(opts?: { includeArchived?: boolean }): Promise<WorkspaceInfo[]> {
+      return localClient.listWorkspaces(opts);
+    },
+    async getWorkspace(id: string): Promise<WorkspaceInfo> {
+      return localClient.getWorkspace(id);
+    },
+    async createWorkspace(opts: { name: string; paths?: Array<{ nodeId?: string; path: string }>; settings?: WorkspaceSettings; metadata?: WorkspaceMetadata }): Promise<WorkspaceInfo> {
+      return localClient.createWorkspace(opts);
+    },
+    async updateWorkspace(id: string, opts: Partial<{ name: string; settings: WorkspaceSettings; metadata: WorkspaceMetadata; archivedAt: string | null }>): Promise<void> {
+      return localClient.updateWorkspace(id, opts);
+    },
+    async deleteWorkspace(id: string): Promise<void> {
+      return localClient.deleteWorkspace(id);
+    },
+    async addWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
+      return localClient.addWorkspacePath(workspaceId, path, nodeId);
+    },
+    async removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
+      return localClient.removeWorkspacePath(workspaceId, path, nodeId);
     },
   };
 

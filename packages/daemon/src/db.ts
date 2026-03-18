@@ -11,6 +11,10 @@ import type {
   Task,
   UsageRecord,
   UsageSummary,
+  WorkspaceInfo,
+  WorkspaceMetadata,
+  WorkspacePathMapping,
+  WorkspaceSettings,
 } from "@orka/core";
 import { BackendKindSchema, PermissionModeSchema, SessionStatusSchema, parseWireEvent } from "@orka/core";
 import { withSpanSync } from "./tracing";
@@ -121,6 +125,10 @@ const MIGRATIONS = [
   { version: 29, sql: `ALTER TABLE sessions DROP COLUMN mode` },
   { version: 30, sql: `ALTER TABLE tasks DROP COLUMN mode` },
   { version: 31, sql: `ALTER TABLE sessions ADD COLUMN permission_mode TEXT` },
+  { version: 32, sql: `CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, archived_at TEXT, settings TEXT, metadata TEXT)` },
+  { version: 33, sql: `CREATE TABLE IF NOT EXISTS workspace_paths (workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, node_id TEXT, project_path TEXT NOT NULL, PRIMARY KEY (workspace_id, COALESCE(node_id, ''), project_path))` },
+  { version: 34, sql: `CREATE INDEX IF NOT EXISTS idx_workspace_paths_path ON workspace_paths(project_path)` },
+  { version: 35, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)` },
 ];
 
 function migrate(db: Database): void {
@@ -181,6 +189,47 @@ function migrate(db: Database): void {
       try { db.exec(sql); } catch { /* column may already exist from pre-versioned migration */ }
       insert.run(version, new Date().toISOString());
     }
+  }
+
+  // Backfill: create workspaces for existing sessions that have project_path but no workspace row
+  backfillWorkspaces(db);
+}
+
+function backfillWorkspaces(db: Database): void {
+  // Only run if workspaces table exists and is empty but sessions have project_paths
+  const wsCount = (db.prepare("SELECT COUNT(*) AS cnt FROM workspaces").get() as { cnt: number })?.cnt ?? 0;
+  if (wsCount > 0) return; // Already has workspaces — skip backfill
+
+  const paths = db.prepare(
+    "SELECT DISTINCT project_path FROM sessions WHERE project_path IS NOT NULL AND project_path != ''",
+  ).all() as { project_path: string }[];
+  if (paths.length === 0) return;
+
+  const { basename } = require("node:path");
+  const { readFileSync, existsSync } = require("node:fs");
+  const now = new Date().toISOString();
+  const insertWs = db.prepare("INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)");
+  const insertPath = db.prepare("INSERT INTO workspace_paths (workspace_id, node_id, project_path) VALUES (?, NULL, ?)");
+  const updateSessions = db.prepare("UPDATE sessions SET workspace_id = ? WHERE project_path = ?");
+
+  // Load project aliases from projects.json for name resolution
+  const aliasMap = new Map<string, string>();
+  try {
+    const projectsFile = join(getOrkaHome(), "projects.json");
+    if (existsSync(projectsFile)) {
+      const aliases = JSON.parse(readFileSync(projectsFile, "utf-8")) as Array<{ name: string; path: string }>;
+      for (const a of aliases) {
+        aliasMap.set(a.path, a.name);
+      }
+    }
+  } catch { /* ignore */ }
+
+  for (const { project_path } of paths) {
+    const wsId = `ws-${crypto.randomUUID().slice(0, 8)}`;
+    const name = aliasMap.get(project_path) ?? basename(project_path);
+    insertWs.run(wsId, name, now);
+    insertPath.run(wsId, project_path);
+    updateSessions.run(wsId, project_path);
   }
 }
 
@@ -805,6 +854,125 @@ export class DatabaseRepository {
         .all(parentId) as any[];
       return rows.map(rowToSessionListItem);
     });
+  }
+
+  // --- Workspaces ---
+
+  insertWorkspace(ws: { id: string; name: string; createdAt: string; settings?: string | null; metadata?: string | null }): void {
+    withSpanSync("orka.db.insertWorkspace", { "orka.workspace.id": ws.id }, () => {
+      this.db
+        .prepare("INSERT INTO workspaces (id, name, created_at, settings, metadata) VALUES (?, ?, ?, ?, ?)")
+        .run(ws.id, ws.name, ws.createdAt, ws.settings ?? null, ws.metadata ?? null);
+    });
+  }
+
+  getWorkspace(id: string): WorkspaceInfo | null {
+    return withSpanSync("orka.db.getWorkspace", { "orka.workspace.id": id }, () => {
+      const row = this.db
+        .prepare("SELECT * FROM workspaces WHERE id = ?")
+        .get(id) as { id: string; name: string; created_at: string; archived_at: string | null; settings: string | null; metadata: string | null } | undefined;
+      if (!row) return null;
+      return this.buildWorkspaceInfo(row);
+    });
+  }
+
+  listWorkspaces(includeArchived = false): WorkspaceInfo[] {
+    return withSpanSync("orka.db.listWorkspaces", {}, () => {
+      const query = includeArchived
+        ? "SELECT * FROM workspaces ORDER BY name ASC"
+        : "SELECT * FROM workspaces WHERE archived_at IS NULL ORDER BY name ASC";
+      const rows = this.db.prepare(query).all() as Array<{ id: string; name: string; created_at: string; archived_at: string | null; settings: string | null; metadata: string | null }>;
+      return rows.map((row) => this.buildWorkspaceInfo(row));
+    });
+  }
+
+  updateWorkspace(id: string, opts: { name?: string; settings?: string | null; metadata?: string | null; archivedAt?: string | null }): void {
+    withSpanSync("orka.db.updateWorkspace", { "orka.workspace.id": id }, () => {
+      const sets: string[] = [];
+      const params: any[] = [];
+      if (opts.name !== undefined) { sets.push("name = ?"); params.push(opts.name); }
+      if (opts.settings !== undefined) { sets.push("settings = ?"); params.push(opts.settings); }
+      if (opts.metadata !== undefined) { sets.push("metadata = ?"); params.push(opts.metadata); }
+      if (opts.archivedAt !== undefined) { sets.push("archived_at = ?"); params.push(opts.archivedAt); }
+      if (sets.length === 0) return;
+      params.push(id);
+      this.db.prepare(`UPDATE workspaces SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+    });
+  }
+
+  deleteWorkspace(id: string): void {
+    withSpanSync("orka.db.deleteWorkspace", { "orka.workspace.id": id }, () => {
+      // Unlink sessions from this workspace
+      this.db.prepare("UPDATE sessions SET workspace_id = '' WHERE workspace_id = ?").run(id);
+      // CASCADE deletes workspace_paths
+      this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+    });
+  }
+
+  addWorkspacePath(workspaceId: string, projectPath: string, nodeId?: string): void {
+    withSpanSync("orka.db.addWorkspacePath", { "orka.workspace.id": workspaceId }, () => {
+      this.db
+        .prepare("INSERT OR IGNORE INTO workspace_paths (workspace_id, node_id, project_path) VALUES (?, ?, ?)")
+        .run(workspaceId, nodeId ?? null, projectPath);
+    });
+  }
+
+  removeWorkspacePath(workspaceId: string, projectPath: string, nodeId?: string): void {
+    withSpanSync("orka.db.removeWorkspacePath", { "orka.workspace.id": workspaceId }, () => {
+      this.db
+        .prepare("DELETE FROM workspace_paths WHERE workspace_id = ? AND COALESCE(node_id, '') = COALESCE(?, '') AND project_path = ?")
+        .run(workspaceId, nodeId ?? null, projectPath);
+    });
+  }
+
+  getWorkspacePaths(workspaceId: string): WorkspacePathMapping[] {
+    return withSpanSync("orka.db.getWorkspacePaths", { "orka.workspace.id": workspaceId }, () => {
+      const rows = this.db
+        .prepare("SELECT node_id, project_path FROM workspace_paths WHERE workspace_id = ? ORDER BY project_path")
+        .all(workspaceId) as Array<{ node_id: string | null; project_path: string }>;
+      return rows.map((r) => ({ nodeId: r.node_id, projectPath: r.project_path }));
+    });
+  }
+
+  /** Resolve a project path + optional node ID to a workspace ID. Returns null if not found. */
+  resolveWorkspaceForPath(projectPath: string, nodeId?: string): string | null {
+    return withSpanSync("orka.db.resolveWorkspaceForPath", {}, () => {
+      // Try exact match with node_id first
+      if (nodeId) {
+        const row = this.db
+          .prepare("SELECT workspace_id FROM workspace_paths WHERE project_path = ? AND node_id = ?")
+          .get(projectPath, nodeId) as { workspace_id: string } | undefined;
+        if (row) return row.workspace_id;
+      }
+      // Fall back to local (node_id IS NULL)
+      const row = this.db
+        .prepare("SELECT workspace_id FROM workspace_paths WHERE project_path = ? AND node_id IS NULL")
+        .get(projectPath) as { workspace_id: string } | undefined;
+      return row?.workspace_id ?? null;
+    });
+  }
+
+  private buildWorkspaceInfo(row: { id: string; name: string; created_at: string; archived_at: string | null; settings: string | null; metadata: string | null }): WorkspaceInfo {
+    const paths = this.getWorkspacePaths(row.id);
+    const counts = this.db
+      .prepare(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN status IN ('running', 'preparing', 'idle') THEN 1 ELSE 0 END) AS active
+         FROM sessions WHERE workspace_id = ?`,
+      )
+      .get(row.id) as { total: number; active: number };
+    return {
+      id: row.id,
+      name: row.name,
+      createdAt: row.created_at,
+      archivedAt: row.archived_at,
+      settings: row.settings ? JSON.parse(row.settings) as WorkspaceSettings : null,
+      metadata: row.metadata ? JSON.parse(row.metadata) as WorkspaceMetadata : null,
+      paths,
+      sessionCount: counts?.total ?? 0,
+      activeCount: counts?.active ?? 0,
+    };
   }
 }
 
