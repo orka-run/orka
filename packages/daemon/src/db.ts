@@ -194,12 +194,17 @@ function migrate(db: Database): void {
   }
 
   // Backfill: create workspaces for existing sessions that have project_path but no workspace row
-  backfillWorkspaces(db);
+  try { backfillWorkspaces(db); } catch { /* tables may not exist yet from a partial migration */ }
 }
 
 function backfillWorkspaces(db: Database): void {
   // Only run if workspaces table exists and is empty but sessions have project_paths
-  const wsCount = (db.prepare("SELECT COUNT(*) AS cnt FROM workspaces").get() as { cnt: number })?.cnt ?? 0;
+  let wsCount: number;
+  try {
+    wsCount = (db.prepare("SELECT COUNT(*) AS cnt FROM workspaces").get() as { cnt: number })?.cnt ?? 0;
+  } catch {
+    return; // Table doesn't exist yet — migrations haven't created it
+  }
   if (wsCount > 0) return; // Already has workspaces — skip backfill
 
   const paths = db.prepare(
