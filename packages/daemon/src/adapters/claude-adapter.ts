@@ -121,7 +121,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
         // For supervised mode, write hook settings and inject env vars BEFORE spawning
         if (supervised && input.cwd) {
-          setupSupervisedHookSettings(input.cwd, input.threadId, spawnEnv);
+          setupSupervisedHookSettings(input.cwd, input.threadId, spawnEnv, input.permissionRules);
         }
 
         const process = this.spawnProcess(command, {
@@ -1006,6 +1006,7 @@ function setupSupervisedHookSettings(
   cwd: string,
   sessionId: string,
   spawnEnv: Record<string, string>,
+  permissionRules?: { autoApprove: string[]; alwaysDeny: string[] },
 ): void {
   // Resolve the hook script path relative to this file's package
   const hookScriptPath = resolve(__dirname, "../hooks/supervised-hook.ts");
@@ -1035,6 +1036,8 @@ function setupSupervisedHookSettings(
   spawnEnv["ORKA_SESSION_ID"] = sessionId;
   spawnEnv["ORKA_DAEMON_URL"] = "http://127.0.0.1:7394";
 
-  // ORKA_PERMISSION_RULES is injected by the orchestrator before calling
-  // startSession(), so the hook script can evaluate rules locally.
+  // Inject permission rules so the hook script can evaluate rules locally
+  if (permissionRules) {
+    spawnEnv["ORKA_PERMISSION_RULES"] = JSON.stringify(permissionRules);
+  }
 }

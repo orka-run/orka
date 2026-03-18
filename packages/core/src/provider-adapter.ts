@@ -21,6 +21,8 @@ export interface ProviderSessionStartInput {
   env?: Record<string, string>;
   /** Permission mode for tool execution. "supervised" enables dashboard approval flow. */
   permissionMode?: PermissionMode;
+  /** Permission rules for supervised mode — adapter injects as ORKA_PERMISSION_RULES env var. */
+  permissionRules?: { autoApprove: string[]; alwaysDeny: string[] };
   /** Set the provider's own session ID (e.g. Claude Code --session-id). */
   providerSessionId?: string;
   /** Resume a previous provider session by its ID (e.g. Claude Code --resume). */
