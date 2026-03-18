@@ -98,4 +98,8 @@ describe("deriveInputState", () => {
 
     expect(deriveInputState(events, "running", "codex")).toBe("disabled");
   });
+
+  test("returns waiting for rate-limited sessions so follow-up input can resume them", () => {
+    expect(deriveInputState([], "rate_limited", "claude-code")).toBe("waiting");
+  });
 });

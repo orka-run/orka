@@ -407,7 +407,7 @@ function NodeBadge({ nodeId }: { nodeId: string }) {
 }
 
 function isActive(status: SessionSummary["status"]): boolean {
-  return status === "running" || status === "queued" || status === "preparing";
+  return status === "running" || status === "queued" || status === "preparing" || status === "rate_limited";
 }
 
 function matchesQuery(session: SessionSummary, query: string): boolean {
@@ -427,6 +427,7 @@ const STATUS_CONFIG: Record<
 > = {
   running: { dotClass: "bg-status-running animate-pulse", label: "Running" },
   idle: { dotClass: "bg-accent", label: "Idle" },
+  rate_limited: { dotClass: "bg-status-warning", label: "Rate Limited" },
   hibernated: { dotClass: "bg-ink-muted", label: "Done" },
   queued: { dotClass: "bg-accent animate-pulse", label: "Queued" },
   preparing: { dotClass: "bg-accent animate-pulse", label: "Preparing" },

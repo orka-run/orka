@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import type { BackendKind, PermissionMode, OrkaService, ReasoningEffort, SpawnRequest, WorkspaceInfo } from "@orka/core";
+import type { BackendKind, OrchestrationEvent, PermissionMode, OrkaService, ReasoningEffort, SpawnRequest, WorkspaceInfo } from "@orka/core";
 import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
 import {
   ensureNoiseKeyPair,
@@ -61,7 +61,7 @@ function enumType<T extends string>(values: readonly T[]): Type<string, T> {
   };
 }
 
-const statusValues = ["running", "idle", "hibernated", "completed", "failed", "cancelled", "interrupted", "queued", "preparing"] as const;
+const statusValues = ["running", "idle", "rate_limited", "hibernated", "completed", "failed", "cancelled", "interrupted", "queued", "preparing"] as const;
 const backendValues = ["claude-code", "codex"] as const;
 const MIN_PRUNE_AGE_MS = 60 * 60 * 1000;
 
@@ -934,6 +934,32 @@ const spawnCmd = command({
   }),
 });
 
+function getScheduledResumeAt(events: OrchestrationEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === "session.rate_limited" && typeof event.scheduledResumeAt === "string") {
+      return event.scheduledResumeAt;
+    }
+  }
+
+  return null;
+}
+
+function formatResumeTime(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 const psCmd = command({
   name: "ps",
   description: "List active sessions",
@@ -988,6 +1014,7 @@ const psCmd = command({
     const statusColor = (status: string): string => {
       switch (status) {
         case "running": return c("32", status);
+        case "rate_limited": return c("33", status);
         case "completed": return c("2", status);
         case "failed": return c("31", status);
         case "cancelled": return c("33", status);
@@ -1002,6 +1029,20 @@ const psCmd = command({
     const uniqueProjects = new Set(sessions.map((s) => s.projectPath));
     const multiProject = uniqueProjects.size > 1;
     const showProject = multiProject || verbose;
+    const showResume = sessions.some((s) => s.status === "rate_limited");
+    const resumeBySession = new Map<string, string>();
+
+    if (showResume) {
+      await Promise.all(sessions
+        .filter((s) => s.status === "rate_limited")
+        .map(async (session) => {
+          const timeline = await svc.getSessionTimeline({ sessionId: session.id, limit: 200 });
+          const scheduledResumeAt = getScheduledResumeAt(timeline.events);
+          if (scheduledResumeAt) {
+            resumeBySession.set(session.id, formatResumeTime(scheduledResumeAt));
+          }
+        }));
+    }
 
     const running = sessions.filter((s) => s.status === "running").length;
     console.log(c("1", `${running} running / ${sessions.length} total`));
@@ -1011,13 +1052,14 @@ const psCmd = command({
       padR("ID", 16) +
       padR("STATUS", 20) +
       padR("AGE", 10);
+    if (showResume) header += padR("RESUME", 18);
     if (showProject) header += padR("PROJECT", 36);
     header += padR("BACKEND", 14);
     if (verbose) {
       header += padR("COST", 10) + padR("DURATION", 10) + padR("TOKENS", 14);
     }
     header += "TITLE";
-    const lineWidth = 76 + (showProject ? 36 : 0) + (verbose ? 34 : 0);
+    const lineWidth = 76 + (showResume ? 18 : 0) + (showProject ? 36 : 0) + (verbose ? 34 : 0);
     console.log(header);
     console.log("-".repeat(lineWidth));
 
@@ -1030,6 +1072,9 @@ const psCmd = command({
         padR(s.id, 16) +
         colored.padEnd(statusPad) +
         padR(formatAge(s.createdAt), 10);
+      if (showResume) {
+        line += padR(resumeBySession.get(s.id) ?? "-", 18);
+      }
 
       if (showProject) {
         const alias = projectNameForPath(s.projectPath);
@@ -1185,7 +1230,7 @@ const stopCmd = command({
   handler: async ({ sessionId, tag }) => runCliCommand("stop", async () => {
     if (tag) {
       const sessions = await svc.listSessions({ tag });
-      const running = sessions.filter((s) => s.status === "running" || s.status === "preparing");
+      const running = sessions.filter((s) => s.status === "running" || s.status === "preparing" || s.status === "rate_limited");
       if (running.length === 0) {
         console.log(`no running sessions with tag "${tag}"`);
         return;
@@ -1224,7 +1269,7 @@ const stopCmd = command({
       fail(`session not found: ${sessionId}`);
     }
 
-    if (session.status !== "running" && session.status !== "preparing") {
+    if (session.status !== "running" && session.status !== "preparing" && session.status !== "rate_limited") {
       console.warn(`warning: session ${session.id} is already ${session.status}`);
       return;
     }

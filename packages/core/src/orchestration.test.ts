@@ -99,12 +99,9 @@ describe("WireOrchestrationEventSchema", () => {
     const result = WireOrchestrationEventSchema.safeParse({
       ...BASE,
       type: "session.rate_limited",
-      status: "allowed_warning",
       resetsAt: 1773990000,
       rateLimitType: "seven_day",
-      utilization: 0.78,
-      surpassedThreshold: 0.75,
-      isUsingOverage: false,
+      scheduledResumeAt: "2026-03-18T05:00:00.000Z",
     });
     expect(result.success).toBe(true);
   });

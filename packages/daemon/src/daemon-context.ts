@@ -18,6 +18,10 @@ export interface SessionRuntimeState {
   /** Per-session idle timers. When a session goes idle, a timer starts.
    *  When it fires, the process is killed and the session is set to "hibernated". */
   idleTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Per-session rate-limit resume timers. */
+  rateLimitTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Latest rejected rate-limit reset info observed for a session. */
+  pendingRateLimits: Map<string, { rateLimitType: string; resetsAt: number }>;
   /** Tracks which sessions have already auto-merged (one-shot on first idle). */
   autoMergeFired: Set<string>;
   /** Per-session checkpoint turn counters. */
@@ -85,6 +89,8 @@ export async function createDaemonContext(orkaHome?: string): Promise<DaemonCont
 
   const sessionRuntime: SessionRuntimeState = {
     idleTimers: new Map(),
+    rateLimitTimers: new Map(),
+    pendingRateLimits: new Map(),
     autoMergeFired: new Set(),
     turnCounts: new Map(),
     checkpointCaptureChains: new Map(),

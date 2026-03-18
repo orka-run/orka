@@ -2,7 +2,7 @@ import type { OrchestrationEvent } from "@orka/core";
 
 export type InputState = "disabled" | "waiting" | "busy" | "not_started";
 
-const ACTIVE_SESSION_STATUSES = new Set(["queued", "preparing", "running", "idle", "hibernated"]);
+const ACTIVE_SESSION_STATUSES = new Set(["queued", "preparing", "running", "idle", "rate_limited", "hibernated"]);
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const PRESTART_SESSION_STATUSES = new Set(["queued", "preparing"]);
 
@@ -56,6 +56,10 @@ export function deriveInputState(
       default:
         break;
     }
+  }
+
+  if (sessionStatus === "rate_limited" || sessionStatus === "hibernated") {
+    return "waiting";
   }
 
   return "disabled";
