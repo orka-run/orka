@@ -3,6 +3,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   ChatEntry,
+  Checkpoint,
   DiffResult,
   MergeResult,
   NodeInfo,
@@ -78,6 +79,10 @@ export function createRpcClient(ws: WsTransport) {
       rpc<void>("sendTurn", { sessionId, text }, options),
     closeSession: (sessionId: string, options?: RequestOptions) =>
       rpc<void>("closeSession", { sessionId }, options),
+    getCheckpoints: (sessionId: string, options?: RequestOptions) =>
+      rpc<Checkpoint[]>("getCheckpoints", { sessionId }, options),
+    getTurnDiff: (sessionId: string, fromTurn: number, toTurn: number, options?: RequestOptions) =>
+      rpc<{ diff: string }>("getTurnDiff", { sessionId, fromTurn, toTurn }, options),
 
     // --- Worktree ---
     getDiff: (sessionId: string, options?: RequestOptions) =>
