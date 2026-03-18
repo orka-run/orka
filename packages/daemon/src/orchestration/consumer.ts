@@ -45,6 +45,10 @@ export interface ProviderEventConsumerCallbacks {
   denyHookApprovals?: (sessionId: string) => void;
   /** Called when a turn completes and session transitions to idle. Used to start hibernate timer. */
   onSessionIdle?: (sessionId: string) => void;
+  /** Called when a turn completes and should trigger a git checkpoint capture. */
+  onTurnCheckpoint?: (sessionId: string, turnSeq: number, workingDir: string) => void;
+  /** Returns the next checkpoint turn sequence for a session. */
+  getNextTurnSeq?: (sessionId: string) => number;
   /** Shared set tracking which sessions have already auto-merged (injected from DaemonContext). */
   autoMergeFired?: Set<string>;
 }
@@ -212,6 +216,12 @@ async function handleTurnCompleted(
   sessionId: string,
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
+  const workingDir = callbacks.workingDir;
+  const turnSeq = callbacks.getNextTurnSeq?.(sessionId);
+  if (workingDir && turnSeq !== undefined) {
+    callbacks.onTurnCheckpoint?.(sessionId, turnSeq, workingDir);
+  }
+
   // Transition session to "idle" — the turn is done, process is still alive
   callbacks.updateSessionStatus(sessionId, "idle");
   callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {

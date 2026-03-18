@@ -142,6 +142,13 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
           case "sendTurn":
             await svc.sendTurn(params.sessionId, params.text);
             return null;
+          case "getCheckpoints":
+            return svc.getCheckpoints(params.sessionId);
+          case "getTurnDiff":
+            return svc.getTurnDiff(params.sessionId, params.fromTurn, params.toTurn);
+          case "revertToCheckpoint":
+            await svc.revertToCheckpoint(params.sessionId, params.turnSeq);
+            return null;
           case "startPairing":
             return svc.startPairing(params);
           case "pairWithNode":

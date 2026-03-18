@@ -20,6 +20,10 @@ export interface SessionRuntimeState {
   idleTimers: Map<string, ReturnType<typeof setTimeout>>;
   /** Tracks which sessions have already auto-merged (one-shot on first idle). */
   autoMergeFired: Set<string>;
+  /** Per-session checkpoint turn counters. */
+  turnCounts: Map<string, number>;
+  /** Per-session checkpoint chains to serialize git snapshot work. */
+  checkpointCaptureChains: Map<string, Promise<void>>;
 }
 
 /**
@@ -82,6 +86,8 @@ export async function createDaemonContext(orkaHome?: string): Promise<DaemonCont
   const sessionRuntime: SessionRuntimeState = {
     idleTimers: new Map(),
     autoMergeFired: new Set(),
+    turnCounts: new Map(),
+    checkpointCaptureChains: new Map(),
   };
 
   const ctx: DaemonContext = {

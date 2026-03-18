@@ -110,6 +110,16 @@ export interface Session {
   noWorktree?: boolean;
 }
 
+export interface Checkpoint {
+  id: string;
+  sessionId: string;
+  turnSeq: number;
+  gitRef: string;
+  status: "ready" | "missing" | "error" | "oversized";
+  files: Array<{ path: string; additions: number; deletions: number }> | null;
+  createdAt: string;
+}
+
 /** Denormalized session with task fields inlined. Returned by listSessions API
  *  to avoid N+1 getTask calls. Dashboard uses this for session lists. */
 export interface SessionListItem extends Session {

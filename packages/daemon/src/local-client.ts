@@ -4,6 +4,7 @@ import { $ } from "bun";
 import { generateId } from "@orka/core";
 import type {
   ChatEntry,
+  Checkpoint,
   NodeInfo,
   OrchestrationEvent,
   OrkaService,
@@ -52,6 +53,7 @@ import { queryMetricSnapshot, queryTraceLog, withSpan } from "./tracing";
 import { PairingServer } from "./pairing/pairing-server";
 import type { PairMessage } from "@orka/core";
 import { performClientPairing } from "./client-pairing";
+import { deleteCheckpointRefsAfter, getCheckpointDiff, pruneCheckpoints, revertToCheckpoint as restoreCheckpoint } from "./checkpointing";
 
 export interface PairingConfig {
   /** Node ID for pairing enrollment (e.g. "fra1-gpu-01"). */
@@ -272,6 +274,46 @@ class LocalClient implements OrkaService {
     await sendTurnToSession(this.ctx, sessionId, text);
   }
 
+  async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {
+    return this.ctx.db.getCheckpoints(sessionId);
+  }
+
+  async getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }> {
+    const session = this.ctx.db.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    const fromCheckpoint = this.ctx.db.getCheckpoint(sessionId, fromTurn);
+    const toCheckpoint = this.ctx.db.getCheckpoint(sessionId, toTurn);
+    if (!fromCheckpoint || !toCheckpoint) {
+      throw new Error(`Checkpoint range not found for session ${sessionId}: ${fromTurn} -> ${toTurn}`);
+    }
+    if (fromCheckpoint.status !== "ready" || toCheckpoint.status !== "ready") {
+      throw new Error(`Checkpoint diff unavailable for non-ready checkpoints: ${fromTurn} -> ${toTurn}`);
+    }
+
+    const diff = await getCheckpointDiff(getSessionGitDir(session), fromCheckpoint.gitRef, toCheckpoint.gitRef);
+    return { diff };
+  }
+
+  async revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void> {
+    const session = this.ctx.db.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (session.status === "running" || session.status === "preparing") {
+      throw new Error(`Session ${sessionId} must not be running to revert`);
+    }
+
+    const checkpoint = this.ctx.db.getCheckpoint(sessionId, turnSeq);
+    if (!checkpoint) throw new Error(`Checkpoint not found for session ${sessionId} turn ${turnSeq}`);
+    if (checkpoint.status !== "ready") {
+      throw new Error(`Checkpoint ${turnSeq} is not revertible (status=${checkpoint.status})`);
+    }
+
+    await restoreCheckpoint(session.workingDir, checkpoint.gitRef);
+    await deleteCheckpointRefsAfter(getSessionGitDir(session), sessionId, turnSeq);
+    this.ctx.db.deleteCheckpoints(sessionId, turnSeq);
+    this.ctx.sessionRuntime.turnCounts.set(sessionId, turnSeq);
+  }
+
   async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
     if (!this.enrollmentStore || !this.pairingConfig) {
       throw new Error("Pairing is not configured on this node (missing pairing config)");
@@ -465,6 +507,17 @@ class LocalClient implements OrkaService {
   }
 
   async deleteSessions(ids: string[]): Promise<void> {
+    const sessions = ids
+      .map((id) => this.ctx.db.getSession(id))
+      .filter((session): session is Session => session !== null);
+
+    for (const session of sessions) {
+      await pruneCheckpointRefsForSession(this.ctx, session);
+      this.ctx.sessionRuntime.idleTimers.delete(session.id);
+      this.ctx.sessionRuntime.autoMergeFired.delete(session.id);
+      this.ctx.sessionRuntime.turnCounts.delete(session.id);
+      this.ctx.sessionRuntime.checkpointCaptureChains.delete(session.id);
+    }
     this.ctx.db.deleteSessions(ids);
   }
 
@@ -514,7 +567,7 @@ class LocalClient implements OrkaService {
 
     let dbRecordsDeleted = 0;
     if (opts.purgeDb) {
-      this.ctx.db.deleteSessions(sessions.map((s) => s.id));
+      await this.deleteSessions(sessions.map((s) => s.id));
       dbRecordsDeleted = sessions.length;
     }
 
@@ -754,6 +807,20 @@ class LocalClient implements OrkaService {
   async removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
     this.ctx.db.removeWorkspacePath(workspaceId, resolve(path), nodeId);
   }
+}
+
+async function pruneCheckpointRefsForSession(ctx: DaemonContext, session: Session): Promise<void> {
+  try {
+    await pruneCheckpoints(getSessionGitDir(session), session.id);
+  } catch (error) {
+    console.warn(
+      `failed to prune checkpoints for session ${session.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function getSessionGitDir(session: Session): string {
+  return session.noWorktree ? session.workingDir : session.projectPath;
 }
 
 export function createLocalClient(ctx: DaemonContext, pairingConfig?: PairingConfig): OrkaService {

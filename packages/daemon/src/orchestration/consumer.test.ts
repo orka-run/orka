@@ -249,6 +249,72 @@ describe("consumeProviderEvents", () => {
     expect(diffs[0]?.diff).toBe("");
   });
 
+  test("requests a turn checkpoint without blocking idle transition", async () => {
+    const repoPath = await createRepo();
+    const queue = new AsyncEventQueue<ProviderRuntimeEvent>();
+    const handle = {
+      threadId: "thread-checkpoint",
+      provider: "codex" as const,
+      events: queue,
+      meta: {},
+    };
+    const engine = new OrchestrationEngine();
+    const approvals = new ApprovalManager();
+    const statuses: StatusUpdate[] = [];
+    const checkpointCalls: Array<{ sessionId: string; turnSeq: number; workingDir: string }> = [];
+
+    const consumeTask = consumeProviderEvents("sess-checkpoint", handle, engine, {
+      updateSessionStatus: (sessionId, status, extra) => {
+        recordStatusUpdate(statuses, sessionId, status, extra);
+      },
+      saveSessionDiff: () => {},
+      insertUsageRecord: () => {},
+      approvalManager: approvals,
+      workingDir: repoPath,
+      getNextTurnSeq: () => 1,
+      onTurnCheckpoint: (sessionId, turnSeq, workingDir) => {
+        checkpointCalls.push({ sessionId, turnSeq, workingDir });
+      },
+    });
+
+    queue.push(
+      createEvent(
+        "turn.completed",
+        "thread-checkpoint",
+        { state: "completed" },
+        {
+          turnId: "turn-1",
+          createdAt: "2026-03-11T00:10:00.000Z",
+        },
+      ),
+    );
+    queue.push(
+      createEvent(
+        "session.exited",
+        "thread-checkpoint",
+        { exitKind: "graceful", reason: "done" },
+        {
+          createdAt: "2026-03-11T00:10:01.000Z",
+        },
+      ),
+    );
+    queue.close();
+
+    await consumeTask;
+
+    expect(checkpointCalls).toEqual([
+      {
+        sessionId: "sess-checkpoint",
+        turnSeq: 1,
+        workingDir: repoPath,
+      },
+    ]);
+    expect(statuses[0]).toEqual({
+      sessionId: "sess-checkpoint",
+      status: "idle",
+    });
+  });
+
   test("auto-merges completed worktree sessions when configured", async () => {
     const repoPath = await createRepo();
     const workingDir = await worktreeCreate(repoPath, "sess-merge", testHome);

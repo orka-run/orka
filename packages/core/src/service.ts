@@ -1,4 +1,4 @@
-import type { BackendKind, ChatEntry, NodeInfo, PermissionMode, Session, SessionId, SessionStatus, SpawnRequest, StoredNode, Task, WorkspaceInfo, WorkspaceMetadata, WorkspaceSettings } from "./types";
+import type { BackendKind, ChatEntry, Checkpoint, NodeInfo, PermissionMode, SessionId, SessionStatus, SpawnRequest, StoredNode, Task, WorkspaceInfo, WorkspaceMetadata, WorkspaceSettings } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -221,6 +221,9 @@ export interface OrkaService {
   getLogContent(sessionId: string): Promise<string | null>;
   isAlive(sessionId: string): Promise<boolean>;
   sendTurn(sessionId: string, text: string): Promise<void>;
+  getCheckpoints(sessionId: string): Promise<Checkpoint[]>;
+  getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }>;
+  revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void>;
 
   // --- Worktree ---
   getDiff(sessionId: string): Promise<DiffResult>;
