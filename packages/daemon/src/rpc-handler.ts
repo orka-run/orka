@@ -101,23 +101,13 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             return session;
           }
           case "closeSession": {
+            // Orchestrator broadcasts sessionUpdated internally.
             await svc.closeSession(params.sessionId);
-            pushHub.broadcast("orchestration.sessionUpdated", {
-              sessionId: params.sessionId,
-              status: "completed",
-            });
             return null;
           }
           case "stop": {
+            // Orchestrator broadcasts sessionUpdated internally.
             await svc.stop(params.sessionId);
-            const session = await svc.getSession(params.sessionId);
-            if (session) {
-              // Broadcast session status change for dashboard/CLI consumers.
-              pushHub.broadcast("orchestration.sessionUpdated", {
-                sessionId: session.id,
-                status: session.status,
-              });
-            }
             return null;
           }
           case "reap":

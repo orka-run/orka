@@ -134,21 +134,14 @@ interface LaunchOptions {
 }
 
 /** Start a provider process for a session.
- *  Builds supervised env if needed, then delegates to providerService.startSession(). */
+ *  Passes permissionMode and permissionRules to the adapter, which handles all
+ *  supervised-mode setup (hook settings, env vars) internally. */
 async function launchProviderSession(
   ctx: DaemonContext,
   opts: LaunchOptions,
 ): Promise<ProviderSessionHandle> {
-  const supervisedEnv: Record<string, string> = {};
-  if (opts.permissionMode === "supervised") {
-    const hasRules = ctx.config.permissions.autoApprove.length > 0 || ctx.config.permissions.alwaysDeny.length > 0;
-    if (hasRules) {
-      supervisedEnv["ORKA_PERMISSION_RULES"] = JSON.stringify({
-        autoApprove: ctx.config.permissions.autoApprove,
-        alwaysDeny: ctx.config.permissions.alwaysDeny,
-      });
-    }
-  }
+  const { permissions } = ctx.config;
+  const hasRules = permissions.autoApprove.length > 0 || permissions.alwaysDeny.length > 0;
 
   return ctx.providerService.startSession(opts.backend, {
     threadId: opts.sessionId,
@@ -158,8 +151,9 @@ async function launchProviderSession(
     ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
     ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
     ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
-    env: { ...opts.env, ...supervisedEnv },
+    env: opts.env,
     ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+    ...(hasRules ? { permissionRules: { autoApprove: permissions.autoApprove, alwaysDeny: permissions.alwaysDeny } } : {}),
     ...(opts.providerSessionId ? { providerSessionId: opts.providerSessionId } : {}),
     ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
   });
