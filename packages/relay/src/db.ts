@@ -187,7 +187,16 @@ function migrate(db: Database): void {
 
   for (const { version, sql } of MIGRATIONS) {
     if (!check.get(version)) {
-      try { db.exec(sql); } catch { /* column may already exist */ }
+      try {
+        db.exec(sql);
+      } catch (err) {
+        const msg = String(err);
+        if (msg.includes("duplicate column") || msg.includes("already exists")) {
+          // Safe to ignore — column was already created before versioned migrations
+        } else {
+          throw err;
+        }
+      }
       insert.run(version, new Date().toISOString());
     }
   }
