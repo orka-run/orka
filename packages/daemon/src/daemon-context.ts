@@ -12,6 +12,16 @@ import { createNodeRegistry, type NodeRegistry } from "./node-registry";
 import { createRemoteNodeManager, type RemoteNodeManager } from "./remote-nodes";
 import { recoverStaleSessions, cleanupOrphanedWorktrees } from "./orchestrator";
 
+/** Per-session runtime state that lives in-memory (not persisted).
+ *  Moved here from module-level singletons for DI/testability. */
+export interface SessionRuntimeState {
+  /** Per-session idle timers. When a session goes idle, a timer starts.
+   *  When it fires, the process is killed and the session is set to "hibernated". */
+  idleTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Tracks which sessions have already auto-merged (one-shot on first idle). */
+  autoMergeFired: Set<string>;
+}
+
 /**
  * All daemon-scoped dependencies.
  * Created once per daemon process (or per test) at the composition root.
@@ -28,6 +38,7 @@ export interface DaemonContext {
   hookApprovalBridge: HookApprovalBridge;
   nodeRegistry: NodeRegistry;
   remoteNodes: RemoteNodeManager;
+  sessionRuntime: SessionRuntimeState;
 }
 
 /**
@@ -67,6 +78,11 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
   const nodeRegistry = createNodeRegistry(home);
   const remoteNodes = createRemoteNodeManager(nodeRegistry, pushHub);
 
+  const sessionRuntime: SessionRuntimeState = {
+    idleTimers: new Map(),
+    autoMergeFired: new Set(),
+  };
+
   const ctx: DaemonContext = {
     orkaHome: home,
     config,
@@ -79,6 +95,7 @@ export function createDaemonContext(orkaHome?: string): DaemonContext {
     hookApprovalBridge,
     nodeRegistry,
     remoteNodes,
+    sessionRuntime,
   };
 
   // Recover sessions left in running/preparing from a previous daemon process

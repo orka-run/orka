@@ -45,6 +45,8 @@ export interface ProviderEventConsumerCallbacks {
   denyHookApprovals?: (sessionId: string) => void;
   /** Called when a turn completes and session transitions to idle. Used to start hibernate timer. */
   onSessionIdle?: (sessionId: string) => void;
+  /** Shared set tracking which sessions have already auto-merged (injected from DaemonContext). */
+  autoMergeFired?: Set<string>;
 }
 
 export async function consumeProviderEvents(
@@ -206,9 +208,6 @@ function persistUsageRecord(
   });
 }
 
-/** Track whether auto-merge has already fired for a session (one-shot on first idle). */
-const autoMergeFired = new Set<string>();
-
 async function handleTurnCompleted(
   sessionId: string,
   callbacks: ProviderEventConsumerCallbacks,
@@ -221,8 +220,8 @@ async function handleTurnCompleted(
   });
 
   // Auto-merge fires on first idle transition (preserves old "background completes and merges" behavior)
-  if (callbacks.autoMerge && !autoMergeFired.has(sessionId)) {
-    autoMergeFired.add(sessionId);
+  if (callbacks.autoMerge && !callbacks.autoMergeFired?.has(sessionId)) {
+    callbacks.autoMergeFired?.add(sessionId);
     await tryAutoMerge(sessionId, callbacks);
     // After successful auto-merge, mark session as completed
     const session = callbacks.getSession?.(sessionId);
@@ -247,7 +246,7 @@ async function finalizeSession(
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
   // Clean up auto-merge tracking
-  autoMergeFired.delete(sessionId);
+  callbacks.autoMergeFired?.delete(sessionId);
 
   // Check current session state — if already hibernated (by idle timer), don't overwrite
   const currentSession = callbacks.getSession?.(sessionId);

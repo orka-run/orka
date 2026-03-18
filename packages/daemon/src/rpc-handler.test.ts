@@ -142,12 +142,8 @@ describe("handleRpcRequest", () => {
       id: 2,
       result: null,
     });
-    expect(events).toEqual([
-      {
-        channel: "orchestration.sessionUpdated",
-        data: { sessionId: detail.id, status: "cancelled" },
-      },
-    ]);
+    // Orchestrator broadcasts sessionUpdated internally — rpc-handler no longer duplicates it.
+    expect(events).toEqual([]);
   });
 
   test("broadcasts session deletions after deleteSessions", async () => {

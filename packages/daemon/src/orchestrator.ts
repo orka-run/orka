@@ -20,31 +20,27 @@ import { getDaemonMetrics, withSpan } from "./tracing";
 
 // --- Idle timer management ---
 
-/** Per-session idle timers. When a session goes idle, a timer is started.
- *  When it fires, the process is killed and the session is set to "hibernated". */
-const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function clearIdleTimer(sessionId: string): void {
-  const timer = idleTimers.get(sessionId);
+function clearIdleTimer(ctx: DaemonContext, sessionId: string): void {
+  const timer = ctx.sessionRuntime.idleTimers.get(sessionId);
   if (timer) {
     clearTimeout(timer);
-    idleTimers.delete(sessionId);
+    ctx.sessionRuntime.idleTimers.delete(sessionId);
   }
 }
 
 function startIdleTimer(ctx: DaemonContext, sessionId: string): void {
-  clearIdleTimer(sessionId);
+  clearIdleTimer(ctx, sessionId);
 
   const timeoutMinutes = ctx.config.limits.idleTimeoutMinutes ?? 10;
   if (timeoutMinutes <= 0) return; // 0 = no auto-hibernate
 
   const timer = setTimeout(() => {
-    idleTimers.delete(sessionId);
+    ctx.sessionRuntime.idleTimers.delete(sessionId);
     void hibernateSession(ctx, sessionId);
   }, timeoutMinutes * 60_000);
   timer.unref(); // Don't prevent process exit
 
-  idleTimers.set(sessionId, timer);
+  ctx.sessionRuntime.idleTimers.set(sessionId, timer);
 }
 
 /** Kill the process and set session to "hibernated". */
@@ -113,6 +109,7 @@ function buildConsumerCallbacks(
       }
     },
     onSessionIdle: (id: string) => startIdleTimer(ctx, id),
+    autoMergeFired: ctx.sessionRuntime.autoMergeFired,
   };
 }
 
@@ -304,7 +301,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       })
       .finally(() => {
         ctx.providerService.clearHandle(sessionId);
-        clearIdleTimer(sessionId);
+        clearIdleTimer(ctx, sessionId);
       });
 
     span.addEvent("session.started");
@@ -426,7 +423,7 @@ export async function resumeSession(
       })
       .finally(() => {
         ctx.providerService.clearHandle(sessionId);
-        clearIdleTimer(sessionId);
+        clearIdleTimer(ctx, sessionId);
       });
   });
 }
@@ -439,7 +436,7 @@ export async function closeSession(ctx: DaemonContext, sessionId: string): Promi
     const session = ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    clearIdleTimer(sessionId);
+    clearIdleTimer(ctx, sessionId);
 
     // Kill process if alive
     const handle = ctx.providerService.getHandle(sessionId);
@@ -475,7 +472,7 @@ export async function sendTurnToSession(
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
     // Cancel idle timer — user is sending input
-    clearIdleTimer(sessionId);
+    clearIdleTimer(ctx, sessionId);
 
     switch (session.status) {
       case "running":
@@ -534,7 +531,7 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
     const session = ctx.db.getSession(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    clearIdleTimer(sessionId);
+    clearIdleTimer(ctx, sessionId);
 
     // Deny all pending hook-based approvals so the hook scripts unblock
     ctx.hookApprovalBridge.denyAllForSession(sessionId);

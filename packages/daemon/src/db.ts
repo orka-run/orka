@@ -286,6 +286,17 @@ export class DatabaseRepository {
     extra?: { startedAt?: string; finishedAt?: string; exitCode?: number },
   ): void {
     withSpanSync("orka.db.updateSessionStatus", { "orka.session.id": id, "orka.session.status": status }, () => {
+      // Validate transition before applying
+      const currentRow = this.db
+        .prepare("SELECT status FROM sessions WHERE id = ?")
+        .get(id) as { status: string } | undefined;
+      if (currentRow) {
+        const current = currentRow.status as SessionStatus;
+        if (!isValidTransition(current, status)) {
+          console.warn(`[state-machine] Invalid session transition: ${current} → ${status} (session ${id})`);
+        }
+      }
+
       const sets = ["status = $status"];
       const params: Record<string, any> = { $id: id, $status: status };
 
@@ -879,6 +890,25 @@ function rowToOrchestrationEvent(row: unknown): OrchestrationEvent {
     throw new Error("Invalid orchestration event payload: failed wire schema validation");
   }
   return event;
+}
+
+// --- Session state machine ---
+
+/** Valid status transitions. Terminal states (failed, cancelled) have no outgoing transitions. */
+const VALID_TRANSITIONS: Record<SessionStatus, readonly SessionStatus[]> = {
+  queued: ["preparing", "cancelled"],
+  preparing: ["running", "cancelled", "failed"],
+  running: ["idle", "completed", "failed", "cancelled"],
+  idle: ["running", "hibernated", "completed", "failed", "cancelled"],
+  hibernated: ["running"],
+  completed: ["running"], // resume
+  failed: [], // terminal
+  cancelled: [], // terminal
+  interrupted: ["running"], // resume after interrupt
+};
+
+function isValidTransition(current: SessionStatus, next: SessionStatus): boolean {
+  return VALID_TRANSITIONS[current]?.includes(next) ?? false;
 }
 
 function stripPersistedEventFields(event: PersistedOrchestrationEvent): OrchestrationEvent {
