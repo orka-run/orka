@@ -1302,9 +1302,11 @@ const retryCmd = command({
       fail(`session ${session.id} is still running — stop it first`);
     }
 
+    const retryProjectPath = resolveProject(session.projectPath || session.workingDir);
+
     const retryRequest: SpawnRequest = {
       prompt: session.prompt,
-      projectPath: session.projectPath || session.workingDir,
+      projectPath: retryProjectPath,
       backend: session.backend,
       ...(session.title ? { title: session.title } : {}),
       ...(session.model ? { model: session.model } : {}),
