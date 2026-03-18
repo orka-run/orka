@@ -13,11 +13,11 @@ let testHome = "";
 let ctx: DaemonContext;
 let server: Server<unknown> | null = null;
 
-beforeEach(() => {
+beforeEach(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-server-test-"));
   // Tracing module uses ORKA_HOME for trace file location (global by design)
   process.env["ORKA_HOME"] = testHome;
-  ctx = createDaemonContext(testHome);
+  ctx = await createDaemonContext(testHome);
 });
 
 afterEach(() => {
@@ -37,7 +37,7 @@ describe("startServer", () => {
     writeFileSync(join(testHome, "config.toml"), ["[limits]", "max_concurrent = 4"].join("\n"), "utf8");
     // Recreate ctx to pick up the new config
     ctx.db.close();
-    ctx = createDaemonContext(testHome);
+    ctx = await createDaemonContext(testHome);
 
     ({ server } = await startServer(ctx, {} as OrkaService, {
       port: 0,

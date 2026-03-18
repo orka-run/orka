@@ -25,7 +25,7 @@ import { RateLimiter, GlobalRateLimiter } from "./rate-limiter";
 import { UsageMeter } from "./metering";
 import { AbuseDetector } from "./abuse";
 import { loadRelayConfig } from "./config";
-import { openRelayDb, getRelayHome } from "./db";
+import { openRelayDb, migrateRelayDb, getRelayHome } from "./db";
 import { SingleInstanceCluster } from "./cluster";
 import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync } from "./tracing";
 import { PairingRouter } from "./pairing";
@@ -49,16 +49,17 @@ export interface RelayHandle {
 
 // --- Start Relay ---
 
-export function startRelay(opts: RelayOptions): RelayHandle {
+export async function startRelay(opts: RelayOptions): Promise<RelayHandle> {
   const dataDir = opts.dataDir ?? getRelayHome();
   const config = loadRelayConfig(dataDir, opts.configPath);
   initRelayTracing(config.observability.traceFile ? { traceFile: config.observability.traceFile } : undefined);
-  return withSpanSync("orka.relay.start", {
+  return withSpan("orka.relay.start", {
     "orka.port": opts.port,
     "orka.hostname": opts.hostname ?? config.server.hostname,
-  }, () => {
+  }, async () => {
     // --- Composition root: create all dependencies ---
     const db = openRelayDb(dataDir);
+    await migrateRelayDb(db, dataDir);
     const state = new RelayState();
     const rateLimiter = new RateLimiter();
     const globalLimiter = new GlobalRateLimiter(config.rateLimits.globalRequestsPerSecond);
@@ -581,7 +582,7 @@ function jsonResponse(data: any, status: number = 200): Response {
 
 if (import.meta.main) {
   const port = parseInt(process.argv[2] || "7390", 10);
-  const handle = startRelay({ port });
+  const handle = await startRelay({ port });
   console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);
   console.log("  signup:           POST /v1/signup");
   console.log("  nodes register:   /register?node=<id>");

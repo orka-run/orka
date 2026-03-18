@@ -63,7 +63,7 @@ export async function startDaemonWithNoise(opts?: {
   const { registerTestAdapter } = await import("../helpers/test-adapter");
 
   const nodeId = opts?.nodeId ?? "test-node";
-  const ctx = createDaemonContext();
+  const ctx = await createDaemonContext();
   registerTestAdapter(ctx);
   const svc = createLocalClient(ctx);
 

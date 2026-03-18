@@ -79,7 +79,7 @@ describe("Relay Routing & Auth", () => {
     await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
 
     // 2. Start relay
-    relay = startRelay({ port: 0, hostname: "127.0.0.1" });
+    relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
     const assignedRelayPort = relay.server.port;
     if (assignedRelayPort === undefined) {
       throw new Error("Relay port was not assigned");
@@ -108,7 +108,7 @@ describe("Relay Routing & Auth", () => {
     nodeApiKey = nodeKeyData.apiKey;
 
     // 4. Start daemon and register with relay
-    ctx = createDaemonContext(daemonHome);
+    ctx = await createDaemonContext(daemonHome);
     svc = createLocalClient(ctx);
     ({ server: daemonServer } = await startServer(ctx, svc, {
       port: 0,

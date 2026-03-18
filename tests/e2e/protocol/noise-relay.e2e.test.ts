@@ -187,7 +187,7 @@ describe("Noise NK through Relay", () => {
 
   beforeAll(async () => {
     // 1. Start in-process relay (ephemeral port)
-    relay = startRelay({ port: 0, hostname: "127.0.0.1" });
+    relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
     relayPort = relay.server.port;
 
     // 2. Sign up + create API keys on relay
@@ -215,7 +215,7 @@ describe("Noise NK through Relay", () => {
     const nodeApiKeyB = ((await nodeKeyResB.json()) as { apiKey: string }).apiKey;
 
     // 3. Start daemon A with encryption + relay registration
-    ctxA = createDaemonContext(daemonHomeA);
+    ctxA = await createDaemonContext(daemonHomeA);
     svcA = createLocalClient(ctxA);
     ({ server: daemonServerA } = await startServer(ctxA, svcA, {
       port: 0,
@@ -229,7 +229,7 @@ describe("Noise NK through Relay", () => {
     noiseKeyA = await fetchNoiseKeyInfo(daemonPortA);
 
     // 4. Start daemon B with encryption + relay registration
-    ctxB = createDaemonContext(daemonHomeB);
+    ctxB = await createDaemonContext(daemonHomeB);
     svcB = createLocalClient(ctxB);
     ({ server: daemonServerB } = await startServer(ctxB, svcB, {
       port: 0,

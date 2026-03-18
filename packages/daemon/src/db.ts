@@ -82,172 +82,35 @@ function getDbPath(orkaHome: string): string {
 }
 
 /**
- * Open (or create) a SQLite database at orkaHome/orka.db and run migrations.
- * Returns the raw Database instance — callers should wrap it in a DatabaseRepository.
+ * Open (or create) a SQLite database at orkaHome/orka.db.
+ * Sets PRAGMAs but does NOT run migrations — call migrateDb() separately.
  */
 export function openDb(orkaHome: string): Database {
   const db = new Database(getDbPath(orkaHome));
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
-  migrate(db);
   return db;
 }
 
-const MIGRATIONS = [
-  { version: 1, sql: `ALTER TABLE sessions ADD COLUMN log_file TEXT NOT NULL DEFAULT ''` },
-  { version: 2, sql: `ALTER TABLE sessions ADD COLUMN project_path TEXT NOT NULL DEFAULT ''` },
-  { version: 3, sql: `ALTER TABLE tasks ADD COLUMN model TEXT` },
-  { version: 4, sql: `ALTER TABLE sessions ADD COLUMN kept INTEGER NOT NULL DEFAULT 0` },
-  { version: 5, sql: `ALTER TABLE sessions ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0` },
-  { version: 6, sql: `CREATE TABLE IF NOT EXISTS session_tags (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, tag TEXT NOT NULL, PRIMARY KEY (session_id, tag))` },
-  { version: 7, sql: `CREATE TABLE IF NOT EXISTS usage_log (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, backend TEXT NOT NULL, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, cache_read_tokens INTEGER DEFAULT 0, cost_usd REAL, model TEXT, recorded_at TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES sessions(id))` },
-  { version: 8, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_session_id ON usage_log(session_id)` },
-  { version: 9, sql: `CREATE INDEX IF NOT EXISTS idx_usage_log_backend_recorded_at ON usage_log(backend, recorded_at)` },
-  { version: 10, sql: `ALTER TABLE sessions ADD COLUMN last_diff TEXT` },
-  { version: 11, sql: `CREATE TABLE IF NOT EXISTS orchestration_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, turn_id TEXT, item_id TEXT, request_id TEXT, provider TEXT NOT NULL, timestamp TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES sessions(id))` },
-  { version: 12, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_session ON orchestration_events(session_id)` },
-  { version: 13, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_type ON orchestration_events(type)` },
-  { version: 14, sql: `ALTER TABLE sessions ADD COLUMN system_prompt TEXT` },
-  { version: 15, sql: `ALTER TABLE sessions ADD COLUMN allowed_tools TEXT` },
-  { version: 16, sql: `ALTER TABLE sessions ADD COLUMN env_json TEXT` },
-  { version: 17, sql: `CREATE TABLE IF NOT EXISTS client_errors (id INTEGER PRIMARY KEY AUTOINCREMENT, error TEXT NOT NULL, stack TEXT, url TEXT NOT NULL, timestamp TEXT NOT NULL, received_at TEXT NOT NULL)` },
-  { version: 18, sql: `CREATE INDEX IF NOT EXISTS idx_client_errors_timestamp ON client_errors(timestamp DESC)` },
-  { version: 19, sql: `ALTER TABLE orchestration_events ADD COLUMN seq INTEGER` },
-  { version: 20, sql: `UPDATE orchestration_events SET seq = (SELECT COUNT(*) FROM orchestration_events e2 WHERE e2.session_id = orchestration_events.session_id AND e2.rowid <= orchestration_events.rowid) WHERE seq IS NULL` },
-  { version: 21, sql: `CREATE INDEX IF NOT EXISTS idx_orch_events_session_seq ON orchestration_events(session_id, seq)` },
-  { version: 22, sql: `ALTER TABLE sessions ADD COLUMN raw_log_file TEXT` },
-  { version: 23, sql: `ALTER TABLE sessions ADD COLUMN parent_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL` },
-  { version: 24, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)` },
-  { version: 25, sql: `ALTER TABLE sessions ADD COLUMN archived_at TEXT` },
-  { version: 26, sql: `ALTER TABLE sessions DROP COLUMN tmux_session_name` },
-  { version: 27, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_archived_at ON sessions(archived_at)` },
-  { version: 28, sql: `ALTER TABLE sessions ADD COLUMN provider_session_id TEXT` },
-  { version: 29, sql: `ALTER TABLE sessions DROP COLUMN mode` },
-  { version: 30, sql: `ALTER TABLE tasks DROP COLUMN mode` },
-  { version: 31, sql: `ALTER TABLE sessions ADD COLUMN permission_mode TEXT` },
-  { version: 32, sql: `ALTER TABLE sessions ADD COLUMN no_worktree INTEGER NOT NULL DEFAULT 0` },
-  { version: 33, sql: `CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, archived_at TEXT, settings TEXT, metadata TEXT)` },
-  { version: 34, sql: `CREATE TABLE IF NOT EXISTS workspace_paths (workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, node_id TEXT NOT NULL DEFAULT '', project_path TEXT NOT NULL, PRIMARY KEY (workspace_id, node_id, project_path))` },
-  { version: 35, sql: `CREATE INDEX IF NOT EXISTS idx_workspace_paths_path ON workspace_paths(project_path)` },
-  { version: 36, sql: `CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)` },
-];
-
-function migrate(db: Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      prompt TEXT NOT NULL,
-      backend TEXT NOT NULL,
-      mode TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL REFERENCES tasks(id),
-      workspace_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'queued',
-      backend TEXT NOT NULL,
-      mode TEXT NOT NULL,
-      working_dir TEXT NOT NULL,
-      log_file TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL,
-      started_at TEXT,
-      finished_at TEXT,
-      exit_code INTEGER
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-
-    CREATE TABLE IF NOT EXISTS usage_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      backend TEXT NOT NULL,
-      input_tokens INTEGER DEFAULT 0,
-      output_tokens INTEGER DEFAULT 0,
-      cache_read_tokens INTEGER DEFAULT 0,
-      cost_usd REAL,
-      model TEXT,
-      recorded_at TEXT NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES sessions(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_usage_log_session_id ON usage_log(session_id);
-    CREATE INDEX IF NOT EXISTS idx_usage_log_backend_recorded_at ON usage_log(backend, recorded_at);
-
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    );
-  `);
-
-  const check = db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?");
-  const insert = db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)");
-
-  for (const { version, sql } of MIGRATIONS) {
-    if (!check.get(version)) {
-      try {
-        db.exec(sql);
-      } catch (err) {
-        // Only swallow "duplicate column" errors from ALTER TABLE ADD COLUMN
-        // (pre-versioned migrations may have already added these columns)
-        const msg = String(err);
-        if (msg.includes("duplicate column") || msg.includes("already exists")) {
-          // Safe to ignore — column/table was already created before we had versioned migrations
-        } else {
-          throw err; // Re-throw real errors (CREATE TABLE, CREATE INDEX, etc.)
-        }
-      }
-      insert.run(version, new Date().toISOString());
-    }
+/**
+ * Run Kysely migrations on an open daemon database.
+ * Handles transition from the legacy schema_migrations table automatically.
+ */
+export async function migrateDb(db: Database, orkaHome: string): Promise<void> {
+  const { runMigrations } = await import("@orka/core/migrate");
+  const { daemonMigrations } = await import("./migrations");
+  const result = await runMigrations(
+    db,
+    getDbPath(orkaHome),
+    daemonMigrations,
+    2, // 001_initial + 002_backfill_workspaces correspond to legacy state
+  );
+  if (result.error) {
+    throw new Error(`Daemon migration failed: ${result.error}`);
   }
-
-  // Backfill: create workspaces for existing sessions that have project_path but no workspace row
-  try { backfillWorkspaces(db); } catch { /* tables may not exist yet from a partial migration */ }
-}
-
-function backfillWorkspaces(db: Database): void {
-  // Only run if workspaces table exists and is empty but sessions have project_paths
-  let wsCount: number;
-  try {
-    wsCount = (db.prepare("SELECT COUNT(*) AS cnt FROM workspaces").get() as { cnt: number })?.cnt ?? 0;
-  } catch {
-    return; // Table doesn't exist yet — migrations haven't created it
-  }
-  if (wsCount > 0) return; // Already has workspaces — skip backfill
-
-  const paths = db.prepare(
-    "SELECT DISTINCT project_path FROM sessions WHERE project_path IS NOT NULL AND project_path != ''",
-  ).all() as { project_path: string }[];
-  if (paths.length === 0) return;
-
-  const { basename } = require("node:path");
-  const { readFileSync, existsSync } = require("node:fs");
-  const now = new Date().toISOString();
-  const insertWs = db.prepare("INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)");
-  const insertPath = db.prepare("INSERT INTO workspace_paths (workspace_id, node_id, project_path) VALUES (?, NULL, ?)");
-  const updateSessions = db.prepare("UPDATE sessions SET workspace_id = ? WHERE project_path = ?");
-
-  // Load project aliases from projects.json for name resolution
-  const aliasMap = new Map<string, string>();
-  try {
-    const projectsFile = join(getOrkaHome(), "projects.json");
-    if (existsSync(projectsFile)) {
-      const aliases = JSON.parse(readFileSync(projectsFile, "utf-8")) as Array<{ name: string; path: string }>;
-      for (const a of aliases) {
-        aliasMap.set(a.path, a.name);
-      }
-    }
-  } catch { /* ignore */ }
-
-  for (const { project_path } of paths) {
-    const wsId = `ws-${crypto.randomUUID().slice(0, 8)}`;
-    const name = aliasMap.get(project_path) ?? basename(project_path);
-    insertWs.run(wsId, name, now);
-    insertPath.run(wsId, project_path);
-    updateSessions.run(wsId, project_path);
+  if (result.migrationsRun.length > 0) {
+    console.log(`[db] ran ${result.migrationsRun.length} migration(s): ${result.migrationsRun.join(", ")}`);
   }
 }
 

@@ -2105,7 +2105,7 @@ const serveCmd = command({
         };
       }
 
-      const ctx = createDaemonContext();
+      const ctx = await createDaemonContext();
       const localSvc = createLocalClient(ctx, pairingConfig);
       const relayToken = args.relayToken ?? process.env["ORKA_TOKEN"];
       const serverOptions = {
@@ -2354,7 +2354,7 @@ const relayServeCmd = command({
   },
   handler: async ({ port }) => runCliCommand("relay", async () => {
     const parsedPort = parseInt(port ?? "7390", 10);
-    const handle = startRelay({
+    const handle = await startRelay({
       port: parsedPort,
     });
     console.log(`orka relay listening on ws://0.0.0.0:${handle.server.port}`);

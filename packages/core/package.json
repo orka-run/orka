@@ -9,11 +9,14 @@
     "./crypto": "./src/crypto.ts",
     "./crypto/protocol": "./src/crypto/index.ts",
     "./transport/noise-transport": "./src/transport/noise-transport.ts",
-    "./pairing": "./src/pairing/pairing-client.ts"
+    "./pairing": "./src/pairing/pairing-client.ts",
+    "./migrate": "./src/migrate.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^2.1.1",
     "@noble/curves": "^2.0.1",
-    "@noble/hashes": "^2.0.1"
+    "@noble/hashes": "^2.0.1",
+    "kysely": "^0.28.12",
+    "kysely-bun-sqlite": "^0.4.0"
   }
 }

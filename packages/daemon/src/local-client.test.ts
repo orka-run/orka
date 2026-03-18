@@ -9,10 +9,10 @@ import { createLocalClient } from "./local-client";
 let testHome = "";
 let ctx: DaemonContext;
 
-beforeEach(() => {
+beforeEach(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-local-client-test-"));
   mkdirSync(testHome, { recursive: true });
-  ctx = createDaemonContext(testHome);
+  ctx = await createDaemonContext(testHome);
 });
 
 afterEach(() => {

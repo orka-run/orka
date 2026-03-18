@@ -10,11 +10,11 @@ import { parsePairingCode } from "@orka/core/crypto/protocol";
 let testHome = "";
 let ctx: DaemonContext;
 
-beforeEach(() => {
+beforeEach(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-pairing-test-"));
   mkdirSync(testHome, { recursive: true });
   writeFileSync(join(testHome, "config.toml"), "");
-  ctx = createDaemonContext(testHome);
+  ctx = await createDaemonContext(testHome);
 });
 
 afterEach(() => {

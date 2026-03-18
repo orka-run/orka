@@ -177,7 +177,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     saveNoiseKeyPair(daemonHome, "node", noiseKeyInfo);
 
     // 1. Start relay
-    relay = startRelay({ port: 0, hostname: "127.0.0.1" });
+    relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
     relayPort = relay.server.port;
     relayOrigin = `ws://127.0.0.1:${relayPort}`;
 
@@ -214,7 +214,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     };
 
     // 4. Start daemon with pairing enabled
-    ctx = createDaemonContext(daemonHome);
+    ctx = await createDaemonContext(daemonHome);
     svc = createLocalClient(ctx, pairingConfig);
     ({ server: daemonServer } = await startServer(ctx, svc, {
       port: 0,

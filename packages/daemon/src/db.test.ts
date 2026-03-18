@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Session, Task } from "@orka/core";
-import { openDb, DatabaseRepository } from "./db";
+import { openDb, migrateDb, DatabaseRepository } from "./db";
 
 let testHome = "";
 let db: DatabaseRepository;
@@ -15,9 +15,11 @@ function versioned<T extends Record<string, unknown>>(event: T): T & { v: number
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-db-test-"));
-  db = new DatabaseRepository(openDb(testHome));
+  const rawDb = openDb(testHome);
+  await migrateDb(rawDb, testHome);
+  db = new DatabaseRepository(rawDb);
 });
 
 afterEach(() => {

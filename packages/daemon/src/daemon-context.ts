@@ -1,6 +1,6 @@
 import type { OrkaConfig } from "./config";
 import { loadConfig } from "./config";
-import { DatabaseRepository, getOrkaHome, openDb } from "./db";
+import { DatabaseRepository, getOrkaHome, openDb, migrateDb } from "./db";
 import { ApprovalManager } from "./approval-manager";
 import { ClaudeCodeAdapter, CodexAdapter } from "./adapters";
 import { HookApprovalBridge } from "./hook-approval-bridge";
@@ -46,10 +46,11 @@ export interface DaemonContext {
  * This is the composition root for the daemon — all dependencies are
  * created here and passed down via the context object.
  */
-export function createDaemonContext(orkaHome?: string): DaemonContext {
+export async function createDaemonContext(orkaHome?: string): Promise<DaemonContext> {
   const home = orkaHome ?? getOrkaHome();
   const config = loadConfig(home);
   const rawDb = openDb(home);
+  await migrateDb(rawDb, home);
   const db = new DatabaseRepository(rawDb);
   const pushHub = new PushHub();
   const approvalManager = new ApprovalManager({

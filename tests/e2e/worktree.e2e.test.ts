@@ -53,7 +53,7 @@ describe("Worktree Management", () => {
     await $`git -C ${testRepo} add -A`.quiet();
     await $`git -C ${testRepo} commit -m "init"`.quiet();
 
-    ctx = createDaemonContext(testHome);
+    ctx = await createDaemonContext(testHome);
     registerTestAdapter(ctx);
     client = createLocalClient(ctx);
   }, 30_000);

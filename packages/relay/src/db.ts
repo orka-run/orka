@@ -103,7 +103,7 @@ export function getRelayHome(): string {
 
 /**
  * Open (or create) a relay SQLite database at the given data directory.
- * Each call returns a new, independent Database instance.
+ * Sets PRAGMAs but does NOT run migrations — call migrateRelayDb() separately.
  */
 export function openRelayDb(dataDir?: string): Database {
   const dir = dataDir ?? getRelayHome();
@@ -113,92 +113,29 @@ export function openRelayDb(dataDir?: string): Database {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
-  migrate(db);
   return db;
 }
 
-// --- Migrations ---
-
-const MIGRATIONS: Array<{ version: number; sql: string }> = [
-  // Future migrations go here
-];
-
-function migrate(db: Database): void {
-  // Split table creation into individual statements for Bun SQLite compatibility
-  const tables = [
-    `CREATE TABLE IF NOT EXISTS accounts (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      tier TEXT NOT NULL DEFAULT 'free',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS api_keys (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id),
-      key_hash TEXT NOT NULL UNIQUE,
-      key_prefix TEXT NOT NULL,
-      label TEXT NOT NULL DEFAULT 'default',
-      permissions TEXT NOT NULL DEFAULT 'client',
-      status TEXT NOT NULL DEFAULT 'active',
-      last_used_at TEXT,
-      created_at TEXT NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
-    `CREATE INDEX IF NOT EXISTS idx_api_keys_account ON api_keys(account_id)`,
-    `CREATE TABLE IF NOT EXISTS usage_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      account_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      bytes_in INTEGER NOT NULL DEFAULT 0,
-      bytes_out INTEGER NOT NULL DEFAULT 0,
-      node_id TEXT,
-      request_method TEXT,
-      timestamp TEXT NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_usage_account_ts ON usage_events(account_id, timestamp)`,
-    `CREATE TABLE IF NOT EXISTS rate_limit_config (
-      account_id TEXT PRIMARY KEY REFERENCES accounts(id),
-      requests_per_minute INTEGER NOT NULL DEFAULT 60,
-      requests_per_hour INTEGER NOT NULL DEFAULT 1000,
-      concurrent_connections INTEGER NOT NULL DEFAULT 10,
-      max_message_bytes INTEGER NOT NULL DEFAULT 1048576,
-      updated_at TEXT NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS node_registrations (
-      node_id TEXT NOT NULL,
-      account_id TEXT NOT NULL REFERENCES accounts(id),
-      registered_at TEXT NOT NULL,
-      last_heartbeat_at TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      PRIMARY KEY (node_id, account_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    )`,
-  ];
-  for (const sql of tables) db.exec(sql);
-
-  const check = db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?");
-  const insert = db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)");
-
-  for (const { version, sql } of MIGRATIONS) {
-    if (!check.get(version)) {
-      try {
-        db.exec(sql);
-      } catch (err) {
-        const msg = String(err);
-        if (msg.includes("duplicate column") || msg.includes("already exists")) {
-          // Safe to ignore — column was already created before versioned migrations
-        } else {
-          throw err;
-        }
-      }
-      insert.run(version, new Date().toISOString());
-    }
+/**
+ * Run Kysely migrations on an open relay database.
+ * Handles transition from the legacy schema_migrations table automatically.
+ */
+export async function migrateRelayDb(db: Database, dataDir?: string): Promise<void> {
+  const { runMigrations } = await import("@orka/core/migrate");
+  const { relayMigrations } = await import("./migrations");
+  const dir = dataDir ?? getRelayHome();
+  const dbPath = join(dir, DB_FILE);
+  const result = await runMigrations(
+    db,
+    dbPath,
+    relayMigrations,
+    1, // 001_initial corresponds to legacy state
+  );
+  if (result.error) {
+    throw new Error(`Relay migration failed: ${result.error}`);
+  }
+  if (result.migrationsRun.length > 0) {
+    console.log(`[relay-db] ran ${result.migrationsRun.length} migration(s): ${result.migrationsRun.join(", ")}`);
   }
 }
 
