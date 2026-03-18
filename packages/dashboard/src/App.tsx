@@ -302,6 +302,8 @@ function AppShell({ transport, client }: AppShellProps) {
   });
 
   useEffect(() => {
+    transport.connect();
+
     const unsubscribeState = transport.onStateChange((connection) => {
       setConnectionStatus(connection.state, connection.reconnectAttempts);
     });
@@ -709,7 +711,7 @@ export function App() {
 
   // Re-create transport when mode, URL, or paired node changes
   if (!transportRef.current || transportRef.current.key !== transportKey) {
-    transportRef.current?.transport.disconnect();
+    transportRef.current?.transport.dispose();
     transportRef.current = { key: transportKey, transport: createTransport(effectiveUrl, noiseConfig) };
   }
   const transport = transportRef.current.transport;

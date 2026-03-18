@@ -89,6 +89,7 @@ export class WsTransport {
   private channelTransformers = new Map<string, PushDataTransform>();
   private serverCapabilities: ServerCapabilities | null = null;
   private shouldReconnect = false;
+  private disposed = false;
   private noiseTransport: NoiseClientTransport | null = null;
   private noiseHandshaking = false;
   private connectionSpan: Span | null = null;
@@ -103,6 +104,8 @@ export class WsTransport {
   ) {}
 
   connect(): void {
+    if (this.disposed) return;
+
     this.shouldReconnect = true;
 
     if (
@@ -147,14 +150,18 @@ export class WsTransport {
     };
 
     ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
       this.messagesReceived++;
       this.handleMessage(typeof event.data === "string" ? event.data : "");
     };
 
     ws.onclose = (event) => {
-      if (this.ws === ws) {
-        this.ws = null;
-      }
+      // Stale WebSocket close — a newer connection exists, ignore entirely.
+      // The connection span for this WS was already ended when the new connect()
+      // called beginConnectionSpan() → endConnectionSpan("replaced").
+      if (this.ws !== ws) return;
+
+      this.ws = null;
       const isAbnormal = event.code !== 1000 && event.code !== 1005;
       this.connectionSpan?.addEvent("ws.closed", {
         "ws.close_code": event.code,
@@ -174,6 +181,7 @@ export class WsTransport {
     };
 
     ws.onerror = () => {
+      if (this.ws !== ws) return;
       const readyState = ws.readyState;
       const readyStateLabel = readyState === 0 ? "CONNECTING" : readyState === 1 ? "OPEN" : readyState === 2 ? "CLOSING" : "CLOSED";
       const message = `WebSocket error (readyState=${readyStateLabel}, url=${this.url})`;
@@ -214,7 +222,21 @@ export class WsTransport {
     this.setState("disconnected");
   }
 
+  /**
+   * Permanently shut down this transport. After disposal, connect/subscribe/request
+   * are all no-ops. Use this when the transport instance will never be reused.
+   */
+  dispose(): void {
+    this.disposed = true;
+    this.disconnect();
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed;
+  }
+
   async request<T>(method: string, params?: unknown, options?: RequestOptions): Promise<T> {
+    if (this.disposed) throw new Error("Transport is disposed");
     const id = ++this.requestId;
     const { span, startedAt } = startSpan("orka.client.rpc", {
       "orka.method": method,
@@ -275,6 +297,7 @@ export class WsTransport {
   }
 
   subscribe(channel: string, handler: PushHandler): () => void {
+    if (this.disposed) return () => {};
     let handlers = this.pushHandlers.get(channel);
     const isFirstHandler = !handlers || handlers.size === 0;
 
