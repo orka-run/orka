@@ -69,7 +69,7 @@ export function Sidebar({
   const workspaceFilteredSessions = activeWorkspace
     ? nodeFilteredSessions.filter((s) =>
         activeWorkspace.paths.some(
-          (p) => p.projectPath === s.projectPath && (p.nodeId === null || p.nodeId === s.nodeId),
+          (p) => p.projectPath === s.projectPath && (!p.nodeId || p.nodeId === s.nodeId),
         ),
       )
     : nodeFilteredSessions;
