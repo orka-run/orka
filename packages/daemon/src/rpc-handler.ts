@@ -236,6 +236,28 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             return ctx.db.listClientErrors(params.limit ?? 50);
           case "listNodes":
             return svc.listNodes();
+          case "listWorkspaces":
+            return svc.listWorkspaces(params);
+          case "getWorkspace":
+            return svc.getWorkspace(params.id);
+          case "createWorkspace":
+            return svc.createWorkspace(params);
+          case "updateWorkspace": {
+            await svc.updateWorkspace(params.id, params.opts ?? {});
+            return null;
+          }
+          case "deleteWorkspace": {
+            await svc.deleteWorkspace(params.id);
+            return null;
+          }
+          case "addWorkspacePath": {
+            await svc.addWorkspacePath(params.workspaceId, params.path, params.nodeId);
+            return null;
+          }
+          case "removeWorkspacePath": {
+            await svc.removeWorkspacePath(params.workspaceId, params.path, params.nodeId);
+            return null;
+          }
           case "getMetrics":
             return svc.getMetrics();
           case "queryTraces":

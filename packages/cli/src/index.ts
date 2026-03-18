@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import type { BackendKind, PermissionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
+import type { BackendKind, PermissionMode, OrkaService, ReasoningEffort, SpawnRequest, WorkspaceInfo } from "@orka/core";
 import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
 import {
   ensureNoiseKeyPair,
@@ -28,9 +28,6 @@ import {
   withSpan,
   resolveProject,
   projectNameForPath,
-  addProject,
-  removeProject,
-  listProjects,
   formatLog,
   formatEvent,
   parseLine,
@@ -596,7 +593,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "keep",
   "unkeep",
   "merge",
-  "project",
+  "workspace",
   "traces",
   "archive",
   "unarchive",
@@ -608,7 +605,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "dashboard",
 ]);
 
-const PROJECT_SUBCOMMANDS = new Set(["add", "remove", "rm", "list", "ls"]);
+const WORKSPACE_SUBCOMMANDS = new Set(["list", "ls", "create", "show", "update", "archive", "delete", "add-path", "rm-path"]);
 const RELAY_SUBCOMMANDS = new Set(["serve", "signup", "keys", "account", "usage"]);
 const RELAY_KEYS_SUBCOMMANDS = new Set(["create", "revoke", "list"]);
 const KEYGEN_SUBCOMMANDS = new Set(["client", "node", "save-server", "show", "help"]);
@@ -616,7 +613,7 @@ const KEYGEN_SUBCOMMANDS = new Set(["client", "node", "save-server", "show", "he
 let svc: OrkaService;
 
 // Commands that don't need the daemon (local-only operations)
-const LOCAL_ONLY_COMMANDS = new Set(["serve", "project", "keygen", "relay", "dashboard"]);
+const LOCAL_ONLY_COMMANDS = new Set(["serve", "keygen", "relay", "dashboard"]);
 
 async function runCliCommand(name: string, fn: () => Promise<void>): Promise<void> {
   try {
@@ -2130,110 +2127,222 @@ const serveCmd = command({
   },
 });
 
-const projectAddCmd = command({
-  name: "add",
-  description: "Register a project alias",
-  args: {
-    name: positional({ type: optional(str), displayName: "name" }),
-    path: positional({ type: optional(str), displayName: "path" }),
-    rest: restPositionals({ type: str, displayName: "args" }),
-  },
-  handler: async ({ name, path }) => runCliCommand("project", async () => {
-    if (!name) {
-      fail("usage: orka project add <name> [path]");
-    }
-    const entry = addProject(name, path || ".");
-    console.log(`registered project ${entry.name} → ${entry.path}`);
-  }),
-});
-
-const projectRemoveCmd = command({
-  name: "remove",
-  description: "Unregister a project alias",
-  args: {
-    name: positional({ type: optional(str), displayName: "name" }),
-    rest: restPositionals({ type: str, displayName: "args" }),
-  },
-  handler: async ({ name }) => runCliCommand("project", async () => {
-    if (!name) {
-      fail("usage: orka project remove <name>");
-    }
-    if (removeProject(name)) {
-      console.log(`removed project ${name}`);
-    } else {
-      fail(`project not found: ${name}`);
-    }
-  }),
-});
-
-const projectRmCmd = command({
-  name: "rm",
-  description: "Unregister a project alias",
-  args: {
-    name: positional({ type: optional(str), displayName: "name" }),
-    rest: restPositionals({ type: str, displayName: "args" }),
-  },
-  handler: async ({ name }) => runCliCommand("project", async () => {
-    if (!name) {
-      fail("usage: orka project remove <name>");
-    }
-    if (removeProject(name)) {
-      console.log(`removed project ${name}`);
-    } else {
-      fail(`project not found: ${name}`);
-    }
-  }),
-});
-
-const projectListCmd = command({
+const wsListCmd = command({
   name: "list",
-  description: "List project aliases",
+  description: "List workspaces",
   args: {
+    includeArchived: flag({ long: "include-archived", description: "Include archived workspaces" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
-  handler: async () => runCliCommand("project", async () => {
-    const projects = listProjects();
-    if (projects.length === 0) {
-      console.log("no registered projects");
+  handler: async ({ includeArchived }) => runCliCommand("workspace", async () => {
+    const workspaces = await svc.listWorkspaces({ includeArchived });
+    if (workspaces.length === 0) {
+      console.log("no workspaces");
       console.log("");
-      console.log("register with: orka project add <name> [path]");
+      console.log("workspaces are auto-created when you spawn sessions");
+      console.log("or create one manually: orka workspace create <name> [--path <path>]");
       return;
     }
-    for (const p of projects) {
-      console.log(`${p.name.padEnd(20)} ${p.path}`);
+    for (const ws of workspaces) {
+      const paths = ws.paths.map((p) => p.nodeId ? `${p.nodeId}:${p.projectPath}` : p.projectPath).join(", ");
+      const archived = ws.archivedAt ? " [archived]" : "";
+      console.log(`${ws.name.padEnd(20)} ${String(ws.activeCount).padStart(2)} active / ${String(ws.sessionCount).padStart(3)} total  ${paths}${archived}`);
     }
   }),
 });
 
-const projectLsCmd = command({
+const wsLsCmd = command({
   name: "ls",
-  description: "List project aliases",
+  description: "List workspaces",
   args: {
+    includeArchived: flag({ long: "include-archived", description: "Include archived workspaces" }),
     rest: restPositionals({ type: str, displayName: "args" }),
   },
-  handler: async () => runCliCommand("project", async () => {
-    const projects = listProjects();
-    if (projects.length === 0) {
-      console.log("no registered projects");
-      console.log("");
-      console.log("register with: orka project add <name> [path]");
+  handler: async ({ includeArchived }) => runCliCommand("workspace", async () => {
+    const workspaces = await svc.listWorkspaces({ includeArchived });
+    if (workspaces.length === 0) {
+      console.log("no workspaces");
       return;
     }
-    for (const p of projects) {
-      console.log(`${p.name.padEnd(20)} ${p.path}`);
+    for (const ws of workspaces) {
+      const paths = ws.paths.map((p) => p.nodeId ? `${p.nodeId}:${p.projectPath}` : p.projectPath).join(", ");
+      console.log(`${ws.name.padEnd(20)} ${String(ws.activeCount).padStart(2)} active / ${String(ws.sessionCount).padStart(3)} total  ${paths}`);
     }
   }),
 });
 
-const projectCmd = subcommands({
-  name: "project",
-  description: "Register/list/remove project aliases",
+const wsCreateCmd = command({
+  name: "create",
+  description: "Create a workspace",
+  args: {
+    name: positional({ type: optional(str), displayName: "name" }),
+    path: option({ type: optional(str), long: "path", short: "p", description: "Project path to link (default: current dir)" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ name, path }) => runCliCommand("workspace", async () => {
+    if (!name) {
+      fail("usage: orka workspace create <name> [--path <path>]");
+    }
+    const { resolve } = require("node:path");
+    const resolvedPath = resolve(path || ".");
+    const ws = await svc.createWorkspace({ name, paths: [{ path: resolvedPath }] });
+    console.log(`created workspace ${ws.name} (${ws.id})`);
+    for (const p of ws.paths) {
+      console.log(`  path: ${p.projectPath}`);
+    }
+  }),
+});
+
+const wsShowCmd = command({
+  name: "show",
+  description: "Show workspace details",
+  args: {
+    ref: positional({ type: optional(str), displayName: "name-or-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ ref }) => runCliCommand("workspace", async () => {
+    if (!ref) {
+      fail("usage: orka workspace show <name-or-id>");
+    }
+    const ws = await resolveWorkspace(svc, ref);
+    console.log(`workspace: ${ws.name} (${ws.id})`);
+    console.log(`  created:  ${ws.createdAt}`);
+    if (ws.archivedAt) console.log(`  archived: ${ws.archivedAt}`);
+    console.log(`  sessions: ${ws.sessionCount} total, ${ws.activeCount} active`);
+    if (ws.paths.length > 0) {
+      console.log("  paths:");
+      for (const p of ws.paths) {
+        const nodeLabel = p.nodeId ? ` (node: ${p.nodeId})` : "";
+        console.log(`    ${p.projectPath}${nodeLabel}`);
+      }
+    }
+    if (ws.settings) {
+      console.log("  settings:", JSON.stringify(ws.settings, null, 2));
+    }
+    if (ws.metadata) {
+      const meta = ws.metadata;
+      if (meta.description) console.log(`  description: ${meta.description}`);
+      if (meta.color) console.log(`  color: ${meta.color}`);
+      if (meta.icon) console.log(`  icon: ${meta.icon}`);
+    }
+  }),
+});
+
+const wsUpdateCmd = command({
+  name: "update",
+  description: "Update workspace properties",
+  args: {
+    ref: positional({ type: optional(str), displayName: "name-or-id" }),
+    name: option({ type: optional(str), long: "name", description: "New workspace name" }),
+    description: option({ type: optional(str), long: "description", description: "Workspace description" }),
+    color: option({ type: optional(str), long: "color", description: "Workspace color" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ ref, name, description, color }) => runCliCommand("workspace", async () => {
+    if (!ref) {
+      fail("usage: orka workspace update <name-or-id> [--name <name>] [--description <desc>] [--color <color>]");
+    }
+    const ws = await resolveWorkspace(svc, ref);
+    const opts: Record<string, any> = {};
+    if (name !== undefined) opts.name = name;
+    if (description !== undefined || color !== undefined) {
+      const meta = { ...ws.metadata };
+      if (description !== undefined) meta.description = description;
+      if (color !== undefined) meta.color = color;
+      opts.metadata = meta;
+    }
+    await svc.updateWorkspace(ws.id, opts);
+    console.log(`updated workspace ${ws.name}`);
+  }),
+});
+
+const wsArchiveCmd = command({
+  name: "archive",
+  description: "Archive a workspace",
+  args: {
+    ref: positional({ type: optional(str), displayName: "name-or-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ ref }) => runCliCommand("workspace", async () => {
+    if (!ref) {
+      fail("usage: orka workspace archive <name-or-id>");
+    }
+    const ws = await resolveWorkspace(svc, ref);
+    await svc.updateWorkspace(ws.id, { archivedAt: new Date().toISOString() });
+    console.log(`archived workspace ${ws.name}`);
+  }),
+});
+
+const wsDeleteCmd = command({
+  name: "delete",
+  description: "Delete a workspace (sessions are kept but unlinked)",
+  args: {
+    ref: positional({ type: optional(str), displayName: "name-or-id" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ ref }) => runCliCommand("workspace", async () => {
+    if (!ref) {
+      fail("usage: orka workspace delete <name-or-id>");
+    }
+    const ws = await resolveWorkspace(svc, ref);
+    await svc.deleteWorkspace(ws.id);
+    console.log(`deleted workspace ${ws.name}`);
+  }),
+});
+
+const wsAddPathCmd = command({
+  name: "add-path",
+  description: "Add a project path to a workspace",
+  args: {
+    ref: positional({ type: optional(str), displayName: "name-or-id" }),
+    path: positional({ type: optional(str), displayName: "path" }),
+    node: option({ type: optional(str), long: "node", description: "Node ID for remote path" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ ref, path, node }) => runCliCommand("workspace", async () => {
+    if (!ref || !path) {
+      fail("usage: orka workspace add-path <name-or-id> <path> [--node <node-id>]");
+    }
+    const ws = await resolveWorkspace(svc, ref);
+    const { resolve } = require("node:path");
+    await svc.addWorkspacePath(ws.id, resolve(path), node);
+    console.log(`added path ${path} to workspace ${ws.name}`);
+  }),
+});
+
+const wsRmPathCmd = command({
+  name: "rm-path",
+  description: "Remove a project path from a workspace",
+  args: {
+    ref: positional({ type: optional(str), displayName: "name-or-id" }),
+    path: positional({ type: optional(str), displayName: "path" }),
+    node: option({ type: optional(str), long: "node", description: "Node ID for remote path" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ ref, path, node }) => runCliCommand("workspace", async () => {
+    if (!ref || !path) {
+      fail("usage: orka workspace rm-path <name-or-id> <path> [--node <node-id>]");
+    }
+    const ws = await resolveWorkspace(svc, ref);
+    const { resolve } = require("node:path");
+    await svc.removeWorkspacePath(ws.id, resolve(path), node);
+    console.log(`removed path ${path} from workspace ${ws.name}`);
+  }),
+});
+
+const workspaceCmd = subcommands({
+  name: "workspace",
+  description: "Manage workspaces (project groupings)",
   cmds: {
-    add: projectAddCmd,
-    remove: projectRemoveCmd,
-    rm: projectRmCmd,
-    list: projectListCmd,
-    ls: projectLsCmd,
+    list: wsListCmd,
+    ls: wsLsCmd,
+    create: wsCreateCmd,
+    show: wsShowCmd,
+    update: wsUpdateCmd,
+    archive: wsArchiveCmd,
+    delete: wsDeleteCmd,
+    "add-path": wsAddPathCmd,
+    "rm-path": wsRmPathCmd,
   },
 });
 
@@ -2903,7 +3012,7 @@ const app = subcommands({
     keep: keepCmd,
     unkeep: unkeepCmd,
     merge: mergeCmd,
-    project: projectCmd,
+    workspace: workspaceCmd,
     traces: tracesCmd,
     archive: archiveCmd,
     unarchive: unarchiveCmd,
@@ -2923,15 +3032,20 @@ function normalizeArgv(argv: string[]): string[] | null {
   const top = normalized[0];
   if (!top || !TOP_LEVEL_COMMANDS.has(top)) return null;
 
-  if (top === "project") {
+  if (top === "workspace") {
     const sub = normalized[1];
     if (!sub) {
       normalized.splice(1, 0, "list");
-    } else if (!PROJECT_SUBCOMMANDS.has(sub)) {
-      console.error("usage: orka project <add|remove|list>");
-      console.error("  add <name> [path]  — register project (default path: .)");
-      console.error("  remove <name>      — unregister project");
-      console.error("  list               — show registered projects");
+    } else if (!WORKSPACE_SUBCOMMANDS.has(sub)) {
+      console.error("usage: orka workspace <list|create|show|update|archive|delete|add-path|rm-path>");
+      console.error("  list                          — list workspaces");
+      console.error("  create <name> [--path <path>] — create workspace");
+      console.error("  show <name-or-id>             — show workspace details");
+      console.error("  update <id> [--name] [--desc] — update workspace");
+      console.error("  archive <name-or-id>          — archive workspace");
+      console.error("  delete <name-or-id>           — delete workspace");
+      console.error("  add-path <id> <path>          — add project path");
+      console.error("  rm-path <id> <path>           — remove project path");
       process.exit(1);
     }
   }
@@ -3032,7 +3146,7 @@ function printUsage(): void {
   console.log("  unarchive Restore archived sessions       orka unarchive <id>");
   console.log("");
   console.log("infrastructure:");
-  console.log("  project  Register/list/remove aliases     orka project add myapp /path/to/repo");
+  console.log("  workspace Manage workspaces               orka workspace list");
   console.log("  serve    Start daemon WS server           orka serve --port 7394");
   console.log("  relay    Relay router / account mgmt      orka relay --port 7390");
   console.log("  keygen   Manage E2E encryption keys       orka keygen client");
@@ -3235,6 +3349,21 @@ function projectName(path: string): string {
   if (!path) return "-";
   const parts = path.split("/");
   return parts[parts.length - 1] || path;
+}
+
+async function resolveWorkspace(svc: OrkaService, ref: string): Promise<WorkspaceInfo> {
+  // Try as ID first
+  if (ref.startsWith("ws-")) {
+    try { return await svc.getWorkspace(ref); } catch { /* not found */ }
+  }
+  // Search by name
+  const workspaces = await svc.listWorkspaces({ includeArchived: true });
+  const byName = workspaces.find((ws) => ws.name === ref);
+  if (byName) return byName;
+  // Try partial match on ID
+  const byPartialId = workspaces.find((ws) => ws.id.includes(ref));
+  if (byPartialId) return byPartialId;
+  throw new Error(`Workspace not found: ${ref}`);
 }
 
 function padR(s: string, n: number): string {

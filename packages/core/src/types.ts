@@ -34,8 +34,6 @@ export const SessionStatusSchema = z.enum([
 ]);
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 
-export type WorkspaceKind = "repo" | "worktree";
-
 // --- Core Models ---
 
 export interface Task {
@@ -47,12 +45,40 @@ export interface Task {
   createdAt: string; // ISO 8601
 }
 
-export interface Workspace {
-  id: WorkspaceId;
+// --- Workspace ---
+
+export interface WorkspaceSettings {
+  defaults?: {
+    backend?: string;
+    model?: string;
+    permissionMode?: string;
+    systemPrompt?: string;
+    tags?: string[];
+  };
+}
+
+export interface WorkspaceMetadata {
+  color?: string;
+  icon?: string;
+  description?: string;
+  pinned?: boolean;
+}
+
+export interface WorkspacePathMapping {
+  nodeId: string | null;
   projectPath: string;
-  kind: WorkspaceKind;
-  gitBranch: string | null;
-  worktreePath: string | null;
+}
+
+export interface WorkspaceInfo {
+  id: string;
+  name: string;
+  createdAt: string;
+  archivedAt: string | null;
+  settings: WorkspaceSettings | null;
+  metadata: WorkspaceMetadata | null;
+  paths: WorkspacePathMapping[];
+  sessionCount: number;
+  activeCount: number;
 }
 
 /** Normalized session entity (matches DB schema). */

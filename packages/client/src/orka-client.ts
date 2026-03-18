@@ -23,6 +23,9 @@ import type {
   DataFrame,
   StartPairingParams,
   StartPairingResult,
+  WorkspaceInfo,
+  WorkspaceMetadata,
+  WorkspaceSettings,
 } from "@orka/core";
 import { trace } from "@opentelemetry/api";
 import { RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent, canonicalTransportOrigin } from "@orka/core";
@@ -404,6 +407,36 @@ class OrkaClient implements OrkaService {
 
   async listNodes(): Promise<NodeInfo[]> {
     return this.call("listNodes");
+  }
+
+  // --- Workspaces ---
+
+  async listWorkspaces(opts?: { includeArchived?: boolean }): Promise<WorkspaceInfo[]> {
+    return this.call("listWorkspaces", opts ?? {});
+  }
+
+  async getWorkspace(id: string): Promise<WorkspaceInfo> {
+    return this.call("getWorkspace", { id });
+  }
+
+  async createWorkspace(opts: { name: string; paths?: Array<{ nodeId?: string; path: string }>; settings?: WorkspaceSettings; metadata?: WorkspaceMetadata }): Promise<WorkspaceInfo> {
+    return this.call("createWorkspace", opts);
+  }
+
+  async updateWorkspace(id: string, opts: Partial<{ name: string; settings: WorkspaceSettings; metadata: WorkspaceMetadata; archivedAt: string | null }>): Promise<void> {
+    return this.call("updateWorkspace", { id, opts });
+  }
+
+  async deleteWorkspace(id: string): Promise<void> {
+    return this.call("deleteWorkspace", { id });
+  }
+
+  async addWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
+    return this.call("addWorkspacePath", { workspaceId, path, nodeId });
+  }
+
+  async removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
+    return this.call("removeWorkspacePath", { workspaceId, path, nodeId });
   }
 }
 

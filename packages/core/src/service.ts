@@ -1,4 +1,4 @@
-import type { BackendKind, ChatEntry, NodeInfo, PermissionMode, Session, SessionId, SessionStatus, SpawnRequest, StoredNode, Task } from "./types";
+import type { BackendKind, ChatEntry, NodeInfo, PermissionMode, Session, SessionId, SessionStatus, SpawnRequest, StoredNode, Task, WorkspaceInfo, WorkspaceMetadata, WorkspaceSettings } from "./types";
 import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
@@ -269,4 +269,13 @@ export interface OrkaService {
   terminalResize(termId: string, cols: number, rows: number): Promise<void>;
   terminalClose(termId: string): Promise<void>;
   terminalList(sessionId: string): Promise<Array<{ id: string; cols: number; rows: number }>>;
+
+  // --- Workspaces ---
+  listWorkspaces(opts?: { includeArchived?: boolean }): Promise<WorkspaceInfo[]>;
+  getWorkspace(id: string): Promise<WorkspaceInfo>;
+  createWorkspace(opts: { name: string; paths?: Array<{ nodeId?: string; path: string }>; settings?: WorkspaceSettings; metadata?: WorkspaceMetadata }): Promise<WorkspaceInfo>;
+  updateWorkspace(id: string, opts: Partial<{ name: string; settings: WorkspaceSettings; metadata: WorkspaceMetadata; archivedAt: string | null }>): Promise<void>;
+  deleteWorkspace(id: string): Promise<void>;
+  addWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void>;
+  removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void>;
 }
