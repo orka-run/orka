@@ -44,7 +44,11 @@ export interface ProviderEventConsumerCallbacks {
   /** Deny all pending hook-based approvals for a session (called on session exit). */
   denyHookApprovals?: (sessionId: string) => void;
   /** Called when a turn completes and session transitions to idle. Used to start hibernate timer. */
-  onSessionIdle?: (sessionId: string) => void;
+  onSessionIdle?: (sessionId: string) => Promise<void> | void;
+  /** Sends follow-up messages queued while the current turn was still running. */
+  deliverPendingMessages?: (sessionId: string) => Promise<boolean> | boolean;
+  /** Clears any queued follow-up messages for sessions that exit before delivery. */
+  clearPendingMessages?: (sessionId: string) => void;
   /** Called when a turn completes and should trigger a git checkpoint capture. */
   onTurnCheckpoint?: (sessionId: string, turnSeq: number, workingDir: string) => void;
   /** Returns the next checkpoint turn sequence for a session. */
@@ -229,6 +233,11 @@ async function handleTurnCompleted(
     status: "idle",
   });
 
+  const deliveredPendingMessages = await callbacks.deliverPendingMessages?.(sessionId);
+  if (deliveredPendingMessages) {
+    return;
+  }
+
   // Auto-merge fires on first idle transition (preserves old "background completes and merges" behavior)
   if (callbacks.autoMerge && !callbacks.autoMergeFired?.has(sessionId)) {
     callbacks.autoMergeFired?.add(sessionId);
@@ -247,7 +256,7 @@ async function handleTurnCompleted(
   }
 
   // Notify orchestrator to start idle timer
-  callbacks.onSessionIdle?.(sessionId);
+  await callbacks.onSessionIdle?.(sessionId);
 }
 
 async function finalizeSession(
@@ -255,6 +264,8 @@ async function finalizeSession(
   event: ProviderRuntimeEventOf<"session.exited">,
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
+  callbacks.clearPendingMessages?.(sessionId);
+
   // Clean up auto-merge tracking
   callbacks.autoMergeFired?.delete(sessionId);
 

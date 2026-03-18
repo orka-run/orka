@@ -105,6 +105,30 @@ function queueCheckpointCapture(
   });
 }
 
+function emitUserInputEvent(
+  ctx: DaemonContext,
+  sessionId: string,
+  text: string,
+  provider: string,
+  queued = false,
+): void {
+  const event = {
+    v: 1 as const,
+    type: "user.input" as const,
+    sessionId,
+    text,
+    timestamp: new Date().toISOString(),
+    ...(queued ? { queued: true } : {}),
+  };
+
+  ctx.db.insertOrchestrationEvent({
+    ...event,
+    provider,
+    eventId: generateId("evt"),
+  });
+  ctx.pushHub.broadcast("orchestration.event", event);
+}
+
 // --- Consumer callbacks factory ---
 
 function buildConsumerCallbacks(
@@ -154,6 +178,25 @@ function buildConsumerCallbacks(
     },
     getNextTurnSeq: (id: string) => getNextCheckpointTurnSeq(ctx, id),
     autoMergeFired: ctx.sessionRuntime.autoMergeFired,
+    clearPendingMessages: (id: string) => {
+      ctx.sessionRuntime.pendingMessages.delete(id);
+    },
+    deliverPendingMessages: async (id: string) => {
+      const queuedMessages = ctx.sessionRuntime.pendingMessages.get(id);
+      if (!queuedMessages || queuedMessages.length === 0) {
+        return false;
+      }
+
+      const text = queuedMessages.join("\n\n");
+      await ctx.providerService.sendTurn(id, { input: text });
+      ctx.sessionRuntime.pendingMessages.delete(id);
+      ctx.db.updateSessionStatus(id, "running");
+      ctx.pushHub.broadcast("orchestration.sessionUpdated", {
+        sessionId: id,
+        status: "running",
+      });
+      return true;
+    },
   };
 }
 
@@ -496,6 +539,7 @@ export async function closeSession(ctx: DaemonContext, sessionId: string): Promi
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
     clearIdleTimer(ctx, sessionId);
+    ctx.sessionRuntime.pendingMessages.delete(sessionId);
 
     // Kill process if alive
     const handle = ctx.providerService.getHandle(sessionId);
@@ -519,6 +563,7 @@ export async function closeSession(ctx: DaemonContext, sessionId: string): Promi
 // --- Send Turn (unified: handles idle, hibernated, completed) ---
 
 /** Send a turn to a session. Handles all states transparently:
+ *  - running: queue follow-up input until the current turn completes
  *  - idle: write to existing stdin (zero overhead)
  *  - hibernated/completed: spawn --resume process, then send */
 export async function sendTurnToSession(
@@ -536,11 +581,19 @@ export async function sendTurnToSession(
     switch (session.status) {
       case "running":
       case "idle": {
-        // Process is alive — write to stdin directly
+        // Process is alive — queue during an active turn, or write directly when idle
         const handle = ctx.providerService.getHandle(sessionId);
         if (!handle) {
           // Process died but status wasn't updated — resume instead
           await resumeSession(ctx, sessionId, text);
+          return;
+        }
+
+        if (session.status === "running") {
+          const pending = ctx.sessionRuntime.pendingMessages.get(sessionId) ?? [];
+          pending.push(text);
+          ctx.sessionRuntime.pendingMessages.set(sessionId, pending);
+          emitUserInputEvent(ctx, sessionId, text, handle.provider, true);
           return;
         }
 
@@ -550,20 +603,7 @@ export async function sendTurnToSession(
           ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "running" });
         }
 
-        // Emit user.input event
-        const event = {
-          v: 1 as const,
-          type: "user.input" as const,
-          sessionId,
-          text,
-          timestamp: new Date().toISOString(),
-        };
-        ctx.db.insertOrchestrationEvent({
-          ...event,
-          provider: handle.provider,
-          eventId: generateId("evt"),
-        });
-        ctx.pushHub.broadcast("orchestration.event", event);
+        emitUserInputEvent(ctx, sessionId, text, handle.provider);
 
         await ctx.providerService.sendTurn(sessionId, { input: text });
         return;
@@ -591,6 +631,7 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
     clearIdleTimer(ctx, sessionId);
+    ctx.sessionRuntime.pendingMessages.delete(sessionId);
 
     // Deny all pending hook-based approvals so the hook scripts unblock
     ctx.hookApprovalBridge.denyAllForSession(sessionId);

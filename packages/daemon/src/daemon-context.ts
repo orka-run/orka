@@ -18,6 +18,8 @@ export interface SessionRuntimeState {
   /** Per-session idle timers. When a session goes idle, a timer starts.
    *  When it fires, the process is killed and the session is set to "hibernated". */
   idleTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Per-session follow-up messages queued while the agent is still finishing the current turn. */
+  pendingMessages: Map<string, string[]>;
   /** Tracks which sessions have already auto-merged (one-shot on first idle). */
   autoMergeFired: Set<string>;
   /** Per-session checkpoint turn counters. */
@@ -85,6 +87,7 @@ export async function createDaemonContext(orkaHome?: string): Promise<DaemonCont
 
   const sessionRuntime: SessionRuntimeState = {
     idleTimers: new Map(),
+    pendingMessages: new Map(),
     autoMergeFired: new Set(),
     turnCounts: new Map(),
     checkpointCaptureChains: new Map(),

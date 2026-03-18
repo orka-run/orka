@@ -315,6 +315,73 @@ describe("consumeProviderEvents", () => {
     });
   });
 
+  test("delivers queued follow-up messages before auto-merge or idle timers", async () => {
+    const queue = new AsyncEventQueue<ProviderRuntimeEvent>();
+    const handle = {
+      threadId: "thread-follow-up",
+      provider: "codex" as const,
+      events: queue,
+      meta: {},
+    };
+    const statuses: StatusUpdate[] = [];
+    const deliveredTurns: Array<{ sessionId: string; text: string }> = [];
+    let idleNotifications = 0;
+    const autoMergeFired = new Set<string>();
+
+    const consumeTask = consumeProviderEvents("sess-follow-up", handle, new OrchestrationEngine(), {
+      updateSessionStatus: (sessionId, status, extra) => {
+        recordStatusUpdate(statuses, sessionId, status, extra);
+      },
+      saveSessionDiff: () => {},
+      insertUsageRecord: () => {},
+      approvalManager: new ApprovalManager(),
+      deliverPendingMessages: async (sessionId) => {
+        deliveredTurns.push({ sessionId, text: "first\n\nsecond" });
+        recordStatusUpdate(statuses, sessionId, "running");
+        return true;
+      },
+      onSessionIdle: async () => {
+        idleNotifications += 1;
+      },
+      autoMerge: true,
+      autoMergeFired,
+    });
+
+    queue.push(
+      createEvent(
+        "turn.completed",
+        "thread-follow-up",
+        { state: "completed" },
+        {
+          turnId: "turn-1",
+          createdAt: "2026-03-11T00:10:00.000Z",
+        },
+      ),
+    );
+    queue.close();
+
+    await consumeTask;
+
+    expect(deliveredTurns).toEqual([
+      {
+        sessionId: "sess-follow-up",
+        text: "first\n\nsecond",
+      },
+    ]);
+    expect(statuses).toEqual([
+      {
+        sessionId: "sess-follow-up",
+        status: "idle",
+      },
+      {
+        sessionId: "sess-follow-up",
+        status: "running",
+      },
+    ]);
+    expect(idleNotifications).toBe(0);
+    expect(autoMergeFired.size).toBe(0);
+  });
+
   test("auto-merges completed worktree sessions when configured", async () => {
     const repoPath = await createRepo();
     const workingDir = await worktreeCreate(repoPath, "sess-merge", testHome);

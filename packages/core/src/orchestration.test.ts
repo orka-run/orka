@@ -234,10 +234,12 @@ describe("parseWireEvent", () => {
       ...BASE,
       type: "user.input",
       text: "hello agent",
+      queued: true,
     });
     expect(event).not.toBeNull();
     expect(event!.type).toBe("user.input");
     expect((event as any).text).toBe("hello agent");
+    expect((event as any).queued).toBe(true);
   });
 
   test("parses event.passthrough directly", () => {

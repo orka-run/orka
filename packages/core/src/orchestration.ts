@@ -63,6 +63,7 @@ export type OrchestrationEvent =
   | OrchestrationEventEnvelope<"user.input", {
       turnId?: string;
       text: string;
+      queued?: boolean;
     }>
   | OrchestrationEventEnvelope<"content.delta", {
       turnId: string;
@@ -253,6 +254,7 @@ const WireEventVariants: Record<string, z.ZodType> = {
     type: z.literal("user.input"),
     turnId: z.string().optional(),
     text: z.string(),
+    queued: z.boolean().optional(),
   }).passthrough(),
 
   "content.delta": WireEventBaseSchema.extend({
