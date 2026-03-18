@@ -148,7 +148,7 @@ async function launchProviderSession(
     ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
     ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
     ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
-    env: opts.env,
+    ...(opts.env ? { env: opts.env } : {}),
     ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
     ...(hasRules ? { permissionRules: { autoApprove: permissions.autoApprove, alwaysDeny: permissions.alwaysDeny } } : {}),
     ...(opts.providerSessionId ? { providerSessionId: opts.providerSessionId } : {}),
