@@ -21,6 +21,7 @@ describe("KnownOrchestrationEventTypeSchema", () => {
       "item.started", "item.updated", "item.completed",
       "request.opened", "request.resolved",
       "tool.progress", "runtime.error", "runtime.warning",
+      "session.rate_limited", "session.api_retry",
       "event.passthrough",
     ];
     for (const t of known) {
@@ -43,7 +44,10 @@ describe("WireOrchestrationEventSchema", () => {
       backend: "claude-code",
     });
     expect(result.success).toBe(true);
-    expect(result.data!.type).toBe("session.created");
+    if (!result.success) {
+      throw new Error("expected session.created to parse");
+    }
+    expect((result.data as { type: string }).type).toBe("session.created");
   });
 
   test("parses session.completed with null exitCode", () => {
@@ -53,7 +57,10 @@ describe("WireOrchestrationEventSchema", () => {
       exitCode: null,
     });
     expect(result.success).toBe(true);
-    expect(result.data!.type).toBe("session.completed");
+    if (!result.success) {
+      throw new Error("expected session.completed to parse");
+    }
+    expect((result.data as { type: string }).type).toBe("session.completed");
   });
 
   test("parses session.completed with numeric exitCode", () => {
@@ -88,6 +95,32 @@ describe("WireOrchestrationEventSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  test("parses session.rate_limited event", () => {
+    const result = WireOrchestrationEventSchema.safeParse({
+      ...BASE,
+      type: "session.rate_limited",
+      status: "allowed_warning",
+      resetsAt: 1773990000,
+      rateLimitType: "seven_day",
+      utilization: 0.78,
+      surpassedThreshold: 0.75,
+      isUsingOverage: false,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("parses session.api_retry event", () => {
+    const result = WireOrchestrationEventSchema.safeParse({
+      ...BASE,
+      type: "session.api_retry",
+      attempt: 1,
+      maxAttempts: 10,
+      error: "overloaded_error",
+      delayMs: 1000,
+    });
+    expect(result.success).toBe(true);
+  });
+
   test("wraps known type with invalid variant fields as event.passthrough", () => {
     // session.created requires threadId + backend, omitting them causes variant failure
     const result = WireOrchestrationEventSchema.safeParse({
@@ -96,7 +129,10 @@ describe("WireOrchestrationEventSchema", () => {
       // missing threadId and backend
     });
     expect(result.success).toBe(true);
-    expect(result.data!.type).toBe("event.passthrough");
+    if (!result.success) {
+      throw new Error("expected invalid known type to wrap as passthrough");
+    }
+    expect((result.data as { type: string }).type).toBe("event.passthrough");
     expect((result.data as any).originalType).toBe("session.created");
   });
 
@@ -107,7 +143,10 @@ describe("WireOrchestrationEventSchema", () => {
       someNewField: 42,
     });
     expect(result.success).toBe(true);
-    expect(result.data!.type).toBe("future.event.v2");
+    if (!result.success) {
+      throw new Error("expected future event to parse");
+    }
+    expect((result.data as { type: string }).type).toBe("future.event.v2");
   });
 
   test("preserves extra unknown fields via .passthrough()", () => {

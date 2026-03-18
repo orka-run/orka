@@ -17,6 +17,15 @@ afterEach(() => {
   }
 });
 
+function requireEventKind<TKind extends LogEvent["kind"]>(
+  event: LogEvent | null,
+  kind: TKind,
+): Extract<LogEvent, { kind: TKind }> {
+  expect(event).not.toBeNull();
+  expect(event?.kind).toBe(kind);
+  return event as Extract<LogEvent, { kind: TKind }>;
+}
+
 describe("parseLine", () => {
   test("returns null for empty string", () => {
     expect(parseLine("")).toBeNull();
@@ -56,52 +65,99 @@ describe("parseLine", () => {
   });
 
   test("parses turn.completed with usage", () => {
-    const event = parseLine(JSON.stringify({
+    const event = requireEventKind(parseLine(JSON.stringify({
       type: "turn.completed",
       usage: { input_tokens: 500, output_tokens: 200 },
-    }));
-    expect(event).not.toBeNull();
-    expect(event!.kind).toBe("info");
-    expect(event!.text).toContain("500 input");
-    expect(event!.text).toContain("200 output");
+    })), "info");
+    expect(event.text).toContain("500 input");
+    expect(event.text).toContain("200 output");
   });
 
   test("parses turn.completed with camelCase usage keys", () => {
-    const event = parseLine(JSON.stringify({
+    const event = requireEventKind(parseLine(JSON.stringify({
       type: "turn.completed",
       usage: { inputTokens: 100, outputTokens: 50 },
-    }));
-    expect(event).not.toBeNull();
-    expect(event!.text).toContain("100 input");
-    expect(event!.text).toContain("50 output");
+    })), "info");
+    expect(event.text).toContain("100 input");
+    expect(event.text).toContain("50 output");
   });
 
   test("parses turn.completed without usage", () => {
-    const event = parseLine(JSON.stringify({ type: "turn.completed" }));
-    expect(event).not.toBeNull();
-    expect(event!.kind).toBe("info");
-    expect(event!.text).toContain("0 input");
+    const event = requireEventKind(parseLine(JSON.stringify({ type: "turn.completed" })), "info");
+    expect(event.text).toContain("0 input");
   });
 
   test("parses result event", () => {
-    const event = parseLine(JSON.stringify({ type: "result", result: "All done!" }));
-    expect(event).not.toBeNull();
-    expect(event!.kind).toBe("message");
-    expect(event!.text).toContain("RESULT");
-    expect(event!.text).toContain("All done!");
+    const event = requireEventKind(parseLine(JSON.stringify({ type: "result", result: "All done!" })), "message");
+    expect(event.text).toContain("RESULT");
+    expect(event.text).toContain("All done!");
   });
 
   test("parses system init event", () => {
-    const event = parseLine(JSON.stringify({
+    const event = requireEventKind(parseLine(JSON.stringify({
       type: "system",
       subtype: "init",
       model: "opus-4",
       permissionMode: "auto",
+    })), "system");
+    expect(event.text).toContain("opus-4");
+    expect(event.text).toContain("auto");
+  });
+
+  test("parses nested system api_retry event", () => {
+    const event = parseLine(JSON.stringify({
+      type: "system",
+      subtype: "api_retry",
+      api_retry_info: {
+        attempt: 1,
+        max_attempts: 10,
+        error: "overloaded_error",
+        delay_ms: 1000,
+      },
     }));
-    expect(event).not.toBeNull();
-    expect(event!.kind).toBe("system");
-    expect(event!.text).toContain("opus-4");
-    expect(event!.text).toContain("auto");
+    expect(event).toEqual({
+      kind: "info",
+      text: "API retry (attempt 1/10) - overloaded, waiting 1s",
+    });
+  });
+
+  test("parses rate_limit_event warning", () => {
+    const realNow = Date.now;
+    Date.now = () => new Date("2026-03-18T13:00:00.000Z").getTime();
+    try {
+      const event = parseLine(JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed_warning",
+          resetsAt: Math.floor(new Date("2026-03-18T15:00:00.000Z").getTime() / 1000),
+          utilization: 0.78,
+          isUsingOverage: false,
+          rateLimitType: "seven_day",
+        },
+      }));
+      expect(event).toEqual({
+        kind: "warning",
+        text: "Rate limit: 78% used (resets in 2h)",
+      });
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test("parses rate_limit_event rejection", () => {
+    const event = parseLine(JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: Math.floor(new Date("2026-03-18T15:00:00.000Z").getTime() / 1000),
+        isUsingOverage: false,
+        rateLimitType: "seven_day",
+      },
+    }));
+    expect(event).toEqual({
+      kind: "error",
+      text: "Rate limit exceeded - resets at 15:00",
+    });
   });
 
   test("returns null for non-init system events", () => {
@@ -149,19 +205,17 @@ describe("parseLine", () => {
 
   describe("claude events", () => {
     test("parses assistant text message", () => {
-      const event = parseLine(JSON.stringify({
+      const event = requireEventKind(parseLine(JSON.stringify({
         type: "assistant",
         message: {
           content: [{ type: "text", text: "Hello there" }],
         },
-      }));
-      expect(event).not.toBeNull();
-      expect(event!.kind).toBe("message");
-      expect(event!.text).toBe("Hello there");
+      })), "message");
+      expect(event.text).toBe("Hello there");
     });
 
     test("parses assistant with multiple text blocks", () => {
-      const event = parseLine(JSON.stringify({
+      const event = requireEventKind(parseLine(JSON.stringify({
         type: "assistant",
         message: {
           content: [
@@ -169,9 +223,8 @@ describe("parseLine", () => {
             { type: "text", text: "Part two" },
           ],
         },
-      }));
-      expect(event).not.toBeNull();
-      expect(event!.text).toBe("Part one\nPart two");
+      })), "message");
+      expect(event.text).toBe("Part one\nPart two");
     });
 
     test("parses assistant tool_use", () => {
@@ -281,6 +334,13 @@ describe("formatEvent", () => {
     expect(result).toContain("something broke");
   });
 
+  test("formats warning event with WARN prefix", () => {
+    const event: LogEvent = { kind: "warning", text: "rate limit warning" };
+    const result = formatEvent(event);
+    expect(result).toContain("WARN");
+    expect(result).toContain("rate limit warning");
+  });
+
   test("formats system event", () => {
     const event: LogEvent = { kind: "system", text: "session started" };
     const result = formatEvent(event);
@@ -341,5 +401,40 @@ describe("formatLog", () => {
     const result = formatLog(log);
     expect(result).toContain("line1");
     expect(result).toContain("line2");
+  });
+
+  test("formats api retry and rate limit events", () => {
+    const realNow = Date.now;
+    Date.now = () => new Date("2026-03-18T13:00:00.000Z").getTime();
+    try {
+      const log = [
+        JSON.stringify({
+          type: "system",
+          subtype: "api_retry",
+          api_retry_info: {
+            attempt: 1,
+            max_attempts: 10,
+            error: "overloaded_error",
+            delay_ms: 1000,
+          },
+        }),
+        JSON.stringify({
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed_warning",
+            resetsAt: Math.floor(new Date("2026-03-18T15:00:00.000Z").getTime() / 1000),
+            utilization: 0.78,
+            isUsingOverage: false,
+            rateLimitType: "seven_day",
+          },
+        }),
+      ].join("\n");
+
+      const result = formatLog(log);
+      expect(result).toContain("API retry (attempt 1/10) - overloaded, waiting 1s");
+      expect(result).toContain("Rate limit: 78% used (resets in 2h)");
+    } finally {
+      Date.now = realNow;
+    }
   });
 });

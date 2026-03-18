@@ -3,6 +3,7 @@ export type LogEvent =
   | { kind: "tool_call"; tool: string; input: string }
   | { kind: "tool_result"; tool: string; output: string; exitCode?: number }
   | { kind: "error"; text: string }
+  | { kind: "warning"; text: string }
   | { kind: "system"; text: string }
   | { kind: "info"; text: string };
 
@@ -54,6 +55,8 @@ export function parseLine(line: string): LogEvent | null {
       return { kind: "message", text: `--- RESULT ---\n${parsed["result"] ?? ""}` };
     case "system":
       return parseClaudeSystem(parsed);
+    case "rate_limit_event":
+      return parseClaudeRateLimit(parsed);
     default:
       return null;
   }
@@ -77,6 +80,8 @@ export function formatEvent(event: LogEvent): string {
       return `${formatToolResultOutput(event.output)}\n`;
     case "error":
       return red(`ERROR: ${event.text}`);
+    case "warning":
+      return yellow(`WARN: ${event.text}`);
     case "system":
       return dimItalic(event.text);
     case "info":
@@ -156,15 +161,128 @@ function parseClaudeAssistant(parsed: JsonRecord): LogEvent | null {
 }
 
 function parseClaudeSystem(parsed: JsonRecord): LogEvent | null {
-  if (parsed["subtype"] !== "init") return null;
+  if (parsed["subtype"] === "init") {
+    const session = isRecord(parsed["session"]) ? parsed["session"] : undefined;
+    const model = parsed["model"] ?? session?.["model"] ?? "unknown";
+    const mode = parsed["permissionMode"] ?? parsed["permission_mode"] ?? parsed["mode"] ?? "unknown";
+    return {
+      kind: "system",
+      text: `session started (model: ${model}, mode: ${mode})`,
+    };
+  }
 
-  const session = isRecord(parsed["session"]) ? parsed["session"] : undefined;
-  const model = parsed["model"] ?? session?.["model"] ?? "unknown";
-  const mode = parsed["permissionMode"] ?? parsed["permission_mode"] ?? parsed["mode"] ?? "unknown";
+  if (parsed["subtype"] === "api_retry") {
+    const retry = normalizeApiRetryInfo(parsed);
+    if (!retry) {
+      return null;
+    }
+
+    return {
+      kind: "info",
+      text: `API retry (attempt ${String(retry.attempt)}/${String(retry.maxAttempts)}) - ${formatRetryError(retry.error)}, waiting ${formatRetryDelay(retry.delayMs)}`,
+    };
+  }
+
+  return null;
+}
+
+function parseClaudeRateLimit(parsed: JsonRecord): LogEvent | null {
+  const info = normalizeRateLimitInfo(parsed["rate_limit_info"]);
+  if (!info || info.status === "allowed") {
+    return null;
+  }
+
+  if (info.status === "rejected") {
+    return {
+      kind: "error",
+      text: `Rate limit exceeded - resets at ${formatResetTime(info.resetsAt)}`,
+    };
+  }
+
   return {
-    kind: "system",
-    text: `session started (model: ${model}, mode: ${mode})`,
+    kind: "warning",
+    text: `Rate limit: ${formatUtilization(info.utilization)} used (resets in ${formatResetDistance(info.resetsAt)})`,
   };
+}
+
+function normalizeApiRetryInfo(parsed: JsonRecord): { attempt: number; maxAttempts: number; error: string; delayMs: number } | null {
+  const info = isRecord(parsed["api_retry_info"]) ? parsed["api_retry_info"] : parsed;
+  const attempt = typeof info["attempt"] === "number" ? info["attempt"] : null;
+  const maxAttempts =
+    typeof info["max_attempts"] === "number"
+      ? info["max_attempts"]
+      : typeof info["max_retries"] === "number"
+        ? info["max_retries"]
+        : null;
+  const error = typeof info["error"] === "string" ? info["error"] : null;
+  const delayMs =
+    typeof info["delay_ms"] === "number"
+      ? info["delay_ms"]
+      : typeof info["retry_delay_ms"] === "number"
+        ? info["retry_delay_ms"]
+        : null;
+
+  if (attempt == null || maxAttempts == null || error == null || delayMs == null) {
+    return null;
+  }
+
+  return { attempt, maxAttempts, error, delayMs };
+}
+
+function normalizeRateLimitInfo(value: unknown): { status: string; resetsAt: number; utilization?: number } | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const status = typeof value["status"] === "string" ? value["status"] : null;
+  const resetsAt = typeof value["resetsAt"] === "number" ? value["resetsAt"] : null;
+  const utilization = typeof value["utilization"] === "number" ? value["utilization"] : undefined;
+  if (status == null || resetsAt == null) {
+    return null;
+  }
+
+  return {
+    status,
+    resetsAt,
+    ...(utilization !== undefined ? { utilization } : {}),
+  };
+}
+
+function formatRetryError(error: string): string {
+  return error.replace(/_error$/i, "").replace(/_/g, " ");
+}
+
+function formatRetryDelay(delayMs: number): string {
+  const seconds = delayMs / 1000;
+  return Number.isInteger(seconds) ? `${String(seconds)}s` : `${seconds.toFixed(1)}s`;
+}
+
+function formatUtilization(utilization?: number): string {
+  if (utilization === undefined) {
+    return "unknown";
+  }
+
+  return `${Math.round(utilization * 100)}%`;
+}
+
+function formatResetDistance(epochSeconds: number): string {
+  const deltaSeconds = Math.max(0, Math.round(epochSeconds - Date.now() / 1000));
+  const totalMinutes = Math.round(deltaSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+function formatResetTime(epochSeconds: number): string {
+  return new Date(epochSeconds * 1000).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function formatClaudeToolInput(tool: string, input: unknown): string {
@@ -251,6 +369,10 @@ function cyan(text: string): string {
 
 function red(text: string): string {
   return style(text, 31);
+}
+
+function yellow(text: string): string {
+  return style(text, 33);
 }
 
 function dimItalic(text: string): string {

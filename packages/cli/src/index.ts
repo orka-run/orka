@@ -662,6 +662,15 @@ function createLogChunkFormatter() {
   };
 }
 
+async function readLiveLogOutput(sessionId: string): Promise<string> {
+  const rawLog = await svc.getLogContent(sessionId);
+  if (rawLog) {
+    return rawLog;
+  }
+
+  return svc.captureOutput(sessionId);
+}
+
 function fail(message: string): never {
   console.error(message);
   process.exit(1);
@@ -1072,7 +1081,7 @@ const attachCmd = command({
     const formatter = createLogChunkFormatter();
     while (true) {
       try {
-        const output = await svc.captureOutput(session.id);
+        const output = await readLiveLogOutput(session.id);
         if (output.length < offset) {
           offset = 0;
           formatter.reset();
@@ -1089,7 +1098,7 @@ const attachCmd = command({
     }
     // Final read after session ended
     try {
-      const output = await svc.captureOutput(session.id);
+      const output = await readLiveLogOutput(session.id);
       if (output.length > offset) {
         formatter.push(output.slice(offset));
       }
@@ -1120,7 +1129,7 @@ const logsCmd = command({
 
     if (!follow) {
       try {
-        const output = await svc.captureOutput(session.id);
+        const output = await readLiveLogOutput(session.id);
         console.log(formatLog(output));
         return;
       } catch {
@@ -1133,7 +1142,7 @@ const logsCmd = command({
       const formatter = createLogChunkFormatter();
       while (true) {
         try {
-          const output = await svc.captureOutput(session.id);
+          const output = await readLiveLogOutput(session.id);
           if (output.length < offset) {
             offset = 0;
             formatter.reset();

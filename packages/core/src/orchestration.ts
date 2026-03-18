@@ -124,6 +124,20 @@ export type OrchestrationEvent =
       itemId?: string;
       message: string;
     }>
+  | OrchestrationEventEnvelope<"session.rate_limited", {
+      status: string;
+      resetsAt: number;
+      rateLimitType: string;
+      utilization?: number;
+      surpassedThreshold?: number;
+      isUsingOverage: boolean;
+    }>
+  | OrchestrationEventEnvelope<"session.api_retry", {
+      attempt: number;
+      maxAttempts: number;
+      error: string;
+      delayMs: number;
+    }>
   | OrchestrationEventEnvelope<"event.passthrough", {
       turnId?: string;
       originalType: string;
@@ -160,6 +174,8 @@ export const KnownOrchestrationEventTypeSchema = z.enum([
   "tool.progress",
   "runtime.error",
   "runtime.warning",
+  "session.rate_limited",
+  "session.api_retry",
   "event.passthrough",
 ]);
 
@@ -315,6 +331,24 @@ const WireEventVariants: Record<string, z.ZodType> = {
     turnId: z.string().optional(),
     itemId: z.string().optional(),
     message: z.string(),
+  }).passthrough(),
+
+  "session.rate_limited": WireEventBaseSchema.extend({
+    type: z.literal("session.rate_limited"),
+    status: z.string(),
+    resetsAt: z.number(),
+    rateLimitType: z.string(),
+    utilization: z.number().optional(),
+    surpassedThreshold: z.number().optional(),
+    isUsingOverage: z.boolean(),
+  }).passthrough(),
+
+  "session.api_retry": WireEventBaseSchema.extend({
+    type: z.literal("session.api_retry"),
+    attempt: z.number(),
+    maxAttempts: z.number(),
+    error: z.string(),
+    delayMs: z.number(),
   }).passthrough(),
 
   "event.passthrough": WireEventBaseSchema.extend({

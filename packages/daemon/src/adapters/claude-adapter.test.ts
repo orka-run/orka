@@ -17,6 +17,55 @@ describe("mapClaudeEvent", () => {
     expect(event?.payload).toEqual({ message: "Claude Code started" });
   });
 
+  test("maps rate_limit_event to rate.limit", () => {
+    const event = mapClaudeEvent("thread-1", {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed_warning",
+        resetsAt: 1773990000,
+        rateLimitType: "seven_day",
+        utilization: 0.78,
+        surpassedThreshold: 0.75,
+        isUsingOverage: false,
+      },
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.type).toBe("rate.limit");
+    expect(event?.payload).toEqual({
+      rateLimitInfo: {
+        status: "allowed_warning",
+        resetsAt: 1773990000,
+        rateLimitType: "seven_day",
+        utilization: 0.78,
+        surpassedThreshold: 0.75,
+        isUsingOverage: false,
+      },
+    });
+  });
+
+  test("maps system api_retry to api.retry", () => {
+    const event = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "api_retry",
+      api_retry_info: {
+        attempt: 1,
+        max_attempts: 10,
+        error: "overloaded_error",
+        delay_ms: 1000,
+      },
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.type).toBe("api.retry");
+    expect(event?.payload).toEqual({
+      attempt: 1,
+      maxAttempts: 10,
+      error: "overloaded_error",
+      delayMs: 1000,
+    });
+  });
+
   test("maps assistant text to content.delta", () => {
     const event = mapClaudeEvent("thread-1", {
       type: "assistant",
@@ -297,7 +346,6 @@ describe("ClaudeCodeAdapter", () => {
       threadId: "thread-2",
       model: "claude-sonnet-4-6",
       prompt: "First task",
-      interactive: true,
     });
 
     // sendTurn writes a second JSON message to stdin
@@ -363,7 +411,7 @@ async function collectEvents(events: AsyncIterable<ProviderRuntimeEvent>): Promi
 class MockWritableSink {
   writes: string[] = [];
   ended = false;
-  private onEnd?: () => void;
+  private onEnd: (() => void) | undefined;
 
   constructor(onEnd?: () => void) {
     this.onEnd = onEnd;
