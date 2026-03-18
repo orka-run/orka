@@ -1,6 +1,6 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, Globe, LoaderCircle, RotateCcw, Search, Square, TerminalSquare, User, Wrench, Eye } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, ChevronDown, ChevronRight, Clock3, FileCode2, Globe, LoaderCircle, RotateCcw, Search, TerminalSquare, User, Wrench, Eye } from "lucide-react";
 import type { OrchestrationEvent } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { withDashboardSpan } from "../lib/tracing";
@@ -39,6 +39,8 @@ type ChatEntry =
       timestamp: string;
       title: string;
       body: string;
+      tone?: "default" | "warning" | "error" | "info";
+      compact?: boolean;
     }
   | {
       id: string;
@@ -190,6 +192,43 @@ function buildToolGroupSummary(tools: ToolEntry[]): string {
   return text;
 }
 
+function formatPercent(value?: number): string | null {
+  if (value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatRelativeResetTime(epochSeconds: number, now = Date.now()): string | null {
+  const resetAtMs = epochSeconds * 1000;
+  if (!Number.isFinite(resetAtMs)) {
+    return null;
+  }
+
+  const deltaMs = resetAtMs - now;
+  if (deltaMs <= 0) {
+    return "now";
+  }
+
+  const totalMinutes = Math.round(deltaMs / 60_000);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+function formatResetAt(epochSeconds: number): string {
+  return formatRelativeTime(new Date(epochSeconds * 1000).toISOString());
+}
+
+function formatRetryError(error: string): string {
+  return error.replace(/_error$/i, "").replace(/_/g, " ");
+}
+
 /**
  * Process a full list of OrchestrationEvents into ChatEntries.
  *
@@ -207,10 +246,10 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
     if (event.type === "item.completed") completedItemIds.add(event.itemId);
     if (event.type === "item.started") {
       startedMeta.set(event.itemId, {
-        title: event.title,
-        detail: event.detail,
         itemType: event.itemType,
-        args: event.args,
+        ...(event.title !== undefined ? { title: event.title } : {}),
+        ...(event.detail !== undefined ? { detail: event.detail } : {}),
+        ...(event.args !== undefined ? { args: event.args } : {}),
       });
     }
   }
@@ -379,7 +418,9 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
     if (
       event.type === "turn.completed" ||
       event.type === "turn.aborted" ||
-      event.type === "user.input"
+      event.type === "user.input" ||
+      event.type === "session.rate_limited" ||
+      event.type === "session.api_retry"
     ) {
       flushAssistant();
       flushToolGroup();
@@ -472,6 +513,37 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
           body: event.message,
         });
         break;
+      case "session.rate_limited": {
+        if (event.status === "allowed") {
+          break;
+        }
+
+        const resetText = event.status === "rejected"
+          ? `resets at ${formatResetAt(event.resetsAt)}`
+          : `resets in ${formatRelativeResetTime(event.resetsAt) ?? formatResetAt(event.resetsAt)}`;
+        entries.push({
+          id: `rate-limit-${event.timestamp}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: event.status === "rejected" ? "Rate limit exceeded" : "Rate limit warning",
+          body: event.status === "rejected"
+            ? `Rate limit exceeded - ${resetText}`
+            : `Rate limit: ${formatPercent(event.utilization) ?? "warning"} used (${resetText})`,
+          tone: event.status === "rejected" ? "error" : "warning",
+        });
+        break;
+      }
+      case "session.api_retry":
+        entries.push({
+          id: `api-retry-${event.timestamp}-${event.attempt}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "API retry",
+          body: `API retry (attempt ${String(event.attempt)}/${String(event.maxAttempts)}) - ${formatRetryError(event.error)}, waiting ${String(Math.max(1, Math.round(event.delayMs / 1000)))}s`,
+          tone: "info",
+          compact: true,
+        });
+        break;
       default:
         break;
     }
@@ -487,7 +559,7 @@ function eventsToEntries(events: OrchestrationEvent[], initialPrompt?: string, w
   );
   if (hasTerminalEvent) {
     for (const entry of entries) {
-      if (entry.type === "tool_group") {
+      if (entry.type === "tool-group") {
         for (const tool of entry.tools) {
           tool.inProgress = false;
         }
@@ -663,7 +735,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const inputState = useInputState(events, activeSession.status, activeSession.backend);
 
   const [stopping, setStopping] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
   async function handleSend(text: string) {
@@ -708,16 +779,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
       setStopping(false);
     }
   }
-
-  async function handleRetry() {
-    setRetrying(true);
-    try {
-      await client.retrySession(sessionId);
-    } finally {
-      setRetrying(false);
-    }
-  }
-
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center rounded-sm border border-border bg-surface">
@@ -787,7 +848,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onSend={handleSend}
           sendError={sendError}
           onClearError={() => { setSendError(null); }}
-          onStop={isRunning(activeSession.status) ? () => { void handleStop(); } : undefined}
+          {...(isRunning(activeSession.status) ? { onStop: () => { void handleStop(); } } : {})}
           isStopping={stopping}
         />
       </div>
@@ -907,7 +968,12 @@ const TimelineEntry = memo(function TimelineEntry({
             </summary>
             {tool.details.length > 0 ? (
               <div className="border-t border-border/30 px-2 py-1">
-                <ToolCallDetails title={tool.title} details={tool.details} args={tool.args} projectPath={projectPath} />
+                <ToolCallDetails
+                  title={tool.title}
+                  details={tool.details}
+                  args={tool.args}
+                  {...(projectPath ? { projectPath } : {})}
+                />
               </div>
             ) : null}
           </details>
@@ -983,12 +1049,49 @@ const TimelineEntry = memo(function TimelineEntry({
     );
   }
 
+  if (entry.type !== "system") {
+    return null;
+  }
+
+  if (entry.compact) {
+    return (
+      <div className="flex items-center gap-2 rounded-sm border border-border/70 bg-surface-alt px-2 py-1 text-[11px] text-ink-muted">
+        <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+        <p>{entry.body}</p>
+        <p className="ml-auto shrink-0 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
+      </div>
+    );
+  }
+
+  const systemToneClasses = entry.tone === "warning"
+    ? {
+        container: "border-status-warning/30 bg-status-warning/10",
+        icon: "text-status-warning",
+        title: "text-status-warning",
+        body: "text-status-warning/80",
+      }
+    : entry.tone === "error"
+      ? {
+          container: "border-status-error/30 bg-status-error/10",
+          icon: "text-status-error",
+          title: "text-status-error",
+          body: "text-status-error/80",
+        }
+      : {
+          container: "border-border bg-surface-alt",
+          icon: "text-ink-muted",
+          title: "text-ink",
+          body: "text-ink-muted",
+        };
+
   return (
-    <div className="flex items-start gap-2 rounded-sm border border-border bg-surface-alt px-2 py-1.5">
-      <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-muted" />
+    <div className={`flex items-start gap-2 rounded-sm border px-2 py-1.5 ${systemToneClasses.container}`}>
+      {entry.tone === "warning" || entry.tone === "error"
+        ? <AlertTriangle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${systemToneClasses.icon}`} />
+        : <Clock3 className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${systemToneClasses.icon}`} />}
       <div>
-        <p className="text-[12px] font-medium text-ink">{entry.title}</p>
-        <p className="mt-0.5 text-[11px] text-ink-muted">{entry.body}</p>
+        <p className={`text-[12px] font-medium ${systemToneClasses.title}`}>{entry.title}</p>
+        <p className={`mt-0.5 text-[11px] ${systemToneClasses.body}`}>{entry.body}</p>
         <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
       </div>
     </div>

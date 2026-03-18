@@ -164,6 +164,26 @@ export interface RuntimeErrorPayload {
   terminal?: boolean;
 }
 
+export interface RateLimitInfo {
+  status: string;
+  resetsAt: number;
+  rateLimitType: string;
+  utilization?: number;
+  surpassedThreshold?: number;
+  isUsingOverage: boolean;
+}
+
+export interface RateLimitPayload {
+  rateLimitInfo: RateLimitInfo;
+}
+
+export interface ApiRetryPayload {
+  attempt: number;
+  maxAttempts: number;
+  error: string;
+  delayMs: number;
+}
+
 interface ProviderRuntimeEventEnvelope<TType extends string, TPayload> extends ProviderRuntimeEventBase {
   type: TType;
   payload: TPayload;
@@ -184,6 +204,8 @@ export type RequestResolvedEvent = ProviderRuntimeEventEnvelope<"request.resolve
 export type ToolProgressEvent = ProviderRuntimeEventEnvelope<"tool.progress", ToolProgressPayload>;
 export type RuntimeErrorEvent = ProviderRuntimeEventEnvelope<"runtime.error", RuntimeErrorPayload>;
 export type RuntimeWarningEvent = ProviderRuntimeEventEnvelope<"runtime.warning", RuntimeWarningPayload>;
+export type RateLimitEvent = ProviderRuntimeEventEnvelope<"rate.limit", RateLimitPayload>;
+export type ApiRetryEvent = ProviderRuntimeEventEnvelope<"api.retry", ApiRetryPayload>;
 
 export type ProviderRuntimeEvent =
   | SessionStartedEvent
@@ -200,7 +222,9 @@ export type ProviderRuntimeEvent =
   | RequestResolvedEvent
   | ToolProgressEvent
   | RuntimeErrorEvent
-  | RuntimeWarningEvent;
+  | RuntimeWarningEvent
+  | RateLimitEvent
+  | ApiRetryEvent;
 
 export interface ProviderRuntimeEventPayloads {
   "session.started": SessionStartedPayload;
@@ -218,6 +242,8 @@ export interface ProviderRuntimeEventPayloads {
   "tool.progress": ToolProgressPayload;
   "runtime.error": RuntimeErrorPayload;
   "runtime.warning": RuntimeWarningPayload;
+  "rate.limit": RateLimitPayload;
+  "api.retry": ApiRetryPayload;
 }
 
 export type ProviderRuntimeEventType = keyof ProviderRuntimeEventPayloads;

@@ -54,6 +54,22 @@ interface ClaudeUsage {
   outputTokens: number;
 }
 
+interface ClaudeRateLimitInfo {
+  status: string;
+  resetsAt: number;
+  rateLimitType: string;
+  utilization?: number;
+  surpassedThreshold?: number;
+  isUsingOverage: boolean;
+}
+
+interface ClaudeApiRetryInfo {
+  attempt: number;
+  maxAttempts: number;
+  error: string;
+  delayMs: number;
+}
+
 class AsyncEventQueue<T> implements AsyncIterable<T> {
   private values: T[] = [];
   private resolvers: Array<(result: IteratorResult<T>) => void> = [];
@@ -403,16 +419,49 @@ export function mapClaudeEvent(
 
   switch (raw["type"]) {
     case "system":
-      if (raw["subtype"] !== "init") {
+      if (raw["subtype"] === "init") {
+        return createEvent(
+          "session.started",
+          threadId,
+          { ...(typeof raw["message"] === "string" ? { message: raw["message"] } : {}) },
+          { provider: "claude-code" },
+        );
+      }
+
+      if (raw["subtype"] === "api_retry") {
+        const retry = normalizeClaudeApiRetryInfo(raw);
+        if (!retry) {
+          return null;
+        }
+
+        return createEvent(
+          "api.retry",
+          threadId,
+          {
+            attempt: retry.attempt,
+            maxAttempts: retry.maxAttempts,
+            error: retry.error,
+            delayMs: retry.delayMs,
+          },
+          { provider: "claude-code" },
+        );
+      }
+
+      return null;
+
+    case "rate_limit_event": {
+      const rateLimitInfo = normalizeClaudeRateLimitInfo(raw["rate_limit_info"]);
+      if (!rateLimitInfo) {
         return null;
       }
 
       return createEvent(
-        "session.started",
+        "rate.limit",
         threadId,
-        { ...(typeof raw["message"] === "string" ? { message: raw["message"] } : {}) },
+        { rateLimitInfo },
         { provider: "claude-code" },
       );
+    }
 
     case "assistant": {
       const message = isRecord(raw["message"]) ? raw["message"] : undefined;
@@ -539,7 +588,7 @@ async function consumeClaudeOutput(
 
             // Track new open item
             if (primary.type === "item.started") {
-              openItemId = primary.itemId;
+              openItemId = primary.itemId ?? null;
               openItemType = primary.payload.itemType ?? "unknown";
             }
 
@@ -757,6 +806,59 @@ function normalizeClaudeUsage(raw: Record<string, unknown>): ClaudeUsage | undef
   }
 
   return normalizeClaudeUsageValue(raw["usage"]);
+}
+
+function normalizeClaudeRateLimitInfo(value: unknown): ClaudeRateLimitInfo | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const status = typeof value["status"] === "string" ? value["status"] : undefined;
+  const resetsAt = typeof value["resetsAt"] === "number" ? value["resetsAt"] : undefined;
+  const rateLimitType = typeof value["rateLimitType"] === "string" ? value["rateLimitType"] : undefined;
+  const isUsingOverage = typeof value["isUsingOverage"] === "boolean" ? value["isUsingOverage"] : undefined;
+
+  if (!status || resetsAt === undefined || !rateLimitType || isUsingOverage === undefined) {
+    return undefined;
+  }
+
+  return {
+    status,
+    resetsAt,
+    rateLimitType,
+    ...(typeof value["utilization"] === "number" ? { utilization: value["utilization"] } : {}),
+    ...(typeof value["surpassedThreshold"] === "number" ? { surpassedThreshold: value["surpassedThreshold"] } : {}),
+    isUsingOverage,
+  };
+}
+
+function normalizeClaudeApiRetryInfo(raw: Record<string, unknown>): ClaudeApiRetryInfo | undefined {
+  const value = isRecord(raw["api_retry_info"]) ? raw["api_retry_info"] : raw;
+  const attempt = typeof value["attempt"] === "number" ? value["attempt"] : undefined;
+  const maxAttempts =
+    typeof value["max_attempts"] === "number"
+      ? value["max_attempts"]
+      : typeof value["max_retries"] === "number"
+        ? value["max_retries"]
+        : undefined;
+  const error = typeof value["error"] === "string" ? value["error"] : undefined;
+  const delayMs =
+    typeof value["delay_ms"] === "number"
+      ? value["delay_ms"]
+      : typeof value["retry_delay_ms"] === "number"
+        ? value["retry_delay_ms"]
+        : undefined;
+
+  if (attempt === undefined || maxAttempts === undefined || !error || delayMs === undefined) {
+    return undefined;
+  }
+
+  return {
+    attempt,
+    maxAttempts,
+    error,
+    delayMs,
+  };
 }
 
 function firstModelUsage(value: unknown): unknown {

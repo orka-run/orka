@@ -189,6 +189,36 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         message: event.payload.message,
         timestamp: event.createdAt,
       };
+    case "rate.limit":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "session.rate_limited",
+        sessionId,
+        status: event.payload.rateLimitInfo.status,
+        resetsAt: event.payload.rateLimitInfo.resetsAt,
+        rateLimitType: event.payload.rateLimitInfo.rateLimitType,
+        ...(event.payload.rateLimitInfo.utilization !== undefined
+          ? { utilization: event.payload.rateLimitInfo.utilization }
+          : {}),
+        ...(event.payload.rateLimitInfo.surpassedThreshold !== undefined
+          ? { surpassedThreshold: event.payload.rateLimitInfo.surpassedThreshold }
+          : {}),
+        isUsingOverage: event.payload.rateLimitInfo.isUsingOverage,
+        timestamp: event.createdAt,
+      };
+    case "api.retry":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "session.api_retry",
+        sessionId,
+        attempt: event.payload.attempt,
+        maxAttempts: event.payload.maxAttempts,
+        error: event.payload.error,
+        delayMs: event.payload.delayMs,
+        timestamp: event.createdAt,
+      };
     default: {
       const passthroughEvent = event as ProviderRuntimeEvent & {
         type: string;
