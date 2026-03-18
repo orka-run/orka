@@ -37,6 +37,7 @@ export interface UserEntry {
   type: "user";
   timestamp: string;
   body: string;
+  queued?: boolean;
 }
 
 export interface ToolCallGroup {
@@ -220,6 +221,23 @@ export function eventsToEntries(
   let accumTurnId: string | null = null;
   let accumStart: string | null = null;
   let pendingTools: ToolEntry[] = [];
+  let queuedMessagesReadyForDelivery = false;
+  const pendingQueuedEntryIds = new Set<string>();
+
+  function clearPendingQueuedEntries() {
+    if (!queuedMessagesReadyForDelivery || pendingQueuedEntryIds.size === 0) {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.type === "user" && entry.queued && pendingQueuedEntryIds.has(entry.id)) {
+        entry.queued = false;
+      }
+    }
+
+    pendingQueuedEntryIds.clear();
+    queuedMessagesReadyForDelivery = false;
+  }
 
   function flushAssistant() {
     if (accum && accumStart) {
@@ -266,6 +284,20 @@ export function eventsToEntries(
   }
 
   for (const event of events) {
+    if (
+      queuedMessagesReadyForDelivery &&
+      (
+        event.type === "turn.started" ||
+        event.type === "content.delta" ||
+        event.type === "item.started" ||
+        event.type === "item.updated" ||
+        event.type === "item.completed" ||
+        event.type === "request.opened"
+      )
+    ) {
+      clearPendingQueuedEntries();
+    }
+
     if (event.type === "content.delta") {
       if (event.streamKind === "assistant_text" || event.streamKind === "reasoning_text") {
         if (pendingTools.length > 0) {
@@ -392,6 +424,9 @@ export function eventsToEntries(
 
     switch (event.type) {
       case "turn.completed": {
+        if (pendingQueuedEntryIds.size > 0) {
+          queuedMessagesReadyForDelivery = true;
+        }
         const parts: string[] = [];
         if (event.cost != null) {
           parts.push(`$${event.cost.toFixed(4)}`);
@@ -419,14 +454,20 @@ export function eventsToEntries(
           body: event.reason,
         });
         break;
-      case "user.input":
-        entries.push({
+      case "user.input": {
+        const entry: UserEntry = {
           id: `user-input-${event.sessionId}-${event.timestamp}`,
           type: "user",
           timestamp: event.timestamp,
           body: event.text,
-        });
+          ...(event.queued ? { queued: true } : {}),
+        };
+        entries.push(entry);
+        if (event.queued) {
+          pendingQueuedEntryIds.add(entry.id);
+        }
         break;
+      }
       case "session.completed":
         flushToolGroup();
         entries.push({

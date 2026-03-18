@@ -60,8 +60,8 @@ describe("LocalClient provider runtime support", () => {
     ]);
   });
 
-  test("uses provider handles for liveness and input routing", async () => {
-    seedSession("sess-live", { status: "running" });
+  test("uses provider handles for liveness and idle-session input routing", async () => {
+    seedSession("sess-live", { status: "idle" });
 
     const handle: ProviderSessionHandle = {
       threadId: "sess-live",
@@ -98,8 +98,15 @@ describe("LocalClient provider runtime support", () => {
         text: "continue",
         timestamp: expect.any(String),
       });
-      expect(broadcasts).toHaveLength(1);
+      expect(broadcasts).toHaveLength(2);
       expect(broadcasts[0]).toMatchObject({
+        channel: "orchestration.sessionUpdated",
+        data: {
+          sessionId: "sess-live",
+          status: "running",
+        },
+      });
+      expect(broadcasts[1]).toMatchObject({
         channel: "orchestration.event",
         data: {
           v: 1,
@@ -108,6 +115,65 @@ describe("LocalClient provider runtime support", () => {
           text: "continue",
         },
       });
+    } finally {
+      (ctx.providerService as any).getHandle = originalGetHandle;
+      (ctx.providerService as any).sendTurn = originalSendTurn;
+      (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = originalBroadcast;
+    }
+  });
+
+  test("queues follow-up input while a session is running", async () => {
+    seedSession("sess-live", { status: "running" });
+
+    const handle: ProviderSessionHandle = {
+      threadId: "sess-live",
+      provider: "codex",
+      events: (async function* () {})(),
+      meta: {},
+    };
+
+    const originalGetHandle = ctx.providerService.getHandle;
+    const originalSendTurn = ctx.providerService.sendTurn;
+    const originalBroadcast = ctx.pushHub.broadcast.bind(ctx.pushHub);
+    const sendTurnCalls: Array<{ sessionId: string; input: { input: string } }> = [];
+    const broadcasts: Array<{ channel: string; data: unknown }> = [];
+
+    (ctx.providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
+    (ctx.providerService as any).sendTurn = async (sessionId: string, input: { input: string }) => {
+      sendTurnCalls.push({ sessionId, input });
+    };
+    (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = ((channel: string, data: unknown) => {
+      broadcasts.push({ channel, data });
+    }) as typeof ctx.pushHub.broadcast;
+
+    try {
+      const client = createLocalClient(ctx);
+
+      await client.sendTurn("sess-live", "continue");
+
+      expect(sendTurnCalls).toEqual([]);
+      expect(ctx.sessionRuntime.pendingMessages.get("sess-live")).toEqual(["continue"]);
+      expect(ctx.db.getOrchestrationEvents("sess-live")).toContainEqual({
+        v: 1,
+        type: "user.input",
+        sessionId: "sess-live",
+        text: "continue",
+        queued: true,
+        timestamp: expect.any(String),
+      });
+      expect(broadcasts).toEqual([
+        {
+          channel: "orchestration.event",
+          data: {
+            v: 1,
+            type: "user.input",
+            sessionId: "sess-live",
+            text: "continue",
+            queued: true,
+            timestamp: expect.any(String),
+          },
+        },
+      ]);
     } finally {
       (ctx.providerService as any).getHandle = originalGetHandle;
       (ctx.providerService as any).sendTurn = originalSendTurn;
