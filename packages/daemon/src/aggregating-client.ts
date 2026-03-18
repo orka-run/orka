@@ -389,6 +389,10 @@ export function createAggregatingClient(
       return routeBySession<void>(sessionId, "stop", { sessionId });
     },
 
+    async closeSession(sessionId: string): Promise<void> {
+      return routeBySession<void>(sessionId, "closeSession", { sessionId });
+    },
+
     async sendTurn(sessionId: string, text: string): Promise<void> {
       return routeBySession<void>(sessionId, "sendTurn", { sessionId, text });
     },
