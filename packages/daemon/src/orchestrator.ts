@@ -1,4 +1,5 @@
-import { resolve, join } from "node:path";
+import { join } from "node:path";
+import { resolveProject } from "./projects";
 import { mkdirSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { $ } from "bun";
 import {
@@ -383,7 +384,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       }
     }
 
-    const projectPath = resolve(req.projectPath);
+    const projectPath = resolveProject(req.projectPath);
     const taskId = generateId("task");
     const sessionId = generateId("sess");
     const now = new Date().toISOString();
