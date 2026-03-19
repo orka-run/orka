@@ -170,7 +170,7 @@ export function createRpcClient(ws: WsTransport) {
     retrySession: (sessionId: string, options?: RequestOptions) =>
       rpc<void>("retrySession", { sessionId }, options),
     stopSession: (sessionId: string, options?: RequestOptions) =>
-      rpc<void>("stopSession", { sessionId }, options),
+      rpc<void>("stop", { sessionId }, options),
     reportClientError: (report: unknown, options?: RequestOptions) =>
       rpc<void>("reportClientError", report, options),
   };
