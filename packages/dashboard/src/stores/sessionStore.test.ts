@@ -1,4 +1,4 @@
-import type { SessionListResponse, SpawnRequest, SpawnResult, Task } from "@orka/core";
+import type { SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
 import { describe, expect, test } from "bun:test";
 import { createSessionStore } from "./sessionStore";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
@@ -6,23 +6,23 @@ import type { RpcClient } from "../lib/rpcClient";
 
 class MockRpcClient {
   sessions: SessionListResponse[] = [];
-  tasks = new Map<string, Task>();
   spawnResult: SpawnResult | null = null;
   spawnParams: SpawnRequest | null = null;
 
-  listSessions = async () => this.sessions;
+  listSessions = () => Promise.resolve(this.sessions);
 
-  spawn = async (req: SpawnRequest) => {
-    if (!this.spawnResult) throw new Error("Missing spawn result");
+  spawn = (req: SpawnRequest) => {
+    if (!this.spawnResult) return Promise.reject(new Error("Missing spawn result"));
     this.spawnParams = req;
-    return this.spawnResult;
+    return Promise.resolve(this.spawnResult);
   };
 
   stop = async () => {};
 
-  deleteSessions = async (ids: string[]) => {
+  deleteSessions = (ids: string[]) => {
     const idSet = new Set(ids);
     this.sessions = this.sessions.filter((session) => !idSet.has(session.id));
+    return Promise.resolve();
   };
 }
 
@@ -62,18 +62,6 @@ function makeSpawnResult(overrides: Partial<SpawnResult> = {}): SpawnResult {
   };
 }
 
-function makeTask(overrides: Partial<Task> = {}): Task {
-  return {
-    id: "task-1",
-    title: "Dashboard task",
-    prompt: "Build the dashboard session store",
-    backend: "codex",
-    model: "gpt-5",
-    createdAt: "2026-03-11T09:59:00.000Z",
-    ...overrides,
-  };
-}
-
 describe("sessionStore", () => {
   test("fetchSessions populates store", async () => {
     const store = createSessionStore();
@@ -96,6 +84,7 @@ describe("sessionStore", () => {
         projectPath: "/tmp/project",
         kept: false,
         autoMerge: false,
+        noWorktree: false,
         prompt: "Build the dashboard session store",
         parentSessionId: null,
         permissionMode: null,
@@ -133,6 +122,7 @@ describe("sessionStore", () => {
           projectPath: session.projectPath,
           kept: session.kept,
           autoMerge: session.autoMerge,
+          noWorktree: session.noWorktree,
           prompt: null,
           parentSessionId: null,
           permissionMode: null,
@@ -166,6 +156,7 @@ describe("sessionStore", () => {
           projectPath: session.projectPath,
           kept: session.kept,
           autoMerge: session.autoMerge,
+          noWorktree: session.noWorktree,
           prompt: null,
           parentSessionId: null,
           permissionMode: null,
@@ -197,8 +188,9 @@ describe("sessionStore", () => {
       title: "Ship dashboard store",
       projectPath: "/tmp/project",
       backend: "codex",
-        model: "gpt-5",
+      model: "gpt-5",
       autoMerge: true,
+      noWorktree: true,
       tags: ["dashboard", "polish"],
       systemPrompt: "Keep the response concise and implementation-focused.",
     };
@@ -217,6 +209,7 @@ describe("sessionStore", () => {
     expect(sessions[0].model).toBe("gpt-5");
     expect(sessions[0].projectPath).toBe("/tmp/project");
     expect(sessions[0].autoMerge).toBe(true);
+    expect(sessions[0].noWorktree).toBe(true);
     expect(sessions[0].nodeId).toBeNull();
     expect(store.getState().selectedId).toBe("sess-2");
   });

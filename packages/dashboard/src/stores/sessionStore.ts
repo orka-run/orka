@@ -1,4 +1,4 @@
-import type { PermissionMode, Session, SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
+import type { PermissionMode, Session, SessionListResponse, SpawnRequest } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RpcClient } from "../lib/rpcClient";
@@ -19,6 +19,7 @@ export interface SessionSummary {
   projectPath: string;
   kept: boolean;
   autoMerge: boolean;
+  noWorktree: boolean;
   prompt: string | null;
   parentSessionId: string | null;
   permissionMode: PermissionMode | null;
@@ -45,7 +46,7 @@ function toSessionSummary(
   session: SessionListResponse,
   options?: { fallbackTitle?: string; nodeId?: string },
 ): SessionSummary {
-  const title = options?.fallbackTitle ?? session.title ?? session.id;
+  const title = options?.fallbackTitle ?? session.title;
 
   return {
     id: session.id,
@@ -60,10 +61,11 @@ function toSessionSummary(
     projectPath: session.projectPath,
     kept: session.kept,
     autoMerge: session.autoMerge,
-    prompt: session.prompt ?? null,
-    parentSessionId: session.parentSessionId ?? null,
-    permissionMode: session.permissionMode ?? null,
-    tags: session.tags ?? [],
+    noWorktree: session.noWorktree,
+    prompt: session.prompt,
+    parentSessionId: session.parentSessionId,
+    permissionMode: session.permissionMode,
+    tags: session.tags,
     nodeId: options?.nodeId ?? null,
   };
 }
@@ -175,6 +177,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           projectPath: request.projectPath,
           kept: false,
           autoMerge: request.autoMerge ?? false,
+          noWorktree: request.noWorktree ?? false,
           prompt: request.prompt,
           parentSessionId: request.parentSessionId ?? null,
           permissionMode: request.permissionMode ?? null,

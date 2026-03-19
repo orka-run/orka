@@ -51,6 +51,8 @@ interface SpawnAdvancedPanelProps {
   onPermissionModeChange: (v: PermissionMode) => void;
   autoMerge: boolean;
   onAutoMergeChange: (v: boolean) => void;
+  noWorktree: boolean;
+  onNoWorktreeChange: (v: boolean) => void;
   systemPrompt: string;
   onSystemPromptChange: (v: string) => void;
   nodeId: string;
@@ -69,6 +71,8 @@ export function SpawnAdvancedPanel({
   onPermissionModeChange,
   autoMerge,
   onAutoMergeChange,
+  noWorktree,
+  onNoWorktreeChange,
   systemPrompt,
   onSystemPromptChange,
   nodeId,
@@ -78,6 +82,7 @@ export function SpawnAdvancedPanel({
   const titleId = useId();
   const tagsId = useId();
   const autoMergeId = useId();
+  const noWorktreeId = useId();
   const systemPromptId = useId();
   const showNodeSelector = nodes.length > 1;
 
@@ -118,7 +123,9 @@ export function SpawnAdvancedPanel({
                 id={titleId}
                 type="text"
                 value={title}
-                onChange={(e) => onTitleChange(e.target.value)}
+                onChange={(e) => {
+                  onTitleChange(e.target.value);
+                }}
                 placeholder="Optional"
                 className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
               />
@@ -131,7 +138,9 @@ export function SpawnAdvancedPanel({
                 id={tagsId}
                 type="text"
                 value={tags}
-                onChange={(e) => onTagsChange(e.target.value)}
+                onChange={(e) => {
+                  onTagsChange(e.target.value);
+                }}
                 placeholder="frontend, urgent"
                 className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
               />
@@ -148,7 +157,9 @@ export function SpawnAdvancedPanel({
                   <button
                     key={pm}
                     type="button"
-                    onClick={() => handlePermissionChange(pm)}
+                    onClick={() => {
+                      handlePermissionChange(pm);
+                    }}
                     className={`flex w-full items-start gap-2 rounded-sm border-l-2 px-2 py-1.5 text-left transition ${config.borderColor} ${
                       isSelected
                         ? `${config.activeBg} border border-r-0 border-y-0`
@@ -182,10 +193,25 @@ export function SpawnAdvancedPanel({
               id={autoMergeId}
               type="checkbox"
               checked={autoMerge}
-              onChange={(e) => onAutoMergeChange(e.target.checked)}
+              onChange={(e) => {
+                onAutoMergeChange(e.target.checked);
+              }}
               className="h-3.5 w-3.5 rounded-sm border-border bg-surface accent-accent-strong"
             />
             <span className="text-[10px] font-medium text-ink-secondary">Auto-merge</span>
+          </label>
+
+          <label htmlFor={noWorktreeId} className="flex cursor-pointer items-center gap-1.5">
+            <input
+              id={noWorktreeId}
+              type="checkbox"
+              checked={noWorktree}
+              onChange={(e) => {
+                onNoWorktreeChange(e.target.checked);
+              }}
+              className="h-3.5 w-3.5 rounded-sm border-border bg-surface accent-accent-strong"
+            />
+            <span className="text-[10px] font-medium text-ink-secondary">Run in-place (no worktree)</span>
           </label>
 
           <div>
@@ -195,7 +221,9 @@ export function SpawnAdvancedPanel({
             <textarea
               id={systemPromptId}
               value={systemPrompt}
-              onChange={(e) => onSystemPromptChange(e.target.value)}
+              onChange={(e) => {
+                onSystemPromptChange(e.target.value);
+              }}
               rows={2}
               placeholder="Optional system prompt override"
               className="w-full rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink outline-none transition placeholder:text-ink-muted focus:border-accent"
@@ -208,7 +236,9 @@ export function SpawnAdvancedPanel({
               <div className="inline-flex rounded-sm border border-border bg-surface-alt p-0.5">
                 <button
                   type="button"
-                  onClick={() => onNodeIdChange("")}
+                  onClick={() => {
+                    onNodeIdChange("");
+                  }}
                   className={`rounded-sm px-2 py-0.5 text-[10px] font-medium transition ${
                     nodeId === ""
                       ? "bg-surface-hover text-ink"
@@ -221,7 +251,9 @@ export function SpawnAdvancedPanel({
                   <button
                     key={node.id}
                     type="button"
-                    onClick={() => onNodeIdChange(node.id)}
+                    onClick={() => {
+                      onNodeIdChange(node.id);
+                    }}
                     className={`rounded-sm px-2 py-0.5 text-[10px] font-medium transition ${
                       nodeId === node.id
                         ? "bg-surface-hover text-ink"
