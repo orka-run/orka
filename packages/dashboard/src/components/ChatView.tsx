@@ -43,9 +43,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
   const inputState = useInputState(
     events,
-    session?.status ?? "queued",
     session?.allowedActions ?? [],
-    session?.backend ?? "unknown",
   );
   const [stopping, setStopping] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);

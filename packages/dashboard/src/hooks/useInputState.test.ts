@@ -7,99 +7,41 @@ function createEvent(event: OrchestrationEvent): OrchestrationEvent {
 }
 
 describe("deriveInputState", () => {
-  test("returns disabled for terminal sessions", () => {
-    expect(deriveInputState([], "completed", "codex")).toBe("disabled");
-    expect(deriveInputState([], "failed", "codex")).toBe("disabled");
-    expect(deriveInputState([], "cancelled", "codex")).toBe("disabled");
+  test("returns disabled when sendTurn not in allowedActions", () => {
+    expect(deriveInputState([], [])).toBe("not_started");
+    expect(deriveInputState([createEvent({ type: "session.started", sessionId: "s", timestamp: "t" })], [])).toBe("disabled");
   });
 
-  test("returns not_started when a queued or preparing session has no events", () => {
-    expect(deriveInputState([], "queued", "codex")).toBe("not_started");
-    expect(deriveInputState([], "preparing", "codex")).toBe("not_started");
+  test("returns not_started when sendTurn allowed but no events", () => {
+    expect(deriveInputState([], ["sendTurn"])).toBe("not_started");
   });
 
   test("returns busy when a turn has started but not completed", () => {
     const events: OrchestrationEvent[] = [
-      createEvent({
-        type: "turn.started",
-        sessionId: "sess-1",
-        turnId: "turn-1",
-        timestamp: "2026-03-12T10:00:00.000Z",
-      }),
+      createEvent({ type: "turn.started", sessionId: "s", turnId: "t1", timestamp: "t" }),
     ];
-
-    expect(deriveInputState(events, "running", "codex")).toBe("busy");
+    expect(deriveInputState(events, ["sendTurn"])).toBe("busy");
   });
 
-  test("returns busy when an item has started but not completed", () => {
+  test("returns waiting after turn completes", () => {
     const events: OrchestrationEvent[] = [
-      createEvent({
-        type: "turn.started",
-        sessionId: "sess-1",
-        turnId: "turn-1",
-        timestamp: "2026-03-12T10:00:00.000Z",
-      }),
-      createEvent({
-        type: "item.started",
-        sessionId: "sess-1",
-        turnId: "turn-1",
-        itemId: "item-1",
-        itemType: "command_execution",
-        timestamp: "2026-03-12T10:00:01.000Z",
-      }),
+      createEvent({ type: "turn.started", sessionId: "s", turnId: "t1", timestamp: "t" }),
+      createEvent({ type: "turn.completed", sessionId: "s", turnId: "t1", timestamp: "t" }),
     ];
-
-    expect(deriveInputState(events, "running", "codex")).toBe("busy");
+    expect(deriveInputState(events, ["sendTurn"])).toBe("waiting");
   });
 
-  test("returns waiting after the latest turn completes while the session is still active", () => {
+  test("returns waiting when sendTurn allowed and no open turns", () => {
     const events: OrchestrationEvent[] = [
-      createEvent({
-        type: "turn.started",
-        sessionId: "sess-1",
-        turnId: "turn-1",
-        timestamp: "2026-03-12T10:00:00.000Z",
-      }),
-      createEvent({
-        type: "item.started",
-        sessionId: "sess-1",
-        turnId: "turn-1",
-        itemId: "item-1",
-        itemType: "command_execution",
-        timestamp: "2026-03-12T10:00:01.000Z",
-      }),
-      createEvent({
-        type: "item.completed",
-        sessionId: "sess-1",
-        turnId: "turn-1",
-        itemId: "item-1",
-        itemType: "command_execution",
-        timestamp: "2026-03-12T10:00:02.000Z",
-      }),
-      createEvent({
-        type: "turn.completed",
-        sessionId: "sess-1",
-        turnId: "turn-1",
-        timestamp: "2026-03-12T10:00:03.000Z",
-      }),
+      createEvent({ type: "session.started", sessionId: "s", timestamp: "t" }),
     ];
-
-    expect(deriveInputState(events, "running", "codex")).toBe("waiting");
+    expect(deriveInputState(events, ["sendTurn"])).toBe("waiting");
   });
 
-  test("falls back to disabled when no waiting or busy condition applies", () => {
+  test("returns disabled when only stop allowed", () => {
     const events: OrchestrationEvent[] = [
-      createEvent({
-        type: "session.started",
-        sessionId: "sess-1",
-        timestamp: "2026-03-12T10:00:00.000Z",
-      }),
+      createEvent({ type: "session.started", sessionId: "s", timestamp: "t" }),
     ];
-
-    expect(deriveInputState(events, "running", "codex")).toBe("disabled");
-  });
-
-  test("returns waiting for rate-limited sessions so follow-up input can resume them", () => {
-    expect(deriveInputState([], "rate_limited", "claude-code")).toBe("waiting");
+    expect(deriveInputState(events, ["stop"])).toBe("disabled");
   });
 });
