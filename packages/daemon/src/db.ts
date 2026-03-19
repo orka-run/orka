@@ -1033,8 +1033,8 @@ const VALID_TRANSITIONS: Record<SessionStatus, readonly SessionStatus[]> = {
   rate_limited: ["running", "hibernated", "completed", "cancelled"],
   hibernated: ["running"],
   completed: ["running"], // resume
-  failed: [], // terminal
-  cancelled: [], // terminal
+  failed: ["running"], // resume after failure
+  cancelled: ["running"], // resume after cancellation
   interrupted: ["running"], // resume after interrupt
 };
 

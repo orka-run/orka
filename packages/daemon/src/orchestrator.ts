@@ -735,7 +735,9 @@ export async function sendTurnToSession(
 
       case "rate_limited":
       case "hibernated":
-      case "completed": {
+      case "completed":
+      case "failed":
+      case "cancelled": {
         // Process is dead — resume with --resume
         await resumeSession(ctx, sessionId, text);
         return;
