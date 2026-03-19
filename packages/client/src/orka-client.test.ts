@@ -141,6 +141,99 @@ describe("OrkaClient", () => {
     await expect(resultPromise).resolves.toEqual([]);
     client.close();
   });
+
+  test("wraps listSessions filters under params.filters", async () => {
+    const client = createOrkaClient("ws://orka.test");
+    const resultPromise = client.listSessions({ status: "running" });
+
+    const socket = latestSocket();
+    socket.open();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const request = JSON.parse(socket.sent[0] ?? "{}");
+    expect(request).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "listSessions",
+      params: {
+        filters: {
+          status: "running",
+        },
+      },
+    });
+
+    socket.receive({
+      jsonrpc: "2.0",
+      id: 1,
+      result: [],
+    });
+
+    await expect(resultPromise).resolves.toEqual([]);
+    client.close();
+  });
+
+  test("wraps terminalOpen sizing options under params.opts", async () => {
+    const client = createOrkaClient("ws://orka.test");
+    const resultPromise = client.terminalOpen("sess-123", { cols: 80, rows: 24 });
+
+    const socket = latestSocket();
+    socket.open();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const request = JSON.parse(socket.sent[0] ?? "{}");
+    expect(request).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "terminalOpen",
+      params: {
+        sessionId: "sess-123",
+        opts: {
+          cols: 80,
+          rows: 24,
+        },
+      },
+    });
+
+    socket.receive({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { termId: "term-123" },
+    });
+
+    await expect(resultPromise).resolves.toEqual({ termId: "term-123" });
+    client.close();
+  });
+
+  test("wraps workspace updates under params.opts", async () => {
+    const client = createOrkaClient("ws://orka.test");
+    const resultPromise = client.updateWorkspace("ws-123", { name: "Renamed workspace" });
+
+    const socket = latestSocket();
+    socket.open();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const request = JSON.parse(socket.sent[0] ?? "{}");
+    expect(request).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "updateWorkspace",
+      params: {
+        id: "ws-123",
+        opts: {
+          name: "Renamed workspace",
+        },
+      },
+    });
+
+    socket.receive({
+      jsonrpc: "2.0",
+      id: 1,
+      result: null,
+    });
+
+    await expect(resultPromise).resolves.toBeNull();
+    client.close();
+  });
 });
 
 function latestSocket(): MockWebSocket {
