@@ -20,7 +20,7 @@ interface ChatInputComposerProps {
 
 const STATE_PLACEHOLDERS: Record<InputState, string> = {
   waiting: "Send a follow-up message...",
-  busy: "Queue a message for when agent finishes...",
+  busy: "Send a message...",
   disabled: "Session completed",
   not_started: "Session is starting...",
 };
