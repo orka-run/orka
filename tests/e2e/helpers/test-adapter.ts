@@ -21,6 +21,7 @@ import { createEvent } from "@orka/core";
 const CTRL_C = "\u0003";
 
 type ShellProcess = ReturnType<typeof Bun.spawn>;
+type WritableStdin = Exclude<ShellProcess["stdin"], number | undefined>;
 
 interface AsyncQueueResult<T> {
   done: boolean;
@@ -75,6 +76,11 @@ interface TestSessionRuntime {
   rawEvents: AsyncEventQueue<RawProviderLine>;
   closed: boolean;
   exitEmitted: boolean;
+}
+
+function getWritableStdin(proc: ShellProcess): WritableStdin | null {
+  const { stdin } = proc;
+  return stdin && typeof stdin !== "number" ? stdin : null;
 }
 
 /**
@@ -136,14 +142,16 @@ export class TestShellAdapter implements ProviderAdapter {
     if (input.input === undefined) return;
     const runtime = handle.meta["runtime"] as TestSessionRuntime;
     const text = `${input.input}\n`;
-    runtime.proc.stdin.write(text);
-    runtime.proc.stdin.flush();
+    const stdin = getWritableStdin(runtime.proc);
+    stdin?.write(text);
+    stdin?.flush();
   }
 
   async interruptTurn(handle: ProviderSessionHandle): Promise<void> {
     const runtime = handle.meta["runtime"] as TestSessionRuntime;
-    runtime.proc.stdin.write(CTRL_C);
-    runtime.proc.stdin.flush();
+    const stdin = getWritableStdin(runtime.proc);
+    stdin?.write(CTRL_C);
+    stdin?.flush();
   }
 
   async stopSession(handle: ProviderSessionHandle): Promise<void> {
@@ -164,10 +172,13 @@ export class TestShellAdapter implements ProviderAdapter {
 
     const readStream = async (stream: ReadableStream<Uint8Array> | null) => {
       if (!stream) return;
+      const reader = stream.getReader();
       try {
-        for await (const chunk of stream) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) return;
           if (runtime.closed) return;
-          const text = decoder.decode(chunk, { stream: true });
+          const text = decoder.decode(value, { stream: true });
           if (text.length > 0) {
             runtime.rawEvents.push({ direction: "out", data: text, ts: new Date().toISOString() });
             runtime.queue.push(
@@ -177,13 +188,15 @@ export class TestShellAdapter implements ProviderAdapter {
         }
       } catch {
         // Stream closed
+      } finally {
+        reader.releaseLock();
       }
     };
 
     const stdoutDone = readStream(runtime.proc.stdout as ReadableStream<Uint8Array> | null);
     const stderrDone = readStream(runtime.proc.stderr as ReadableStream<Uint8Array> | null);
 
-    const exitCode = await runtime.proc.exited;
+    await runtime.proc.exited;
     await Promise.allSettled([stdoutDone, stderrDone]);
 
     if (!runtime.closed) {

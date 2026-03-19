@@ -146,12 +146,12 @@ describe("canonicalJson", () => {
 
   test("deterministic: different key insertion order produces same output", () => {
     const obj1: Record<string, number> = {};
-    obj1.b = 1;
-    obj1.a = 2;
+    obj1["b"] = 1;
+    obj1["a"] = 2;
 
     const obj2: Record<string, number> = {};
-    obj2.a = 2;
-    obj2.b = 1;
+    obj2["a"] = 2;
+    obj2["b"] = 1;
 
     expect(canonicalJson(obj1)).toBe(canonicalJson(obj2));
   });

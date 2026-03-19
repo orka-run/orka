@@ -2,7 +2,7 @@ import { context, propagation, trace } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { OrkaService, SpawnResult, SessionDetailResponse } from "@orka/core";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { PushHub } from "./push-hub";
 import type { DaemonContext } from "./daemon-context";
 import { handleRpcRequest } from "./rpc-handler";
@@ -71,7 +71,6 @@ async function withTestTracing(
 function makeMockCtx(): { ctx: DaemonContext; events: Array<{ channel: string; data: unknown }> } {
   const pushHub = new PushHub();
   const events: Array<{ channel: string; data: unknown }> = [];
-  const originalBroadcast = pushHub.broadcast.bind(pushHub);
   (pushHub as { broadcast: typeof pushHub.broadcast }).broadcast = ((channel: string, data: unknown) => {
     events.push({ channel, data });
   }) as typeof pushHub.broadcast;

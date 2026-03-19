@@ -100,7 +100,6 @@ if (encryptIdx !== -1) {
 
 // Server public key for E2E (can be set via env or fetched from /health)
 const serverPubKeyIdx = process.argv.indexOf("--server-key");
-let serverPublicKey = serverPubKeyIdx !== -1 ? process.argv[serverPubKeyIdx + 1] : process.env["ORKA_SERVER_KEY"];
 if (serverPubKeyIdx !== -1) {
   process.argv.splice(serverPubKeyIdx, 2);
 }
@@ -766,8 +765,8 @@ const spawnCmd = command({
 
     // Layer 3: env var overrides
     const envOverrides = {
-      backend: process.env.ORKA_BACKEND,
-      model: process.env.ORKA_MODEL,
+      ...(process.env["ORKA_BACKEND"] ? { backend: process.env["ORKA_BACKEND"] } : {}),
+      ...(process.env["ORKA_MODEL"] ? { model: process.env["ORKA_MODEL"] } : {}),
     };
 
     // Determine backend early (CLI > env > config) so per-backend defaults apply
@@ -1885,10 +1884,10 @@ const tracesCmd = command({
 
     const svc = await getSvc();
     const traces: any[] = await svc.queryTraces({
-      errorsOnly: args.errors || undefined,
-      namePattern: args.name,
-      service: args.service,
-      since,
+      ...(args.errors ? { errorsOnly: true } : {}),
+      ...(args.name ? { namePattern: args.name } : {}),
+      ...(args.service ? { service: args.service } : {}),
+      ...(since ? { since } : {}),
       limit,
     });
 
@@ -1971,7 +1970,7 @@ const unarchiveCmd = command({
   }),
 });
 
-const pruneCmd = command({
+command({
   name: "prune",
   description: "Remove old completed/cancelled/failed sessions and orphaned worktrees",
   examples: [
@@ -2310,12 +2309,12 @@ const wsUpdateCmd = command({
     }
     const ws = await resolveWorkspace(svc, ref);
     const opts: Record<string, any> = {};
-    if (name !== undefined) opts.name = name;
+    if (name !== undefined) opts["name"] = name;
     if (description !== undefined || color !== undefined) {
       const meta = { ...ws.metadata };
       if (description !== undefined) meta.description = description;
       if (color !== undefined) meta.color = color;
-      opts.metadata = meta;
+      opts["metadata"] = meta;
     }
     await svc.updateWorkspace(ws.id, opts);
     console.log(`updated workspace ${ws.name}`);

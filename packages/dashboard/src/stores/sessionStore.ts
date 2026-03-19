@@ -1,4 +1,4 @@
-import type { PermissionMode, Session, SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
+import type { PermissionMode, Session, SessionListResponse, SpawnRequest } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RpcClient } from "../lib/rpcClient";

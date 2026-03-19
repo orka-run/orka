@@ -46,9 +46,9 @@ function performHandshake(opts?: {
     keyId: opts?.serverKeyId ?? keyId,
     staticKeypair: keypair,
     relayOrigin,
-    supportedSuites: opts?.serverSuites,
-    supportedProtocols: opts?.serverProtocols,
-    maxFrame: opts?.serverMaxFrame,
+    ...(opts?.serverSuites ? { supportedSuites: opts.serverSuites } : {}),
+    ...(opts?.serverProtocols ? { supportedProtocols: opts.serverProtocols } : {}),
+    ...(opts?.serverMaxFrame !== undefined ? { maxFrame: opts.serverMaxFrame } : {}),
   });
 
   const client = new NoiseClientTransport({
@@ -222,7 +222,7 @@ describe("NoiseTransport", () => {
     });
 
     it("cross-side decryption fails (wrong cipher state)", () => {
-      const { client, server } = performHandshake();
+      const { client } = performHandshake();
 
       // Client encrypts a message
       const rpc = { jsonrpc: "2.0", method: "test", id: 1 };

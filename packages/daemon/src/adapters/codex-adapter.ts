@@ -254,9 +254,7 @@ export class CodexAdapter implements ProviderAdapter {
           void drainStream(process.stderr);
         }
 
-        void consumeCodexOutput(input.threadId, process.stdout, meta, events, process, {
-          interactive: input.interactive,
-        });
+        void consumeCodexOutput(input.threadId, process.stdout, meta, events, process);
 
         try {
           await meta.sendRequest<{ userAgent: string }>("initialize", {
@@ -721,8 +719,8 @@ async function consumeCodexOutput(
     async (span) => {
       const projection = new CodexSessionProjection({
         hasActiveTurn: Boolean(meta.activeTurnId),
-        interactive: opts?.interactive,
         hasProviderThread: Boolean(meta.providerThreadId),
+        ...(opts?.interactive !== undefined ? { interactive: opts.interactive } : {}),
       });
 
       try {

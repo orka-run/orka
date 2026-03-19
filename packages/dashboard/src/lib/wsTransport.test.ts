@@ -3,7 +3,6 @@ import { propagation, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { rpcLatencyStore } from "./rpcLatencyStore";
-import { WsTransport } from "@orka/client";
 import { createDashboardTransport } from "./wsTransport";
 
 class MockWebSocket {
@@ -15,7 +14,7 @@ class MockWebSocket {
 
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event: { code: number; reason: string; wasClean: boolean }) => void) | null = null;
   onerror: (() => void) | null = null;
   readyState = MockWebSocket.CONNECTING;
   sent: string[] = [];

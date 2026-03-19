@@ -78,7 +78,7 @@ export function createRemoteNodeManager(
         publicKey,
         keyId: node.noiseKeyId,
       },
-      relayOrigin,
+      ...(relayOrigin ? { relayOrigin } : {}),
     };
   }
 

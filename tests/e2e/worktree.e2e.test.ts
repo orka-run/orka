@@ -73,7 +73,6 @@ describe("Worktree Management", () => {
     const result = await client.spawn({
       prompt: "echo 'wt-auto' && exit 0",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(result.id);
@@ -97,7 +96,7 @@ describe("Worktree Management", () => {
     const result = await client.spawn({
       prompt: "echo 'no-wt' && exit 0",
       backend: "claude-code",
-      mode: "interactive",
+      noWorktree: true,
       projectPath: testRepo,
     });
     sessionIds.push(result.id);
@@ -114,7 +113,6 @@ describe("Worktree Management", () => {
     const result = await client.spawn({
       prompt: "echo 'custom-branch' && exit 0",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
       branch: "feat/custom-test",
     });
@@ -134,7 +132,6 @@ describe("Worktree Management", () => {
     const result = await client.spawn({
       prompt: "echo 'diff-content' > test-file.txt && sleep 300",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(result.id);
@@ -154,7 +151,6 @@ describe("Worktree Management", () => {
     const result = await client.spawn({
       prompt: 'git config user.email "test@orka.dev" && git config user.name "Orka Test" && echo \'merge-test-content\' > merge-test.txt && git add merge-test.txt && git commit -m \'add merge-test\' && sleep 300',
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(result.id);
@@ -190,7 +186,6 @@ describe("Worktree Management", () => {
     const result = await client.spawn({
       prompt: "echo 'no-commit' && sleep 300",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(result.id);
@@ -210,7 +205,6 @@ describe("Worktree Management", () => {
     const result = await client.spawn({
       prompt: "sleep 600",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(result.id);

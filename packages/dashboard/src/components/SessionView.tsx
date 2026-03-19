@@ -2,7 +2,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, ScrollText, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
-import type { SessionResult } from "@orka/core";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
 import { LogPanel } from "./LogPanel";

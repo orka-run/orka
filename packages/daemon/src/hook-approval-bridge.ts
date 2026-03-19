@@ -133,7 +133,7 @@ export class HookApprovalBridge {
     this.orchestrationEngine.ingest(entry.sessionId, resolvedEvent);
 
     // Resolve the HTTP long-poll
-    entry.resolve({ decision: hookDecision, reason });
+    entry.resolve({ decision: hookDecision, ...(reason ? { reason } : {}) });
     return true;
   }
 

@@ -30,7 +30,7 @@ import {
   type DaemonWithNoise,
   type SecureConnection,
 } from "./protocol-helpers";
-import type { DataFrame, TransportPayload } from "@orka/core";
+import type { DataFrame } from "@orka/core";
 
 describe("Noise NK Transport — Advanced", () => {
   let daemon: DaemonWithNoise;
@@ -78,12 +78,12 @@ describe("Noise NK Transport — Advanced", () => {
     // Every response should succeed with a valid session array
     expect(results.length).toBe(count);
     for (let i = 0; i < count; i++) {
-      expect(results[i].error).toBeUndefined();
-      expect(Array.isArray(results[i].result)).toBe(true);
+      expect(results[i]!["error"]).toBeUndefined();
+      expect(Array.isArray(results[i]!["result"])).toBe(true);
     }
 
     // All response IDs should be unique (each RPC got its own response)
-    const ids = results.map((r) => r.id);
+    const ids = results.map((r) => r["id"]);
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(count);
 
@@ -123,9 +123,9 @@ describe("Noise NK Transport — Advanced", () => {
 
     // Each connection should have received a valid response
     expect(rpcResults.length).toBe(connectionCount);
-    for (const { idx, resp } of rpcResults) {
-      expect(resp.error).toBeUndefined();
-      expect(Array.isArray(resp.result)).toBe(true);
+    for (const { resp } of rpcResults) {
+      expect(resp["error"]).toBeUndefined();
+      expect(Array.isArray(resp["result"])).toBe(true);
     }
 
     // Do a second round to confirm all connections are still functional
@@ -134,8 +134,8 @@ describe("Noise NK Transport — Advanced", () => {
     );
     const round2Results = await Promise.all(round2Promises);
     for (const resp of round2Results) {
-      expect(resp.error).toBeUndefined();
-      expect(Array.isArray(resp.result)).toBe(true);
+      expect(resp["error"]).toBeUndefined();
+      expect(Array.isArray(resp["result"])).toBe(true);
     }
 
     // Clean up all connections
@@ -179,14 +179,14 @@ describe("Noise NK Transport — Advanced", () => {
           const parsed = JSON.parse(String(event.data));
 
           // Push events arrive as encrypted data frames
-          if (parsed.t === "data" && typeof parsed.ct === "string") {
+          if (parsed["t"] === "data" && typeof parsed["ct"] === "string") {
             try {
               const payload = transport.decryptFrame(parsed as DataFrame);
               if (payload.kind === "push") {
                 const push = payload.push as Record<string, unknown>;
                 if (
-                  push.type === "push" &&
-                  push.channel === "orchestration.sessionUpdated"
+                  push["type"] === "push" &&
+                  push["channel"] === "orchestration.sessionUpdated"
                 ) {
                   clearTimeout(timer);
                   ws.removeEventListener("message", handler);
@@ -213,19 +213,19 @@ describe("Noise NK Transport — Advanced", () => {
       projectPath: testRepo,
       title: "Push event test",
     });
-    expect(spawnResp.error).toBeUndefined();
-    const session = spawnResp.result as Record<string, unknown>;
-    expect(typeof session.id).toBe("string");
+    expect(spawnResp["error"]).toBeUndefined();
+    const session = spawnResp["result"] as Record<string, unknown>;
+    expect(typeof session["id"]).toBe("string");
 
     // Wait for the push event
     const pushEvent = await pushPromise;
-    expect(pushEvent.type).toBe("push");
-    expect(pushEvent.channel).toBe("orchestration.sessionUpdated");
-    expect(pushEvent.data).toBeDefined();
+    expect(pushEvent["type"]).toBe("push");
+    expect(pushEvent["channel"]).toBe("orchestration.sessionUpdated");
+    expect(pushEvent["data"]).toBeDefined();
 
-    const pushData = pushEvent.data as Record<string, unknown>;
-    expect(typeof pushData.sessionId).toBe("string");
-    expect(typeof pushData.status).toBe("string");
+    const pushData = pushEvent["data"] as Record<string, unknown>;
+    expect(typeof pushData["sessionId"]).toBe("string");
+    expect(typeof pushData["status"]).toBe("string");
 
     ws.close();
   }, 30_000);
@@ -326,8 +326,8 @@ describe("Noise NK Transport — Advanced", () => {
       "listSessions",
       { filters: {} },
     );
-    expect(resp.error).toBeUndefined();
-    expect(Array.isArray(resp.result)).toBe(true);
+    expect(resp["error"]).toBeUndefined();
+    expect(Array.isArray(resp["result"])).toBe(true);
 
     verifyWs.close();
   }, 30_000);
@@ -359,23 +359,23 @@ describe("Noise NK Transport — Advanced", () => {
       20_000,
     );
 
-    expect(spawnResp.error).toBeUndefined();
-    const session = spawnResp.result as Record<string, unknown>;
-    expect(typeof session.id).toBe("string");
-    expect((session.id as string).startsWith("sess-")).toBe(true);
+    expect(spawnResp["error"]).toBeUndefined();
+    const session = spawnResp["result"] as Record<string, unknown>;
+    expect(typeof session["id"]).toBe("string");
+    expect((session["id"] as string).startsWith("sess-")).toBe(true);
 
     // Verify we can retrieve the session (proves the large payload round-tripped)
     const getResp = await encryptedRpc(transport, ws, "getSession", {
-      id: session.id,
+      id: session["id"],
     });
 
-    expect(getResp.error).toBeUndefined();
-    const fetched = getResp.result as Record<string, unknown>;
-    expect(fetched.id).toBe(session.id);
-    expect(fetched.backend).toBe("claude-code");
+    expect(getResp["error"]).toBeUndefined();
+    const fetched = getResp["result"] as Record<string, unknown>;
+    expect(fetched["id"]).toBe(session["id"]);
+    expect(fetched["backend"]).toBe("claude-code");
 
     // Verify the large prompt was stored correctly (now inline in SessionDetailResponse)
-    expect(fetched.prompt).toBe(largePrompt);
+    expect(fetched["prompt"]).toBe(largePrompt);
 
     ws.close();
   }, 30_000);

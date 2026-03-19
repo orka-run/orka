@@ -78,14 +78,14 @@ export function getInputString(tool: string, input?: Record<string, unknown>): s
   if (!input) return "";
 
   if (tool === "Bash") {
-    if (typeof input.command === "string") return input.command;
-    if (typeof input.cmd === "string") return input.cmd;
+    if (typeof input["command"] === "string") return input["command"];
+    if (typeof input["cmd"] === "string") return input["cmd"];
   }
 
   if (tool === "Read" || tool === "Write" || tool === "Edit" || tool === "Glob" || tool === "Grep") {
-    if (typeof input.file_path === "string") return input.file_path;
-    if (typeof input.filePath === "string") return input.filePath;
-    if (typeof input.path === "string") return input.path;
+    if (typeof input["file_path"] === "string") return input["file_path"];
+    if (typeof input["filePath"] === "string") return input["filePath"];
+    if (typeof input["path"] === "string") return input["path"];
   }
 
   // Fallback: concatenate all string-valued args
@@ -152,7 +152,7 @@ export function extractToolInfo(request: ApprovalRequest): {
     if (colonMatch) {
       const tool = colonMatch[1]!;
       // If the detail contains the full command, inject it as 'command' for Bash matching
-      if (tool === "Bash" && !args.command) {
+      if (tool === "Bash" && !args["command"]) {
         const cmd = request.detail.slice(request.detail.indexOf(":") + 1).trim();
         return { tool, input: { ...args, command: cmd } };
       }
@@ -164,17 +164,17 @@ export function extractToolInfo(request: ApprovalRequest): {
   switch (request.requestType) {
     case "command_execution_approval":
       // If args has a detail or command field, use that
-      if (!args.command && request.detail) {
+      if (!args["command"] && request.detail) {
         return { tool: "Bash", input: { ...args, command: request.detail } };
       }
       return { tool: "Bash", input: args };
     case "file_read_approval":
-      if (!args.file_path && request.detail) {
+      if (!args["file_path"] && request.detail) {
         return { tool: "Read", input: { ...args, file_path: request.detail } };
       }
       return { tool: "Read", input: args };
     case "file_change_approval":
-      if (!args.file_path && request.detail) {
+      if (!args["file_path"] && request.detail) {
         return { tool: "Edit", input: { ...args, file_path: request.detail } };
       }
       return { tool: "Edit", input: args };

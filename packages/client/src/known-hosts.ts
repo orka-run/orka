@@ -6,7 +6,7 @@
  * Lines starting with # are comments.
  */
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const KNOWN_HOSTS_FILE = "known_hosts";
@@ -43,7 +43,10 @@ export function loadKnownHosts(orkaHome: string): Map<string, KnownHostEntry> {
     const parts = trimmed.split(/\s+/);
     if (parts.length < 3) continue;
 
-    const [host, keyId, pubKeyB64] = parts;
+    const host = parts[0];
+    const keyId = parts[1];
+    const pubKeyB64 = parts[2];
+    if (!host || !keyId || !pubKeyB64) continue;
     const publicKey = new Uint8Array(Buffer.from(pubKeyB64, "base64url"));
     result.set(host, { keyId, publicKey, publicKeyB64: pubKeyB64 });
   }
@@ -109,7 +112,10 @@ export function lookupKnownHost(orkaHome: string, host: string): KnownHostEntry 
     const parts = trimmed.split(/\s+/);
     if (parts.length < 3) continue;
 
-    const [h, keyId, pubKeyB64] = parts;
+    const h = parts[0];
+    const keyId = parts[1];
+    const pubKeyB64 = parts[2];
+    if (!h || !keyId || !pubKeyB64) continue;
     if (h === host) {
       const publicKey = new Uint8Array(Buffer.from(pubKeyB64, "base64url"));
       return { keyId, publicKey, publicKeyB64: pubKeyB64 };

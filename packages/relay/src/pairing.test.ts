@@ -1,7 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { PairingRouter } from "./pairing";
-import type { AnySocketData } from "./state";
-
 // --- Mock WebSocket ---
 
 interface MockWsOpts {

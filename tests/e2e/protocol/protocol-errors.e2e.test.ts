@@ -164,8 +164,8 @@ describe("Protocol Error Handling", () => {
 
     // Corrupt the base64url ciphertext by flipping bits
     const ctBytes = Buffer.from(frame.ct, "base64url");
-    ctBytes[0] ^= 0xff; // flip first byte
-    ctBytes[ctBytes.length - 1] ^= 0xff; // flip last byte
+    ctBytes[0]! ^= 0xff; // flip first byte
+    ctBytes[ctBytes.length - 1]! ^= 0xff; // flip last byte
     const corruptedFrame = { t: "data", ct: ctBytes.toString("base64url") };
 
     ws.send(JSON.stringify(corruptedFrame));
@@ -217,10 +217,10 @@ describe("Protocol Error Handling", () => {
     await waitForOpen(ws2);
 
     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
-    expect(resp.error).toBeUndefined();
-    expect(resp.result).toBeInstanceOf(Array);
-    expect(resp.jsonrpc).toBe("2.0");
-    expect(typeof resp.id).toBe("string");
+    expect(resp["error"]).toBeUndefined();
+    expect(resp["result"]).toBeInstanceOf(Array);
+    expect(resp["jsonrpc"]).toBe("2.0");
+    expect(typeof resp["id"]).toBe("string");
 
     ws2.close();
   });
@@ -277,17 +277,17 @@ describe("Protocol Error Handling", () => {
 
     // Send encrypted RPC on the Noise connection
     const encResp = await encryptedRpc(transport, noiseWs, "listSessions", { filters: {} });
-    expect(encResp.error).toBeUndefined();
-    expect(encResp.result).toBeInstanceOf(Array);
-    expect(encResp.jsonrpc).toBe("2.0");
-    expect(typeof encResp.id).toBe("string");
+    expect(encResp["error"]).toBeUndefined();
+    expect(encResp["result"]).toBeInstanceOf(Array);
+    expect(encResp["jsonrpc"]).toBe("2.0");
+    expect(typeof encResp["id"]).toBe("string");
 
     // Send plain RPC on the plain connection
     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
-    expect(plainResp.error).toBeUndefined();
-    expect(plainResp.result).toBeInstanceOf(Array);
-    expect(plainResp.jsonrpc).toBe("2.0");
-    expect(typeof plainResp.id).toBe("string");
+    expect(plainResp["error"]).toBeUndefined();
+    expect(plainResp["result"]).toBeInstanceOf(Array);
+    expect(plainResp["jsonrpc"]).toBe("2.0");
+    expect(typeof plainResp["id"]).toBe("string");
 
     // Both returned valid session lists without cross-contamination
     noiseWs.close();
@@ -334,10 +334,10 @@ describe("Protocol Error Handling", () => {
     await waitForOpen(ws2);
 
     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
-    expect(resp.error).toBeUndefined();
-    expect(resp.result).toBeInstanceOf(Array);
-    expect(resp.jsonrpc).toBe("2.0");
-    expect(typeof resp.id).toBe("string");
+    expect(resp["error"]).toBeUndefined();
+    expect(resp["result"]).toBeInstanceOf(Array);
+    expect(resp["jsonrpc"]).toBe("2.0");
+    expect(typeof resp["id"]).toBe("string");
 
     ws2.close();
   }, 15_000);

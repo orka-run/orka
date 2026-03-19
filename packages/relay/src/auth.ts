@@ -154,7 +154,6 @@ const DEFAULT_RATE_LIMITS: RateLimitConfig = {
  */
 export class AuthManager {
   private readonly db: Database;
-  private readonly config: RelayConfig;
   private readonly cache = new AuthCache();
   private readonly lastUsedQueue = new Set<string>();
   private lastUsedFlushTimer: Timer | null = null;
@@ -162,7 +161,7 @@ export class AuthManager {
 
   constructor(db: Database, config: RelayConfig) {
     this.db = db;
-    this.config = config;
+    void config;
 
     // Periodic cache pruning
     this.pruneTimer = setInterval(() => this.cache.prune(), 60_000);

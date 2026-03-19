@@ -226,7 +226,7 @@ describe("extractToolInfo", () => {
       createdAt: new Date().toISOString(),
     });
     expect(result.tool).toBe("Bash");
-    expect(result.input.command).toBe("git status");
+    expect(result.input["command"]).toBe("git status");
   });
 
   test("maps file_read_approval to Read", () => {
@@ -241,7 +241,7 @@ describe("extractToolInfo", () => {
       createdAt: new Date().toISOString(),
     });
     expect(result.tool).toBe("Read");
-    expect(result.input.file_path).toBe("/src/config.ts");
+    expect(result.input["file_path"]).toBe("/src/config.ts");
   });
 
   test("maps file_change_approval to Edit", () => {
@@ -256,7 +256,7 @@ describe("extractToolInfo", () => {
       createdAt: new Date().toISOString(),
     });
     expect(result.tool).toBe("Edit");
-    expect(result.input.file_path).toBe("/src/config.ts");
+    expect(result.input["file_path"]).toBe("/src/config.ts");
   });
 
   test("extracts tool name from detail with colon prefix", () => {
@@ -270,7 +270,7 @@ describe("extractToolInfo", () => {
       createdAt: new Date().toISOString(),
     });
     expect(result.tool).toBe("Bash");
-    expect(result.input.command).toBe("git status");
+    expect(result.input["command"]).toBe("git status");
   });
 
   test("falls back to detail for command when args has no command", () => {
@@ -284,7 +284,7 @@ describe("extractToolInfo", () => {
       createdAt: new Date().toISOString(),
     });
     expect(result.tool).toBe("Bash");
-    expect(result.input.command).toBe("rm -rf .");
+    expect(result.input["command"]).toBe("rm -rf .");
   });
 
   test("unknown request type maps to unknown", () => {
@@ -310,6 +310,6 @@ describe("extractToolInfo", () => {
       createdAt: new Date().toISOString(),
     });
     expect(result.tool).toBe("Read");
-    expect(result.input.file_path).toBe("/src/file.ts");
+    expect(result.input["file_path"]).toBe("/src/file.ts");
   });
 });

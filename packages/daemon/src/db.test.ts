@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Session, Task } from "@orka/core";
 import { openDb, migrateDb, DatabaseRepository } from "./db";
 
 let testHome = "";
@@ -278,15 +277,15 @@ describe("orchestration event helpers", () => {
 
     expect(db.getOrchestrationEvents("sess-1")).toEqual([
       versioned({
-        type: "session.started",
+        type: "session.started" as const,
         sessionId: "sess-1",
         timestamp: "2026-01-01T00:00:00.000Z",
       }),
       versioned({
-        type: "turn.completed",
+        type: "turn.completed" as const,
         sessionId: "sess-1",
         turnId: "turn-1",
-        state: "completed",
+        state: "completed" as const,
         timestamp: "2026-01-01T00:01:00.000Z",
       }),
     ]);
@@ -305,7 +304,7 @@ describe("orchestration event helpers", () => {
 
     expect(db.getOrchestrationEvents("sess-legacy")).toEqual([
       versioned({
-        type: "session.started",
+        type: "session.started" as const,
         sessionId: "sess-legacy",
         timestamp: "2026-01-01T00:00:00.000Z",
       }),

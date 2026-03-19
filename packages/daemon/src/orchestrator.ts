@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { resolveProject } from "./projects";
 import { mkdirSync, existsSync, readdirSync, rmSync } from "node:fs";
-import { $ } from "bun";
 import {
   generateId,
   type BackendKind,
@@ -12,11 +11,10 @@ import {
   type Session,
   type Task,
   type SpawnRequest,
-  type SpawnResult,
 } from "@orka/core";
 import { captureCheckpoint } from "./checkpointing";
 import { consumeProviderEvents } from "./orchestration";
-import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges, worktreeMerge, deleteBranch } from "./worktree";
+import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges } from "./worktree";
 import { assertBackendInstalled } from "./backends";
 import type { DaemonContext } from "./daemon-context";
 import { getDaemonMetrics, withSpan } from "./tracing";
@@ -273,7 +271,7 @@ function buildConsumerCallbacks(
     model: opts.model,
     orkaHome: ctx.orkaHome,
     getSession: (id: string) => ctx.db.getSession(id),
-    permissionRules,
+    ...(permissionRules ? { permissionRules } : {}),
     respondToRequest: (threadId: string, requestId: string, decision: any) =>
       ctx.providerService.respondToRequest(threadId, requestId, decision),
     denyHookApprovals: (id: string) => ctx.hookApprovalBridge.denyAllForSession(id),
@@ -416,11 +414,17 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     let workingDir = projectPath;
     const inPlace = req.noWorktree === true;
     if (!inPlace) {
-      if (req.branch) {
+      const branch = req.branch;
+      if (branch) {
         workingDir = await withSpan("orka.worktree.create", {
           "orka.session.id": sessionId,
-          "orka.branch": req.branch,
-        }, async () => worktreeCreate(projectPath, sessionId, ctx.orkaHome, { branch: req.branch, config: ctx.config }));
+          "orka.branch": branch,
+        }, async () =>
+          worktreeCreate(projectPath, sessionId, ctx.orkaHome, {
+            branch,
+            config: ctx.config,
+          }),
+        );
       } else {
         workingDir = await withSpan("orka.worktree.create", {
           "orka.session.id": sessionId,
@@ -479,13 +483,13 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       backend: req.backend,
       cwd: workingDir,
       prompt: req.prompt,
-      permissionMode: req.permissionMode,
-      systemPrompt: req.systemPrompt,
-      allowedTools: req.allowedTools,
-      model: req.model,
-      reasoningEffort: req.reasoningEffort,
-      providerSessionId,
-      env: req.env,
+      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
+      ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
+      ...(req.model ? { model: req.model } : {}),
+      ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
+      ...(providerSessionId ? { providerSessionId } : {}),
+      ...(req.env ? { env: req.env } : {}),
     });
 
     const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
@@ -605,12 +609,12 @@ export async function resumeSession(
       backend: session.backend,
       cwd: session.workingDir,
       prompt: fullPrompt,
-      permissionMode,
-      systemPrompt: session.systemPrompt,
-      allowedTools: session.allowedTools,
-      model: task?.model ?? undefined,
-      resumeSessionId: session.providerSessionId,
-      env: sessionEnv,
+      ...(permissionMode ? { permissionMode } : {}),
+      ...(session.systemPrompt ? { systemPrompt: session.systemPrompt } : {}),
+      ...(session.allowedTools ? { allowedTools: session.allowedTools } : {}),
+      ...(task?.model ? { model: task.model } : {}),
+      ...(session.providerSessionId ? { resumeSessionId: session.providerSessionId } : {}),
+      ...(sessionEnv ? { env: sessionEnv } : {}),
     });
 
     span.addEvent("session.resumed");

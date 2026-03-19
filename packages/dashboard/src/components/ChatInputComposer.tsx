@@ -25,12 +25,6 @@ const STATE_PLACEHOLDERS: Record<InputState, string> = {
   not_started: "Session is starting...",
 };
 
-const STATE_MESSAGES: Record<Exclude<InputState, "waiting">, string> = {
-  busy: "Agent is working...",
-  disabled: "Session completed",
-  not_started: "Session is starting...",
-};
-
 export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onStop, isRetrying, isStopping }: ChatInputComposerProps) {
   const text = useChatUiStore((s) => s.sessions[sessionId]?.draftText ?? "");
   const [isSending, setIsSending] = useState(false);
@@ -49,7 +43,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
     }
   }, [inputState, isSending]);
 
-  const submitRef = useRef<() => void>();
+  const submitRef = useRef<(() => void) | undefined>(undefined);
 
   async function submit() {
     const nextText = (editorRef.current?.getText() ?? text).trim();
@@ -101,7 +95,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
             ref={editorRef}
             disabled={!isEditable}
             placeholder={placeholder ?? STATE_PLACEHOLDERS[inputState]}
-            autoFocus={autoFocus}
+            {...(autoFocus !== undefined ? { autoFocus } : {})}
             initialText={text}
             onChange={handleChange}
             onSubmit={handleSubmit}

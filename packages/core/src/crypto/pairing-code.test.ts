@@ -49,7 +49,6 @@ describe("Crockford Base32", () => {
     // Encode a byte that has known Crockford chars
     // '1' in Crockford = value 1, so I, i, L, l should all map to 1
     // '0' in Crockford = value 0, so O, o should all map to 0
-    const val1 = crockfordDecode("1", 0); // reference
     expect(crockfordDecode("I")).toEqual(crockfordDecode("1"));
     expect(crockfordDecode("i")).toEqual(crockfordDecode("1"));
     expect(crockfordDecode("L")).toEqual(crockfordDecode("1"));
@@ -89,11 +88,11 @@ describe("Pairing Code", () => {
     const { code } = generatePairingCode();
     const parts = code.split("-");
     expect(parts.length).toBe(5);
-    expect(parts[0].length).toBe(4);
-    expect(parts[1].length).toBe(4);
-    expect(parts[2].length).toBe(4);
-    expect(parts[3].length).toBe(4);
-    expect(parts[4].length).toBe(5);
+    expect(parts[0]!.length).toBe(4);
+    expect(parts[1]!.length).toBe(4);
+    expect(parts[2]!.length).toBe(4);
+    expect(parts[3]!.length).toBe(4);
+    expect(parts[4]!.length).toBe(5);
     // Total chars (without dashes) = 21
     expect(code.replace(/-/g, "").length).toBe(21);
   });
@@ -130,7 +129,7 @@ describe("Pairing Code", () => {
   });
 
   test("spaces and dashes stripped: various formats parse the same", () => {
-    const { code, parsed } = generatePairingCode();
+    const { code } = generatePairingCode();
     const stripped = code.replace(/-/g, "");
 
     // With spaces instead of dashes
@@ -159,7 +158,6 @@ describe("Pairing Code", () => {
 
     // Flip the last character to a different valid Crockford char
     const lastChar = stripped[stripped.length - 1];
-    const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     const altChar = lastChar === "0" ? "1" : "0";
 
     const tampered = stripped.slice(0, -1) + altChar;

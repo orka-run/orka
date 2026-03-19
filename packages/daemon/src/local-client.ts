@@ -512,7 +512,7 @@ class LocalClient implements OrkaService {
       .filter((session): session is Session => session !== null);
 
     for (const session of sessions) {
-      await pruneCheckpointRefsForSession(this.ctx, session);
+      await pruneCheckpointRefsForSession(session);
       this.ctx.sessionRuntime.idleTimers.delete(session.id);
       this.ctx.sessionRuntime.autoMergeFired.delete(session.id);
       this.ctx.sessionRuntime.turnCounts.delete(session.id);
@@ -809,7 +809,7 @@ class LocalClient implements OrkaService {
   }
 }
 
-async function pruneCheckpointRefsForSession(ctx: DaemonContext, session: Session): Promise<void> {
+async function pruneCheckpointRefsForSession(session: Session): Promise<void> {
   try {
     await pruneCheckpoints(getSessionGitDir(session), session.id);
   } catch (error) {

@@ -38,7 +38,7 @@ export class OrchestrationEngine {
     withSpanSync(
       "orka.orchestration.ingest",
       { "orka.session.id": sessionId, "orka.provider.event_type": event.type },
-      (span) => {
+      () => {
         const orchestrationEvent = mapProviderEvent(sessionId, event);
 
         const versionedEvent: OrchestrationEvent = {

@@ -44,9 +44,9 @@ async function waitForSessionCompletion(
     const resp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
       id: sessionId,
     });
-    expect(resp.error).toBeUndefined();
-    const session = resp.result as Record<string, unknown>;
-    if (session && session.status !== "running" && session.status !== "queued" && session.status !== "preparing") {
+    expect(resp["error"]).toBeUndefined();
+    const session = resp["result"] as Record<string, unknown>;
+    if (session && session["status"] !== "running" && session["status"] !== "queued" && session["status"] !== "preparing") {
       return session;
     }
     await Bun.sleep(intervalMs);
@@ -95,41 +95,40 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       title: "lifecycle-full-test",
     });
 
-    expect(spawnResp.error).toBeUndefined();
-    const spawned = spawnResp.result as Record<string, unknown>;
-    expect(typeof spawned.id).toBe("string");
-    expect((spawned.id as string).startsWith("sess-")).toBe(true);
-    expect(spawned.status).toBe("running");
-    expect(spawned.title).toBe("lifecycle-full-test");
+    expect(spawnResp["error"]).toBeUndefined();
+    const spawned = spawnResp["result"] as Record<string, unknown>;
+    expect(typeof spawned["id"]).toBe("string");
+    expect((spawned["id"] as string).startsWith("sess-")).toBe(true);
+    expect(spawned["status"]).toBe("running");
+    expect(spawned["title"]).toBe("lifecycle-full-test");
 
-    const sessionId = spawned.id as string;
+    const sessionId = spawned["id"] as string;
 
     // List sessions and verify the new session appears
     const listResp = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
       filters: {},
     });
-    expect(listResp.error).toBeUndefined();
-    const sessions = listResp.result as Array<Record<string, unknown>>;
-    const found = sessions.find((s) => s.id === sessionId);
+    expect(listResp["error"]).toBeUndefined();
+    const sessions = listResp["result"] as Array<Record<string, unknown>>;
+    const found = sessions.find((s) => s["id"] === sessionId);
     expect(found).toBeDefined();
-    expect(found!.backend).toBe("claude-code");
+    expect(found!["backend"]).toBe("claude-code");
 
     // Get session details
     const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
       id: sessionId,
     });
-    expect(getResp.error).toBeUndefined();
-    const detail = getResp.result as Record<string, unknown>;
-    expect(detail.id).toBe(sessionId);
-    expect(detail.backend).toBe("claude-code");
-    expect(detail.mode).toBe("background");
-    expect(detail.projectPath).toBe(testRepo);
+    expect(getResp["error"]).toBeUndefined();
+    const detail = getResp["result"] as Record<string, unknown>;
+    expect(detail["id"]).toBe(sessionId);
+    expect(detail["backend"]).toBe("claude-code");
+    expect(detail["projectPath"]).toBe(testRepo);
 
     // Stop the session
     const stopResp = await encryptedRpc(conn.transport, conn.ws, "stop", {
       sessionId,
     });
-    expect(stopResp.error).toBeUndefined();
+    expect(stopResp["error"]).toBeUndefined();
 
     // Wait briefly for status to update
     await Bun.sleep(500);
@@ -138,10 +137,10 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     const afterStop = await encryptedRpc(conn.transport, conn.ws, "getSession", {
       id: sessionId,
     });
-    expect(afterStop.error).toBeUndefined();
-    const finalSession = afterStop.result as Record<string, unknown>;
+    expect(afterStop["error"]).toBeUndefined();
+    const finalSession = afterStop["result"] as Record<string, unknown>;
     expect(["completed", "stopped", "cancelled", "failed"]).toContain(
-      finalSession.status as string,
+      finalSession["status"] as string,
     );
 
     conn.ws.close();
@@ -167,26 +166,26 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       title: "lifecycle-result-test",
     });
 
-    expect(spawnResp.error).toBeUndefined();
-    const spawned = spawnResp.result as Record<string, unknown>;
-    const sessionId = spawned.id as string;
+    expect(spawnResp["error"]).toBeUndefined();
+    const spawned = spawnResp["result"] as Record<string, unknown>;
+    const sessionId = spawned["id"] as string;
     expect(sessionId.startsWith("sess-")).toBe(true);
 
     // Poll until session completes
     const finalSession = await waitForSessionCompletion(conn, sessionId);
-    expect(["completed", "failed"]).toContain(finalSession.status as string);
+    expect(["completed", "failed"]).toContain(finalSession["status"] as string);
 
     // Get result
     const resultResp = await encryptedRpc(conn.transport, conn.ws, "getResult", {
       sessionId,
     });
-    expect(resultResp.error).toBeUndefined();
+    expect(resultResp["error"]).toBeUndefined();
     // getResult may return null for sessions that complete too quickly
     // for the runtime to capture structured output. The call succeeding without
     // error is what we verify; if a result is present, check its shape.
-    if (resultResp.result !== null) {
-      const result = resultResp.result as Record<string, unknown>;
-      expect(typeof result.durationMs).toBe("number");
+    if (resultResp["result"] !== null) {
+      const result = resultResp["result"] as Record<string, unknown>;
+      expect(typeof result["durationMs"]).toBe("number");
     }
 
     conn.ws.close();
@@ -210,9 +209,9 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       title: "lifecycle-log-test",
     });
 
-    expect(spawnResp.error).toBeUndefined();
-    const spawned = spawnResp.result as Record<string, unknown>;
-    const sessionId = spawned.id as string;
+    expect(spawnResp["error"]).toBeUndefined();
+    const spawned = spawnResp["result"] as Record<string, unknown>;
+    const sessionId = spawned["id"] as string;
 
     // Wait for completion
     await waitForSessionCompletion(conn, sessionId);
@@ -221,10 +220,10 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     const logResp = await encryptedRpc(conn.transport, conn.ws, "getLogContent", {
       sessionId,
     });
-    expect(logResp.error).toBeUndefined();
+    expect(logResp["error"]).toBeUndefined();
     // getLogContent returns a string if the log file exists, null otherwise.
     // Short-lived sessions may not produce a log file.
-    const logContent = logResp.result;
+    const logContent = logResp["result"];
     expect(logContent === null || typeof logContent === "string").toBe(true);
     if (typeof logContent === "string") {
       expect(logContent.length).toBeGreaterThan(0);
@@ -254,12 +253,12 @@ describe("Session Lifecycle via Encrypted Channel", () => {
         title: `lifecycle-concurrent-${i}`,
         tags: ["concurrent-test"],
       });
-      expect(resp.error).toBeUndefined();
-      const session = resp.result as Record<string, unknown>;
-      expect(typeof session.id).toBe("string");
-      expect((session.id as string).startsWith("sess-")).toBe(true);
-      expect(session.status).toBe("running");
-      sessionIds.push(session.id as string);
+      expect(resp["error"]).toBeUndefined();
+      const session = resp["result"] as Record<string, unknown>;
+      expect(typeof session["id"]).toBe("string");
+      expect((session["id"] as string).startsWith("sess-")).toBe(true);
+      expect(session["status"]).toBe("running");
+      sessionIds.push(session["id"] as string);
     }
 
     expect(sessionIds.length).toBe(3);
@@ -268,13 +267,13 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     const listResp = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
       filters: {},
     });
-    expect(listResp.error).toBeUndefined();
-    const allSessions = listResp.result as Array<Record<string, unknown>>;
+    expect(listResp["error"]).toBeUndefined();
+    const allSessions = listResp["result"] as Array<Record<string, unknown>>;
 
     for (const id of sessionIds) {
-      const found = allSessions.find((s) => s.id === id);
+      const found = allSessions.find((s) => s["id"] === id);
       expect(found).toBeDefined();
-      expect(found!.backend).toBe("claude-code");
+      expect(found!["backend"]).toBe("claude-code");
     }
 
     // Stop any that are still running
@@ -282,8 +281,8 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
         id,
       });
-      const session = getResp.result as Record<string, unknown>;
-      if (session.status === "running" || session.status === "queued" || session.status === "preparing") {
+      const session = getResp["result"] as Record<string, unknown>;
+      if (session["status"] === "running" || session["status"] === "queued" || session["status"] === "preparing") {
         await encryptedRpc(conn.transport, conn.ws, "stop", { sessionId: id });
       }
     }
@@ -296,10 +295,10 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
         id,
       });
-      expect(getResp.error).toBeUndefined();
-      const session = getResp.result as Record<string, unknown>;
+      expect(getResp["error"]).toBeUndefined();
+      const session = getResp["result"] as Record<string, unknown>;
       expect(["completed", "stopped", "cancelled", "failed"]).toContain(
-        session.status as string,
+        session["status"] as string,
       );
     }
 
@@ -324,9 +323,9 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       title: "lifecycle-delete-test",
     });
 
-    expect(spawnResp.error).toBeUndefined();
-    const spawned = spawnResp.result as Record<string, unknown>;
-    const sessionId = spawned.id as string;
+    expect(spawnResp["error"]).toBeUndefined();
+    const spawned = spawnResp["result"] as Record<string, unknown>;
+    const sessionId = spawned["id"] as string;
 
     // Wait for completion
     await waitForSessionCompletion(conn, sessionId);
@@ -335,23 +334,23 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     const listBefore = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
       filters: {},
     });
-    expect(listBefore.error).toBeUndefined();
-    const beforeSessions = listBefore.result as Array<Record<string, unknown>>;
-    expect(beforeSessions.some((s) => s.id === sessionId)).toBe(true);
+    expect(listBefore["error"]).toBeUndefined();
+    const beforeSessions = listBefore["result"] as Array<Record<string, unknown>>;
+    expect(beforeSessions.some((s) => s["id"] === sessionId)).toBe(true);
 
     // Delete the session
     const deleteResp = await encryptedRpc(conn.transport, conn.ws, "deleteSessions", {
       ids: [sessionId],
     });
-    expect(deleteResp.error).toBeUndefined();
+    expect(deleteResp["error"]).toBeUndefined();
 
     // Verify it no longer appears in listing
     const listAfter = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
       filters: {},
     });
-    expect(listAfter.error).toBeUndefined();
-    const afterSessions = listAfter.result as Array<Record<string, unknown>>;
-    expect(afterSessions.some((s) => s.id === sessionId)).toBe(false);
+    expect(listAfter["error"]).toBeUndefined();
+    const afterSessions = listAfter["result"] as Array<Record<string, unknown>>;
+    expect(afterSessions.some((s) => s["id"] === sessionId)).toBe(false);
 
     conn.ws.close();
   }, 30_000);

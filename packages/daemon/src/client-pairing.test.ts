@@ -1,5 +1,5 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
-import { performClientPairing, type ClientPairingDeps } from "./client-pairing";
+import { describe, it, expect, beforeEach } from "bun:test";
+import { performClientPairing } from "./client-pairing";
 import type { NodeRegistry } from "./node-registry";
 import type { RemoteNodeManager } from "./remote-nodes";
 import type { StoredNode } from "@orka/core";
@@ -151,7 +151,7 @@ describe("client-pairing delegate operations", () => {
       await remoteNodes.connect(loaded!);
 
       expect(remoteNodes.connected).toHaveLength(1);
-      expect(remoteNodes.connected[0].nodeId).toBe(node.nodeId);
+      expect(remoteNodes.connected[0]!.nodeId).toBe(node.nodeId);
     });
 
     it("throws when node not in registry", () => {

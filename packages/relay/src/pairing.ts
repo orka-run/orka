@@ -14,7 +14,7 @@
  */
 
 import type { ServerWebSocket } from "bun";
-import type { AnySocketData, PairingSocketData } from "./state";
+import type { AnySocketData } from "./state";
 
 // --- Types ---
 

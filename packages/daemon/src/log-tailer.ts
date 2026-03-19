@@ -1,4 +1,3 @@
-import { existsSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import type { OrkaService } from "@orka/core";
 import type { PushHub } from "./push-hub";
 
@@ -39,43 +38,25 @@ export class LogTailer {
       );
 
       for (const session of active) {
-        this.tailSession(session.id, session.logFile);
+        await this.tailSession(session.id);
       }
     } catch {
       // Ignore errors during tick
     }
   }
 
-  private tailSession(sessionId: string, logFile: string): void {
-    if (!logFile || !existsSync(logFile)) return;
-
-    let size: number;
-    try {
-      size = statSync(logFile).size;
-    } catch {
-      return;
-    }
+  private async tailSession(sessionId: string): Promise<void> {
+    const content = await this.svc.getLogContent(sessionId);
+    if (!content) return;
 
     const currentOffset = this.offsets.get(sessionId) ?? 0;
-    if (size <= currentOffset) return;
+    if (content.length <= currentOffset) return;
 
-    const bytesToRead = size - currentOffset;
-    const buf = Buffer.alloc(bytesToRead);
-
-    let fd: number | undefined;
-    try {
-      fd = openSync(logFile, "r");
-      readSync(fd, buf, 0, bytesToRead, currentOffset);
-    } catch {
-      return;
-    } finally {
-      if (fd !== undefined) closeSync(fd);
-    }
-
-    this.offsets.set(sessionId, size);
+    const nextContent = content.slice(currentOffset);
+    this.offsets.set(sessionId, content.length);
     this.hub.broadcast("session.logLine", {
       sessionId,
-      content: buf.toString("utf-8"),
+      content: nextContent,
       offset: currentOffset,
     });
   }

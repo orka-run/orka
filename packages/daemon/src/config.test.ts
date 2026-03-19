@@ -252,7 +252,7 @@ describe("daemon config hooks", () => {
 
     try {
       const config = loadConfig(testHome);
-      expect(config.backendDefaults.codex).toEqual({
+      expect(config.backendDefaults["codex"]).toEqual({
         model: "gpt-5.4",
         reasoningEffort: "high",
         systemPrompt: undefined,
@@ -327,7 +327,7 @@ describe("loadProjectConfig", () => {
     try {
       const config = loadProjectConfig(testDir);
       expect(config).not.toBeNull();
-      expect(config!.backendDefaults.codex).toEqual({
+      expect(config!.backendDefaults["codex"]).toEqual({
         model: "gpt-5.4",
         reasoningEffort: "high",
         systemPrompt: undefined,
@@ -442,10 +442,10 @@ describe("mergeConfigs", () => {
 
     const merged = mergeConfigs(user, project);
     // project codex overrides user codex fields
-    expect(merged.backendDefaults.codex?.model).toBe("gpt-4"); // kept from user
-    expect(merged.backendDefaults.codex?.reasoningEffort).toBe("high"); // overridden by project
+    expect(merged.backendDefaults["codex"]?.model).toBe("gpt-4"); // kept from user
+    expect(merged.backendDefaults["codex"]?.reasoningEffort).toBe("high"); // overridden by project
     // shell kept from user
-    expect(merged.backendDefaults.shell?.model).toBe("bash");
+    expect(merged.backendDefaults["shell"]?.model).toBe("bash");
   });
 });
 
@@ -505,9 +505,7 @@ describe("resolveDefaults", () => {
     const config = emptyConfig();
     config.defaults.model = "sonnet";
 
-    const resolved = resolveDefaults(config, "claude-code", {
-      model: undefined,
-    });
+    const resolved = resolveDefaults(config, "claude-code", {});
     expect(resolved.model).toBe("sonnet");
   });
 

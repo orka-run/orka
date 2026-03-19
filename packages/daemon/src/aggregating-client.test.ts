@@ -78,7 +78,7 @@ function mockSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: overrides.id ?? "sess-remote-1",
     status: "running",
-    backend: "claude",
+    backend: "claude-code",
     title: "test session",
     createdAt: "2026-01-02T00:00:00Z",
     nodeId: "node-1",
@@ -88,7 +88,8 @@ function mockSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
 
 function createMockLocalClient(): OrkaService {
   return {
-    spawn: mock(async (req) => mockSpawnResult()),
+    spawn: mock(async () => mockSpawnResult()),
+    closeSession: mock(async () => {}),
     stop: mock(async () => {}),
     reap: mock(async () => 0),
     getSession: mock(async (id) =>
@@ -151,7 +152,25 @@ function createMockLocalClient(): OrkaService {
     terminalResize: mock(async () => {}),
     terminalClose: mock(async () => {}),
     terminalList: mock(async () => []),
-  };
+    pairWithNode: mock(async () => ({
+      nodeId: "node-1",
+      nodeName: "Remote Node",
+      relayUrl: "wss://relay.example.com",
+      nodePaths: [],
+      connected: false,
+    })),
+    listPairedNodes: mock(async () => []),
+    removePairedNode: mock(async () => {}),
+    connectNode: mock(async () => {}),
+    disconnectNode: mock(async () => {}),
+    listWorkspaces: mock(async () => []),
+    getWorkspace: mock(async () => ({ id: "ws-1" } as any)),
+    createWorkspace: mock(async () => ({ id: "ws-1" } as any)),
+    updateWorkspace: mock(async () => {}),
+    deleteWorkspace: mock(async () => {}),
+    addWorkspacePath: mock(async () => {}),
+    removeWorkspacePath: mock(async () => {}),
+  } as unknown as OrkaService;
 }
 
 function createMockRemoteNodes(): RemoteNodeManager & {
@@ -315,7 +334,7 @@ describe("AggregatingClient", () => {
     it("sorts by createdAt desc", async () => {
       const sessions = await svc.listSessions();
       for (let i = 1; i < sessions.length; i++) {
-        expect(sessions[i - 1].createdAt >= sessions[i].createdAt).toBe(true);
+        expect(sessions[i - 1]!.createdAt >= sessions[i]!.createdAt).toBe(true);
       }
     });
 
@@ -342,7 +361,7 @@ describe("AggregatingClient", () => {
     it("routes to remote for remote sessions", async () => {
       const remoteSession = mockDetailResponse({ id: "sess-remote-1" });
       (remote.request as any).mockImplementation(
-        async (nodeId: string, method: string) => {
+        async (_nodeId: string, method: string) => {
           if (method === "getSession") return remoteSession;
           return null;
         },
@@ -455,7 +474,7 @@ describe("AggregatingClient", () => {
       expect(result.totalCostUsd).toBe(3.0);
       expect(result.totalInputTokens).toBe(300);
       expect(result.sessionCount).toBe(5);
-      expect(result.byBackend.claude.sessions).toBe(5);
+      expect(result.byBackend["claude"]!.sessions).toBe(5);
     });
 
     it("routes to owning node when sessionId specified", async () => {
@@ -573,7 +592,7 @@ describe("AggregatingClient", () => {
           ?.get("orchestration.sessionUpdated");
 
       // Simulate push event for a new session
-      handlers![0]({
+      handlers![0]!({
         sessionId: "sess-remote-new",
         status: "running",
         backend: "claude",
@@ -592,7 +611,7 @@ describe("AggregatingClient", () => {
           .get("node-1")
           ?.get("orchestration.sessionDeleted");
 
-      handlers![0]({ sessionId: "sess-remote-1" });
+      handlers![0]!({ sessionId: "sess-remote-1" });
 
       expect(cache.getOwningNode("sess-remote-1")).toBeNull();
     });

@@ -7,7 +7,7 @@ import {
 import { ExportResultCode } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRelayHome } from "./db";
 
@@ -40,39 +40,6 @@ class SimpleCounter {
 
   reset(): void {
     this.entries.clear();
-  }
-}
-
-class SimpleHistogram {
-  private buckets = new Map<string, number[]>();
-
-  record(labels: Record<string, string>, value: number): void {
-    const key = Object.entries(labels).sort().map(([k, v]) => `${k}=${v}`).join(",");
-    let values = this.buckets.get(key);
-    if (!values) {
-      values = [];
-      this.buckets.set(key, values);
-    }
-    values.push(value);
-    // Keep only last 1000 values per bucket to avoid memory growth
-    if (values.length > 1000) values.shift();
-  }
-
-  getSummary(key: string): { count: number; sum: number; avg: number; p99: number } | null {
-    const values = this.buckets.get(key);
-    if (!values || values.length === 0) return null;
-    const sorted = [...values].sort((a, b) => a - b);
-    const sum = sorted.reduce((a, b) => a + b, 0);
-    return {
-      count: sorted.length,
-      sum,
-      avg: sum / sorted.length,
-      p99: sorted[Math.floor(sorted.length * 0.99)] ?? sorted[sorted.length - 1] ?? 0,
-    };
-  }
-
-  reset(): void {
-    this.buckets.clear();
   }
 }
 

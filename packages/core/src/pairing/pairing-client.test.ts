@@ -26,7 +26,6 @@ import {
 import {
   PairingClient,
   PairingError,
-  type PairingClientOpts,
   type PairingClientResult,
 } from "./pairing-client";
 
@@ -259,14 +258,14 @@ async function runFullExchange(
   expect((messages[0] as any).t).toBe("pair_client_hello");
 
   // Step 2: Server responds with pair_server_hello → client sends pair_init
-  const serverHelloJson = server.handleClientHello(messages[0]);
+  const serverHelloJson = server.handleClientHello(messages[0]!);
   const r1 = await client.handleMessage(serverHelloJson);
   expect(r1).toBeNull();
   expect(messages.length).toBe(2);
   expect((messages[1] as any).t).toBe("pair_init");
 
   // Step 3: Server processes pair_init → client sends pair_confirm1
-  const pairRespJson = server.handlePairInit(messages[1] as any);
+  const pairRespJson = server.handlePairInit(messages[1]! as any);
   const r2 = await client.handleMessage(pairRespJson);
   expect(r2).toBeNull();
   expect(messages.length).toBe(3);
@@ -502,11 +501,11 @@ describe("PairingClient", () => {
       client.start();
       expect(client.state).toBe("AWAIT_SERVER_HELLO");
 
-      const serverHelloJson = server.handleClientHello(messages[0]);
+      const serverHelloJson = server.handleClientHello(messages[0]!);
       await client.handleMessage(serverHelloJson);
       expect(client.state).toBe("AWAIT_PAIR_RESP");
 
-      const pairRespJson = server.handlePairInit(messages[1] as any);
+      const pairRespJson = server.handlePairInit(messages[1]! as any);
       await client.handleMessage(pairRespJson);
       expect(client.state).toBe("AWAIT_PAIR_CONFIRM2");
 
@@ -551,10 +550,10 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      const serverHelloJson = server.handleClientHello(messages[0]);
+      const serverHelloJson = server.handleClientHello(messages[0]!);
       await client.handleMessage(serverHelloJson);
 
-      const pairRespJson = server.handlePairInit(messages[1] as any);
+      const pairRespJson = server.handlePairInit(messages[1]! as any);
       await client.handleMessage(pairRespJson);
 
       // The server's SPAKE2 result has a different Ke than the client's,
@@ -649,7 +648,7 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
 
       await expect(
         client.handleMessage(JSON.stringify({ t: "pair_resp" })),
@@ -669,8 +668,8 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
-      await client.handleMessage(server.handlePairInit(messages[1] as any));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
+      await client.handleMessage(server.handlePairInit(messages[1]! as any));
 
       await expect(
         client.handleMessage(JSON.stringify({ t: "pair_confirm2" })),
@@ -694,14 +693,14 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
-      await client.handleMessage(server.handlePairInit(messages[1] as any));
-      await client.handleMessage(server.handlePairConfirm1(messages[2] as any));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
+      await client.handleMessage(server.handlePairInit(messages[1]! as any));
+      await client.handleMessage(server.handlePairConfirm1(messages[2]! as any));
 
       // Generate valid bootstrap then tamper with ciphertext
       const bootstrap = JSON.parse(server.generateBootstrap());
       const ctBytes = fromBase64url(bootstrap.ct);
-      ctBytes[0] ^= 0xff; // flip a byte
+      ctBytes[0]! ^= 0xff; // flip a byte
       const tamperedBootstrap = {
         t: "pair_bootstrap",
         ct: toBase64url(ctBytes),
@@ -725,9 +724,9 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
-      await client.handleMessage(server.handlePairInit(messages[1] as any));
-      await client.handleMessage(server.handlePairConfirm1(messages[2] as any));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
+      await client.handleMessage(server.handlePairInit(messages[1]! as any));
+      await client.handleMessage(server.handlePairConfirm1(messages[2]! as any));
 
       await expect(
         client.handleMessage(JSON.stringify({
@@ -749,7 +748,7 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
       await client.handleMessage(server.handlePairInit(messages[1] as any));
       await client.handleMessage(server.handlePairConfirm1(messages[2] as any));
 
@@ -844,7 +843,7 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
       expect(client.state).toBe("AWAIT_PAIR_RESP");
 
       await expect(
@@ -865,8 +864,8 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
-      await client.handleMessage(server.handlePairInit(messages[1] as any));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
+      await client.handleMessage(server.handlePairInit(messages[1]! as any));
       expect(client.state).toBe("AWAIT_PAIR_CONFIRM2");
 
       await expect(
@@ -887,9 +886,9 @@ describe("PairingClient", () => {
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]));
-      await client.handleMessage(server.handlePairInit(messages[1] as any));
-      await client.handleMessage(server.handlePairConfirm1(messages[2] as any));
+      await client.handleMessage(server.handleClientHello(messages[0]!));
+      await client.handleMessage(server.handlePairInit(messages[1]! as any));
+      await client.handleMessage(server.handlePairConfirm1(messages[2]! as any));
       expect(client.state).toBe("AWAIT_PAIR_BOOTSTRAP");
 
       await expect(
