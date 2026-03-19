@@ -96,7 +96,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   async function handleStop() {
     setStopping(true);
     try {
-      await client.stopSession(sessionId);
+      await client.stop(sessionId);
     } finally {
       setStopping(false);
     }

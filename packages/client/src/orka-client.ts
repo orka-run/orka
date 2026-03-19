@@ -1,46 +1,42 @@
 import type {
+  ApprovalDecision,
+  ApprovalRequest,
   ChatEntry,
   Checkpoint,
+  DiffResult,
+  MergeResult,
   NodeInfo,
   OrchestrationEvent,
   OrkaService,
-  SessionDetailResponse,
-  SessionListResponse,
-  Task,
-  SpawnRequest,
-  SpawnResult,
-  SessionFilters,
-  PruneOptions,
-  PruneResult,
-  DiffResult,
-  MergeResult,
-  SessionResult,
-  TimelineParams,
-  TimelineResponse,
-  UsageSummary,
-  ApprovalRequest,
-  ApprovalDecision,
-  PushChannel,
   PairWithNodeParams,
   PairWithNodeResult,
-  DataFrame,
+  PruneOptions,
+  PruneResult,
+  PushChannel,
+  SessionDetailResponse,
+  SessionFilters,
+  SessionListResponse,
+  SessionResult,
+  SpawnRequest,
+  SpawnResult,
   StartPairingParams,
   StartPairingResult,
   StoredNode,
+  Task,
+  TimelineParams,
+  TimelineResponse,
+  UsageSummary,
   WorkspaceInfo,
   WorkspaceMetadata,
   WorkspaceSettings,
 } from "@orka/core";
-import { trace } from "@opentelemetry/api";
-import { RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent, canonicalTransportOrigin } from "@orka/core";
+import { parseWireEvent } from "@orka/core";
 import type { NoiseKeyInfo } from "@orka/core/crypto";
-import type { NoiseClientTransport } from "@orka/core/transport/noise-transport";
-import { withSpan, injectSpanContext } from "./tracing";
-import { ReconnectStrategy } from "./reconnect";
-import { driveNoiseHandshake } from "./noise-handshake";
+import { canonicalTransportOrigin } from "@orka/core";
+import { WsTransport, type RequestOptions, type WsTransportOptions } from "./ws-transport";
 
 export interface OrkaClientOptions {
-  /** WebSocket URL of the daemon or relay */
+  /** WebSocket URL of the daemon or relay. */
   url: string;
   /** Noise transport key info for the server. If provided, uses Noise NK encryption. */
   noiseServerKey?: NoiseKeyInfo;
@@ -48,439 +44,345 @@ export interface OrkaClientOptions {
   nodeId?: string;
   /** Relay origin for Noise transport prologue binding. Defaults to "". */
   relayOrigin?: string;
+  /** Additional transport configuration such as timeouts and callbacks. */
+  transportOptions?: Omit<WsTransportOptions, "noiseConfig">;
 }
 
-interface PendingRequest {
-  resolve: (value: any) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-  method: string;
-}
+type OrkaClientSource = WsTransport | string | OrkaClientOptions;
 
-class OrkaClient implements OrkaService {
-  private ws: WebSocket | null = null;
-  private pending = new Map<string, PendingRequest>();
-  private nextId = 1;
-  private url: string;
-  private connectPromise: Promise<void> | null = null;
-  private noiseServerKey: NoiseKeyInfo | undefined;
-  private nodeId: string | undefined;
-  private relayOrigin: string;
-  private noiseTransport: NoiseClientTransport | null = null;
-  private backoff = new ReconnectStrategy();
+export class OrkaClient implements OrkaService {
+  protected readonly transport: WsTransport;
+  private readonly ownsTransport: boolean;
 
-  constructor(opts: OrkaClientOptions) {
-    this.url = opts.url;
-    this.noiseServerKey = opts.noiseServerKey;
-    this.nodeId = opts.nodeId;
-    this.relayOrigin = canonicalTransportOrigin(opts.relayOrigin);
-  }
-
-  private get useNoise(): boolean {
-    return !!this.noiseServerKey;
-  }
-
-  private async connect(): Promise<void> {
-    return withSpan("orka.rpc.connect", {}, async () => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        // Already connected. If Noise, ensure handshake is done.
-        if (this.useNoise && this.noiseTransport?.isSecure) return;
-        if (!this.useNoise) return;
-      }
-      if (this.connectPromise) return this.connectPromise;
-
-      this.connectPromise = new Promise<void>((resolve, reject) => {
-        const ws = new WebSocket(this.url);
-        ws.onopen = () => {
-          this.ws = ws;
-          this.connectPromise = null;
-          this.backoff.reset();
-
-          if (this.useNoise) {
-            // Start Noise handshake
-            this.performNoiseHandshake(ws).then(resolve).catch(reject);
-          } else {
-            resolve();
-          }
-        };
-        ws.onerror = () => {
-          this.connectPromise = null;
-          reject(new Error(`WebSocket connection failed: ${this.url}`));
-        };
-        ws.onclose = () => {
-          this.ws = null;
-          this.connectPromise = null;
-          this.noiseTransport = null;
-          // Reject all pending requests
-          for (const [id, p] of this.pending) {
-            clearTimeout(p.timer);
-            p.reject(new Error("Connection closed"));
-            this.pending.delete(id);
-          }
-        };
-        ws.onmessage = (event) => {
-          this.handleMessage(typeof event.data === "string" ? event.data : "");
-        };
-      });
-
-      return this.connectPromise;
-    });
-  }
-
-  private performNoiseHandshake(ws: WebSocket): Promise<void> {
-    return withSpan("orka.rpc.noise_handshake", {
-      "orka.transport.side": "client",
-    }, async (span) => {
-      if (!this.noiseServerKey) {
-        throw new Error("Noise server key not configured");
-      }
-
-      span.addEvent("noise.client_hello_sent");
-
-      this.noiseTransport = await driveNoiseHandshake(ws, {
-        nodeId: this.nodeId ?? "",
-        serverKey: this.noiseServerKey,
-        relayOrigin: this.relayOrigin,
-      });
-
-      span.addEvent("noise.handshake_complete");
-    });
-  }
-
-  private handleMessage(raw: string): void {
-    let resp: unknown;
-    try {
-      resp = JSON.parse(raw);
-    } catch {
+  constructor(source: OrkaClientSource) {
+    if (source instanceof WsTransport) {
+      this.transport = source;
+      this.ownsTransport = false;
       return;
     }
 
-    // Noise transport: decrypt data frames
-    if (this.noiseTransport?.isSecure) {
-      const frame = resp as Record<string, unknown>;
-      if (frame["t"] === "data" && typeof frame["ct"] === "string") {
-        try {
-          resp = this.noiseTransport.decryptData(frame as DataFrame);
-        } catch {
-          // Decryption failed — record the error and drop the frame
-          const activeSpan = trace.getActiveSpan();
-          if (activeSpan) {
-            activeSpan.addEvent("noise.decrypt_error", {
-              "orka.transport.side": "client",
-            });
+    const opts = typeof source === "string" ? { url: source } : source;
+    this.transport = new WsTransport(opts.url, {
+      ...opts.transportOptions,
+      ...(opts.noiseServerKey
+        ? {
+            noiseConfig: {
+              nodeId: opts.nodeId ?? "",
+              serverKey: opts.noiseServerKey,
+              relayOrigin: canonicalTransportOrigin(opts.relayOrigin),
+            },
           }
-          return;
-        }
-      } else {
-        // Not a data frame in Noise mode — ignore
-        return;
-      }
-    }
-    if (!isRecord(resp) || typeof resp["id"] !== "string") {
-      return;
-    }
-
-    const p = this.pending.get(resp["id"]);
-    if (!p) return;
-    this.pending.delete(resp["id"]);
-    clearTimeout(p.timer);
-
-    const error = isRecord(resp["error"]) ? resp["error"] : undefined;
-    if (error) {
-      if (error["code"] === RPC_METHOD_NOT_FOUND) {
-        p.reject(new MethodNotFoundError(p.method, typeof error["message"] === "string" ? error["message"] : undefined));
-      } else {
-        p.reject(new Error(typeof error["message"] === "string" ? error["message"] : "RPC request failed"));
-      }
-    } else {
-      p.resolve(resp["result"]);
-    }
+        : {}),
+    });
+    this.ownsTransport = true;
   }
 
-  private async call(method: string, params?: any): Promise<any> {
-    return withSpan("orka.rpc.request", {
-      "orka.method": method,
-    }, async (span) => {
-      await this.connect();
-      const id = String(this.nextId++);
-
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (this.pending.has(id)) {
-            this.pending.delete(id);
-            reject(new Error(`Request timeout: ${method}`));
-          }
-        }, 30_000);
-        timer.unref();
-
-        this.pending.set(id, { resolve, reject, timer, method });
-
-        let req: any = {
-          jsonrpc: "2.0",
-          id,
-          method,
-          ...(params !== undefined ? { params } : {}),
-        };
-        const traceCarrier: { traceparent?: string } = {};
-        injectSpanContext(span, traceCarrier);
-        if (traceCarrier.traceparent) {
-          req.traceparent = traceCarrier.traceparent;
-        }
-
-        // Noise transport: encrypt entire RPC message
-        if (this.noiseTransport?.isSecure) {
-          const frame = this.noiseTransport.encryptRpc(req);
-          this.ws!.send(JSON.stringify(frame));
-          return;
-        }
-
-        this.ws!.send(JSON.stringify(req));
-      });
-    });
+  protected request<T>(method: string, params?: unknown, options?: RequestOptions): Promise<T> {
+    return this.transport.request<T>(method, params, options);
   }
 
   close(): void {
-    this.ws?.close();
-    this.noiseTransport = null;
+    if (this.ownsTransport) {
+      this.transport.dispose();
+    }
   }
 
-  // --- OrkaService ---
-
-  async spawn(req: SpawnRequest): Promise<SpawnResult> {
-    return this.call("spawn", req);
+  async spawn(req: SpawnRequest, options?: RequestOptions): Promise<SpawnResult> {
+    return this.request("spawn", req, options);
   }
 
-  async closeSession(sessionId: string): Promise<void> {
-    return this.call("closeSession", { sessionId });
+  async closeSession(sessionId: string, options?: RequestOptions): Promise<void> {
+    return this.request("closeSession", { sessionId }, options);
   }
 
-  async stop(sessionId: string): Promise<void> {
-    return this.call("stop", { sessionId });
+  async stop(sessionId: string, options?: RequestOptions): Promise<void> {
+    return this.request("stop", { sessionId }, options);
   }
 
-  async reap(): Promise<number> {
-    return this.call("reap");
+  async reap(options?: RequestOptions): Promise<number> {
+    return this.request("reap", undefined, options);
   }
 
-  async getSession(id: string): Promise<SessionDetailResponse | null> {
-    return this.call("getSession", { id });
+  async getSession(id: string, options?: RequestOptions): Promise<SessionDetailResponse | null> {
+    return this.request("getSession", { id }, options);
   }
 
-  async listSessions(filters?: SessionFilters): Promise<SessionListResponse[]> {
-    return this.call("listSessions", { filters });
+  async listSessions(filters?: SessionFilters, options?: RequestOptions): Promise<SessionListResponse[]> {
+    return this.request("listSessions", filters === undefined ? undefined : { filters }, options);
   }
 
-  async getChildSessions(sessionId: string): Promise<SessionListResponse[]> {
-    return this.call("getChildSessions", { sessionId });
+  async getChildSessions(sessionId: string, options?: RequestOptions): Promise<SessionListResponse[]> {
+    return this.request("getChildSessions", { sessionId }, options);
   }
 
-  async getTask(id: string): Promise<Task | null> {
-    return this.call("getTask", { id });
+  async getTask(id: string, options?: RequestOptions): Promise<Task | null> {
+    return this.request("getTask", { id }, options);
   }
 
-  async setKept(sessionId: string, kept: boolean): Promise<void> {
-    return this.call("setKept", { sessionId, kept });
+  async setKept(sessionId: string, kept: boolean, options?: RequestOptions): Promise<void> {
+    return this.request("setKept", { sessionId, kept }, options);
   }
 
-  async getTags(sessionId: string): Promise<string[]> {
-    return this.call("getTags", { sessionId });
+  async getTags(sessionId: string, options?: RequestOptions): Promise<string[]> {
+    return this.request("getTags", { sessionId }, options);
   }
 
-  async getResult(sessionId: string): Promise<SessionResult | null> {
-    return this.call("getResult", { sessionId });
+  async getResult(sessionId: string, options?: RequestOptions): Promise<SessionResult | null> {
+    return this.request("getResult", { sessionId }, options);
   }
 
-  async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
-    const raw: any = await this.call("getSessionTimeline", params);
-    const rawEvents: unknown[] = Array.isArray(raw?.events) ? raw.events : [];
+  async getSessionTimeline(params: TimelineParams, options?: RequestOptions): Promise<TimelineResponse> {
+    const raw = await this.request<{ events?: unknown[]; total?: unknown }>("getSessionTimeline", params, options);
+    const rawEvents = Array.isArray(raw.events) ? raw.events : [];
     const events: OrchestrationEvent[] = [];
     for (const item of rawEvents) {
       const event = parseWireEvent(item);
       if (event) events.push(event);
     }
-    return { events, total: typeof raw?.total === "number" ? raw.total : events.length };
+    return {
+      events,
+      total: typeof raw.total === "number" ? raw.total : events.length,
+    };
   }
 
-  async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
-    return this.call("getChatMessages", { sessionId });
+  async getChatMessages(sessionId: string, options?: RequestOptions): Promise<ChatEntry[]> {
+    return this.request("getChatMessages", { sessionId }, options);
   }
 
-  async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {
-    return this.call("getUsage", opts ?? {});
+  async getUsage(
+    opts?: { sessionId?: string; since?: string; backend?: string },
+    options?: RequestOptions,
+  ): Promise<UsageSummary> {
+    return this.request("getUsage", opts, options);
   }
 
-  async captureOutput(sessionId: string): Promise<string> {
-    return this.call("captureOutput", { sessionId });
+  async captureOutput(sessionId: string, options?: RequestOptions): Promise<string> {
+    return this.request("captureOutput", { sessionId }, options);
   }
 
-  async getLogContent(sessionId: string): Promise<string | null> {
-    return this.call("getLogContent", { sessionId });
+  async getLogContent(sessionId: string, options?: RequestOptions): Promise<string | null> {
+    return this.request("getLogContent", { sessionId }, options);
   }
 
-  async isAlive(sessionId: string): Promise<boolean> {
-    return this.call("isAlive", { sessionId });
+  async isAlive(sessionId: string, options?: RequestOptions): Promise<boolean> {
+    return this.request("isAlive", { sessionId }, options);
   }
 
-  async sendTurn(sessionId: string, text: string): Promise<void> {
-    return this.call("sendTurn", { sessionId, text });
+  async sendTurn(sessionId: string, text: string, options?: RequestOptions): Promise<void> {
+    return this.request("sendTurn", { sessionId, text }, options);
   }
 
-  async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {
-    return this.call("getCheckpoints", { sessionId });
+  async getCheckpoints(sessionId: string, options?: RequestOptions): Promise<Checkpoint[]> {
+    return this.request("getCheckpoints", { sessionId }, options);
   }
 
-  async getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }> {
-    return this.call("getTurnDiff", { sessionId, fromTurn, toTurn });
+  async getTurnDiff(
+    sessionId: string,
+    fromTurn: number,
+    toTurn: number,
+    options?: RequestOptions,
+  ): Promise<{ diff: string }> {
+    return this.request("getTurnDiff", { sessionId, fromTurn, toTurn }, options);
   }
 
-  async revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void> {
-    return this.call("revertToCheckpoint", { sessionId, turnSeq });
+  async revertToCheckpoint(sessionId: string, turnSeq: number, options?: RequestOptions): Promise<void> {
+    return this.request("revertToCheckpoint", { sessionId, turnSeq }, options);
   }
 
-  async startPairing(params: StartPairingParams): Promise<StartPairingResult> {
-    return this.call("startPairing", params);
+  async startPairing(params: StartPairingParams, options?: RequestOptions): Promise<StartPairingResult> {
+    return this.request("startPairing", params, options);
   }
 
-  async pairWithNode(params: PairWithNodeParams): Promise<PairWithNodeResult> {
-    return this.call("pairWithNode", params);
+  async pairWithNode(params: PairWithNodeParams, options?: RequestOptions): Promise<PairWithNodeResult> {
+    return this.request("pairWithNode", params, options);
   }
 
-  async listPairedNodes(): Promise<StoredNode[]> {
-    return this.call("listPairedNodes");
+  async listPairedNodes(options?: RequestOptions): Promise<StoredNode[]> {
+    return this.request("listPairedNodes", undefined, options);
   }
 
-  async removePairedNode(params: { nodeId: string }): Promise<void> {
-    return this.call("removePairedNode", params);
+  async removePairedNode(params: { nodeId: string }, options?: RequestOptions): Promise<void> {
+    return this.request("removePairedNode", params, options);
   }
 
-  async connectNode(params: { nodeId: string }): Promise<void> {
-    return this.call("connectNode", params);
+  async connectNode(params: { nodeId: string }, options?: RequestOptions): Promise<void> {
+    return this.request("connectNode", params, options);
   }
 
-  async disconnectNode(params: { nodeId: string }): Promise<void> {
-    return this.call("disconnectNode", params);
+  async disconnectNode(params: { nodeId: string }, options?: RequestOptions): Promise<void> {
+    return this.request("disconnectNode", params, options);
   }
 
-  async getDiff(sessionId: string): Promise<DiffResult> {
-    return this.call("getDiff", { sessionId });
+  async getDiff(sessionId: string, options?: RequestOptions): Promise<DiffResult> {
+    return this.request("getDiff", { sessionId }, options);
   }
 
-  async merge(sessionId: string, cleanup?: boolean): Promise<MergeResult> {
-    return this.call("merge", { sessionId, cleanup });
+  async merge(sessionId: string, cleanup?: boolean, options?: RequestOptions): Promise<MergeResult> {
+    return this.request("merge", { sessionId, cleanup }, options);
   }
 
-  async deleteSessions(ids: string[]): Promise<void> {
-    return this.call("deleteSessions", { ids });
+  async deleteSessions(ids: string[], options?: RequestOptions): Promise<void> {
+    return this.request("deleteSessions", { ids }, options);
   }
 
-  async archiveSession(sessionId: string): Promise<void> {
-    return this.call("archiveSession", { sessionId });
+  async pruneSessions(opts: PruneOptions, options?: RequestOptions): Promise<PruneResult> {
+    return this.request("pruneSessions", opts, options);
   }
 
-  async unarchiveSession(sessionId: string): Promise<void> {
-    return this.call("unarchiveSession", { sessionId });
+  async archiveSession(sessionId: string, options?: RequestOptions): Promise<void> {
+    return this.request("archiveSession", { sessionId }, options);
   }
 
-  async pruneSessions(opts: PruneOptions): Promise<PruneResult> {
-    return this.call("pruneSessions", {
-      maxAgeMs: opts.maxAgeMs,
-      projectPath: opts.projectPath,
-      confirm: opts.confirm,
-      purgeLogs: opts.purgeLogs,
-      purgeDb: opts.purgeDb,
-    });
+  async unarchiveSession(sessionId: string, options?: RequestOptions): Promise<void> {
+    return this.request("unarchiveSession", { sessionId }, options);
   }
 
-  async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {
-    return this.call("getPendingApprovals", { sessionId });
+  async getPendingApprovals(sessionId?: string, options?: RequestOptions): Promise<ApprovalRequest[]> {
+    return this.request(
+      "getPendingApprovals",
+      sessionId === undefined ? undefined : { sessionId },
+      options,
+    );
   }
 
-  async resolveApproval(requestId: string, decision: ApprovalDecision): Promise<void> {
-    return this.call("resolveApproval", { requestId, decision });
+  async resolveApproval(
+    requestId: string,
+    decision: ApprovalDecision,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("resolveApproval", { requestId, decision }, options);
   }
 
-  async backfillSession(sessionId: string): Promise<{ eventsReplayed: number }> {
-    return this.call("backfillSession", { sessionId });
+  async reportEventGap(
+    channel: PushChannel,
+    expectedSeq: number,
+    gotSeq: number,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("reportEventGap", { channel, expectedSeq, gotSeq }, options);
   }
 
-  async getMetrics(): Promise<Record<string, unknown> | null> {
-    return this.call("getMetrics", {});
+  async backfillSession(
+    sessionId: string,
+    options?: RequestOptions,
+  ): Promise<{ eventsReplayed: number }> {
+    return this.request("backfillSession", { sessionId }, options);
   }
 
-  async queryTraces(query?: {
-    service?: string;
-    errorsOnly?: boolean;
-    namePattern?: string;
-    limit?: number;
-    since?: string;
-  }): Promise<Array<Record<string, unknown>>> {
-    return this.call("queryTraces", query ?? {});
+  async listNodes(options?: RequestOptions): Promise<NodeInfo[]> {
+    return this.request("listNodes", undefined, options);
   }
 
-  async reportEventGap(channel: PushChannel, expectedSeq: number, gotSeq: number): Promise<void> {
-    return this.call("reportEventGap", { channel, expectedSeq, gotSeq });
+  async getMetrics(options?: RequestOptions): Promise<Record<string, unknown> | null> {
+    return this.request("getMetrics", undefined, options);
   }
 
-  async terminalOpen(sessionId: string, opts?: { cols?: number; rows?: number }): Promise<{ termId: string }> {
-    return this.call("terminalOpen", { sessionId, opts });
+  async queryTraces(
+    query?: {
+      service?: string;
+      errorsOnly?: boolean;
+      namePattern?: string;
+      limit?: number;
+      since?: string;
+    },
+    options?: RequestOptions,
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.request("queryTraces", query, options);
   }
 
-  async terminalWrite(termId: string, data: string): Promise<void> {
-    return this.call("terminalWrite", { termId, data });
+  async terminalOpen(
+    sessionId: string,
+    opts?: { cols?: number; rows?: number },
+    options?: RequestOptions,
+  ): Promise<{ termId: string }> {
+    return this.request("terminalOpen", { sessionId, opts }, options);
   }
 
-  async terminalResize(termId: string, cols: number, rows: number): Promise<void> {
-    return this.call("terminalResize", { termId, cols, rows });
+  async terminalWrite(termId: string, data: string, options?: RequestOptions): Promise<void> {
+    return this.request("terminalWrite", { termId, data }, options);
   }
 
-  async terminalClose(termId: string): Promise<void> {
-    return this.call("terminalClose", { termId });
+  async terminalResize(
+    termId: string,
+    cols: number,
+    rows: number,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("terminalResize", { termId, cols, rows }, options);
   }
 
-  async terminalList(sessionId: string): Promise<Array<{ id: string; cols: number; rows: number }>> {
-    return this.call("terminalList", { sessionId });
+  async terminalClose(termId: string, options?: RequestOptions): Promise<void> {
+    return this.request("terminalClose", { termId }, options);
   }
 
-  async listNodes(): Promise<NodeInfo[]> {
-    return this.call("listNodes");
+  async terminalList(
+    sessionId: string,
+    options?: RequestOptions,
+  ): Promise<Array<{ id: string; cols: number; rows: number }>> {
+    return this.request("terminalList", { sessionId }, options);
   }
 
-  // --- Workspaces ---
-
-  async listWorkspaces(opts?: { includeArchived?: boolean }): Promise<WorkspaceInfo[]> {
-    return this.call("listWorkspaces", opts ?? {});
+  async listWorkspaces(
+    opts?: { includeArchived?: boolean },
+    options?: RequestOptions,
+  ): Promise<WorkspaceInfo[]> {
+    return this.request("listWorkspaces", opts, options);
   }
 
-  async getWorkspace(id: string): Promise<WorkspaceInfo> {
-    return this.call("getWorkspace", { id });
+  async getWorkspace(id: string, options?: RequestOptions): Promise<WorkspaceInfo> {
+    return this.request("getWorkspace", { id }, options);
   }
 
-  async createWorkspace(opts: { name: string; paths?: Array<{ nodeId?: string; path: string }>; settings?: WorkspaceSettings; metadata?: WorkspaceMetadata }): Promise<WorkspaceInfo> {
-    return this.call("createWorkspace", opts);
+  async createWorkspace(
+    opts: {
+      name: string;
+      paths?: Array<{ nodeId?: string; path: string }>;
+      settings?: WorkspaceSettings;
+      metadata?: WorkspaceMetadata;
+    },
+    options?: RequestOptions,
+  ): Promise<WorkspaceInfo> {
+    return this.request("createWorkspace", opts, options);
   }
 
-  async updateWorkspace(id: string, opts: Partial<{ name: string; settings: WorkspaceSettings; metadata: WorkspaceMetadata; archivedAt: string | null }>): Promise<void> {
-    return this.call("updateWorkspace", { id, opts });
+  async updateWorkspace(
+    id: string,
+    opts: Partial<{
+      name: string;
+      settings: WorkspaceSettings;
+      metadata: WorkspaceMetadata;
+      archivedAt: string | null;
+    }>,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("updateWorkspace", { id, opts }, options);
   }
 
-  async deleteWorkspace(id: string): Promise<void> {
-    return this.call("deleteWorkspace", { id });
+  async deleteWorkspace(id: string, options?: RequestOptions): Promise<void> {
+    return this.request("deleteWorkspace", { id }, options);
   }
 
-  async addWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
-    return this.call("addWorkspacePath", { workspaceId, path, nodeId });
+  async addWorkspacePath(
+    workspaceId: string,
+    path: string,
+    nodeId?: string,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("addWorkspacePath", { workspaceId, path, nodeId }, options);
   }
 
-  async removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
-    return this.call("removeWorkspacePath", { workspaceId, path, nodeId });
+  async removeWorkspacePath(
+    workspaceId: string,
+    path: string,
+    nodeId?: string,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("removeWorkspacePath", { workspaceId, path, nodeId }, options);
   }
 }
 
-export function createOrkaClient(urlOrOpts: string | OrkaClientOptions): OrkaClient {
-  const opts = typeof urlOrOpts === "string" ? { url: urlOrOpts } : urlOrOpts;
-  return new OrkaClient(opts);
+export function createOrkaClient(source: OrkaClientSource): OrkaClient {
+  return new OrkaClient(source);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+export type { RequestOptions };

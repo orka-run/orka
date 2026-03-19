@@ -90,15 +90,14 @@ describe("OrkaClient", () => {
     const request = JSON.parse(socket.sent[0] ?? "{}");
     expect(request).toMatchObject({
       jsonrpc: "2.0",
-      id: "1",
+      id: 1,
       method: "listSessions",
-      params: {},
     });
     expect(request.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
 
     socket.receive({
       jsonrpc: "2.0",
-      id: "1",
+      id: 1,
       result: [],
     });
 
@@ -106,7 +105,7 @@ describe("OrkaClient", () => {
     await provider.forceFlush();
 
     const rpcSpan = exporter.getFinishedSpans().find(
-      (span) => span.name === "orka.rpc.request" && span.attributes["orka.method"] === "listSessions",
+      (span) => span.name === "orka.client.rpc" && span.attributes["orka.method"] === "listSessions",
     );
     expect(rpcSpan).toBeDefined();
 
@@ -114,6 +113,32 @@ describe("OrkaClient", () => {
     expect(traceId).toBe(rpcSpan?.spanContext().traceId);
     expect(spanId).toBe(rpcSpan?.spanContext().spanId);
 
+    client.close();
+  });
+
+  test("routes requests through the provided node", async () => {
+    const client = createOrkaClient("ws://orka.test");
+    const resultPromise = client.listSessions(undefined, { node: "node-1" });
+
+    const socket = latestSocket();
+    socket.open();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const request = JSON.parse(socket.sent[0] ?? "{}");
+    expect(request).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "listSessions",
+      node: "node-1",
+    });
+
+    socket.receive({
+      jsonrpc: "2.0",
+      id: 1,
+      result: [],
+    });
+
+    await expect(resultPromise).resolves.toEqual([]);
     client.close();
   });
 });

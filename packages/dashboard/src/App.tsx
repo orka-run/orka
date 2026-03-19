@@ -29,7 +29,7 @@ import { WorkspaceDetailView } from "./components/WorkspaceDetailView";
 import { useMobileBreakpoint } from "./hooks/useMobileBreakpoint";
 import { getTracer, initDashboardTracing } from "./lib/tracing";
 import { TransportContext, RpcClientContext } from "./lib/transportContext";
-import { createRpcClient } from "./lib/rpcClient";
+import { RpcClient } from "./lib/rpcClient";
 import { loadNoiseKey, hexToBytes } from "./lib/noiseKeys";
 import { loadPairedNode } from "./lib/nodeRegistry";
 import { createDashboardTransport, type WsTransport } from "./lib/wsTransport";
@@ -82,7 +82,7 @@ function getEffectiveUrl(endpointUrl: string | null, authToken: string | null): 
 
 interface AppShellProps {
   transport: WsTransport;
-  client: ReturnType<typeof createRpcClient>;
+  client: RpcClient;
 }
 
 function getWorkspaceProjectPath(
@@ -715,7 +715,7 @@ export function App() {
     transportRef.current = { key: transportKey, transport: createTransport(effectiveUrl, noiseConfig) };
   }
   const transport = transportRef.current.transport;
-  const client = useMemo(() => createRpcClient(transport), [transport]);
+  const client = useMemo(() => new RpcClient(transport), [transport]);
 
   const reportedErrors = useRef(new Map<string, number>());
   const reportError = async (report: ClientErrorReport): Promise<void> => {

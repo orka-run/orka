@@ -1,4 +1,4 @@
-export { createOrkaClient } from "./orka-client";
+export { OrkaClient, createOrkaClient } from "./orka-client";
 export type { OrkaClientOptions } from "./orka-client";
 
 export { WsTransport } from "./ws-transport";
