@@ -20,7 +20,10 @@ describe("KnownOrchestrationEventTypeSchema", () => {
       "user.input", "content.delta",
       "item.started", "item.updated", "item.completed",
       "request.opened", "request.resolved",
-      "tool.progress", "runtime.error", "runtime.warning",
+      "tool.progress", "task.started", "task.completed",
+      "hook.started", "hook.response",
+      "session.status", "session.compacted",
+      "runtime.error", "runtime.warning",
       "session.rate_limited", "session.api_retry",
       "event.passthrough",
     ];
@@ -116,6 +119,38 @@ describe("WireOrchestrationEventSchema", () => {
       delayMs: 1000,
     });
     expect(result.success).toBe(true);
+  });
+
+  test("parses new Claude system-derived events", () => {
+    const taskStarted = WireOrchestrationEventSchema.safeParse({
+      ...BASE,
+      type: "task.started",
+      turnId: "turn-1",
+      taskId: "task-1",
+      title: "Explore dashboard structure",
+    });
+    const hookResponse = WireOrchestrationEventSchema.safeParse({
+      ...BASE,
+      type: "hook.response",
+      hookName: "SessionStart:startup",
+      decision: "allowed",
+    });
+    const sessionStatus = WireOrchestrationEventSchema.safeParse({
+      ...BASE,
+      type: "session.status",
+      status: "compacting",
+    });
+    const compacted = WireOrchestrationEventSchema.safeParse({
+      ...BASE,
+      type: "session.compacted",
+      tokenCountBefore: 120000,
+      tokenCountAfter: 64000,
+    });
+
+    expect(taskStarted.success).toBe(true);
+    expect(hookResponse.success).toBe(true);
+    expect(sessionStatus.success).toBe(true);
+    expect(compacted.success).toBe(true);
   });
 
   test("wraps known type with invalid variant fields as event.passthrough", () => {

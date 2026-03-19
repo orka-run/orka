@@ -144,6 +144,92 @@ function formatRetryError(error: string): string {
   return error.replace(/_error$/i, "").replace(/_/g, " ");
 }
 
+function humanizeInlineLabel(value: string): string {
+  return value.replace(/_/g, " ").trim();
+}
+
+function formatProgressBody(
+  event: Extract<OrchestrationEvent, { type: "tool.progress" }>,
+  workDir?: string,
+): string {
+  const summary = event.summary ? shortenPath(event.summary, workDir) : "";
+  if (summary) {
+    return summary;
+  }
+
+  if (event.toolName) {
+    return `${humanizeInlineLabel(event.toolName)}...`;
+  }
+
+  return "Working...";
+}
+
+function formatTaskStartedBody(
+  event: Extract<OrchestrationEvent, { type: "task.started" }>,
+  workDir?: string,
+): string {
+  const title = event.title ? shortenPath(event.title, workDir) : "";
+  const detail = event.detail ? shortenPath(event.detail, workDir) : "";
+  if (title && detail && detail !== title) {
+    return `${title} - ${detail}`;
+  }
+
+  return title || detail || "Subtask started.";
+}
+
+function formatTaskCompletedBody(
+  event: Extract<OrchestrationEvent, { type: "task.completed" }>,
+  workDir?: string,
+): string {
+  const summary = event.summary ? shortenPath(event.summary, workDir) : "";
+  const status = event.status ? humanizeInlineLabel(event.status) : "";
+  if (summary && status && summary !== status) {
+    return `${summary} (${status})`;
+  }
+
+  return summary || status || "Subtask completed.";
+}
+
+function formatHookBody(
+  event: Extract<OrchestrationEvent, { type: "hook.started" | "hook.response" }>,
+): string {
+  if (event.type === "hook.started") {
+    return event.matcher ? `${event.hookName} (${event.matcher}) started` : `${event.hookName} started`;
+  }
+
+  const name = event.hookName ?? "Hook";
+  const decision = event.decision ? humanizeInlineLabel(event.decision) : "";
+  if (decision && event.reason) {
+    return `${name} - ${decision}: ${event.reason}`;
+  }
+  if (decision) {
+    return `${name} - ${decision}`;
+  }
+  if (event.reason) {
+    return `${name} - ${event.reason}`;
+  }
+
+  return name;
+}
+
+function formatCompactionBody(
+  event: Extract<OrchestrationEvent, { type: "session.compacted" }>,
+): string {
+  if (event.tokenCountBefore !== undefined && event.tokenCountAfter !== undefined) {
+    return `Trimmed context from ${String(event.tokenCountBefore)} to ${String(event.tokenCountAfter)} tokens.`;
+  }
+
+  if (event.tokenCountBefore !== undefined) {
+    return `Trimmed context near ${String(event.tokenCountBefore)} tokens.`;
+  }
+
+  if (event.reason) {
+    return event.reason;
+  }
+
+  return "Older context was trimmed.";
+}
+
 export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState {
   const completedItemIds = new Set<string>();
   for (const event of events) {
@@ -169,6 +255,10 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
         return "writing";
       case "turn.started":
         return "thinking";
+      case "tool.progress":
+      case "task.started":
+      case "task.completed":
+        return "tools";
       case "turn.completed":
       case "turn.aborted":
       case "session.completed":
@@ -300,7 +390,10 @@ export function eventsToEntries(
         event.type === "item.started" ||
         event.type === "item.updated" ||
         event.type === "item.completed" ||
-        event.type === "request.opened"
+        event.type === "request.opened" ||
+        event.type === "tool.progress" ||
+        event.type === "task.started" ||
+        event.type === "task.completed"
       )
     ) {
       clearPendingQueuedEntries();
@@ -420,7 +513,14 @@ export function eventsToEntries(
       event.type === "turn.aborted" ||
       event.type === "user.input" ||
       event.type === "session.rate_limited" ||
-      event.type === "session.api_retry"
+      event.type === "session.api_retry" ||
+      event.type === "tool.progress" ||
+      event.type === "task.started" ||
+      event.type === "task.completed" ||
+      event.type === "hook.started" ||
+      event.type === "hook.response" ||
+      event.type === "session.status" ||
+      event.type === "session.compacted"
     ) {
       flushAssistant();
       flushToolGroup();
@@ -431,6 +531,67 @@ export function eventsToEntries(
     }
 
     switch (event.type) {
+      case "tool.progress":
+        entries.push({
+          id: `tool-progress-${event.timestamp}-${event.itemId ?? event.turnId}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: event.toolName ? humanizeInlineLabel(event.toolName) : "Progress",
+          body: formatProgressBody(event, workDir),
+          tone: "info",
+        });
+        break;
+      case "task.started":
+        entries.push({
+          id: `task-started-${event.timestamp}-${event.taskId ?? event.itemId ?? event.turnId}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Task started",
+          body: formatTaskStartedBody(event, workDir),
+          tone: "info",
+        });
+        break;
+      case "task.completed":
+        entries.push({
+          id: `task-completed-${event.timestamp}-${event.taskId ?? event.itemId ?? event.turnId}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Task completed",
+          body: formatTaskCompletedBody(event, workDir),
+          tone: "info",
+        });
+        break;
+      case "hook.started":
+      case "hook.response":
+        entries.push({
+          id: `hook-${event.type}-${event.timestamp}-${event.hookName ?? "unknown"}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Hook",
+          body: formatHookBody(event),
+          tone: "info",
+        });
+        break;
+      case "session.status":
+        entries.push({
+          id: `session-status-${event.timestamp}-${event.status}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Status",
+          body: event.detail ? `${humanizeInlineLabel(event.status)} - ${event.detail}` : humanizeInlineLabel(event.status),
+          tone: "info",
+        });
+        break;
+      case "session.compacted":
+        entries.push({
+          id: `session-compacted-${event.timestamp}`,
+          type: "system",
+          timestamp: event.timestamp,
+          title: "Context compacted",
+          body: formatCompactionBody(event),
+          tone: "info",
+        });
+        break;
       case "turn.completed": {
         if (pendingQueuedEntryIds.size > 0) {
           queuedMessagesReadyForDelivery = true;
