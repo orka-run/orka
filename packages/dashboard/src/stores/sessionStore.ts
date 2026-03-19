@@ -25,6 +25,7 @@ export interface SessionSummary {
   permissionMode: PermissionMode | null;
   tags: string[];
   nodeId: string | null;
+  allowedActions: string[];
 }
 
 export interface SessionState {
@@ -67,6 +68,7 @@ function toSessionSummary(
     permissionMode: session.permissionMode,
     tags: session.tags,
     nodeId: options?.nodeId ?? null,
+    allowedActions: session.allowedActions ?? [],
   };
 }
 
@@ -183,6 +185,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           permissionMode: request.permissionMode ?? null,
           tags: request.tags ?? [],
           nodeId: request.nodeId ?? null,
+          allowedActions: ["sendTurn", "stop"],
         };
 
         set((state) => ({
