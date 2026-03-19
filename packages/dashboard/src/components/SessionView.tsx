@@ -35,7 +35,7 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "running", "rate_limited
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function StatusBadge({ status }: { status: string }) {
-  const colors = STATUS_COLORS[status] ?? STATUS_COLORS["cancelled"]!;
+  const colors = STATUS_COLORS[status] ?? STATUS_COLORS.cancelled;
   return (
     <span className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${colors.bg} ${colors.text}`}>
       <span className={`h-1.5 w-1.5 rounded-sm ${colors.dot}`} />
@@ -55,6 +55,14 @@ function formatTokenCount(count: number): string {
   return String(count);
 }
 
+function InPlaceBadge() {
+  return (
+    <span className="inline-flex items-center rounded-sm border border-status-warning/30 bg-status-warning/10 px-1.5 py-0.5 text-[11px] font-medium text-status-warning">
+      In-place — changes are live
+    </span>
+  );
+}
+
 const TAB_ICONS: Record<string, React.ReactNode> = {
   overview: <Eye className="h-4 w-4" />,
   chat: <MessageSquare className="h-4 w-4" />,
@@ -67,7 +75,6 @@ export function SessionView({
   onSelectionLoadSettled,
   isMobile = false,
   mobileActiveTab,
-  onMobileTabChange: _onMobileTabChange,
 }: SessionViewProps) {
   const client = useRpcClient();
   // Desktop uses its own local tab state; mobile tab is driven externally via MobileTabBar
@@ -143,13 +150,18 @@ export function SessionView({
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold text-ink">{activeSession.title}</p>
-          <p className="mt-0.5 font-mono text-[11px] text-ink-muted">{sessionId}</p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            <p className="font-mono text-[11px] text-ink-muted">{sessionId}</p>
+            {activeSession.noWorktree ? <InPlaceBadge /> : null}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {isStoppable && (
             <button
               type="button"
-              onClick={() => void handleStopSession()}
+              onClick={() => {
+                void handleStopSession();
+              }}
               disabled={isStopping}
               className="inline-flex items-center gap-1 rounded-sm border border-status-error/30 bg-status-error/10 px-2 py-1 text-[11px] font-medium text-status-error transition hover:bg-status-error/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -173,7 +185,9 @@ export function SessionView({
               <button
                 key={tab}
                 type="button"
-                onClick={() => setDesktopTab(tab)}
+                onClick={() => {
+                  setDesktopTab(tab);
+                }}
                 className={`rounded-sm px-2 py-1 text-[11px] ${
                   activeTab === tab
                     ? "bg-surface-hover text-ink"
@@ -267,6 +281,14 @@ function OverviewTab({
               <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Status</dt>
               <dd className="mt-1"><StatusBadge status={session.status} /></dd>
             </div>
+            {session.noWorktree && (
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Workspace</dt>
+                <dd className="mt-1">
+                  <InPlaceBadge />
+                </dd>
+              </div>
+            )}
             <MetadataItem label="Backend" value={session.backend} />
             <MetadataItem label="Model" value={session.model ?? result?.model ?? "Default"} />
             {session.permissionMode && (
@@ -337,7 +359,9 @@ function OverviewTab({
         <section className="rounded-sm border border-border bg-surface-alt p-3">
           <button
             type="button"
-            onClick={() => setPromptExpanded(!promptExpanded)}
+            onClick={() => {
+              setPromptExpanded(!promptExpanded);
+            }}
             className="flex w-full items-center gap-2 text-left"
           >
             {promptExpanded ? (

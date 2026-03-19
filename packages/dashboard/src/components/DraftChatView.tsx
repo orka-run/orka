@@ -42,21 +42,22 @@ export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSp
 
   // Derive defaults from workspace settings
   const wsDefaults = activeWorkspace?.settings?.defaults;
+  const defaultBackend = wsDefaults?.backend === "codex" ? "codex" : "claude-code";
+  const defaultPermissionMode = wsDefaults?.permissionMode === "auto" || wsDefaults?.permissionMode === "bypass"
+    ? wsDefaults.permissionMode
+    : "supervised";
 
   // Quick options (always visible)
-  const [backend, setBackend] = useState<BackendKind>(
-    (wsDefaults?.backend as BackendKind) ?? "claude-code",
-  );
+  const [backend, setBackend] = useState<BackendKind>(defaultBackend);
   const [model, setModel] = useState(wsDefaults?.model ?? "");
 
   // Advanced options (collapsible)
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [title, setTitle] = useState("");
   const [tags, setTags] = useState(wsDefaults?.tags?.join(", ") ?? "");
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>(
-    (wsDefaults?.permissionMode as PermissionMode) ?? "supervised",
-  );
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(defaultPermissionMode);
   const [autoMerge, setAutoMerge] = useState(false);
+  const [noWorktree, setNoWorktree] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(wsDefaults?.systemPrompt ?? "");
   const [nodeId, setNodeId] = useState("");
 
@@ -81,6 +82,7 @@ export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSp
         backend,
         permissionMode,
         autoMerge,
+        ...(noWorktree ? { noWorktree: true } : {}),
         ...(trimmedTitle ? { title: trimmedTitle } : {}),
         ...(model ? { model } : {}),
         ...(parsedTags.length > 0 ? { tags: parsedTags } : {}),
@@ -95,6 +97,7 @@ export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSp
           "orka.prompt.length": text.length,
           "orka.permission_mode": permissionMode,
           "orka.auto_merge": autoMerge,
+          "orka.no_worktree": noWorktree,
         },
         async () => {
           return await spawnSession(client, request);
@@ -139,7 +142,9 @@ export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSp
           <MiniPills options={BACKENDS} value={backend} onChange={setBackend} />
           <select
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => {
+              setModel(e.target.value);
+            }}
             className="rounded-sm border border-border bg-surface-alt px-2 py-1 text-[11px] text-ink-secondary outline-none transition focus:border-accent"
           >
             {MODELS.map((m) => (
@@ -153,7 +158,9 @@ export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSp
 
       <SpawnAdvancedPanel
         open={showAdvanced}
-        onToggle={() => setShowAdvanced((v) => !v)}
+        onToggle={() => {
+          setShowAdvanced((v) => !v);
+        }}
         title={title}
         onTitleChange={setTitle}
         tags={tags}
@@ -162,6 +169,8 @@ export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSp
         onPermissionModeChange={setPermissionMode}
         autoMerge={autoMerge}
         onAutoMergeChange={setAutoMerge}
+        noWorktree={noWorktree}
+        onNoWorktreeChange={setNoWorktree}
         systemPrompt={systemPrompt}
         onSystemPromptChange={setSystemPrompt}
         nodeId={nodeId}
@@ -211,7 +220,9 @@ export function DraftChatView({ defaultProjectPath, nodes, activeWorkspace, onSp
             inputState={inputState}
             onSend={handleSend}
             sendError={spawnError}
-            onClearError={() => setSpawnError(null)}
+            onClearError={() => {
+              setSpawnError(null);
+            }}
             placeholder="Describe the work you want the agent to do…"
             autoFocus
           />
@@ -236,7 +247,9 @@ function MiniPills<T extends string>({
         <button
           key={opt}
           type="button"
-          onClick={() => onChange(opt)}
+          onClick={() => {
+            onChange(opt);
+          }}
           className={`rounded-sm px-2 py-1 text-[11px] font-medium transition ${
             value === opt
               ? "bg-surface-hover text-ink"

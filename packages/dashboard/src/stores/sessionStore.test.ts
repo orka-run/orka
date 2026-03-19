@@ -9,19 +9,20 @@ class MockRpcClient {
   spawnResult: SpawnResult | null = null;
   spawnParams: SpawnRequest | null = null;
 
-  listSessions = async () => this.sessions;
+  listSessions = () => Promise.resolve(this.sessions);
 
-  spawn = async (req: SpawnRequest) => {
-    if (!this.spawnResult) throw new Error("Missing spawn result");
+  spawn = (req: SpawnRequest) => {
+    if (!this.spawnResult) return Promise.reject(new Error("Missing spawn result"));
     this.spawnParams = req;
-    return this.spawnResult;
+    return Promise.resolve(this.spawnResult);
   };
 
   stop = async () => {};
 
-  deleteSessions = async (ids: string[]) => {
+  deleteSessions = (ids: string[]) => {
     const idSet = new Set(ids);
     this.sessions = this.sessions.filter((session) => !idSet.has(session.id));
+    return Promise.resolve();
   };
 }
 
@@ -83,6 +84,7 @@ describe("sessionStore", () => {
         projectPath: "/tmp/project",
         kept: false,
         autoMerge: false,
+        noWorktree: false,
         prompt: "Build the dashboard session store",
         parentSessionId: null,
         permissionMode: null,
@@ -120,6 +122,7 @@ describe("sessionStore", () => {
           projectPath: session.projectPath,
           kept: session.kept,
           autoMerge: session.autoMerge,
+          noWorktree: session.noWorktree,
           prompt: null,
           parentSessionId: null,
           permissionMode: null,
@@ -153,6 +156,7 @@ describe("sessionStore", () => {
           projectPath: session.projectPath,
           kept: session.kept,
           autoMerge: session.autoMerge,
+          noWorktree: session.noWorktree,
           prompt: null,
           parentSessionId: null,
           permissionMode: null,
@@ -184,8 +188,9 @@ describe("sessionStore", () => {
       title: "Ship dashboard store",
       projectPath: "/tmp/project",
       backend: "codex",
-        model: "gpt-5",
+      model: "gpt-5",
       autoMerge: true,
+      noWorktree: true,
       tags: ["dashboard", "polish"],
       systemPrompt: "Keep the response concise and implementation-focused.",
     };
@@ -197,14 +202,15 @@ describe("sessionStore", () => {
 
     const sessions = store.getState().sessions;
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]!.id).toBe("sess-2");
-    expect(sessions[0]!.status).toBe("queued");
-    expect(sessions[0]!.backend).toBe("codex");
-    expect(sessions[0]!.title).toBe("Ship dashboard store");
-    expect(sessions[0]!.model).toBe("gpt-5");
-    expect(sessions[0]!.projectPath).toBe("/tmp/project");
-    expect(sessions[0]!.autoMerge).toBe(true);
-    expect(sessions[0]!.nodeId).toBeNull();
+    expect(sessions[0].id).toBe("sess-2");
+    expect(sessions[0].status).toBe("queued");
+    expect(sessions[0].backend).toBe("codex");
+    expect(sessions[0].title).toBe("Ship dashboard store");
+    expect(sessions[0].model).toBe("gpt-5");
+    expect(sessions[0].projectPath).toBe("/tmp/project");
+    expect(sessions[0].autoMerge).toBe(true);
+    expect(sessions[0].noWorktree).toBe(true);
+    expect(sessions[0].nodeId).toBeNull();
     expect(store.getState().selectedId).toBe("sess-2");
   });
 });
