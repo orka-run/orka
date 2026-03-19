@@ -15,7 +15,7 @@ export function deriveInputState(
 ): InputState {
   void backend;
   void mode;
-  const canSendTurn = allowedActions.includes("sendTurn");
+  const canSendTurn = allowedActions?.includes("sendTurn") ?? false;
 
   if (TERMINAL_SESSION_STATUSES.has(sessionStatus) && !canSendTurn) {
     return "disabled";
