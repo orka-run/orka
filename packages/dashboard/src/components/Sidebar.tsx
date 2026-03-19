@@ -427,7 +427,7 @@ const STATUS_CONFIG: Record<
 > = {
   running: { dotClass: "bg-status-running animate-pulse", label: "Running" },
   idle: { dotClass: "bg-accent", label: "Idle" },
-  rate_limited: { dotClass: "bg-status-warning", label: "Rate Limited" },
+  rate_limited: { dotClass: "bg-status-warning", label: "Usage Limit" },
   hibernated: { dotClass: "bg-ink-muted", label: "Done" },
   queued: { dotClass: "bg-accent animate-pulse", label: "Queued" },
   preparing: { dotClass: "bg-accent animate-pulse", label: "Preparing" },

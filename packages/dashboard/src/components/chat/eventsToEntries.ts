@@ -54,6 +54,7 @@ export interface RateLimitEntry {
   title: string;
   body: string;
   tone: "warning" | "error";
+  limitKind: "usage" | "rate";
   scheduledResumeAt?: string;
 }
 
@@ -142,6 +143,25 @@ function formatResetAt(epochSeconds: number): string {
 
 function formatRetryError(error: string): string {
   return error.replace(/_error$/i, "").replace(/_/g, " ");
+}
+
+function isUsageBudgetType(rateLimitType?: string): boolean {
+  return rateLimitType === "five_hour" || rateLimitType === "seven_day";
+}
+
+function formatBudgetWindow(rateLimitType?: string): string | null {
+  switch (rateLimitType) {
+    case "five_hour":
+      return "5h";
+    case "seven_day":
+      return "7d";
+    default:
+      return null;
+  }
+}
+
+function isRateLimitRetryError(error: string): boolean {
+  return /\b429\b|rate[_ -]?limit/i.test(error);
 }
 
 export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState {
@@ -526,14 +546,21 @@ export function eventsToEntries(
         });
         break;
       case "session.rate_limited": {
+        const isUsageLimit = isUsageBudgetType(event.rateLimitType);
+        const budgetWindow = formatBudgetWindow(event.rateLimitType);
+
         if (event.scheduledResumeAt) {
           entries.push({
             id: `rate-limit-${event.timestamp}`,
             type: "rate-limit",
             timestamp: event.timestamp,
-            title: "Rate limit reached",
-            body: `Rate limit reached - auto-resuming at ${formatResetAt(event.resetsAt)}`,
+            title: isUsageLimit ? "Usage limit reached" : "Rate limited",
+            body:
+              isUsageLimit
+                ? `Usage limit reached - auto-resuming at ${formatResetAt(event.resetsAt)}`
+                : `Rate limited - retrying at ${formatResetAt(event.resetsAt)}`,
             tone: "warning",
+            limitKind: isUsageLimit ? "usage" : "rate",
             scheduledResumeAt: event.scheduledResumeAt,
           });
           break;
@@ -556,12 +583,24 @@ export function eventsToEntries(
           id: `rate-limit-${event.timestamp}`,
           type: "rate-limit",
           timestamp: event.timestamp,
-          title: event.status === "rejected" ? "Rate limit exceeded" : "Rate limit warning",
+          title:
+            isUsageLimit
+              ? event.status === "rejected"
+                ? "Usage limit reached"
+                : "Usage warning"
+              : event.status === "rejected"
+                ? "Rate limited"
+                : "Rate limit warning",
           body:
-            event.status === "rejected"
-              ? `Rate limit exceeded - ${resetText}`
-              : `Rate limit: ${formatPercent(event.utilization) ?? "warning"} used (${resetText})`,
+            isUsageLimit
+              ? event.status === "rejected"
+                ? `Usage limit reached - ${budgetWindow ? `${budgetWindow} budget ${resetText}` : resetText}`
+                : `Usage: ${formatPercent(event.utilization) ?? "warning"}${budgetWindow ? ` of ${budgetWindow} budget` : ""} (${resetText})`
+              : event.status === "rejected"
+                ? `Rate limited - retry after ${formatResetAt(event.resetsAt)}`
+                : `Rate limited - retrying (${resetText})`,
           tone: event.status === "rejected" ? "error" : "warning",
+          limitKind: isUsageLimit ? "usage" : "rate",
           ...(event.scheduledResumeAt ? { scheduledResumeAt: event.scheduledResumeAt } : {}),
         });
         break;
@@ -571,7 +610,10 @@ export function eventsToEntries(
           id: `api-retry-${event.timestamp}-${event.attempt}`,
           type: "api-retry",
           timestamp: event.timestamp,
-          body: `API retry (attempt ${String(event.attempt)}/${String(event.maxAttempts)}) - ${formatRetryError(event.error)}, waiting ${String(Math.max(1, Math.round(event.delayMs / 1000)))}s`,
+          body:
+            isRateLimitRetryError(event.error)
+              ? `Rate limited - retrying in ${String(Math.max(1, Math.round(event.delayMs / 1000)))}s (attempt ${String(event.attempt)}/${String(event.maxAttempts)})`
+              : `API retry (attempt ${String(event.attempt)}/${String(event.maxAttempts)}) - ${formatRetryError(event.error)}, waiting ${String(Math.max(1, Math.round(event.delayMs / 1000)))}s`,
         });
         break;
       default:

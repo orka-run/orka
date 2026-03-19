@@ -61,7 +61,9 @@ export const RateLimitEntry = memo(function RateLimitEntry({ entry }: { entry: R
         };
 
   const body = entry.scheduledResumeAt
-    ? `Rate limit reached - auto-resuming at ${formatRelativeTime(entry.scheduledResumeAt, now)} (${formatCountdown(entry.scheduledResumeAt, now) ?? "scheduled"})`
+    ? entry.limitKind === "usage"
+      ? `Usage limit reached - auto-resuming at ${formatRelativeTime(entry.scheduledResumeAt, now)} (${formatCountdown(entry.scheduledResumeAt, now) ?? "scheduled"})`
+      : `Rate limited - retrying at ${formatRelativeTime(entry.scheduledResumeAt, now)} (${formatCountdown(entry.scheduledResumeAt, now) ?? "scheduled"})`
     : entry.body;
 
   return (

@@ -960,6 +960,14 @@ function formatResumeTime(value: string): string {
   });
 }
 
+function formatSessionStatusLabel(status: string): string {
+  if (status === "rate_limited") {
+    return "usage limit";
+  }
+
+  return status;
+}
+
 const psCmd = command({
   name: "ps",
   description: "List active sessions",
@@ -1012,16 +1020,17 @@ const psCmd = command({
       noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
 
     const statusColor = (status: string): string => {
+      const label = formatSessionStatusLabel(status);
       switch (status) {
-        case "running": return c("32", status);
-        case "rate_limited": return c("33", status);
-        case "completed": return c("2", status);
-        case "failed": return c("31", status);
-        case "cancelled": return c("33", status);
-        case "interrupted": return c("33", status);
-        case "preparing": return c("34", status);
-        case "queued": return c("34", status);
-        default: return status;
+        case "running": return c("32", label);
+        case "rate_limited": return c("33", label);
+        case "completed": return c("2", label);
+        case "failed": return c("31", label);
+        case "cancelled": return c("33", label);
+        case "interrupted": return c("33", label);
+        case "preparing": return c("34", label);
+        case "queued": return c("34", label);
+        default: return label;
       }
     };
 
@@ -1064,7 +1073,8 @@ const psCmd = command({
     console.log("-".repeat(lineWidth));
 
     for (const s of sessions) {
-      const statusText = s.kept ? `${s.status} [kept]` : s.status;
+      const statusLabel = formatSessionStatusLabel(s.status);
+      const statusText = s.kept ? `${statusLabel} [kept]` : statusLabel;
       const colored = s.kept ? statusColor(s.status) + " " + c("36", "[kept]") : statusColor(s.status);
       const statusPad = 20 - statusText.length + colored.length;
 
