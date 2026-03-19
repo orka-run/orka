@@ -27,7 +27,7 @@ function isRunning(status: SessionSummary["status"]): boolean {
 }
 
 function canStop(allowedActions: SessionSummary["allowedActions"]): boolean {
-  return allowedActions?.includes("stop") ?? false;
+  return allowedActions.includes("stop");
 }
 
 export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
