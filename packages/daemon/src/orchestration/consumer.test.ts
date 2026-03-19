@@ -419,7 +419,7 @@ describe("consumeProviderEvents", () => {
       createEvent(
         "turn.completed",
         "thread-merge",
-        {},
+        { state: "completed" },
         { turnId: "turn-1", createdAt: "2026-03-11T00:00:59.000Z" },
       ),
     );

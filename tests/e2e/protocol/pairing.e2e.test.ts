@@ -178,7 +178,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
 
     // 1. Start relay
     relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
-    relayPort = relay.server.port;
+    relayPort = relay.server.port!;
     relayOrigin = `ws://127.0.0.1:${relayPort}`;
 
     // 2. Sign up and get API keys
@@ -333,7 +333,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     const hello = transport.getClientHello();
     ws.send(JSON.stringify(hello));
 
-    const secureResult = await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         ws.close();
         reject(new Error("Noise handshake timed out"));

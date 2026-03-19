@@ -1,4 +1,4 @@
-import type { PermissionMode, Session, SessionAction, SessionListResponse, SpawnRequest } from "@orka/core";
+import type { PermissionMode, Session, SessionListResponse, SpawnRequest } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RpcClient } from "../lib/rpcClient";
@@ -9,7 +9,6 @@ const SELECTED_SESSION_KEY = "orka:selectedSession";
 export interface SessionSummary {
   id: string;
   status: Session["status"];
-  allowedActions: SessionAction[];
   backend: Session["backend"];
   title: string;
   model: string | null;
@@ -51,7 +50,6 @@ function toSessionSummary(
   return {
     id: session.id,
     status: session.status,
-    allowedActions: session.allowedActions,
     backend: session.backend,
     title,
     model: session.model ?? null,
@@ -161,28 +159,26 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       try {
         const reqOpts = request.nodeId ? { node: request.nodeId } : undefined;
         const result = await client.spawn(request, reqOpts);
-        const detail = await client.getSession(result.id, reqOpts);
 
-        // Build a summary from the daemon detail response when available.
-        // Seed from the daemon detail response so the dashboard stays server-driven.
+        // Build a minimal summary from SpawnResult + request data.
+        // The next fetchSessions will fill in the full SessionListItem fields.
         const summary: SessionSummary = {
           id: result.id,
-          status: detail?.status ?? result.status,
-          allowedActions: detail?.allowedActions ?? [],
-          backend: detail?.backend ?? request.backend,
-          title: detail?.title ?? result.title ?? fallbackTitleFromRequest(request) ?? result.id,
-          model: detail?.model ?? request.model ?? null,
-          createdAt: detail?.createdAt ?? new Date().toISOString(),
-          startedAt: detail?.startedAt ?? null,
-          finishedAt: detail?.finishedAt ?? null,
-          exitCode: detail?.exitCode ?? null,
-          projectPath: detail?.projectPath ?? request.projectPath,
-          kept: detail?.kept ?? false,
-          autoMerge: detail?.autoMerge ?? (request.autoMerge ?? false),
-          prompt: detail?.prompt ?? request.prompt,
-          parentSessionId: detail?.parentSessionId ?? request.parentSessionId ?? null,
-          permissionMode: detail?.permissionMode ?? request.permissionMode ?? null,
-          tags: detail?.tags ?? request.tags ?? [],
+          status: result.status,
+          backend: request.backend,
+          title: result.title || fallbackTitleFromRequest(request) || result.id,
+          model: request.model ?? null,
+          createdAt: new Date().toISOString(),
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+          exitCode: null,
+          projectPath: request.projectPath,
+          kept: false,
+          autoMerge: request.autoMerge ?? false,
+          prompt: request.prompt,
+          parentSessionId: request.parentSessionId ?? null,
+          permissionMode: request.permissionMode ?? null,
+          tags: request.tags ?? [],
           nodeId: request.nodeId ?? null,
         };
 

@@ -158,12 +158,12 @@ export function NodeManagementDialog({
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-4 text-[10px] text-ink-muted">
                           <span className="font-mono">{node.nodeId}</span>
-                          {node.relayOrigin && (
+                          {node.relayUrl && (
                             <>
                               <span className="text-border">|</span>
                               <span className="inline-flex items-center gap-0.5">
                                 <Globe className="h-2.5 w-2.5" />
-                                {node.relayOrigin}
+                                {node.relayUrl}
                               </span>
                             </>
                           )}

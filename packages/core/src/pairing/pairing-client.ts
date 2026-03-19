@@ -37,7 +37,6 @@ import {
   computePairContext,
   computePairAad,
   type PairClientHello,
-  type PairServerHello,
   type PairError,
 } from "../pairing-protocol";
 
@@ -120,12 +119,10 @@ export class PairingClient {
   private _clientHello!: PairClientHello;
 
   // Populated during handshake
-  private _serverHello: PairServerHello | null = null;
   private _pairContext: Uint8Array | null = null;
   private _pairAad: Uint8Array | null = null;
   private _spake2Finish: ((pB: Uint8Array) => Spake2Result) | null = null;
   private _spake2Result: Spake2Result | null = null;
-  private _bootC2s: Uint8Array | null = null;
   private _bootS2c: Uint8Array | null = null;
   private _bootExport: Uint8Array | null = null;
   private _result: PairingClientResult | null = null;
@@ -275,8 +272,6 @@ export class PairingClient {
       throw this._error!;
     }
 
-    this._serverHello = serverHello;
-
     // Compute pair_context and pair_aad
     this._pairContext = computePairContext(this._clientHello, serverHello);
     this._pairAad = computePairAad(this._relayOrigin, this._pairContext);
@@ -354,9 +349,7 @@ export class PairingClient {
     const info_s2c = encoder.encode("orka-pair/v1 boot s2c");
     const info_export = encoder.encode("orka-pair/v1 export");
 
-    this._bootC2s = new Uint8Array(
-      hkdf(nobleSha256, Ke, new Uint8Array(0), info_c2s, 32),
-    );
+    hkdf(nobleSha256, Ke, new Uint8Array(0), info_c2s, 32);
     this._bootS2c = new Uint8Array(
       hkdf(nobleSha256, Ke, new Uint8Array(0), info_s2c, 32),
     );

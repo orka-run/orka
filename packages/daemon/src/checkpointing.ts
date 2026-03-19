@@ -246,7 +246,7 @@ async function runGit(
 ): Promise<GitResult> {
   const proc = Bun.spawn(["git", ...args], {
     cwd,
-    env,
+    ...(env ? { env } : {}),
     stdout: "pipe",
     stderr: "pipe",
   });

@@ -100,7 +100,7 @@ export function shortenPaths(text: string, projectPath: string | null): string {
 export function getPathFromArgs(args: unknown): string | null {
   if (!args || typeof args !== "object") return null;
   const obj = args as Record<string, unknown>;
-  if (typeof obj.file_path === "string") return obj.file_path;
-  if (typeof obj.path === "string" && obj.path.startsWith("/")) return obj.path;
+  if (typeof obj["file_path"] === "string") return obj["file_path"];
+  if (typeof obj["path"] === "string" && obj["path"].startsWith("/")) return obj["path"];
   return null;
 }

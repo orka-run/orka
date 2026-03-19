@@ -56,7 +56,7 @@ export function buildBackendCommand(
         cmd = buildClaudeCode(prompt, opts?.sessionId, opts?.model, opts?.systemPrompt, opts?.allowedTools);
         break;
       case "codex":
-        cmd = buildCodex(prompt, opts?.model, opts?.reasoningEffort, opts?.projectPath, opts?.systemPrompt);
+        cmd = buildCodex(prompt, opts?.model, opts?.reasoningEffort, opts?.systemPrompt);
         break;
     }
 
@@ -94,7 +94,6 @@ function buildCodex(
   prompt: string,
   model?: string,
   reasoningEffort?: ReasoningEffort,
-  projectPath?: string,
   systemPrompt?: string,
 ): string {
   const escaped = shellEscape(prependSystemPrompt(prompt, systemPrompt));

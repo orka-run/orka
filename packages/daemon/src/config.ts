@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { parse, stringify, type TomlTable, type TomlValue } from "smol-toml";
+import { parse, stringify, TomlDate, type TomlTable, type TomlValue } from "smol-toml";
 import { z } from "zod/v4";
 import { withSpanSync } from "./tracing";
 
@@ -103,10 +103,10 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
   try {
     const raw = readFileSync(configPath, "utf-8");
     const toml = parse(raw);
-    const defaults = getTable(toml.defaults);
-    const limits = getTable(toml.limits);
-    const hooks = getTable(toml.hooks);
-    const permissions = getTable(toml.permissions);
+    const defaults = getTable(toml["defaults"]);
+    const limits = getTable(toml["limits"]);
+    const hooks = getTable(toml["hooks"]);
+    const permissions = getTable(toml["permissions"]);
 
     const backendDefaults: Record<string, Record<string, unknown>> = {};
     if (defaults) {
@@ -122,43 +122,43 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
       defaults:
         defaults !== undefined
           ? {
-              backend: getString(defaults.backend),
-              model: getString(defaults.model),
-              project: getString(defaults.project),
-              systemPrompt: getString(defaults.system_prompt ?? defaults.systemPrompt),
-              reasoningEffort: getString(defaults.reasoning_effort ?? defaults.reasoningEffort),
-              tags: getStringArray(defaults.tags),
-              permissionMode: getString(defaults.permission_mode ?? defaults.permissionMode),
+              backend: getString(defaults["backend"]),
+              model: getString(defaults["model"]),
+              project: getString(defaults["project"]),
+              systemPrompt: getString(defaults["system_prompt"] ?? defaults["systemPrompt"]),
+              reasoningEffort: getString(defaults["reasoning_effort"] ?? defaults["reasoningEffort"]),
+              tags: getStringArray(defaults["tags"]),
+              permissionMode: getString(defaults["permission_mode"] ?? defaults["permissionMode"]),
             }
           : undefined,
       limits:
         limits !== undefined
           ? {
-              ...(limits.max_concurrent !== undefined ? { maxConcurrent: getNumber(limits.max_concurrent) } : {}),
-              ...(limits.session_timeout_minutes !== undefined ? { sessionTimeoutMinutes: getNumber(limits.session_timeout_minutes) } : {}),
-              ...(limits.approval_timeout_minutes !== undefined ? { approvalTimeoutMinutes: getNumber(limits.approval_timeout_minutes) } : {}),
-              ...(limits.idle_timeout_minutes !== undefined ? { idleTimeoutMinutes: getNumber(limits.idle_timeout_minutes) } : {}),
+              ...(limits["max_concurrent"] !== undefined ? { maxConcurrent: getNumber(limits["max_concurrent"]) } : {}),
+              ...(limits["session_timeout_minutes"] !== undefined ? { sessionTimeoutMinutes: getNumber(limits["session_timeout_minutes"]) } : {}),
+              ...(limits["approval_timeout_minutes"] !== undefined ? { approvalTimeoutMinutes: getNumber(limits["approval_timeout_minutes"]) } : {}),
+              ...(limits["idle_timeout_minutes"] !== undefined ? { idleTimeoutMinutes: getNumber(limits["idle_timeout_minutes"]) } : {}),
             }
           : undefined,
       hooks:
-        hooks?.post_worktree_create !== undefined
-          ? { postWorktreeCreate: normalizeHookCommands(hooks.post_worktree_create) }
+        hooks?.["post_worktree_create"] !== undefined
+          ? { postWorktreeCreate: normalizeHookCommands(hooks["post_worktree_create"]) }
           : undefined,
       permissions:
         permissions !== undefined
           ? {
-              ...(getString(permissions.mode) !== undefined ? { mode: getString(permissions.mode) } : {}),
-              ...(getStringArray(permissions.auto_approve ?? permissions.autoApprove) !== undefined
-                ? { autoApprove: getStringArray(permissions.auto_approve ?? permissions.autoApprove) }
+              ...(getString(permissions["mode"]) !== undefined ? { mode: getString(permissions["mode"]) } : {}),
+              ...(getStringArray(permissions["auto_approve"] ?? permissions["autoApprove"]) !== undefined
+                ? { autoApprove: getStringArray(permissions["auto_approve"] ?? permissions["autoApprove"]) }
                 : {}),
-              ...(getStringArray(permissions.always_deny ?? permissions.alwaysDeny) !== undefined
-                ? { alwaysDeny: getStringArray(permissions.always_deny ?? permissions.alwaysDeny) }
+              ...(getStringArray(permissions["always_deny"] ?? permissions["alwaysDeny"]) !== undefined
+                ? { alwaysDeny: getStringArray(permissions["always_deny"] ?? permissions["alwaysDeny"]) }
                 : {}),
-              ...(getNumber(permissions.approval_timeout ?? permissions.approvalTimeout) !== undefined
-                ? { approvalTimeout: getNumber(permissions.approval_timeout ?? permissions.approvalTimeout) }
+              ...(getNumber(permissions["approval_timeout"] ?? permissions["approvalTimeout"]) !== undefined
+                ? { approvalTimeout: getNumber(permissions["approval_timeout"] ?? permissions["approvalTimeout"]) }
                 : {}),
-              ...(getBoolean(permissions.bypass_consent ?? permissions.bypassConsent) !== undefined
-                ? { bypassConsent: getBoolean(permissions.bypass_consent ?? permissions.bypassConsent) }
+              ...(getBoolean(permissions["bypass_consent"] ?? permissions["bypassConsent"]) !== undefined
+                ? { bypassConsent: getBoolean(permissions["bypass_consent"] ?? permissions["bypassConsent"]) }
                 : {}),
             }
           : undefined,
@@ -172,10 +172,10 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
 
 function parsePerBackendDefaults(table: TomlTable): Record<string, unknown> {
   return {
-    model: getString(table.model),
-    reasoningEffort: getString(table.reasoning_effort ?? table.reasoningEffort),
-    systemPrompt: getString(table.system_prompt ?? table.systemPrompt),
-    tags: getStringArray(table.tags),
+    model: getString(table["model"]),
+    reasoningEffort: getString(table["reasoning_effort"] ?? table["reasoningEffort"]),
+    systemPrompt: getString(table["system_prompt"] ?? table["systemPrompt"]),
+    tags: getStringArray(table["tags"]),
   };
 }
 
@@ -294,7 +294,13 @@ function mergeTags(base: string[], overlay: string[]): string[] {
 }
 
 function getTable(value: TomlValue | undefined): TomlTable | undefined {
-  if (value === undefined || Array.isArray(value) || typeof value !== "object" || value === null) {
+  if (
+    value === undefined
+    || Array.isArray(value)
+    || typeof value !== "object"
+    || value === null
+    || value instanceof TomlDate
+  ) {
     return undefined;
   }
 
@@ -356,10 +362,10 @@ export function writeBypassConsent(orkaHome: string): void {
     }
   }
 
-  if (!toml.permissions || typeof toml.permissions !== "object") {
-    toml.permissions = {};
+  if (!toml["permissions"] || typeof toml["permissions"] !== "object") {
+    toml["permissions"] = {};
   }
-  (toml.permissions as Record<string, any>).bypass_consent = true;
+  (toml["permissions"] as Record<string, any>)["bypass_consent"] = true;
 
   writeFileSync(configPath, stringify(toml as any), "utf-8");
 }

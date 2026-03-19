@@ -44,34 +44,6 @@ function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
   });
 }
 
-function plainRpc(
-  ws: WebSocket,
-  method: string,
-  params: unknown = {},
-  opts?: { id?: string; node?: string; timeoutMs?: number },
-): Promise<Record<string, unknown>> {
-  const reqId = opts?.id ?? `${method}-${Date.now()}`;
-  const timeoutMs = opts?.timeoutMs ?? 10_000;
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`RPC ${method} timeout`)), timeoutMs);
-    const handler = (event: MessageEvent) => {
-      try {
-        const resp = JSON.parse(String(event.data));
-        if (resp.id === reqId) {
-          clearTimeout(timer);
-          ws.removeEventListener("message", handler);
-          resolve(resp);
-        }
-      } catch { /* ignore non-JSON */ }
-    };
-    ws.addEventListener("message", handler);
-    const envelope: Record<string, unknown> = { jsonrpc: "2.0", id: reqId, method, params };
-    if (opts?.node) envelope["node"] = opts.node;
-    ws.send(JSON.stringify(envelope));
-  });
-}
-
 function doNoiseHandshake(
   ws: WebSocket,
   noiseKeyInfo: NoiseKeyInfo,
@@ -188,7 +160,7 @@ describe("Noise NK through Relay", () => {
   beforeAll(async () => {
     // 1. Start in-process relay (ephemeral port)
     relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
-    relayPort = relay.server.port;
+    relayPort = relay.server.port!;
 
     // 2. Sign up + create API keys on relay
     const signupRes = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
@@ -225,7 +197,7 @@ describe("Noise NK through Relay", () => {
       relayUrl: `ws://127.0.0.1:${relayPort}`,
       relayToken: nodeApiKeyA,
     }));
-    daemonPortA = daemonServerA.port;
+    daemonPortA = daemonServerA.port!;
     noiseKeyA = await fetchNoiseKeyInfo(daemonPortA);
 
     // 4. Start daemon B with encryption + relay registration
@@ -239,7 +211,7 @@ describe("Noise NK through Relay", () => {
       relayUrl: `ws://127.0.0.1:${relayPort}`,
       relayToken: nodeApiKeyB,
     }));
-    daemonPortB = daemonServerB.port;
+    daemonPortB = daemonServerB.port!;
     noiseKeyB = await fetchNoiseKeyInfo(daemonPortB);
 
     // Wait for nodes to register with relay

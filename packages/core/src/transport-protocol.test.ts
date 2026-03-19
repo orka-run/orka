@@ -16,7 +16,7 @@ import {
   DEFAULT_MAX_FRAME,
   type ClientHello,
   type ServerHello,
-  type ServerCapabilities,
+  type TransportServerCapabilities,
 } from "./transport-protocol";
 
 // ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ function makeClientHello(overrides?: Partial<ClientHello>): ClientHello {
   };
 }
 
-function makeServerCapabilities(overrides?: Partial<ServerCapabilities>): ServerCapabilities {
+function makeServerCapabilities(overrides?: Partial<TransportServerCapabilities>): TransportServerCapabilities {
   return {
     nodeId: "node-1",
     keyId: "sha256:abc123",

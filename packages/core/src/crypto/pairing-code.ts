@@ -21,11 +21,11 @@ const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** Reverse lookup table built at module load time. */
 const DECODE_MAP = new Map<string, number>();
 for (let i = 0; i < CROCKFORD_ALPHABET.length; i++) {
-  DECODE_MAP.set(CROCKFORD_ALPHABET[i], i);
+  DECODE_MAP.set(CROCKFORD_ALPHABET[i]!, i);
 }
 // Lowercase equivalents
 for (let i = 0; i < CROCKFORD_ALPHABET.length; i++) {
-  DECODE_MAP.set(CROCKFORD_ALPHABET[i].toLowerCase(), i);
+  DECODE_MAP.set(CROCKFORD_ALPHABET[i]!.toLowerCase(), i);
 }
 // Error-correcting aliases
 DECODE_MAP.set("I", 1);
@@ -56,11 +56,11 @@ export function crockfordEncode(data: Uint8Array): string {
     for (let j = 0; j < 5; j++) {
       value <<= 1;
       if (i + j < bits.length) {
-        value |= bits[i + j];
+        value |= bits[i + j]!;
       }
       // Implicit zero-padding if bits run out
     }
-    result += CROCKFORD_ALPHABET[value];
+    result += CROCKFORD_ALPHABET[value]!;
   }
 
   return result;
@@ -103,7 +103,7 @@ export function crockfordDecode(input: string, expectedBytes?: number): Uint8Arr
       byte <<= 1;
       const idx = i * 8 + bit;
       if (idx < bits.length) {
-        byte |= bits[idx];
+        byte |= bits[idx]!;
       }
     }
     result[i] = byte;
@@ -217,7 +217,7 @@ export function parsePairingCode(code: string): PairingCode {
   // Extract fields
   const version = data[0];
   const secret = data.slice(1, 1 + SECRET_LENGTH);
-  const checksumReceived = (data[11] << 8) | data[12];
+  const checksumReceived = (data[11]! << 8) | data[12]!;
 
   // Verify checksum over version || secret
   const payload = data.slice(0, 1 + SECRET_LENGTH);

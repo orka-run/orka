@@ -9,7 +9,6 @@ import {
   Monitor,
   Plus,
   Server,
-  X,
 } from "lucide-react";
 import { PairingClient, PairingError } from "@orka/core/pairing";
 import type { PairingClientResult } from "@orka/core/pairing";
@@ -280,10 +279,11 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
 
   function handleDone() {
     const doneResult = localResult ?? result;
-    if (doneResult && mode === "hosted") {
-      const nodePath = doneResult.nodePaths[0];
+    if (doneResult && mode === "hosted" && "nodePaths" in doneResult) {
+      const hostedResult = doneResult as PairingClientResult;
+      const nodePath = hostedResult.nodePaths[0];
       if (nodePath) {
-        setEndpoint(nodePath, null, doneResult.nodeId);
+        setEndpoint(nodePath, null, hostedResult.nodeId);
       }
     }
     onComplete();

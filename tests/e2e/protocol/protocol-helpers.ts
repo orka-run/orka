@@ -76,9 +76,12 @@ export async function startDaemonWithNoise(opts?: {
     encrypt: true,
   });
 
-  const port = server.port;
+  const port = server.port!;
   return {
-    server,
+    server: {
+      port,
+      stop: server.stop.bind(server),
+    },
     svc,
     noiseKeyInfo,
     nodeId,
@@ -211,7 +214,7 @@ export async function performNoiseHandshake(
   // Drain any data frames from the queue (encrypted welcome push, etc.)
   for (const msg of messageQueue) {
     const m = msg as Record<string, unknown>;
-    if (m?.t === "data" && typeof m.ct === "string") {
+    if (m?.["t"] === "data" && typeof m["ct"] === "string") {
       try {
         transport.decryptFrame(m as DataFrame);
       } catch {
@@ -323,12 +326,12 @@ export function encryptedRpc(
       try {
         const parsed = JSON.parse(String(event.data));
         // Skip non-data frames (e.g. cleartext welcome)
-        if (!parsed || parsed.t !== "data" || typeof parsed.ct !== "string") return;
+        if (!parsed || parsed["t"] !== "data" || typeof parsed["ct"] !== "string") return;
         const payload = transport.decryptFrame(parsed as DataFrame);
         // Skip non-RPC payloads (push messages, etc.)
         if (payload.kind !== "rpc") return;
         const decrypted = payload.rpc;
-        if (decrypted.id === reqId) {
+        if (decrypted["id"] === reqId) {
           clearTimeout(timer);
           ws.removeEventListener("message", handler);
           resolve(decrypted);

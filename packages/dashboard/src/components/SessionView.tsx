@@ -1,7 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, ScrollText, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, ScrollText, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
 import { LogPanel } from "./LogPanel";
@@ -30,6 +30,9 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
   cancelled: { bg: "bg-surface-alt", text: "text-ink-muted", dot: "bg-ink-muted" },
   interrupted: { bg: "bg-orange-500/10", text: "text-orange-600", dot: "bg-orange-500" },
 };
+
+const ACTIVE_STATUSES = new Set(["queued", "preparing", "running", "rate_limited"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function StatusBadge({ status }: { status: string }) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS["cancelled"]!;
@@ -99,7 +102,9 @@ export function SessionView({
   }
 
   const activeSession = session;
-  const isStoppable = activeSession.allowedActions.includes("stop");
+  const isStoppable = ACTIVE_STATUSES.has(activeSession.status);
+  const isRetryable = TERMINAL_STATUSES.has(activeSession.status);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   async function handleStopSession() {
     if (!isStoppable || isStopping) return;
@@ -122,6 +127,15 @@ export function SessionView({
     }
   }
 
+  async function handleRetrySession() {
+    setIsRetrying(true);
+    try {
+      await client.retrySession(sessionId);
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+
   // On mobile: no internal header — MobileHeader and MobileTabBar handle navigation.
   // On desktop: render full header with tab switcher.
   const header = isMobile ? null : (
@@ -141,6 +155,17 @@ export function SessionView({
             >
               {isStopping ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3" />}
               Stop
+            </button>
+          )}
+          {isRetryable && (
+            <button
+              type="button"
+              onClick={() => void handleRetrySession()}
+              disabled={isRetrying}
+              className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:text-ink-secondary disabled:opacity-50"
+            >
+              {isRetrying ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+              Retry
             </button>
           )}
           <div className="flex rounded-sm border border-border bg-surface-alt p-0.5">

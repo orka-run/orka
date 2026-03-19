@@ -62,14 +62,14 @@ function getInputString(tool: string, input?: Record<string, unknown>): string {
   if (!input) return "";
 
   if (tool === "Bash") {
-    if (typeof input.command === "string") return input.command;
-    if (typeof input.cmd === "string") return input.cmd;
+    if (typeof input["command"] === "string") return input["command"];
+    if (typeof input["cmd"] === "string") return input["cmd"];
   }
 
   if (tool === "Read" || tool === "Write" || tool === "Edit" || tool === "Glob" || tool === "Grep") {
-    if (typeof input.file_path === "string") return input.file_path;
-    if (typeof input.filePath === "string") return input.filePath;
-    if (typeof input.path === "string") return input.path;
+    if (typeof input["file_path"] === "string") return input["file_path"];
+    if (typeof input["filePath"] === "string") return input["filePath"];
+    if (typeof input["path"] === "string") return input["path"];
   }
 
   return Object.values(input)

@@ -1,4 +1,4 @@
-import type { SessionListResponse, SpawnRequest, SpawnResult, Task } from "@orka/core";
+import type { SessionListResponse, SpawnRequest, SpawnResult } from "@orka/core";
 import { describe, expect, test } from "bun:test";
 import { createSessionStore } from "./sessionStore";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
@@ -6,30 +6,14 @@ import type { RpcClient } from "../lib/rpcClient";
 
 class MockRpcClient {
   sessions: SessionListResponse[] = [];
-  tasks = new Map<string, Task>();
   spawnResult: SpawnResult | null = null;
   spawnParams: SpawnRequest | null = null;
 
   listSessions = async () => this.sessions;
-  getSession = async (id: string) => this.sessions.find((session) => session.id === id) ?? null;
 
   spawn = async (req: SpawnRequest) => {
     if (!this.spawnResult) throw new Error("Missing spawn result");
     this.spawnParams = req;
-    this.sessions = [
-      makeSession({
-        id: this.spawnResult.id,
-        status: this.spawnResult.status,
-        title: this.spawnResult.title,
-        backend: req.backend,
-        model: req.model ?? null,
-        prompt: req.prompt,
-        projectPath: req.projectPath,
-        autoMerge: req.autoMerge ?? false,
-        tags: req.tags ?? [],
-      }),
-      ...this.sessions,
-    ];
     return this.spawnResult;
   };
 
@@ -55,7 +39,6 @@ function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListR
     startedAt: null,
     finishedAt: null,
     exitCode: null,
-    allowedActions: ["cancel"],
     kept: false,
     autoMerge: false,
     title: "Dashboard task",
@@ -78,18 +61,6 @@ function makeSpawnResult(overrides: Partial<SpawnResult> = {}): SpawnResult {
   };
 }
 
-function makeTask(overrides: Partial<Task> = {}): Task {
-  return {
-    id: "task-1",
-    title: "Dashboard task",
-    prompt: "Build the dashboard session store",
-    backend: "codex",
-    model: "gpt-5",
-    createdAt: "2026-03-11T09:59:00.000Z",
-    ...overrides,
-  };
-}
-
 describe("sessionStore", () => {
   test("fetchSessions populates store", async () => {
     const store = createSessionStore();
@@ -102,9 +73,8 @@ describe("sessionStore", () => {
       {
         id: "sess-1",
         status: "queued",
-        allowedActions: ["cancel"],
         backend: "codex",
-        title: "First session",
+            title: "First session",
         model: "gpt-5",
         createdAt: "2026-03-11T10:00:00.000Z",
         startedAt: null,
@@ -140,7 +110,6 @@ describe("sessionStore", () => {
         {
           id: session.id,
           status: session.status,
-          allowedActions: session.allowedActions,
           backend: session.backend,
           title: "First session",
           model: "gpt-5",
@@ -174,7 +143,6 @@ describe("sessionStore", () => {
         {
           id: session.id,
           status: session.status,
-          allowedActions: session.allowedActions,
           backend: session.backend,
           title: "First session",
           model: "gpt-5",
@@ -216,7 +184,7 @@ describe("sessionStore", () => {
       title: "Ship dashboard store",
       projectPath: "/tmp/project",
       backend: "codex",
-      model: "gpt-5",
+        model: "gpt-5",
       autoMerge: true,
       tags: ["dashboard", "polish"],
       systemPrompt: "Keep the response concise and implementation-focused.",
@@ -229,15 +197,14 @@ describe("sessionStore", () => {
 
     const sessions = store.getState().sessions;
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].id).toBe("sess-2");
-    expect(sessions[0].status).toBe("queued");
-    expect(sessions[0].allowedActions).toEqual(["cancel"]);
-    expect(sessions[0].backend).toBe("codex");
-    expect(sessions[0].title).toBe("Ship dashboard store");
-    expect(sessions[0].model).toBe("gpt-5");
-    expect(sessions[0].projectPath).toBe("/tmp/project");
-    expect(sessions[0].autoMerge).toBe(true);
-    expect(sessions[0].nodeId).toBeNull();
+    expect(sessions[0]!.id).toBe("sess-2");
+    expect(sessions[0]!.status).toBe("queued");
+    expect(sessions[0]!.backend).toBe("codex");
+    expect(sessions[0]!.title).toBe("Ship dashboard store");
+    expect(sessions[0]!.model).toBe("gpt-5");
+    expect(sessions[0]!.projectPath).toBe("/tmp/project");
+    expect(sessions[0]!.autoMerge).toBe(true);
+    expect(sessions[0]!.nodeId).toBeNull();
     expect(store.getState().selectedId).toBe("sess-2");
   });
 });

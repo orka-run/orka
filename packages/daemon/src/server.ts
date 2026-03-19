@@ -17,7 +17,6 @@ import { trace } from "@opentelemetry/api";
 import { ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
 import { NoiseServerTransport } from "@orka/core/transport/noise-transport";
 import daemonPackageJson from "../package.json";
-import type { OrkaConfig } from "./config";
 import type { DaemonContext } from "./daemon-context";
 import { GracefulShutdown } from "./graceful-shutdown";
 import { handleRpcRequest } from "./rpc-handler";

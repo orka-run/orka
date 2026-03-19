@@ -181,7 +181,7 @@ export type TransportMessage = z.infer<typeof TransportMessageSchema>;
 // Negotiation logic
 // ---------------------------------------------------------------------------
 
-export interface ServerCapabilities {
+export interface TransportServerCapabilities {
   nodeId: string;
   keyId: string;
   supportedSuites: string[];
@@ -203,7 +203,7 @@ export interface ServerCapabilities {
  */
 export function negotiateTransport(
   clientHello: ClientHello,
-  serverCapabilities: ServerCapabilities,
+  serverCapabilities: TransportServerCapabilities,
 ): ServerHello | TransportError {
   // 1. Version check
   if (clientHello.v !== 1) {

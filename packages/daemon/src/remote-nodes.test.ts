@@ -6,7 +6,7 @@ import { createRemoteNodeManager, type TransportFactory } from "./remote-nodes";
 
 const mockConnect = mock(() => {});
 const mockDisconnect = mock(() => {});
-const mockRequest = mock(() => Promise.resolve("result"));
+const mockRequest = mock(async (): Promise<unknown> => "result");
 const mockSubscribe = mock(() => () => {});
 let capturedStateListener: ((snapshot: { state: string; reconnectAttempts: number }) => void) | null = null;
 const mockOnStateChange = mock((listener: any) => {
@@ -105,7 +105,7 @@ describe("RemoteNodeManager", () => {
     await mgr.connect(node);
 
     expect(transportConstructions).toHaveLength(1);
-    expect(transportConstructions[0].url).toContain("?token=secret123");
+    expect(transportConstructions[0]!.url).toContain("?token=secret123");
 
     mgr.shutdown();
   });
@@ -166,7 +166,7 @@ describe("RemoteNodeManager", () => {
     const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
-    mockRequest.mockResolvedValueOnce({ sessions: [] });
+    mockRequest.mockImplementationOnce(async () => ({ sessions: [] }));
     const result = await mgr.request("node-test", "listSessions", { status: "running" });
 
     expect(result).toEqual({ sessions: [] });
@@ -253,7 +253,9 @@ describe("RemoteNodeManager", () => {
     await mgr.connect(makeNode());
 
     // 3 forwarded channels + the explicit subscribePush calls if any
-    const subscribedChannels = mockSubscribe.mock.calls.map((c) => c[0]);
+    const subscribedChannels = (
+      mockSubscribe.mock.calls as unknown as Array<[string, (...args: any[]) => void]>
+    ).map((c) => c[0]);
     expect(subscribedChannels).toContain("orchestration.event");
     expect(subscribedChannels).toContain("orchestration.sessionUpdated");
     expect(subscribedChannels).toContain("orchestration.sessionDeleted");
@@ -266,7 +268,9 @@ describe("RemoteNodeManager", () => {
     await mgr.connect(makeNode());
 
     // Find the handler registered for orchestration.event
-    const eventCall = mockSubscribe.mock.calls.find(
+    const eventCall = (
+      mockSubscribe.mock.calls as unknown as Array<[string, (data: unknown) => void]>
+    ).find(
       (c) => c[0] === "orchestration.event",
     );
     expect(eventCall).toBeTruthy();
@@ -288,7 +292,9 @@ describe("RemoteNodeManager", () => {
     const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
-    const eventCall = mockSubscribe.mock.calls.find(
+    const eventCall = (
+      mockSubscribe.mock.calls as unknown as Array<[string, (data: unknown) => void]>
+    ).find(
       (c) => c[0] === "orchestration.event",
     );
     const handler = eventCall![1];

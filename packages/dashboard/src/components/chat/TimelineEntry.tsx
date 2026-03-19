@@ -32,8 +32,8 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
     return (
       <ToolCallGroup
         entry={entry}
-        isExpanded={isExpanded}
-        onToggleExpand={onToggleExpand}
+        {...(isExpanded !== undefined ? { isExpanded } : {})}
+        {...(onToggleExpand ? { onToggleExpand } : {})}
         {...(projectPath ? { projectPath } : {})}
       />
     );
@@ -47,7 +47,7 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
   if (entry.type === "error") {
     return <ErrorEntry entry={entry} />;
   }
-  return <SystemMessage entry={entry} />;
+  return entry.type === "approval" ? null : <SystemMessage entry={entry} />;
 });
 
 export const ThinkingIndicator = memo(function ThinkingIndicator({ state }: { state: ThinkingState }) {

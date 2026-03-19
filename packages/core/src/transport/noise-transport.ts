@@ -29,7 +29,6 @@ import {
   type ClientHello,
   ClientHelloSchema,
   type DataFrame,
-  DataFrameSchema,
   type Noise1,
   Noise1Schema,
   type Noise2,
@@ -111,8 +110,6 @@ export class NoiseClientTransport {
   private initiator: NoiseInitiator | null = null;
 
   private clientHello: ClientHello | null = null;
-  private serverHello: ServerHello | null = null;
-
   constructor(private readonly opts: NoiseClientTransportOpts) {}
 
   // -- Public getters -------------------------------------------------------
@@ -167,7 +164,7 @@ export class NoiseClientTransport {
 
     // Try to detect the message type from the `t` field.
     const parsed = msg as Record<string, unknown>;
-    const t = parsed?.t;
+    const t = parsed?.["t"];
 
     switch (t) {
       case "server_hello":
@@ -258,7 +255,6 @@ export class NoiseClientTransport {
     }
 
     const serverHello = ServerHelloSchema.parse(raw);
-    this.serverHello = serverHello;
     this._state = "HELLO_CONFIRMED";
 
     // Compute prologue
@@ -393,7 +389,7 @@ export class NoiseServerTransport {
     }
 
     const parsed = msg as Record<string, unknown>;
-    const t = parsed?.t;
+    const t = parsed?.["t"];
 
     switch (t) {
       case "client_hello":

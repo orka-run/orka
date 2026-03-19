@@ -87,7 +87,6 @@ describe("Daemon Session Lifecycle", () => {
     const result = await client.spawn({
       prompt: "echo 'hello orka'",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
       title: "E2E test session",
       tags: ["e2e", "test"],
@@ -102,7 +101,6 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.getSession(result.id);
     expect(session).not.toBeNull();
     expect(session!.backend).toBe("claude-code");
-    expect(session!.mode).toBe("background");
     expect(session!.projectPath).toBe(testRepo);
     expect(session!.startedAt).toBeTruthy();
     expect(session!.tags).toEqual(["e2e", "test"]);
@@ -114,7 +112,6 @@ describe("Daemon Session Lifecycle", () => {
     const spawned = await client.spawn({
       prompt: "echo 'getSession-test'",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
       tags: ["e2e"],
     });
@@ -125,7 +122,6 @@ describe("Daemon Session Lifecycle", () => {
     expect(session).not.toBeNull();
     expect(session!.id).toBe(spawned.id);
     expect(session!.backend).toBe("claude-code");
-    expect(session!.mode).toBe("background");
     expect(session!.status).toBe("running");
     expect(session!.projectPath).toBe(testRepo);
   });
@@ -139,7 +135,6 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.spawn({
       prompt: "sleep 300",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(session.id);
@@ -161,7 +156,6 @@ describe("Daemon Session Lifecycle", () => {
     const spawned = await client.spawn({
       prompt: "echo 'tags-test'",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
       tags: ["e2e", "test"],
     });
@@ -177,7 +171,6 @@ describe("Daemon Session Lifecycle", () => {
     const spawned = await client.spawn({
       prompt: "echo 'tag-filter-test'",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
       tags: ["e2e-filter"],
     });
@@ -195,7 +188,6 @@ describe("Daemon Session Lifecycle", () => {
     const spawned = await client.spawn({
       prompt: "echo 'kept-test'",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(spawned.id);
@@ -217,7 +209,6 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.spawn({
       prompt: "sleep 600",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(session.id);
@@ -241,7 +232,6 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.spawn({
       prompt: "echo 'log-test-marker-42' && exit 0",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(session.id);
@@ -256,7 +246,6 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.spawn({
       prompt: "echo 'capture-marker'; sleep 300",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(session.id);
@@ -276,7 +265,6 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.spawn({
       prompt: "read -p '> ' line && echo \"GOT: $line\" && exit 0",
       backend: "claude-code",
-      mode: "background",
       projectPath: testRepo,
     });
     sessionIds.push(session.id);
@@ -302,7 +290,7 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.spawn({
       prompt: "sleep 300",
       backend: "claude-code",
-      mode: "interactive",
+      noWorktree: true,
       projectPath: pruneRepo,
     });
     sessionIds.push(session.id);
@@ -353,7 +341,7 @@ describe("Daemon Session Lifecycle", () => {
     const session = await client.spawn({
       prompt: "echo 'delete-me' && exit 0",
       backend: "claude-code",
-      mode: "interactive",
+      noWorktree: true,
       projectPath: testRepo,
     });
     sessionIds.push(session.id);

@@ -66,15 +66,15 @@ describe("Noise NK Transport", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
 
-    expect(body.status).toBe("ok");
-    expect(typeof body.publicKey).toBe("string");
-    expect((body.publicKey as string).length).toBeGreaterThan(0);
-    expect(typeof body.keyId).toBe("string");
-    expect((body.keyId as string).startsWith("sha256:")).toBe(true);
-    expect(body.nodeId).toBe("noise-test-node");
+    expect(body["status"]).toBe("ok");
+    expect(typeof body["publicKey"]).toBe("string");
+    expect((body["publicKey"] as string).length).toBeGreaterThan(0);
+    expect(typeof body["keyId"]).toBe("string");
+    expect((body["keyId"] as string).startsWith("sha256:")).toBe(true);
+    expect(body["nodeId"]).toBe("noise-test-node");
 
-    const capabilities = body.capabilities as Record<string, unknown>;
-    expect(capabilities.encryption).toBe("noise-nk");
+    const capabilities = body["capabilities"] as Record<string, unknown>;
+    expect(capabilities["encryption"]).toBe("noise-nk");
   });
 
   // ---- 2. Handshake completes ----
@@ -104,8 +104,8 @@ describe("Noise NK Transport", () => {
 
     const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
 
-    expect(resp.error).toBeUndefined();
-    expect(Array.isArray(resp.result)).toBe(true);
+    expect(resp["error"]).toBeUndefined();
+    expect(Array.isArray(resp["result"])).toBe(true);
 
     ws.close();
   });
@@ -121,8 +121,8 @@ describe("Noise NK Transport", () => {
 
     for (let i = 0; i < 5; i++) {
       const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
-      expect(resp.error).toBeUndefined();
-      expect(Array.isArray(resp.result)).toBe(true);
+      expect(resp["error"]).toBeUndefined();
+      expect(Array.isArray(resp["result"])).toBe(true);
     }
 
     ws.close();
@@ -146,20 +146,20 @@ describe("Noise NK Transport", () => {
       title: "Noise E2E spawn test",
     });
 
-    expect(spawnResp.error).toBeUndefined();
-    const session = spawnResp.result as Record<string, unknown>;
-    expect(typeof session.id).toBe("string");
-    expect((session.id as string).startsWith("sess-")).toBe(true);
+    expect(spawnResp["error"]).toBeUndefined();
+    const session = spawnResp["result"] as Record<string, unknown>;
+    expect(typeof session["id"]).toBe("string");
+    expect((session["id"] as string).startsWith("sess-")).toBe(true);
 
     // Query session back
     const getResp = await encryptedRpc(transport, ws, "getSession", {
-      id: session.id,
+      id: session["id"],
     });
 
-    expect(getResp.error).toBeUndefined();
-    const fetched = getResp.result as Record<string, unknown>;
-    expect(fetched.id).toBe(session.id);
-    expect(fetched.backend).toBe("claude-code");
+    expect(getResp["error"]).toBeUndefined();
+    const fetched = getResp["result"] as Record<string, unknown>;
+    expect(fetched["id"]).toBe(session["id"]);
+    expect(fetched["backend"]).toBe("claude-code");
 
     ws.close();
   }, 15_000);
@@ -173,8 +173,8 @@ describe("Noise NK Transport", () => {
     // Send an unencrypted JSON-RPC — no client_hello, just a standard request
     const resp = await plainRpc(ws, "listSessions", { filters: {} });
 
-    expect(resp.error).toBeUndefined();
-    expect(Array.isArray(resp.result)).toBe(true);
+    expect(resp["error"]).toBeUndefined();
+    expect(Array.isArray(resp["result"])).toBe(true);
 
     ws.close();
   });
@@ -191,15 +191,15 @@ describe("Noise NK Transport", () => {
     const noiseResp = await encryptedRpc(transport, noiseWs, "listSessions", {
       filters: {},
     });
-    expect(noiseResp.error).toBeUndefined();
-    expect(Array.isArray(noiseResp.result)).toBe(true);
+    expect(noiseResp["error"]).toBeUndefined();
+    expect(Array.isArray(noiseResp["result"])).toBe(true);
 
     // 2. Plaintext connection
     const plainWs = new WebSocket(daemon.wsUrl);
     await waitForOpen(plainWs);
     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
-    expect(plainResp.error).toBeUndefined();
-    expect(Array.isArray(plainResp.result)).toBe(true);
+    expect(plainResp["error"]).toBeUndefined();
+    expect(Array.isArray(plainResp["result"])).toBe(true);
 
     noiseWs.close();
     plainWs.close();
@@ -237,7 +237,7 @@ describe("Noise NK Transport", () => {
           // During handshake, process transport messages
           if (!transport.isSecure) {
             // Skip non-transport messages (e.g. plaintext welcome push)
-            if (!msg.t) return;
+            if (!msg["t"]) return;
 
             const responses = transport.processMessage(msg);
             for (const resp of responses) {
@@ -247,7 +247,7 @@ describe("Noise NK Transport", () => {
           }
 
           // After SECURE: look for encrypted data frames
-          if (msg.t === "data" && typeof msg.ct === "string") {
+          if (msg["t"] === "data" && typeof msg["ct"] === "string") {
             let payload: import("@orka/core").TransportPayload;
             try {
               payload = transport.decryptFrame(msg);
@@ -259,12 +259,12 @@ describe("Noise NK Transport", () => {
             if (payload.kind === "push") {
               const push = payload.push as Record<string, unknown>;
               if (
-                push.type === "push" &&
-                push.channel === "server.welcome"
+                push["type"] === "push" &&
+                push["channel"] === "server.welcome"
               ) {
                 clearTimeout(timer);
                 ws.removeEventListener("message", handler);
-                resolve(push.data as Record<string, unknown>);
+                resolve(push["data"] as Record<string, unknown>);
               }
             }
           }
@@ -274,10 +274,10 @@ describe("Noise NK Transport", () => {
       },
     );
 
-    expect(typeof welcomeData.serverVersion).toBe("string");
-    expect(typeof welcomeData.sessionCount).toBe("number");
-    expect(typeof welcomeData.protocolVersion).toBe("number");
-    expect(welcomeData.capabilities).toBeDefined();
+    expect(typeof welcomeData["serverVersion"]).toBe("string");
+    expect(typeof welcomeData["sessionCount"]).toBe("number");
+    expect(typeof welcomeData["protocolVersion"]).toBe("number");
+    expect(welcomeData["capabilities"]).toBeDefined();
 
     ws.close();
   });

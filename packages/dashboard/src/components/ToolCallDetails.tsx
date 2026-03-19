@@ -65,7 +65,7 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
 
   return (
     <div className="space-y-2">
-      {hasArgs ? <ArgsDetail args={args as Record<string, unknown>} projectPath={projectPath} /> : null}
+      {hasArgs ? <ArgsDetail args={args as Record<string, unknown>} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
       {parsedDetails.map((detail, index) => (
         <details
           key={`${detail.kind}-${detail.label}-${String(index)}`}
@@ -82,7 +82,7 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
             {detail.kind === "read" ? <ReadDetail detail={detail} resolved={resolved} /> : null}
             {detail.kind === "edit" ? <EditDetail detail={detail} resolved={resolved} /> : null}
             {detail.kind === "command" ? <CommandDetail detail={detail} /> : null}
-            {detail.kind === "search" ? <SearchDetail detail={detail} projectPath={projectPath} /> : null}
+            {detail.kind === "search" ? <SearchDetail detail={detail} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
             {detail.kind === "default" ? <DefaultDetail detail={detail} /> : null}
           </div>
         </details>
@@ -94,7 +94,7 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
 function ReadDetail({ detail, resolved }: { detail: Extract<ParsedDetail, { kind: "read" }>; resolved?: ResolvedPath | null }) {
   return (
     <div>
-      {detail.path ? <PathHeader path={detail.path} resolved={resolved} /> : null}
+      {detail.path ? <PathHeader path={detail.path} {...(resolved !== undefined ? { resolved } : {})} /> : null}
       {detail.content.trim() ? (
         <CodeBlock content={detail.content} />
       ) : (
@@ -106,13 +106,12 @@ function ReadDetail({ detail, resolved }: { detail: Extract<ParsedDetail, { kind
 
 function EditDetail({ detail, resolved }: { detail: Extract<ParsedDetail, { kind: "edit" }>; resolved?: ResolvedPath | null }) {
   const content = detail.content.trim();
-  const isDiff = looksLikeDiff(content);
 
   return (
     <div>
-      {detail.path ? <PathHeader path={detail.path} resolved={resolved} /> : null}
+      {detail.path ? <PathHeader path={detail.path} {...(resolved !== undefined ? { resolved } : {})} /> : null}
       {content ? (
-        isDiff ? <DiffBlock content={detail.content} /> : <CodeBlock content={detail.content} />
+        looksLikeDiff(content) ? <DiffBlock content={detail.content} /> : <CodeBlock content={detail.content} />
       ) : (
         <EmptyState message="No edited content captured." />
       )}
@@ -150,7 +149,7 @@ function SearchDetail({ detail, projectPath }: { detail: Extract<ParsedDetail, {
       {detail.results.length > 0 ? (
         <div className="divide-y divide-border">
           {detail.results.map((result, index) => (
-            <SearchResultRow key={`${result}-${String(index)}`} result={result} projectPath={projectPath} />
+            <SearchResultRow key={`${result}-${String(index)}`} result={result} {...(projectPath !== undefined ? { projectPath } : {})} />
           ))}
         </div>
       ) : (
@@ -181,7 +180,7 @@ function ArgsDetail({ args, projectPath }: { args: Record<string, unknown>; proj
       </div>
       <div className="divide-y divide-border">
         {entries.map(([key, value]) => (
-          <ArgEntry key={key} name={key} value={value} projectPath={projectPath} />
+          <ArgEntry key={key} name={key} value={value} {...(projectPath !== undefined ? { projectPath } : {})} />
         ))}
       </div>
     </div>
@@ -194,8 +193,6 @@ const PATH_ARG_KEYS = new Set(["file_path", "path"]);
 function ArgEntry({ name, value, projectPath }: { name: string; value: unknown; projectPath?: string | null }) {
   const str = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   const isLong = str.length > 120 || str.includes("\n");
-  const isDiff = typeof value === "string" && (name === "old_string" || name === "new_string");
-
   // Resolve file path args to relative display
   const isPathArg = typeof value === "string" && PATH_ARG_KEYS.has(name) && value.startsWith("/");
   const resolved = isPathArg ? resolvePath(value, projectPath ?? null) : null;

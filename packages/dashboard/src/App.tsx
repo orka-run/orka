@@ -55,6 +55,12 @@ type PendingSelectionSpan = {
   startedAt: number;
 };
 
+type ErrorThrottleEntry = {
+  count: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+};
+
 function now(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
@@ -77,6 +83,20 @@ function parseHashSessionId(): string | null {
 function getEffectiveUrl(endpointUrl: string | null, authToken: string | null): string {
   if (!endpointUrl) return DEFAULT_DAEMON_URL;
   return authToken ? appendAuthToken(endpointUrl, authToken) : endpointUrl;
+}
+
+function shouldIgnoreClientError(report: ClientErrorReport): boolean {
+  const haystack = `${report.error}\n${report.stack ?? ""}\n${report.url}`.toLowerCase();
+  return haystack.includes("@vite/client")
+    || haystack.includes("/@vite/client")
+    || (haystack.includes("vite") && haystack.includes("websocket"))
+    || (haystack.includes("hmr") && haystack.includes("websocket"))
+    || haystack.includes("failed to execute 'send' on 'websocket'");
+}
+
+function getClientErrorKey(report: ClientErrorReport): string {
+  const stackLine = report.stack?.split("\n", 1)[0] ?? "";
+  return `${report.error}\n${stackLine}\n${report.url}`;
 }
 
 interface AppShellProps {
@@ -132,7 +152,6 @@ function AppShell({ transport, client }: AppShellProps) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [mobileActiveTab, setMobileActiveTab] = useState<MobileSessionTab>("chat");
   const [isDevOverlayOpen, setIsDevOverlayOpen] = useState(false);
-  const [isMobileStopping, setIsMobileStopping] = useState(false);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
@@ -339,9 +358,9 @@ function AppShell({ transport, client }: AppShellProps) {
         sendApprovalNotification({
           requestId: typedData.requestId,
           requestType: typedData.requestType,
-          detail: typedData.detail,
-          sessionTitle: session?.title,
           sessionId: typedData.sessionId,
+          ...(typedData.detail ? { detail: typedData.detail } : {}),
+          ...(session?.title ? { sessionTitle: session.title } : {}),
         });
       } else if (typedData.type === "request.resolved") {
         decrementPending();
@@ -431,7 +450,7 @@ function AppShell({ transport, client }: AppShellProps) {
   const handleCreateWorkspace = useCallback(async (name: string) => {
     const ws = await createWorkspace(client, {
       name,
-      paths: defaultProjectPath ? [{ path: defaultProjectPath }] : undefined,
+      ...(defaultProjectPath ? { paths: [{ path: defaultProjectPath }] } : {}),
     });
     setActiveWorkspace(ws.id);
   }, [client, createWorkspace, setActiveWorkspace, defaultProjectPath]);
@@ -468,7 +487,9 @@ function AppShell({ transport, client }: AppShellProps) {
     onSelectWorkspace: setActiveWorkspace,
     onCreateWorkspace: handleCreateWorkspace,
     onPairNode: () => setIsPairNodeOpen(true),
-    onManageNodes: mode === "local" && pairedNodes.length > 0 ? () => setIsNodeManagementOpen(true) : undefined,
+    ...(mode === "local" && pairedNodes.length > 0
+      ? { onManageNodes: () => setIsNodeManagementOpen(true) }
+      : {}),
   };
 
   // Mobile main content: show SessionView, DraftChatView, WorkspaceDetailView, or empty state
@@ -545,16 +566,6 @@ function AppShell({ transport, client }: AppShellProps) {
   );
 
   const mobileHeaderTitle = selectedSession?.title ?? null;
-  const isSelectedSessionStoppable = selectedSession != null && ["running", "queued", "preparing", "rate_limited"].includes(selectedSession.status);
-  const handleMobileStop = useCallback(async () => {
-    if (!selectedId || isMobileStopping) return;
-    setIsMobileStopping(true);
-    try {
-      await transport.request("stop", { sessionId: selectedId });
-    } finally {
-      setIsMobileStopping(false);
-    }
-  }, [selectedId, isMobileStopping, transport]);
 
   // Show onboarding wizard as full-screen replacement
   if (showOnboarding) {
@@ -704,18 +715,35 @@ export function App() {
   const transport = transportRef.current.transport;
   const client = useMemo(() => new RpcClient(transport), [transport]);
 
-  const reportedErrors = useRef(new Map<string, number>());
+  const reportedErrors = useRef(new Map<string, ErrorThrottleEntry>());
   const reportError = async (report: ClientErrorReport): Promise<void> => {
-    if (report.stack?.includes("@vite/client")) return;
-    const key = report.error ?? "";
-    const now = Date.now();
-    // Evict entries older than 60s
-    for (const [k, ts] of reportedErrors.current) {
-      if (now - ts > 60_000) reportedErrors.current.delete(k);
+    if (shouldIgnoreClientError(report)) return;
+
+    const key = getClientErrorKey(report);
+    const currentTime = Date.now();
+
+    for (const [entryKey, entry] of reportedErrors.current) {
+      if (currentTime - entry.lastSeenAt > 60_000) {
+        reportedErrors.current.delete(entryKey);
+      }
     }
-    // Deduplicate: same error at most once per 60s
-    if (reportedErrors.current.has(key)) return;
-    reportedErrors.current.set(key, now);
+
+    const existing = reportedErrors.current.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.lastSeenAt = currentTime;
+      if (currentTime - existing.firstSeenAt < 60_000) {
+        return;
+      }
+      existing.firstSeenAt = currentTime;
+    } else {
+      reportedErrors.current.set(key, {
+        count: 1,
+        firstSeenAt: currentTime,
+        lastSeenAt: currentTime,
+      });
+    }
+
     await client.reportClientError(report).catch(() => undefined);
   };
 

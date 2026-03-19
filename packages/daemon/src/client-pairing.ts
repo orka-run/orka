@@ -126,7 +126,7 @@ async function doPerformClientPairing(
       nodeId: bootstrapResult.nodeId,
       nodeName: bootstrapResult.nodeName,
       relayUrl: params.relayUrl,
-      relayToken: params.relayToken,
+      ...(params.relayToken ? { relayToken: params.relayToken } : {}),
       nodePaths: bootstrapResult.nodePaths,
       pairedAt: new Date().toISOString(),
       noiseStaticPubkey: toBase64url(bootstrapResult.noiseStaticPubkey),

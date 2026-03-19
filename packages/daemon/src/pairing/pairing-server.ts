@@ -188,9 +188,9 @@ export class PairingServer {
       // Could be wrong version or completely invalid
       // Check if it has the right type field to distinguish bad_version vs protocol_error
       const raw = msg as Record<string, unknown> | null;
-      if (raw && typeof raw === "object" && raw.t === "pair_client_hello") {
+      if (raw && typeof raw === "object" && raw["t"] === "pair_client_hello") {
         // It has the right type, but validation failed - check version
-        if (raw.v !== 1) {
+        if (raw["v"] !== 1) {
           return this.errorAndClose("bad_version");
         }
       }
@@ -248,7 +248,7 @@ export class PairingServer {
 
     // Check it's actually pair_init type
     const raw = msg as Record<string, unknown>;
-    if (raw.t !== "pair_init") {
+    if (raw["t"] !== "pair_init") {
       return this.protocolError();
     }
 
@@ -293,7 +293,7 @@ export class PairingServer {
     }
 
     const raw = msg as Record<string, unknown>;
-    if (raw.t !== "pair_confirm1") {
+    if (raw["t"] !== "pair_confirm1") {
       return this.protocolError();
     }
 
@@ -366,7 +366,7 @@ export class PairingServer {
     }
 
     const raw = msg as Record<string, unknown>;
-    if (raw.t !== "pair_done") {
+    if (raw["t"] !== "pair_done") {
       return this.protocolError();
     }
 

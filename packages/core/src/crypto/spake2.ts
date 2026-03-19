@@ -97,7 +97,7 @@ function derivePasswordScalar(password: Uint8Array): bigint {
   // Convert to bigint (little-endian) and reduce modulo group order
   let w = BigInt(0);
   for (let i = okm.length - 1; i >= 0; i--) {
-    w = (w << BigInt(8)) | BigInt(okm[i]);
+    w = (w << BigInt(8)) | BigInt(okm[i]!);
   }
   // Reduce modulo group order, ensuring w is non-zero
   w = w % GROUP_ORDER;
@@ -115,7 +115,7 @@ function randomScalar(): bigint {
   const buf = randomBytes(64);
   let s = BigInt(0);
   for (let i = buf.length - 1; i >= 0; i--) {
-    s = (s << BigInt(8)) | BigInt(buf[i]);
+    s = (s << BigInt(8)) | BigInt(buf[i]!);
   }
   s = s % (GROUP_ORDER - BigInt(1));
   return s + BigInt(1); // Ensure non-zero
@@ -220,7 +220,7 @@ function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
-    diff |= a[i] ^ b[i];
+    diff |= a[i]! ^ b[i]!;
   }
   return diff === 0;
 }

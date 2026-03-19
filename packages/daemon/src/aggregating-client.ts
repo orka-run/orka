@@ -70,47 +70,20 @@ export function createAggregatingClient(
 
   /** Subscribe to push events from a remote node to keep cache in sync. */
   function subscribeNodePush(nodeId: string): void {
-    function refreshCachedSession(sessionId: string, fallback?: Partial<SessionSummary>): void {
-      void remoteNodes
-        .request<SessionDetailResponse | null>(nodeId, "getSession", { id: sessionId })
-        .then((session) => {
-          if (!session) {
-            sessionCache.removeSession(sessionId);
-            return;
-          }
-          sessionCache.upsertSession(nodeId, detailResponseToSummary(session, nodeId));
-        })
-        .catch(() => {
-          sessionCache.upsertSession(nodeId, {
-            id: sessionId,
-            status: (fallback?.status as SessionSummary["status"]) ?? "running",
-            allowedActions: fallback?.allowedActions ?? [],
-            backend: (fallback?.backend as SessionSummary["backend"]) ?? "",
-            title: fallback?.title ?? "",
-            createdAt: fallback?.createdAt ?? new Date().toISOString(),
-            nodeId,
-          });
-        });
-    }
-
     try {
       const unsub1 = remoteNodes.subscribePush(
         nodeId,
         "orchestration.sessionUpdated",
         (data: unknown) => {
-          const payload = data as {
-            sessionId?: string;
-            status?: SessionSummary["status"];
-            backend?: SessionSummary["backend"];
-            title?: string;
-            createdAt?: string;
-          } | null;
-          if (!payload?.sessionId) return;
-          refreshCachedSession(payload.sessionId, {
-            status: payload.status ?? "running",
-            backend: payload.backend ?? "",
-            title: payload.title ?? "",
-            createdAt: payload.createdAt ?? new Date().toISOString(),
+          const d = data as Record<string, unknown> | null;
+          if (!d?.["sessionId"]) return;
+          sessionCache.upsertSession(nodeId, {
+            id: d["sessionId"] as string,
+            status: (d["status"] as SessionSummary["status"]) ?? "running",
+            backend: (d["backend"] as SessionSummary["backend"]) ?? "",
+            title: (d["title"] as string) ?? "",
+            createdAt: (d["createdAt"] as string) ?? new Date().toISOString(),
+            nodeId,
           });
         },
       );
@@ -118,8 +91,8 @@ export function createAggregatingClient(
         nodeId,
         "orchestration.sessionDeleted",
         (data: unknown) => {
-          const payload = data as { sessionId?: string } | null;
-          if (payload?.sessionId) sessionCache.removeSession(payload.sessionId);
+          const d = data as Record<string, unknown> | null;
+          if (d?.["sessionId"]) sessionCache.removeSession(d["sessionId"] as string);
         },
       );
       pushUnsubs.push(unsub1, unsub2);
@@ -165,25 +138,25 @@ export function createAggregatingClient(
     const svc = localClient as any;
     switch (method) {
       case "getSession":
-        return svc.getSession(params.id);
+        return svc.getSession(params["id"]);
       case "getSessionTimeline":
         return svc.getSessionTimeline(params as any);
       case "getChatMessages":
-        return svc.getChatMessages(params.sessionId);
+        return svc.getChatMessages(params["sessionId"]);
       case "getResult":
-        return svc.getResult(params.sessionId);
+        return svc.getResult(params["sessionId"]);
       case "captureOutput":
-        return svc.captureOutput(params.sessionId);
+        return svc.captureOutput(params["sessionId"]);
       case "getLogContent":
-        return svc.getLogContent(params.sessionId);
+        return svc.getLogContent(params["sessionId"]);
       case "getDiff":
-        return svc.getDiff(params.sessionId);
+        return svc.getDiff(params["sessionId"]);
       case "getTags":
-        return svc.getTags(params.sessionId);
+        return svc.getTags(params["sessionId"]);
       case "stop":
-        return svc.stop(params.sessionId);
+        return svc.stop(params["sessionId"]);
       case "sendTurn":
-        return svc.sendTurn(params.sessionId, params.text);
+        return svc.sendTurn(params["sessionId"], params["text"]);
       case "getCheckpoints":
         return svc.getCheckpoints(params["sessionId"]);
       case "getTurnDiff":
@@ -191,37 +164,37 @@ export function createAggregatingClient(
       case "revertToCheckpoint":
         return svc.revertToCheckpoint(params["sessionId"], params["turnSeq"]);
       case "setKept":
-        return svc.setKept(params.sessionId, params.kept);
+        return svc.setKept(params["sessionId"], params["kept"]);
       case "merge":
-        return svc.merge(params.sessionId, params.cleanup);
+        return svc.merge(params["sessionId"], params["cleanup"]);
       case "isAlive":
-        return svc.isAlive(params.sessionId);
+        return svc.isAlive(params["sessionId"]);
       case "archiveSession":
-        return svc.archiveSession(params.sessionId);
+        return svc.archiveSession(params["sessionId"]);
       case "unarchiveSession":
-        return svc.unarchiveSession(params.sessionId);
+        return svc.unarchiveSession(params["sessionId"]);
       case "backfillSession":
-        return svc.backfillSession(params.sessionId);
+        return svc.backfillSession(params["sessionId"]);
       case "deleteSessions":
-        return svc.deleteSessions(params.ids);
+        return svc.deleteSessions(params["ids"]);
       case "getChildSessions":
-        return svc.getChildSessions(params.sessionId);
+        return svc.getChildSessions(params["sessionId"]);
       case "getTask":
-        return svc.getTask(params.id);
+        return svc.getTask(params["id"]);
       case "getPendingApprovals":
-        return svc.getPendingApprovals(params.sessionId);
+        return svc.getPendingApprovals(params["sessionId"]);
       case "resolveApproval":
-        return svc.resolveApproval(params.requestId, params.decision);
+        return svc.resolveApproval(params["requestId"], params["decision"]);
       case "terminalOpen":
-        return svc.terminalOpen(params.sessionId, params.opts);
+        return svc.terminalOpen(params["sessionId"], params["opts"]);
       case "terminalWrite":
-        return svc.terminalWrite(params.termId, params.data);
+        return svc.terminalWrite(params["termId"], params["data"]);
       case "terminalResize":
-        return svc.terminalResize(params.termId, params.cols, params.rows);
+        return svc.terminalResize(params["termId"], params["cols"], params["rows"]);
       case "terminalClose":
-        return svc.terminalClose(params.termId);
+        return svc.terminalClose(params["termId"]);
       case "terminalList":
-        return svc.terminalList(params.sessionId);
+        return svc.terminalList(params["sessionId"]);
       default:
         return svc[method](params);
     }
@@ -232,19 +205,6 @@ export function createAggregatingClient(
     return {
       id: s.id,
       status: s.status,
-      allowedActions: s.allowedActions,
-      backend: s.backend,
-      title: s.title,
-      createdAt: s.createdAt,
-      nodeId,
-    };
-  }
-
-  function detailResponseToSummary(s: SessionDetailResponse, nodeId: string): SessionSummary {
-    return {
-      id: s.id,
-      status: s.status,
-      allowedActions: s.allowedActions,
       backend: s.backend,
       title: s.title,
       createdAt: s.createdAt,
@@ -257,7 +217,6 @@ export function createAggregatingClient(
     return {
       id: s.id,
       status: s.status,
-      allowedActions: s.allowedActions ?? [],
       backend: s.backend,
       title: s.title,
       model: null,
@@ -390,7 +349,6 @@ export function createAggregatingClient(
         sessionCache.upsertSession(req.nodeId, {
           id: result.id,
           status: result.status,
-          allowedActions: [],
           backend: req.backend,
           title: result.title,
           createdAt: new Date().toISOString(),
@@ -407,7 +365,7 @@ export function createAggregatingClient(
     },
 
     async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
-      return routeBySession<TimelineResponse>(params.sessionId, "getSessionTimeline", params);
+      return routeBySession<TimelineResponse>(params.sessionId, "getSessionTimeline", { ...params });
     },
 
     async getChatMessages(sessionId: string): Promise<ChatEntry[]> {

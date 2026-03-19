@@ -73,7 +73,7 @@ describe("OrchestrationEngine", () => {
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
         eventId: expect.any(String),
-        type: "content.delta",
+        type: "content.delta" as const,
         sessionId: "session-1",
         turnId: "turn-1",
         streamKind: "assistant_text",
@@ -190,7 +190,7 @@ describe("OrchestrationEngine", () => {
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
         eventId: expect.any(String),
-        type: "session.started",
+        type: "session.started" as const,
         sessionId: "session-1",
         timestamp: "2026-03-11T00:00:00.000Z",
       }),
@@ -279,7 +279,7 @@ describe("OrchestrationEngine", () => {
     expect(failedEngine.getSessionEvents("session-failed")).toEqual([
       versioned({
         eventId: expect.any(String),
-        type: "session.failed",
+        type: "session.failed" as const,
         sessionId: "session-failed",
         error: "provider crashed",
         timestamp: "2026-03-11T00:02:00.000Z",
@@ -317,7 +317,7 @@ describe("OrchestrationEngine", () => {
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
         eventId: expect.any(String),
-        type: "session.cancelled",
+        type: "session.cancelled" as const,
         sessionId: "session-1",
         reason: "stopped",
         timestamp: "2026-03-11T00:02:00.000Z",
@@ -627,7 +627,7 @@ describe("OrchestrationEngine", () => {
     expect(engine.getSessionEvents("session-1")).toEqual([
       versioned({
         eventId: "evt-missing-turn",
-        type: "content.delta",
+        type: "content.delta" as const,
         sessionId: "session-1",
         turnId: "unknown-turn:evt-missing-turn",
         streamKind: "assistant_text",

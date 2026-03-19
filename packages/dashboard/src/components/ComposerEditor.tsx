@@ -10,8 +10,6 @@ import {
   $createTextNode,
   $createLineBreakNode,
   $getRoot,
-  $getSelection,
-  $isRangeSelection,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   COMMAND_PRIORITY_HIGH,
@@ -184,7 +182,7 @@ function EditorInner({
           <ContentEditable
             className={`block w-full bg-transparent py-1.5 px-2 text-sm text-ink outline-none ${className ?? ""}`}
             aria-label="Chat message"
-            aria-placeholder={placeholder}
+            aria-placeholder={placeholder ?? ""}
             placeholder={<span />}
           />
         }
@@ -196,7 +194,7 @@ function EditorInner({
         ErrorBoundary={LexicalErrorBoundary}
       />
       <OnChangePlugin onChange={handleChange} />
-      <KeyCommandsPlugin onSubmit={onSubmit} />
+      <KeyCommandsPlugin {...(onSubmit ? { onSubmit } : {})} />
       <HistoryPlugin />
     </div>
   );
