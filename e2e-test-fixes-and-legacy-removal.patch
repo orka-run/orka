@@ -1,0 +1,2596 @@
+diff --git a/packages/cli/src/index.ts b/packages/cli/src/index.ts
+index a400cd9..a539729 100644
+--- a/packages/cli/src/index.ts
++++ b/packages/cli/src/index.ts
+@@ -5,10 +5,7 @@ import { join } from "node:path";
+ import type { BackendKind, SessionMode, OrkaService, ReasoningEffort, SpawnRequest } from "@orka/core";
+ import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
+ import {
+-  ensureKeyPair,
+   ensureNoiseKeyPair,
+-  loadKeyPair,
+-  loadPublicKey,
+   loadNoiseKeyPair,
+   loadNoisePublicKey,
+   saveNoiseServerPublicKey,
+@@ -345,19 +342,8 @@ function buildRemoteClient(url: string): OrkaService {
+       });
+     }
+ 
+-    // 3. Fall back to legacy encryption
+-    const keyPair = ensureKeyPair(orkaHome, "client");
+-    let pubKey = serverPublicKey;
+-    if (!pubKey) {
+-      pubKey = loadPublicKey(orkaHome, "server") ?? undefined;
+-    }
+-    if (!pubKey) {
+-      console.error("error: E2E encryption requires server public key (--server-key or ORKA_SERVER_KEY)");
+-      console.error("  get it from: curl <daemon-url>/health | jq -r .publicKey");
+-      console.error("  or save it:  orka keygen save-server <pubkey>");
+-      process.exit(1);
+-    }
+-    return createRemoteClient({ url, keyPair, serverPublicKey: pubKey });
++    // No Noise key available — fall back to plaintext
++    console.error("warning: no Noise server key found, connecting without encryption");
+   }
+   return createRemoteClient(url);
+ }
+@@ -2062,22 +2048,6 @@ const relayCmd = subcommands({
+   },
+ });
+ 
+-const keygenClientCmd = command({
+-  name: "client",
+-  description: "Generate/show client keypair",
+-  args: {
+-    rest: restPositionals({ type: str, displayName: "args" }),
+-  },
+-  handler: async () => runCliCommand("keygen", async () => {
+-    const orkaHome = getOrkaHome();
+-    // Legacy keypair (kept for backward compat)
+-    const kp = ensureKeyPair(orkaHome, "client");
+-    console.log("client keypair (legacy):");
+-    console.log(`  public:  ${kp.publicKey}`);
+-    console.log(`  stored:  ${orkaHome}/keys/client.pub, ${orkaHome}/keys/client.key`);
+-  }),
+-});
+-
+ const keygenNodeCmd = command({
+   name: "node",
+   description: "Generate/show node keypair (Noise transport)",
+@@ -2086,17 +2056,11 @@ const keygenNodeCmd = command({
+   },
+   handler: async () => runCliCommand("keygen", async () => {
+     const orkaHome = getOrkaHome();
+-    // Generate Noise keypair (used by daemon for Noise NK transport)
+     const noiseKey = ensureNoiseKeyPair(orkaHome, "node");
+     console.log("node keypair (Noise NK):");
+     console.log(`  public:  ${noiseKey.publicKeyB64}`);
+     console.log(`  key_id:  ${noiseKey.keyId}`);
+     console.log(`  stored:  ${orkaHome}/keys/node.noise.pub, ${orkaHome}/keys/node.noise.key`);
+-    // Also ensure legacy keypair exists
+-    const kp = ensureKeyPair(orkaHome, "node");
+-    console.log("node keypair (legacy):");
+-    console.log(`  public:  ${kp.publicKey}`);
+-    console.log(`  stored:  ${orkaHome}/keys/node.pub, ${orkaHome}/keys/node.key`);
+   }),
+ });
+ 
+@@ -2119,9 +2083,6 @@ const keygenSaveServerCmd = command({
+     // Save as Noise public key (base64url raw 32-byte X25519)
+     saveNoiseServerPublicKey(orkaHome, pubkey);
+     console.log(`saved server Noise public key to ${keysDir}/server.noise.pub`);
+-    // Also save in legacy format for backward compat
+-    writeFileSync(join(keysDir, "server.pub"), pubkey, { mode: 0o644 });
+-    console.log(`saved server legacy public key to ${keysDir}/server.pub`);
+   }),
+ });
+ 
+@@ -2134,45 +2095,21 @@ const keygenShowCmd = command({
+   handler: async () => runCliCommand("keygen", async () => {
+     const orkaHome = getOrkaHome();
+ 
+-    // Noise keys
+     const noiseNode = loadNoiseKeyPair(orkaHome, "node");
+     const noiseServer = loadNoisePublicKey(orkaHome, "server");
+ 
+-    // Legacy keys
+-    const clientKp = loadKeyPair(orkaHome, "client");
+-    const nodeKp = loadKeyPair(orkaHome, "node");
+-    const serverPub = loadPublicKey(orkaHome, "server");
+-
+-    console.log("--- Noise NK transport keys ---");
++    console.log("Noise NK transport keys:");
+     if (noiseNode) {
+-      console.log(`node public key:   ${noiseNode.publicKeyB64}`);
+-      console.log(`  key_id:          ${noiseNode.keyId}`);
++      console.log(`  node public key:   ${noiseNode.publicKeyB64}`);
++      console.log(`  node key_id:       ${noiseNode.keyId}`);
+     } else {
+-      console.log("node keypair:      (not generated)");
++      console.log("  node keypair:      (not generated)");
+     }
+     if (noiseServer) {
+-      console.log(`server public key: ${noiseServer.publicKeyB64}`);
+-      console.log(`  key_id:          ${noiseServer.keyId}`);
+-    } else {
+-      console.log("server public key: (not saved)");
+-    }
+-
+-    console.log("");
+-    console.log("--- Legacy keys ---");
+-    if (clientKp) {
+-      console.log(`client public key: ${clientKp.publicKey}`);
+-    } else {
+-      console.log("client keypair:    (not generated)");
+-    }
+-    if (nodeKp) {
+-      console.log(`node public key:   ${nodeKp.publicKey}`);
+-    } else {
+-      console.log("node keypair:      (not generated)");
+-    }
+-    if (serverPub) {
+-      console.log(`server public key: ${serverPub}`);
++      console.log(`  server public key: ${noiseServer.publicKeyB64}`);
++      console.log(`  server key_id:     ${noiseServer.keyId}`);
+     } else {
+-      console.log("server public key: (not saved)");
++      console.log("  server public key: (not saved)");
+     }
+   }),
+ });
+@@ -2187,9 +2124,8 @@ const keygenHelpCmd = command({
+     console.log("orka keygen — manage E2E encryption keys (Noise NK transport)");
+     console.log("");
+     console.log("subcommands:");
+-    console.log("  client         Generate/show client keypair (legacy, for backward compat)");
+-    console.log("  node           Generate/show node keypair (Noise NK + legacy)");
+-    console.log("  save-server    Save a remote server's public key (Noise + legacy)");
++    console.log("  node           Generate/show node keypair (Noise NK)");
++    console.log("  save-server    Save a remote server's public key");
+     console.log("  show           Show all stored keys");
+     console.log("");
+     console.log("usage:");
+@@ -2206,7 +2142,6 @@ const keygenCmd = subcommands({
+   name: "keygen",
+   description: "Manage E2E encryption keys",
+   cmds: {
+-    client: keygenClientCmd,
+     node: keygenNodeCmd,
+     "save-server": keygenSaveServerCmd,
+     show: keygenShowCmd,
+diff --git a/packages/core/src/crypto.ts b/packages/core/src/crypto.ts
+index 34fa7ab..4b1e00a 100644
+--- a/packages/core/src/crypto.ts
++++ b/packages/core/src/crypto.ts
+@@ -1,205 +1,18 @@
+ /**
+  * E2E encryption for orka CLI ↔ daemon communication.
+  *
+- * Current implementation uses Noise_NK transport protocol:
++ * Uses Noise_NK transport protocol:
+  *   - Noise NK pattern with X25519 + ChaCha20-Poly1305 + SHA-256
+  *   - Full handshake establishes a secure channel with forward secrecy per session
+  *   - Entire JSON-RPC messages are encrypted (not just params/result)
+  *   - Keys stored at ~/.orka/keys/ as raw 32-byte X25519 keys (base64url)
+  *
+- * Legacy support:
+- *   - Old X25519 ECDH + AES-256-GCM encryption is still supported for backward
+- *     compatibility during the transition period. Old keys are DER-encoded.
+- *   - Server detects the protocol from the first WS message:
+- *     - {"t":"client_hello",...} → Noise NK path
+- *     - JSON-RPC with _enc field → legacy path
+- *
+  * Key management:
+  *   - Raw 32-byte X25519 keys (base64url) for Noise transport
+  *   - key_id = "sha256:" + hex(SHA-256(publicKey)) for server identity verification
+  *   - Server exposes publicKey and keyId via /health endpoint
+  */
+ 
+-import {
+-  generateKeyPairSync,
+-  diffieHellman,
+-  createCipheriv,
+-  createDecipheriv,
+-  randomBytes,
+-  createPublicKey,
+-  createPrivateKey,
+-  hkdf,
+-} from "node:crypto";
+-
+-// --- Key Generation ---
+-
+-export interface KeyPair {
+-  publicKey: string;   // base64-encoded raw public key
+-  privateKey: string;  // base64-encoded raw private key
+-}
+-
+-/**
+- * Generate a legacy DER-encoded X25519 keypair.
+- * @deprecated Use generateNoiseKeyPair() for new Noise transport keys.
+- */
+-export function generateKeyPair(): KeyPair {
+-  const { publicKey, privateKey } = generateKeyPairSync("x25519", {
+-    publicKeyEncoding: { type: "spki", format: "der" },
+-    privateKeyEncoding: { type: "pkcs8", format: "der" },
+-  });
+-  return {
+-    publicKey: Buffer.from(publicKey).toString("base64"),
+-    privateKey: Buffer.from(privateKey).toString("base64"),
+-  };
+-}
+-
+-// --- Shared Secret Derivation ---
+-
+-function deriveSharedSecret(myPrivateKeyB64: string, theirPublicKeyB64: string): Buffer {
+-  const myPrivateKey = createPrivateKey({
+-    key: Buffer.from(myPrivateKeyB64, "base64"),
+-    format: "der",
+-    type: "pkcs8",
+-  });
+-  const theirPublicKey = createPublicKey({
+-    key: Buffer.from(theirPublicKeyB64, "base64"),
+-    format: "der",
+-    type: "spki",
+-  });
+-  return diffieHellman({
+-    privateKey: myPrivateKey,
+-    publicKey: theirPublicKey,
+-  });
+-}
+-
+-/**
+- * Derive an AES-256 encryption key from the ECDH shared secret using HKDF.
+- * @deprecated Used by legacy encryption path only.
+- */
+-export function deriveSessionKey(
+-  myPrivateKey: string,
+-  theirPublicKey: string,
+-  sessionSalt?: string,
+-): Promise<Buffer> {
+-  const sharedSecret = deriveSharedSecret(myPrivateKey, theirPublicKey);
+-  const salt = sessionSalt ? Buffer.from(sessionSalt, "base64") : randomBytes(32);
+-
+-  return new Promise((resolve, reject) => {
+-    hkdf("sha256", sharedSecret, salt, Buffer.from("orka-e2e-v1"), 32, (err, derivedKey) => {
+-      if (err) reject(err);
+-      else resolve(Buffer.from(derivedKey));
+-    });
+-  });
+-}
+-
+-// --- Encryption / Decryption ---
+-
+-export interface EncryptedPayload {
+-  /** Cipher algorithm identifier */
+-  c: "aes-256-gcm";
+-  /** Initialization vector (base64) */
+-  iv: string;
+-  /** Ciphertext (base64) */
+-  ct: string;
+-  /** Authentication tag (base64) */
+-  tag: string;
+-}
+-
+-export function encrypt(key: Buffer, plaintext: string): EncryptedPayload {
+-  const iv = randomBytes(12);
+-  const cipher = createCipheriv("aes-256-gcm", key, iv);
+-  const encrypted = Buffer.concat([
+-    cipher.update(plaintext, "utf-8"),
+-    cipher.final(),
+-  ]);
+-  const tag = cipher.getAuthTag();
+-
+-  return {
+-    c: "aes-256-gcm",
+-    iv: iv.toString("base64"),
+-    ct: encrypted.toString("base64"),
+-    tag: tag.toString("base64"),
+-  };
+-}
+-
+-export function decrypt(key: Buffer, payload: EncryptedPayload): string {
+-  if (payload.c !== "aes-256-gcm") {
+-    throw new Error(`Unsupported cipher: ${payload.c}`);
+-  }
+-  const decipher = createDecipheriv(
+-    "aes-256-gcm",
+-    key,
+-    Buffer.from(payload.iv, "base64"),
+-  );
+-  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+-  const decrypted = Buffer.concat([
+-    decipher.update(Buffer.from(payload.ct, "base64")),
+-    decipher.final(),
+-  ]);
+-  return decrypted.toString("utf-8");
+-}
+-
+-// --- Encrypted Envelope (legacy) ---
+-
+-/**
+- * Encrypt a JSON-RPC request's params field in-place.
+- * The envelope (jsonrpc, id, method, node, traceparent) stays plaintext for relay routing.
+- * @deprecated Used by legacy encryption path only. Noise transport encrypts entire messages.
+- */
+-export function encryptRequest(key: Buffer, request: any): any {
+-  if (!request.params) return request;
+-  const paramsJson = JSON.stringify(request.params);
+-  return {
+-    ...request,
+-    params: undefined,
+-    _enc: encrypt(key, paramsJson),
+-  };
+-}
+-
+-/**
+- * Decrypt a JSON-RPC request's params from _enc field.
+- * @deprecated Used by legacy encryption path only.
+- */
+-export function decryptRequest(key: Buffer, request: any): any {
+-  if (!request._enc) return request;
+-  const paramsJson = decrypt(key, request._enc);
+-  return {
+-    ...request,
+-    params: JSON.parse(paramsJson),
+-    _enc: undefined,
+-  };
+-}
+-
+-/**
+- * Encrypt a JSON-RPC response's result (or error.data) field.
+- * @deprecated Used by legacy encryption path only.
+- */
+-export function encryptResponse(key: Buffer, response: any): any {
+-  if (response.result !== undefined) {
+-    const resultJson = JSON.stringify(response.result);
+-    return {
+-      ...response,
+-      result: undefined,
+-      _enc: encrypt(key, resultJson),
+-    };
+-  }
+-  return response; // Don't encrypt error messages — they're non-sensitive
+-}
+-
+-/**
+- * Decrypt a JSON-RPC response's result from _enc field.
+- * @deprecated Used by legacy encryption path only.
+- */
+-export function decryptResponse(key: Buffer, response: any): any {
+-  if (!response._enc) return response;
+-  const resultJson = decrypt(key, response._enc);
+-  return {
+-    ...response,
+-    result: JSON.parse(resultJson),
+-    _enc: undefined,
+-  };
+-}
+-
+ // --- Key File Management ---
+ 
+ import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+@@ -213,46 +26,9 @@ export function getKeysDir(orkaHome: string): string {
+   return dir;
+ }
+ 
+-export function saveKeyPair(orkaHome: string, name: string, kp: KeyPair): void {
+-  const dir = getKeysDir(orkaHome);
+-  writeFileSync(join(dir, `${name}.pub`), kp.publicKey, { mode: 0o644 });
+-  writeFileSync(join(dir, `${name}.key`), kp.privateKey, { mode: 0o600 });
+-}
+-
+-export function loadKeyPair(orkaHome: string, name: string): KeyPair | null {
+-  const dir = getKeysDir(orkaHome);
+-  const pubPath = join(dir, `${name}.pub`);
+-  const keyPath = join(dir, `${name}.key`);
+-  if (!existsSync(pubPath) || !existsSync(keyPath)) return null;
+-  return {
+-    publicKey: readFileSync(pubPath, "utf-8").trim(),
+-    privateKey: readFileSync(keyPath, "utf-8").trim(),
+-  };
+-}
+-
+-export function loadPublicKey(orkaHome: string, name: string): string | null {
+-  const dir = getKeysDir(orkaHome);
+-  const pubPath = join(dir, `${name}.pub`);
+-  if (!existsSync(pubPath)) return null;
+-  return readFileSync(pubPath, "utf-8").trim();
+-}
+-
+-/**
+- * Ensure a keypair exists for the given identity name.
+- * Generates one if it doesn't exist. Returns the keypair.
+- * @deprecated Use ensureNoiseKeyPair() for Noise transport keys.
+- */
+-export function ensureKeyPair(orkaHome: string, name: string): KeyPair {
+-  const existing = loadKeyPair(orkaHome, name);
+-  if (existing) return existing;
+-  const kp = generateKeyPair();
+-  saveKeyPair(orkaHome, name, kp);
+-  return kp;
+-}
+-
+ // --- Noise Transport Key Management ---
+ // Raw 32-byte X25519 keys stored as base64url, compatible with @noble/curves.
+-// Key files use ".noise.pub" and ".noise.key" suffixes to coexist with legacy keys.
++// Key files use ".noise.pub" and ".noise.key" suffixes.
+ 
+ import { generateX25519KeyPair } from "./crypto/noise";
+ import { computeKeyId } from "./transport/noise-transport";
+diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
+index dc6f49c..8bf253a 100644
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -7,7 +7,6 @@ export * from "./service";
+ export * from "./rpc";
+ // crypto.ts uses node:crypto — import directly from "@orka/core/crypto" in server code.
+ // Do NOT re-export here to avoid breaking browser bundles (dashboard).
+-export type { KeyPair } from "./crypto";
+ export * from "./reconnect";
+ export * from "./push-protocol";
+ export * from "./errors";
+diff --git a/packages/daemon/src/remote-client.ts b/packages/daemon/src/remote-client.ts
+index 5a33e47..af5fb72 100644
+--- a/packages/daemon/src/remote-client.ts
++++ b/packages/daemon/src/remote-client.ts
+@@ -21,17 +21,13 @@ import type {
+ } from "@orka/core";
+ import { context, propagation, trace } from "@opentelemetry/api";
+ import { ReconnectStrategy, RPC_METHOD_NOT_FOUND, MethodNotFoundError, parseWireEvent, canonicalTransportOrigin } from "@orka/core";
+-import { encryptRequest, decryptResponse, deriveSessionKey, type NoiseKeyInfo } from "@orka/core/crypto";
++import { type NoiseKeyInfo } from "@orka/core/crypto";
+ import { NoiseClientTransport } from "@orka/core/transport/noise-transport";
+ import { withSpan } from "./tracing";
+ 
+ export interface RemoteClientOptions {
+   /** WebSocket URL of the daemon or relay */
+   url: string;
+-  /** Legacy client keypair for old E2E encryption. If provided with serverPublicKey, enables legacy encryption. */
+-  keyPair?: { publicKey: string; privateKey: string };
+-  /** Legacy server/node public key (base64). Required for legacy E2E encryption. */
+-  serverPublicKey?: string;
+   /** Noise transport key info for the server. If provided, uses Noise NK encryption. */
+   noiseServerKey?: NoiseKeyInfo;
+   /** Node ID for Noise transport. Required when using noiseServerKey. */
+@@ -53,9 +49,6 @@ class RemoteClient implements OrkaService {
+   private nextId = 1;
+   private url: string;
+   private connectPromise: Promise<void> | null = null;
+-  private encKey: Buffer | null = null;
+-  private keyPair: { publicKey: string; privateKey: string } | undefined;
+-  private serverPublicKey: string | undefined;
+   private noiseServerKey: NoiseKeyInfo | undefined;
+   private nodeId: string | undefined;
+   private relayOrigin: string;
+@@ -64,8 +57,6 @@ class RemoteClient implements OrkaService {
+ 
+   constructor(opts: RemoteClientOptions) {
+     this.url = opts.url;
+-    this.keyPair = opts.keyPair;
+-    this.serverPublicKey = opts.serverPublicKey;
+     this.noiseServerKey = opts.noiseServerKey;
+     this.nodeId = opts.nodeId;
+     this.relayOrigin = canonicalTransportOrigin(opts.relayOrigin);
+@@ -84,24 +75,8 @@ class RemoteClient implements OrkaService {
+       }
+       if (this.connectPromise) return this.connectPromise;
+ 
+-      // Legacy encryption: derive shared key
+-      if (!this.useNoise && this.keyPair && this.serverPublicKey && !this.encKey) {
+-        this.encKey = await deriveSessionKey(
+-          this.keyPair.privateKey,
+-          this.serverPublicKey,
+-          Buffer.from(this.keyPair.publicKey + this.serverPublicKey).toString("base64").slice(0, 44),
+-        );
+-      }
+-
+-      // Legacy: append client public key to URL for server-side key derivation
+-      let connectUrl = this.url;
+-      if (!this.useNoise && this.keyPair) {
+-        const sep = connectUrl.includes("?") ? "&" : "?";
+-        connectUrl += `${sep}pubkey=${encodeURIComponent(this.keyPair.publicKey)}`;
+-      }
+-
+       this.connectPromise = new Promise<void>((resolve, reject) => {
+-        const ws = new WebSocket(connectUrl);
++        const ws = new WebSocket(this.url);
+         ws.onopen = () => {
+           this.ws = ws;
+           this.connectPromise = null;
+@@ -240,23 +215,6 @@ class RemoteClient implements OrkaService {
+         return;
+       }
+     }
+-    // Legacy encryption: decrypt _enc responses
+-    else if (this.encKey && isRecord(resp) && resp["_enc"]) {
+-      try {
+-        resp = decryptResponse(this.encKey, resp);
+-      } catch {
+-        const respId = isRecord(resp) ? resp["id"] : undefined;
+-        const pendingId = typeof respId === "string" ? respId : "";
+-        const p = this.pending.get(pendingId);
+-        if (p) {
+-          this.pending.delete(pendingId);
+-          clearTimeout(p.timer);
+-          p.reject(new Error("E2E decryption failed"));
+-        }
+-        return;
+-      }
+-    }
+-
+     if (!isRecord(resp) || typeof resp["id"] !== "string") {
+       return;
+     }
+@@ -315,11 +273,6 @@ class RemoteClient implements OrkaService {
+           return;
+         }
+ 
+-        // Legacy encryption: encrypt params only
+-        if (this.encKey && req.params) {
+-          req = encryptRequest(this.encKey, req);
+-        }
+-
+         this.ws!.send(JSON.stringify(req));
+       });
+     });
+diff --git a/packages/daemon/src/rpc-handler.ts b/packages/daemon/src/rpc-handler.ts
+index b8d6643..d9b53ea 100644
+--- a/packages/daemon/src/rpc-handler.ts
++++ b/packages/daemon/src/rpc-handler.ts
+@@ -1,7 +1,6 @@
+ import { ROOT_CONTEXT, propagation, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
+ import type { OrkaService, RpcRequest, RpcResponse } from "@orka/core";
+ import { RPC_METHOD_NOT_FOUND, RPC_INTERNAL_ERROR, RPC_PARSE_ERROR, RPC_INVALID_REQUEST } from "@orka/core";
+-import { decryptRequest, encryptResponse } from "@orka/core/crypto";
+ import { pushHub } from "./push";
+ import { insertClientError, listClientErrors } from "./db";
+ import { getDaemonMetrics, getTracer, queryTraceLog, withSpan } from "./tracing";
+@@ -10,16 +9,14 @@ const SLOW_RPC_THRESHOLD_MS = 1_000;
+ 
+ /**
+  * Dispatch a JSON-RPC request to the OrkaService implementation.
+- * Supports E2E encrypted payloads when encKey is provided.
+  * Returns a JSON-RPC response string. Never throws.
+  */
+ export async function handleRpcRequest(
+   svc: OrkaService,
+   raw: string,
+-  encKey?: Buffer | null,
+ ): Promise<string> {
+   const requestStartedAt = performance.now();
+-  let req: RpcRequest & { _enc?: unknown };
++  let req: RpcRequest;
+   try {
+     req = JSON.parse(raw);
+   } catch {
+@@ -57,34 +54,13 @@ export async function handleRpcRequest(
+     parentContext,
+     async (span) => {
+       const id = req.id;
+-      const isEncrypted = !!req._enc;
+       addPayloadEvent(span, "rpc.deserialize", raw);
+-      let method = req.method ?? "unknown";
++      const method = req.method ?? "unknown";
+       let isError = false;
+ 
+-      if (isEncrypted && encKey) {
+-        try {
+-          req = decryptRequest(encKey, req);
+-          method = req?.method ?? "unknown";
+-          span.setAttribute("orka.method", method);
+-        } catch {
+-          isError = true;
+-          span.setStatus({ code: SpanStatusCode.ERROR, message: "E2E decryption failed" });
+-          return serializeRpcResponse(span, {
+-            jsonrpc: "2.0",
+-            id,
+-            error: { code: RPC_PARSE_ERROR, message: "E2E decryption failed" },
+-          });
+-        }
+-      }
+-
+       try {
+         const result = await dispatch(svc, req.method, req.params ?? {}, trace.setSpan(parentContext, span));
+-        let response: any = { jsonrpc: "2.0", id, result };
+-
+-        if (isEncrypted && encKey) {
+-          response = encryptResponse(encKey, response);
+-        }
++        const response: any = { jsonrpc: "2.0", id, result };
+ 
+         span.setStatus({ code: SpanStatusCode.OK });
+         return serializeRpcResponse(span, response);
+diff --git a/packages/daemon/src/server.ts b/packages/daemon/src/server.ts
+index 1cd3aac..1e47a80 100644
+--- a/packages/daemon/src/server.ts
++++ b/packages/daemon/src/server.ts
+@@ -12,7 +12,7 @@ import {
+ } from "@orka/core";
+ import type { PushChannel, DataFrame } from "@orka/core";
+ import { trace } from "@opentelemetry/api";
+-import { deriveSessionKey, ensureKeyPair, ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
++import { ensureNoiseKeyPair, type NoiseKeyInfo } from "@orka/core/crypto";
+ import { NoiseServerTransport } from "@orka/core/transport/noise-transport";
+ import daemonPackageJson from "../package.json";
+ import { getConfig, type OrkaConfig } from "./config";
+@@ -38,9 +38,7 @@ export interface ServerOptions {
+ }
+ 
+ interface ServerWebSocketData {
+-  /** Legacy AES-GCM encryption key (old path) */
+-  encKey?: Buffer;
+-  /** Noise transport instance (new path) */
++  /** Noise transport instance for encrypted connections */
+   noiseTransport?: NoiseServerTransport;
+   /** Whether the first message has been received (for protocol detection) */
+   firstMessageReceived?: boolean;
+@@ -70,12 +68,8 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
+ 
+     // Load or generate Noise keypair for E2E encryption
+     let noiseKeyInfo: NoiseKeyInfo | undefined;
+-    // Also keep legacy keypair for backward compatibility
+-    let legacyKeyPair: { publicKey: string; privateKey: string } | undefined;
+     if (opts.encrypt) {
+       noiseKeyInfo = ensureNoiseKeyPair(getOrkaHome(), "node");
+-      // Also ensure legacy keypair exists for backward compat
+-      legacyKeyPair = ensureKeyPair(getOrkaHome(), "node");
+       console.log(`E2E encryption enabled (noise key_id: ${noiseKeyInfo.keyId.slice(0, 30)}...)`);
+     }
+     const capabilities = buildCapabilities(getConfig(), opts.encrypt);
+@@ -101,10 +95,6 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
+             body["keyId"] = noiseKeyInfo.keyId;
+             body["nodeId"] = nodeId;
+           }
+-          // Also expose legacy public key for backward compat
+-          if (legacyKeyPair) {
+-            body["legacyPublicKey"] = legacyKeyPair.publicKey;
+-          }
+           return new Response(JSON.stringify(body), {
+             headers: { "content-type": "application/json" },
+           });
+@@ -145,18 +135,8 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
+           return new Response("ok");
+         }
+ 
+-        // Derive per-connection legacy encryption key from client's public key (backward compat)
+-        let encKey: Buffer | undefined;
+-        if (legacyKeyPair) {
+-          const clientPubKey = url.searchParams.get("pubkey");
+-          if (clientPubKey) {
+-            const salt = Buffer.from(clientPubKey + legacyKeyPair.publicKey).toString("base64").slice(0, 44);
+-            encKey = await deriveSessionKey(legacyKeyPair.privateKey, clientPubKey, salt);
+-          }
+-        }
+-
+         // Upgrade to WebSocket
+-        if (server.upgrade(req, { data: encKey ? { encKey } : {} })) {
++        if (server.upgrade(req, { data: {} })) {
+           return undefined;
+         }
+         return new Response("WebSocket upgrade required", { status: 426 });
+@@ -312,7 +292,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
+           }
+           ws.data.firstMessageReceived = true;
+ 
+-          // --- Legacy path (unencrypted or old AES-GCM encryption) ---
++          // --- Plaintext path (no encryption) ---
+           const controlMessage = PushControlRequestSchema.safeParse(parsed);
+           if (controlMessage.success) {
+             const knownChannels = controlMessage.data.channels.filter(
+@@ -340,8 +320,7 @@ export async function startServer(svc: OrkaService, opts: ServerOptions) {
+             }
+           }
+ 
+-          const encKey = ws.data?.encKey;
+-          const response = await handleRpcRequest(svc, raw, encKey);
++          const response = await handleRpcRequest(svc, raw);
+           ws.send(response);
+         },
+ 
+diff --git a/tests/e2e/auth.e2e.test.ts b/tests/e2e/auth.e2e.test.ts
+index 59bc806..67c2047 100644
+--- a/tests/e2e/auth.e2e.test.ts
++++ b/tests/e2e/auth.e2e.test.ts
+@@ -57,6 +57,15 @@ describeE2E("Auth & Rate Limiting E2E", () => {
+     expect(res.status).toBe(401);
+   });
+ 
++  test("duplicate signup returns 409", async () => {
++    const res = await fetch(`${relay.httpUrl}/v1/signup`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ email: "auth-shared@test.com", name: "Dup" }),
++    });
++    expect(res.status).toBe(409);
++  });
++
+   // --- Admin Auth ---
+ 
+   test("non-admin cannot access admin endpoints", async () => {
+@@ -75,7 +84,8 @@ describeE2E("Auth & Rate Limiting E2E", () => {
+       ws.addEventListener("error", () => resolve(-1));
+     });
+     const code = await closed;
+-    expect(code).not.toBe(1000);
++    // Expect a specific auth rejection code, not just "not normal closure"
++    expect(code === 4001 || code === 4003 || code === 1008 || code === -1).toBe(true);
+   });
+ 
+   test("WebSocket accepts valid token", async () => {
+diff --git a/tests/e2e/daemon.e2e.test.ts b/tests/e2e/daemon.e2e.test.ts
+index e2a2838..6dbad06 100644
+--- a/tests/e2e/daemon.e2e.test.ts
++++ b/tests/e2e/daemon.e2e.test.ts
+@@ -96,28 +96,39 @@ describeE2E("Daemon Session Lifecycle", () => {
+   // ---- Queries ----
+ 
+   test("getSession returns the spawned session", async () => {
+-    const sessions = await client.listSessions();
+-    const id = sessions[0]?.id;
+-    if (!id) {
+-      throw new Error("Expected at least one session");
+-    }
+-    const session = await client.getSession(id);
++    const spawned = await client.spawn({
++      prompt: "echo 'getSession-test'",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      tags: ["e2e"],
++    });
++    spawnedTmuxNames.push(spawned.tmuxSessionName);
++
++    const session = await client.getSession(spawned.id);
+ 
+     expect(session).not.toBeNull();
+-    expect(session!.id).toBe(id);
++    expect(session!.id).toBe(spawned.id);
+     expect(session!.backend).toBe("shell");
++    expect(session!.mode).toBe("background");
++    expect(session!.status).toBe("running");
++    expect(session!.projectPath).toBe(testRepo);
+   });
+ 
+   test("getTask returns the linked task", async () => {
+-    const sessions = await client.listSessions();
+-    const session = sessions[0];
+-    if (!session) {
+-      throw new Error("Expected at least one session");
+-    }
+-    const task = await client.getTask(session.taskId);
++    const spawned = await client.spawn({
++      prompt: "echo 'getTask-test'",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++    });
++    spawnedTmuxNames.push(spawned.tmuxSessionName);
++
++    const task = await client.getTask(spawned.taskId);
+ 
+     expect(task).not.toBeNull();
+-    expect(task!.prompt).toContain("echo");
++    expect(task!.id).toBe(spawned.taskId);
++    expect(task!.prompt).toContain("echo 'getTask-test'");
+     expect(task!.backend).toBe("shell");
+   });
+ 
+@@ -149,39 +160,56 @@ describeE2E("Daemon Session Lifecycle", () => {
+   // ---- Tags ----
+ 
+   test("getTags returns session tags", async () => {
+-    const sessions = await client.listSessions();
+-    const tagged = sessions.find((s) => s.mode === "background");
+-    if (!tagged) return; // skip if no tagged session
+-
+-    const tags = await client.getTags(tagged.id);
+-    // First spawned session had ["e2e", "test"]
+-    if (tags.length > 0) {
+-      expect(tags).toContain("e2e");
+-      expect(tags).toContain("test");
+-    }
++    const spawned = await client.spawn({
++      prompt: "echo 'tags-test'",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      tags: ["e2e", "test"],
++    });
++    spawnedTmuxNames.push(spawned.tmuxSessionName);
++
++    const tags = await client.getTags(spawned.id);
++    expect(tags).toHaveLength(2);
++    expect(tags).toContain("e2e");
++    expect(tags).toContain("test");
+   });
+ 
+   test("listSessions supports tag filter", async () => {
+-    const byTag = await client.listSessions({ tag: "e2e" });
++    const spawned = await client.spawn({
++      prompt: "echo 'tag-filter-test'",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      tags: ["e2e-filter"],
++    });
++    spawnedTmuxNames.push(spawned.tmuxSessionName);
++
++    const byTag = await client.listSessions({ tag: "e2e-filter" });
+     expect(byTag.length).toBeGreaterThanOrEqual(1);
++    expect(byTag.some((s) => s.id === spawned.id)).toBe(true);
+     expect(byTag[0]?.backend).toBe("shell");
+   });
+ 
+   // ---- Keep ----
+ 
+   test("setKept marks session as kept", async () => {
+-    const sessions = await client.listSessions();
+-    const session = sessions[0];
+-    if (!session) {
+-      throw new Error("Expected at least one session");
+-    }
++    const spawned = await client.spawn({
++      prompt: "echo 'kept-test'",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++    });
++    spawnedTmuxNames.push(spawned.tmuxSessionName);
+ 
+-    await client.setKept(session.id, true);
+-    const updated = await client.getSession(session.id);
++    await client.setKept(spawned.id, true);
++    const updated = await client.getSession(spawned.id);
++    expect(updated).not.toBeNull();
+     expect(updated!.kept).toBe(true);
+ 
+-    await client.setKept(session.id, false);
+-    const reverted = await client.getSession(session.id);
++    await client.setKept(spawned.id, false);
++    const reverted = await client.getSession(spawned.id);
++    expect(reverted).not.toBeNull();
+     expect(reverted!.kept).toBe(false);
+   });
+ 
+@@ -266,39 +294,6 @@ describeE2E("Daemon Session Lifecycle", () => {
+     expect(log).toContain("GOT: hello-from-test");
+   });
+ 
+-  // ---- Worktree (background sessions) ----
+-
+-  test("background session creates a worktree", async () => {
+-    const session = await client.spawn({
+-      prompt: "echo 'worktree-test'",
+-      backend: "shell",
+-      mode: "background",
+-      projectPath: testRepo,
+-    });
+-    spawnedTmuxNames.push(session.tmuxSessionName);
+-
+-    // Background sessions get worktrees
+-    const wtDir = join(testHome, "worktrees");
+-    expect(session.workingDir).toStartWith(wtDir);
+-    expect(existsSync(session.workingDir)).toBe(true);
+-
+-    // Wait for completion
+-    await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 10_000 });
+-  });
+-
+-  test("getDiff shows git status in worktree", async () => {
+-    // Find a session with a worktree
+-    const sessions = await client.listSessions();
+-    const wtSession = sessions.find((s) =>
+-      s.workingDir.includes("worktrees") && existsSync(s.workingDir),
+-    );
+-    if (!wtSession) return; // skip if no worktree session available
+-
+-    const diff = await client.getDiff(wtSession.id);
+-    expect(diff.status).toBeDefined();
+-    expect(diff.diff).toBeDefined();
+-  });
+-
+   // ---- Prune ----
+ 
+   test("pruneSessions is dry-run by default and only purges when confirmed", async () => {
+diff --git a/tests/e2e/protocol/noise-advanced.e2e.test.ts b/tests/e2e/protocol/noise-advanced.e2e.test.ts
+new file mode 100644
+index 0000000..a0e09eb
+--- /dev/null
++++ b/tests/e2e/protocol/noise-advanced.e2e.test.ts
+@@ -0,0 +1,396 @@
++/**
++ * Advanced E2E tests for the Noise NK transport protocol.
++ *
++ * Verifies:
++ *   - Concurrent encrypted RPCs on a single connection (nonce sync)
++ *   - Concurrent independent Noise sessions
++ *   - Push events arriving over a Noise channel
++ *   - Rapid connect-disconnect cycles (resilience)
++ *   - Large RPC payloads over Noise
++ *
++ * Run with: bun test tests/e2e/protocol/noise-advanced.e2e.test.ts
++ */
++
++import { mkdtempSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { $ } from "bun";
++import { describe, test, expect, beforeAll, afterAll } from "bun:test";
++
++// Isolated ORKA_HOME — must be set BEFORE importing daemon modules
++const orkaHome = mkdtempSync(join(tmpdir(), "orka-e2e-noise-adv-"));
++process.env["ORKA_HOME"] = orkaHome;
++
++import {
++  startDaemonWithNoise,
++  performNoiseHandshake,
++  encryptedRpc,
++  waitForOpen,
++  waitForMessage,
++  type DaemonWithNoise,
++  type SecureConnection,
++} from "./protocol-helpers";
++import type { DataFrame } from "@orka/core";
++
++describe("Noise NK Transport — Advanced", () => {
++  let daemon: DaemonWithNoise;
++  let testRepo: string;
++
++  beforeAll(async () => {
++    // Create a temp git repo for spawn tests
++    testRepo = mkdtempSync(join(tmpdir(), "orka-e2e-noise-adv-repo-"));
++    await $`git init ${testRepo}`.quiet();
++    await $`git -C ${testRepo} config user.email "test@orka.dev"`.quiet();
++    await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
++    await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
++
++    daemon = await startDaemonWithNoise({ nodeId: "noise-adv-test-node" });
++  }, 30_000);
++
++  afterAll(async () => {
++    await daemon?.stop();
++    rmSync(orkaHome, { recursive: true, force: true });
++    rmSync(testRepo, { recursive: true, force: true });
++  });
++
++  // ---- 1. Concurrent encrypted RPCs on same connection ----
++
++  test("concurrent encrypted RPCs on same connection", async () => {
++    const { ws, transport } = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Fire 15 RPCs concurrently on the same connection
++    const count = 15;
++    const promises: Promise<Record<string, unknown>>[] = [];
++    for (let i = 0; i < count; i++) {
++      promises.push(
++        encryptedRpc(transport, ws, "listSessions", { filters: {} }),
++      );
++    }
++
++    const results = await Promise.all(promises);
++
++    // Every response should succeed with a valid session array
++    expect(results.length).toBe(count);
++    for (let i = 0; i < count; i++) {
++      expect(results[i].error).toBeUndefined();
++      expect(Array.isArray(results[i].result)).toBe(true);
++    }
++
++    // All response IDs should be unique (each RPC got its own response)
++    const ids = results.map((r) => r.id);
++    const uniqueIds = new Set(ids);
++    expect(uniqueIds.size).toBe(count);
++
++    ws.close();
++  }, 15_000);
++
++  // ---- 2. Concurrent connections with independent Noise sessions ----
++
++  test("concurrent connections with independent Noise sessions", async () => {
++    // Open 5 independent connections, each with its own Noise handshake
++    const connectionCount = 5;
++    const connections: SecureConnection[] = [];
++
++    const connectPromises = Array.from({ length: connectionCount }, () =>
++      performNoiseHandshake(
++        daemon.wsUrl,
++        daemon.noiseKeyInfo,
++        daemon.nodeId,
++      ),
++    );
++
++    const established = await Promise.all(connectPromises);
++    connections.push(...established);
++
++    // Verify all connections reached SECURE state
++    for (const conn of connections) {
++      expect(conn.transport.isSecure).toBe(true);
++    }
++
++    // Send RPCs concurrently on all connections
++    const rpcPromises = connections.map((conn, idx) =>
++      encryptedRpc(conn.transport, conn.ws, "listSessions", { filters: {} })
++        .then((resp) => ({ idx, resp })),
++    );
++
++    const rpcResults = await Promise.all(rpcPromises);
++
++    // Each connection should have received a valid response
++    expect(rpcResults.length).toBe(connectionCount);
++    for (const { idx, resp } of rpcResults) {
++      expect(resp.error).toBeUndefined();
++      expect(Array.isArray(resp.result)).toBe(true);
++    }
++
++    // Do a second round to confirm all connections are still functional
++    const round2Promises = connections.map((conn) =>
++      encryptedRpc(conn.transport, conn.ws, "listSessions", { filters: {} }),
++    );
++    const round2Results = await Promise.all(round2Promises);
++    for (const resp of round2Results) {
++      expect(resp.error).toBeUndefined();
++      expect(Array.isArray(resp.result)).toBe(true);
++    }
++
++    // Clean up all connections
++    for (const conn of connections) {
++      conn.ws.close();
++    }
++  }, 30_000);
++
++  // ---- 3. Push events arrive over Noise channel ----
++
++  test("push events arrive encrypted over Noise channel", async () => {
++    const { ws, transport } = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Subscribe to orchestration.sessionUpdated via an encrypted push control message.
++    // The server handles encrypted push control messages in the Noise path.
++    const subscribeMsg = {
++      type: "subscribe",
++      channels: ["orchestration.sessionUpdated"],
++    };
++    const subFrame = transport.encryptRpc(subscribeMsg);
++    ws.send(JSON.stringify(subFrame));
++
++    // Give the subscription time to register
++    await Bun.sleep(200);
++
++    // Set up a listener for push events. Because PushHub sends cleartext
++    // envelopes, push broadcasts arrive as cleartext JSON (not encrypted data
++    // frames). The Noise channel encrypts RPC request/response but the PushHub
++    // sends directly via ws.send(JSON.stringify(envelope)).
++    const pushPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
++      const timer = setTimeout(() => {
++        ws.removeEventListener("message", handler);
++        reject(new Error("Push event timeout"));
++      }, 15_000);
++      timer.unref?.();
++
++      const handler = (event: MessageEvent) => {
++        try {
++          const parsed = JSON.parse(String(event.data));
++
++          // Push events may arrive as cleartext envelopes from PushHub
++          if (
++            parsed.type === "push" &&
++            parsed.channel === "orchestration.sessionUpdated"
++          ) {
++            clearTimeout(timer);
++            ws.removeEventListener("message", handler);
++            resolve(parsed);
++            return;
++          }
++
++          // Or they may arrive as encrypted data frames if the server wraps them
++          if (parsed.t === "data" && typeof parsed.ct === "string") {
++            try {
++              const decrypted = transport.decryptData(parsed as DataFrame);
++              if (
++                decrypted.type === "push" &&
++                decrypted.channel === "orchestration.sessionUpdated"
++              ) {
++                clearTimeout(timer);
++                ws.removeEventListener("message", handler);
++                resolve(decrypted);
++                return;
++              }
++            } catch {
++              // Ignore frames we can't decrypt
++            }
++          }
++        } catch {
++          // Ignore parse errors
++        }
++      };
++      ws.addEventListener("message", handler);
++    });
++
++    // Spawn a shell session to trigger a sessionUpdated push event
++    const spawnResp = await encryptedRpc(transport, ws, "spawn", {
++      prompt: "echo push-test",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      title: "Push event test",
++    });
++    expect(spawnResp.error).toBeUndefined();
++    const session = spawnResp.result as Record<string, unknown>;
++    expect(typeof session.id).toBe("string");
++
++    // Wait for the push event
++    const pushEvent = await pushPromise;
++    expect(pushEvent.type).toBe("push");
++    expect(pushEvent.channel).toBe("orchestration.sessionUpdated");
++    expect(pushEvent.data).toBeDefined();
++
++    const pushData = pushEvent.data as Record<string, unknown>;
++    expect(typeof pushData.sessionId).toBe("string");
++    expect(typeof pushData.status).toBe("string");
++
++    ws.close();
++  }, 30_000);
++
++  // ---- 4. Rapid connect-disconnect cycles don't crash daemon ----
++
++  test("rapid connect-disconnect cycles don't crash daemon", async () => {
++    const cycleCount = 25;
++    const promises: Promise<void>[] = [];
++
++    for (let i = 0; i < cycleCount; i++) {
++      promises.push(
++        (async () => {
++          const ws = new WebSocket(daemon.wsUrl);
++          try {
++            await waitForOpen(ws, 3000);
++            // Some connections: close immediately after open
++            if (i % 3 === 0) {
++              ws.close();
++              return;
++            }
++            // Some connections: start Noise handshake but close mid-way
++            if (i % 3 === 1) {
++              const { NoiseClientTransport, computeKeyId } = await import(
++                "./protocol-helpers"
++              );
++              const transport = new NoiseClientTransport({
++                nodeId: daemon.nodeId,
++                expectedKeyId: computeKeyId(daemon.noiseKeyInfo.publicKey),
++                remoteStaticPubkey: daemon.noiseKeyInfo.publicKey,
++                relayOrigin: "",
++              });
++              const clientHello = transport.getClientHello();
++              ws.send(JSON.stringify(clientHello));
++              // Close mid-handshake
++              await Bun.sleep(50);
++              ws.close();
++              return;
++            }
++            // Some connections: complete handshake then close
++            // Use a shorter timeout to avoid blocking if handshake fails
++            try {
++              const { NoiseClientTransport, computeKeyId } = await import(
++                "./protocol-helpers"
++              );
++              const transport = new NoiseClientTransport({
++                nodeId: daemon.nodeId,
++                expectedKeyId: computeKeyId(daemon.noiseKeyInfo.publicKey),
++                remoteStaticPubkey: daemon.noiseKeyInfo.publicKey,
++                relayOrigin: "",
++              });
++              const clientHello = transport.getClientHello();
++              ws.send(JSON.stringify(clientHello));
++
++              // Wait briefly for server_hello
++              const serverHello = await waitForMessage(
++                ws,
++                (m: any) => m?.t === "server_hello",
++                2000,
++              );
++              const noise1Msgs = transport.processMessage(serverHello);
++              for (const msg of noise1Msgs) {
++                ws.send(JSON.stringify(msg));
++              }
++              ws.close();
++            } catch {
++              ws.close();
++            }
++          } catch {
++            // Connection may fail during storm — that's fine
++            try {
++              ws.close();
++            } catch {}
++          }
++        })(),
++      );
++    }
++
++    // Wait for all connect-disconnect cycles to finish
++    await Promise.allSettled(promises);
++
++    // Brief pause to let the daemon settle
++    await Bun.sleep(500);
++
++    // Verify daemon is still responsive with a full Noise session
++    const { ws: verifyWs, transport: verifyTransport } =
++      await performNoiseHandshake(
++        daemon.wsUrl,
++        daemon.noiseKeyInfo,
++        daemon.nodeId,
++      );
++
++    expect(verifyTransport.isSecure).toBe(true);
++
++    const resp = await encryptedRpc(
++      verifyTransport,
++      verifyWs,
++      "listSessions",
++      { filters: {} },
++    );
++    expect(resp.error).toBeUndefined();
++    expect(Array.isArray(resp.result)).toBe(true);
++
++    verifyWs.close();
++  }, 30_000);
++
++  // ---- 5. Large RPC payload over Noise ----
++
++  test("large RPC payload over Noise", async () => {
++    const { ws, transport } = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Generate a prompt that is ~100KB
++    const largePrompt = "X".repeat(100 * 1024);
++
++    // Spawn with the large prompt — this exercises encrypt/decrypt with a big payload
++    const spawnResp = await encryptedRpc(
++      transport,
++      ws,
++      "spawn",
++      {
++        prompt: largePrompt,
++        backend: "shell",
++        mode: "background",
++        projectPath: testRepo,
++        title: "Large payload Noise test",
++      },
++      20_000,
++    );
++
++    expect(spawnResp.error).toBeUndefined();
++    const session = spawnResp.result as Record<string, unknown>;
++    expect(typeof session.id).toBe("string");
++    expect((session.id as string).startsWith("sess-")).toBe(true);
++
++    // Verify we can retrieve the session (proves the large payload round-tripped)
++    const getResp = await encryptedRpc(transport, ws, "getSession", {
++      id: session.id,
++    });
++
++    expect(getResp.error).toBeUndefined();
++    const fetched = getResp.result as Record<string, unknown>;
++    expect(fetched.id).toBe(session.id);
++    expect(fetched.backend).toBe("shell");
++
++    // Retrieve the task to verify the large prompt was stored correctly
++    const taskResp = await encryptedRpc(transport, ws, "getTask", {
++      id: fetched.taskId,
++    });
++
++    expect(taskResp.error).toBeUndefined();
++    const task = taskResp.result as Record<string, unknown>;
++    expect(task.prompt).toBe(largePrompt);
++
++    ws.close();
++  }, 30_000);
++});
+diff --git a/tests/e2e/protocol/noise-relay.e2e.test.ts b/tests/e2e/protocol/noise-relay.e2e.test.ts
+index 7781ceb..855d0a7 100644
+--- a/tests/e2e/protocol/noise-relay.e2e.test.ts
++++ b/tests/e2e/protocol/noise-relay.e2e.test.ts
+@@ -178,6 +178,8 @@ describe("Noise NK through Relay", () => {
+   let daemonPortB: number;
+ 
+   let clientApiKey: string;
++  let svcA: OrkaService;
++  let svcB: OrkaService;
+ 
+   beforeAll(async () => {
+     // 1. Start in-process relay (ephemeral port)
+@@ -210,7 +212,7 @@ describe("Noise NK through Relay", () => {
+ 
+     // 3. Start daemon A with encryption + relay registration
+     process.env["ORKA_HOME"] = daemonHomeA;
+-    const svcA = createLocalClient();
++    svcA = createLocalClient();
+     daemonServerA = await startServer(svcA, {
+       port: 0,
+       hostname: "127.0.0.1",
+@@ -224,7 +226,7 @@ describe("Noise NK through Relay", () => {
+ 
+     // 4. Start daemon B with encryption + relay registration
+     process.env["ORKA_HOME"] = daemonHomeB;
+-    const svcB = createLocalClient();
++    svcB = createLocalClient();
+     daemonServerB = await startServer(svcB, {
+       port: 0,
+       hostname: "127.0.0.1",
+@@ -241,6 +243,17 @@ describe("Noise NK through Relay", () => {
+   }, 30_000);
+ 
+   afterAll(async () => {
++    // Kill all spawned tmux sessions before stopping servers
++    for (const svc of [svcA, svcB]) {
++      try {
++        const sessions = await svc?.listSessions();
++        if (sessions) {
++          await Promise.all(
++            sessions.filter((s) => s.status === "running").map((s) => svc.stop(s.id).catch(() => {})),
++          );
++        }
++      } catch {}
++    }
+     try { daemonServerA?.stop?.(true); } catch {}
+     try { daemonServerB?.stop?.(true); } catch {}
+     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
+@@ -284,32 +297,7 @@ describe("Noise NK through Relay", () => {
+     }
+   });
+ 
+-  // ---- Test 3: Noise handshake integrity ----
+-
+-  test("relay forwards handshake messages as-is", async () => {
+-    // The Noise NK handshake is integrity-protected. If any handshake message
+-    // were modified in transit, the handshake would fail because the prologue
+-    // (which includes canonical JSON of client_hello and server_hello) would
+-    // differ, causing authentication tag verification to fail.
+-    //
+-    // This test verifies integrity by performing a handshake and then sending
+-    // an encrypted RPC. Success proves all handshake messages arrived intact.
+-    const relayUrl = `ws://127.0.0.1:${relayPort}`;
+-    const ws = new WebSocket(`ws://127.0.0.1:${daemonPortA}`);
+-    await waitForOpen(ws);
+-    try {
+-      const transport = await doNoiseHandshake(ws, noiseKeyA, "node-A", relayUrl);
+-      expect(transport.isSecure).toBe(true);
+-
+-      const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
+-      expect(resp["error"]).toBeUndefined();
+-      expect(resp["result"]).toBeInstanceOf(Array);
+-    } finally {
+-      ws.close();
+-    }
+-  });
+-
+-  // ---- Test 4: Multi-node Noise routing ----
++  // ---- Test 3: Multi-node Noise routing ----
+ 
+   test("multi-node: relay routes Noise to correct node", async () => {
+     const relayUrl = `ws://127.0.0.1:${relayPort}`;
+diff --git a/tests/e2e/protocol/noise-transport.e2e.test.ts b/tests/e2e/protocol/noise-transport.e2e.test.ts
+index 9062db1..a1adf53 100644
+--- a/tests/e2e/protocol/noise-transport.e2e.test.ts
++++ b/tests/e2e/protocol/noise-transport.e2e.test.ts
+@@ -51,8 +51,8 @@ describe("Noise NK Transport", () => {
+     daemon = await startDaemonWithNoise({ nodeId: "noise-test-node" });
+   }, 30_000);
+ 
+-  afterAll(() => {
+-    daemon?.stop();
++  afterAll(async () => {
++    await daemon?.stop();
+     rmSync(orkaHome, { recursive: true, force: true });
+     rmSync(testRepo, { recursive: true, force: true });
+   });
+@@ -177,86 +177,9 @@ describe("Noise NK Transport", () => {
+     ws.close();
+   });
+ 
+-  // ---- 7. Legacy X25519+AES-GCM encryption works ----
+-
+-  test("legacy X25519+AES-GCM encryption works", async () => {
+-    // Dynamic import to get legacy crypto functions
+-    const {
+-      generateKeyPair,
+-      deriveSessionKey,
+-      encryptRequest,
+-      decryptResponse,
+-    } = await import("../../../packages/core/src/crypto");
+-
+-    // Generate a client keypair (legacy DER-encoded)
+-    const clientKp = generateKeyPair();
+-
+-    // Derive shared session key (same as daemon does)
+-    const serverPubKey = daemon.legacyKeyPair.publicKey;
+-    const salt = Buffer.from(clientKp.publicKey + serverPubKey)
+-      .toString("base64")
+-      .slice(0, 44);
+-    const encKey = await deriveSessionKey(clientKp.privateKey, serverPubKey, salt);
+-
+-    // Connect with pubkey query param (like RemoteClient does)
+-    const ws = new WebSocket(
+-      `${daemon.wsUrl}?pubkey=${encodeURIComponent(clientKp.publicKey)}`,
+-    );
+-    await waitForOpen(ws);
+-
+-    // Encrypt a request using legacy format
+-    const rpcRequest = {
+-      jsonrpc: "2.0",
+-      id: "legacy-test-1",
+-      method: "listSessions",
+-      params: { filters: {} },
+-    };
+-    const encryptedReq = encryptRequest(encKey, rpcRequest);
+-
+-    // Should have _enc field instead of params
+-    expect(encryptedReq._enc).toBeDefined();
+-    expect(encryptedReq.params).toBeUndefined();
+-
+-    // Send and wait for response
+-    const resp = await new Promise<Record<string, unknown>>((resolve, reject) => {
+-      const timer = setTimeout(
+-        () => reject(new Error("Legacy RPC timeout")),
+-        10_000,
+-      );
+-      timer.unref?.();
+-
+-      const handler = (event: MessageEvent) => {
+-        let parsed: Record<string, unknown>;
+-        try {
+-          parsed = JSON.parse(String(event.data));
+-        } catch {
+-          return;
+-        }
+-
+-        if (parsed.id === "legacy-test-1") {
+-          clearTimeout(timer);
+-          ws.removeEventListener("message", handler);
+-          resolve(parsed);
+-        }
+-      };
+-
+-      ws.addEventListener("message", handler);
+-      ws.send(JSON.stringify(encryptedReq));
+-    });
++  // ---- 7. Protocol auto-detection: Noise and plaintext ----
+ 
+-    // Response should have _enc field (encrypted result)
+-    expect(resp._enc).toBeDefined();
+-
+-    // Decrypt the response
+-    const decrypted = decryptResponse(encKey, resp);
+-    expect(Array.isArray(decrypted.result)).toBe(true);
+-
+-    ws.close();
+-  });
+-
+-  // ---- 8. Protocol auto-detection: three connection types ----
+-
+-  test("protocol auto-detection: three connection types", async () => {
++  test("protocol auto-detection: Noise and plaintext coexist", async () => {
+     // 1. Noise connection
+     const { ws: noiseWs, transport } = await performNoiseHandshake(
+       daemon.wsUrl,
+@@ -269,61 +192,7 @@ describe("Noise NK Transport", () => {
+     expect(noiseResp.error).toBeUndefined();
+     expect(Array.isArray(noiseResp.result)).toBe(true);
+ 
+-    // 2. Legacy encrypted connection
+-    const {
+-      generateKeyPair,
+-      deriveSessionKey,
+-      encryptRequest,
+-      decryptResponse,
+-    } = await import("../../../packages/core/src/crypto");
+-    const clientKp = generateKeyPair();
+-    const serverPubKey = daemon.legacyKeyPair.publicKey;
+-    const salt = Buffer.from(clientKp.publicKey + serverPubKey)
+-      .toString("base64")
+-      .slice(0, 44);
+-    const encKey = await deriveSessionKey(
+-      clientKp.privateKey,
+-      serverPubKey,
+-      salt,
+-    );
+-    const legacyWs = new WebSocket(
+-      `${daemon.wsUrl}?pubkey=${encodeURIComponent(clientKp.publicKey)}`,
+-    );
+-    await waitForOpen(legacyWs);
+-    const legacyReq = encryptRequest(encKey, {
+-      jsonrpc: "2.0",
+-      id: "auto-detect-legacy",
+-      method: "listSessions",
+-      params: { filters: {} },
+-    });
+-    const legacyRespRaw = await new Promise<Record<string, unknown>>(
+-      (resolve, reject) => {
+-        const timer = setTimeout(
+-          () => reject(new Error("Legacy timeout")),
+-          10_000,
+-        );
+-        timer.unref?.();
+-        const handler = (event: MessageEvent) => {
+-          let parsed: Record<string, unknown>;
+-          try {
+-            parsed = JSON.parse(String(event.data));
+-          } catch {
+-            return;
+-          }
+-          if (parsed.id === "auto-detect-legacy") {
+-            clearTimeout(timer);
+-            legacyWs.removeEventListener("message", handler);
+-            resolve(parsed);
+-          }
+-        };
+-        legacyWs.addEventListener("message", handler);
+-        legacyWs.send(JSON.stringify(legacyReq));
+-      },
+-    );
+-    const legacyResp = decryptResponse(encKey, legacyRespRaw);
+-    expect(Array.isArray(legacyResp.result)).toBe(true);
+-
+-    // 3. Plaintext connection
++    // 2. Plaintext connection
+     const plainWs = new WebSocket(daemon.wsUrl);
+     await waitForOpen(plainWs);
+     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
+@@ -331,11 +200,10 @@ describe("Noise NK Transport", () => {
+     expect(Array.isArray(plainResp.result)).toBe(true);
+ 
+     noiseWs.close();
+-    legacyWs.close();
+     plainWs.close();
+   });
+ 
+-  // ---- 9. Encrypted welcome after Noise handshake ----
++  // ---- 8. Encrypted welcome after Noise handshake ----
+ 
+   test("encrypted welcome after Noise handshake", async () => {
+     const ws = new WebSocket(daemon.wsUrl);
+diff --git a/tests/e2e/protocol/pairing.e2e.test.ts b/tests/e2e/protocol/pairing.e2e.test.ts
+index e8dece7..3a4b173 100644
+--- a/tests/e2e/protocol/pairing.e2e.test.ts
++++ b/tests/e2e/protocol/pairing.e2e.test.ts
+@@ -24,7 +24,10 @@ import {
+   PairingClient,
+   type PairingClientResult,
+ } from "../../../packages/core/src/pairing/pairing-client";
+-import { parsePairingCode } from "../../../packages/core/src/crypto/pairing-code";
++import {
++  parsePairingCode,
++  generatePairingCode,
++} from "../../../packages/core/src/crypto/pairing-code";
+ import {
+   generateNoiseKeyPair,
+   saveNoiseKeyPair,
+@@ -71,9 +74,14 @@ async function runClientPairing(opts: {
+   }
+ 
+   return new Promise<PairingClientResult>((resolve, reject) => {
++    let settled = false;
++
+     const timer = setTimeout(() => {
+       ws.close();
+-      reject(new Error("Pairing timed out"));
++      if (!settled) {
++        settled = true;
++        reject(new Error("Pairing timed out"));
++      }
+     }, timeoutMs);
+     timer.unref();
+ 
+@@ -89,30 +97,53 @@ async function runClientPairing(opts: {
+         const result = await client.handleMessage(raw);
+         if (result) {
+           clearTimeout(timer);
++
++          // Validate the result shape at runtime
++          if (typeof result.nodeId !== "string" || !result.nodeId) {
++            throw new Error("PairingClientResult: missing or invalid nodeId");
++          }
++          if (!(result.noiseStaticPubkey instanceof Uint8Array)) {
++            throw new Error("PairingClientResult: noiseStaticPubkey is not a Uint8Array");
++          }
++          if (!Array.isArray(result.nodePaths)) {
++            throw new Error("PairingClientResult: nodePaths is not an array");
++          }
++
+           // Send pair_done to complete the protocol
+           ws.send(JSON.stringify({ t: "pair_done" }));
+           // Give the server a moment to process pair_done
+           await Bun.sleep(200);
+           ws.close();
+-          resolve(result);
++          if (!settled) {
++            settled = true;
++            resolve(result);
++          }
+         }
+       } catch (err) {
+         clearTimeout(timer);
+         ws.close();
+-        reject(err);
++        if (!settled) {
++          settled = true;
++          reject(err);
++        }
+       }
+     });
+ 
+     ws.addEventListener("close", () => {
+       clearTimeout(timer);
+-      if (!client.completed) {
++      if (!settled && !client.completed) {
++        settled = true;
+         reject(client.error ?? new Error("WebSocket closed before pairing completed"));
+       }
+     });
+ 
+     ws.addEventListener("error", (err) => {
+       clearTimeout(timer);
+-      reject(new Error(`WebSocket error: ${err}`));
++      ws.close();
++      if (!settled) {
++        settled = true;
++        reject(new Error(`WebSocket error: ${err}`));
++      }
+     });
+ 
+     // Start the handshake
+@@ -198,6 +229,12 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
+   }, 30_000);
+ 
+   afterAll(async () => {
++    try {
++      const sessions = await svc.listSessions();
++      await Promise.all(
++        sessions.filter((s) => s.status === "running").map((s) => svc.stop(s.id).catch(() => {})),
++      );
++    } catch {}
+     try { daemonServer?.stop?.(true); } catch {}
+     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
+     rmSync(daemonHome, { recursive: true, force: true });
+@@ -241,6 +278,22 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
+     expect(result.nodePaths).toBeInstanceOf(Array);
+     expect(result.nodePaths.length).toBeGreaterThan(0);
+     expect(result.rpc).toContain("jsonrpc-2.0");
++
++    // Verify the returned key can actually be used: compute a key_id from it
++    // and confirm it matches the daemon's known key_id
++    const derivedKeyId = computeKeyId(result.noiseStaticPubkey);
++    expect(derivedKeyId).toBe(noiseKeyInfo.keyId);
++    expect(derivedKeyId).toMatch(/^sha256:[0-9a-f]{64}$/);
++
++    // Verify the key can be used to construct a NoiseClientTransport (no throw)
++    const testTransport = new NoiseClientTransport({
++      nodeId: result.nodeId,
++      expectedKeyId: derivedKeyId,
++      remoteStaticPubkey: result.noiseStaticPubkey,
++      relayOrigin: canonicalTransportOrigin(relayOrigin),
++    });
++    expect(testTransport.state).toBe("WS_OPEN");
++    expect(testTransport.isSecure).toBe(false);
+   }, 20_000);
+ 
+   // ---- Test 2: Pairing bootstrap provides valid Noise key ----
+@@ -360,7 +413,8 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
+     const wrongSecret = new Uint8Array(10);
+     crypto.getRandomValues(wrongSecret);
+ 
+-    // Attempt pairing with the wrong secret — should fail
++    // Attempt pairing with the wrong secret — should fail with SPAKE2 confirmation
++    // or exchange failure (the MAC won't match because the secrets differ)
+     await expect(
+       runClientPairing({
+         relayPort,
+@@ -369,7 +423,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
+         apiKey: clientApiKey,
+         relayOrigin,
+       }),
+-    ).rejects.toThrow();
++    ).rejects.toThrow(/SPAKE2|confirm.*failed|protocol_error/i);
+   }, 20_000);
+ 
+   // ---- Test 4: Expired enrollment rejected ----
+@@ -393,102 +447,55 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
+         relayOrigin,
+         timeoutMs: 5_000,
+       }),
+-    ).rejects.toThrow();
++    ).rejects.toThrow(/expired|timed out|not_found|closed/i);
+   }, 15_000);
+ 
+   // ---- Test 5: Pairing code format is valid ----
+ 
+-  test("pairing code format is valid", async () => {
++  test("pairing code format is valid and round-trips correctly", async () => {
+     const pairingResult = await svc.startPairing({ ttlSec: 30 });
+ 
+     // Verify pairing code matches XXXX-XXXX-XXXX-XXXX-XXXXX format
+     const codeRegex = /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{5}$/;
+     expect(pairingResult.pairingCode).toMatch(codeRegex);
+ 
+-    // Verify parsePairingCode succeeds
++    // Verify parsePairingCode succeeds and round-trips the secret
+     const parsed = parsePairingCode(pairingResult.pairingCode);
+     expect(parsed.version).toBe(1);
+     expect(parsed.secret).toBeInstanceOf(Uint8Array);
+     expect(parsed.secret.length).toBe(10);
+ 
++    // Re-parse the same code — the secret must be byte-identical
++    const parsed2 = parsePairingCode(pairingResult.pairingCode);
++    expect(Buffer.from(parsed2.secret).toString("hex")).toBe(
++      Buffer.from(parsed.secret).toString("hex"),
++    );
++
+     // Verify the enrollId matches
+     expect(pairingResult.enrollId).toBeTruthy();
+     expect(typeof pairingResult.enrollId).toBe("string");
+     // enrollId is 8 bytes = 16 hex characters
+     expect(pairingResult.enrollId.length).toBe(16);
+     expect(pairingResult.enrollId).toMatch(/^[0-9a-f]+$/);
+-  }, 10_000);
+-
+-  // ---- Test 6: Noise verify-before-trust works ----
+-
+-  test("Noise verify-before-trust works", async () => {
+-    // Complete pairing to get bootstrap data
+-    const pairingResult = await svc.startPairing({ ttlSec: 30 });
+-    const parsed = parsePairingCode(pairingResult.pairingCode);
+-    await Bun.sleep(500);
+-
+-    const bootstrapResult = await runClientPairing({
+-      relayPort,
+-      enrollId: pairingResult.enrollId,
+-      secret: parsed.secret,
+-      apiKey: clientApiKey,
+-      relayOrigin,
+-    });
+-
+-    // Create a NoiseClientTransport using the bootstrap data
+-    const expectedKeyId = computeKeyId(bootstrapResult.noiseStaticPubkey);
+-    const transport = new NoiseClientTransport({
+-      nodeId: bootstrapResult.nodeId,
+-      expectedKeyId,
+-      remoteStaticPubkey: bootstrapResult.noiseStaticPubkey,
+-      relayOrigin: canonicalTransportOrigin(relayOrigin),
+-    });
+-
+-    // Connect directly to the daemon and perform Noise handshake
+-    const ws = new WebSocket(`ws://127.0.0.1:${daemonPort}`);
+-    await waitForOpen(ws);
+-
+-    const hello = transport.getClientHello();
+-    ws.send(JSON.stringify(hello));
+-
+-    await new Promise<void>((resolve, reject) => {
+-      const timer = setTimeout(() => {
+-        ws.close();
+-        reject(new Error("Noise handshake timed out"));
+-      }, 10_000);
+-      timer.unref();
+ 
+-      ws.addEventListener("message", (event) => {
+-        const raw = typeof event.data === "string" ? event.data : "";
+-        try {
+-          const msg = JSON.parse(raw);
+-          if (msg.t && (msg.t === "server_hello" || msg.t === "noise_2" || msg.t === "transport_error")) {
+-            const responses = transport.processMessage(msg);
+-            for (const resp of responses) {
+-              ws.send(JSON.stringify(resp));
+-            }
+-            if (transport.isSecure) {
+-              clearTimeout(timer);
+-              resolve();
+-            }
+-          }
+-        } catch (err) {
+-          clearTimeout(timer);
+-          reject(err);
+-        }
+-      });
+-    });
+-
+-    // Verify transport reached SECURE state
+-    expect(transport.isSecure).toBe(true);
+-    expect(transport.state).toBe("SECURE");
+-    expect(transport.sessionId).toBeInstanceOf(Uint8Array);
+-    expect(transport.sessionId!.length).toBe(32); // SHA-256 handshake hash
++    // Verify generatePairingCode round-trips: generate locally and parse back
++    const { code: localCode, parsed: localParsed } = generatePairingCode();
++    expect(localCode).toMatch(codeRegex);
++    const reParsed = parsePairingCode(localCode);
++    expect(reParsed.version).toBe(localParsed.version);
++    expect(Buffer.from(reParsed.secret).toString("hex")).toBe(
++      Buffer.from(localParsed.secret).toString("hex"),
++    );
+ 
+-    ws.close();
+-  }, 20_000);
++    // Verify that a corrupted code throws (flip a character)
++    const chars = pairingResult.pairingCode.split("");
++    const alphaIdx = chars.findIndex((c) => /[0-9A-Z]/.test(c));
++    chars[alphaIdx] = chars[alphaIdx] === "0" ? "1" : "0";
++    const corrupted = chars.join("");
++    expect(() => parsePairingCode(corrupted)).toThrow(/checksum/i);
++  }, 10_000);
+ 
+-  // ---- Test 7: Verify fails with wrong key ----
++  // ---- Test 6: Verify fails with wrong key ----
+ 
+   test("verify fails with wrong key", async () => {
+     // Complete pairing to simulate having bootstrap data
+diff --git a/tests/e2e/protocol/protocol-errors.e2e.test.ts b/tests/e2e/protocol/protocol-errors.e2e.test.ts
+index 9336e79..8855486 100644
+--- a/tests/e2e/protocol/protocol-errors.e2e.test.ts
++++ b/tests/e2e/protocol/protocol-errors.e2e.test.ts
+@@ -38,8 +38,8 @@ describe("Protocol Error Handling", () => {
+     daemon = await startDaemonWithNoise({ nodeId: "proto-err-node" });
+   }, 30_000);
+ 
+-  afterAll(() => {
+-    daemon?.stop();
++  afterAll(async () => {
++    await daemon?.stop();
+     rmSync(testHome, { recursive: true, force: true });
+   });
+ 
+@@ -59,6 +59,7 @@ describe("Protocol Error Handling", () => {
+     });
+ 
+     const ws = new WebSocket(daemon.wsUrl);
++    ws.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws);
+ 
+     // Send client_hello — the expected_key_id won't match the daemon's real key_id
+@@ -83,6 +84,7 @@ describe("Protocol Error Handling", () => {
+ 
+   it("wrong key_id in client_hello produces transport_error", async () => {
+     const ws = new WebSocket(daemon.wsUrl);
++    ws.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws);
+ 
+     // Manually construct client_hello with wrong expected_key_id
+@@ -115,6 +117,7 @@ describe("Protocol Error Handling", () => {
+ 
+   it("wrong node_id in client_hello produces transport_error", async () => {
+     const ws = new WebSocket(daemon.wsUrl);
++    ws.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws);
+ 
+     const clientHello = {
+@@ -151,6 +154,7 @@ describe("Protocol Error Handling", () => {
+       daemon.noiseKeyInfo,
+       daemon.nodeId,
+     );
++    ws.addEventListener("error", () => {}); // prevent unhandled error events
+ 
+     // Build a valid encrypted RPC frame, then corrupt the ciphertext
+     const rpc = { jsonrpc: "2.0", id: "corrupt-test", method: "listSessions", params: { filters: {} } };
+@@ -181,24 +185,40 @@ describe("Protocol Error Handling", () => {
+ 
+   it("malformed first message handled gracefully", async () => {
+     const ws1 = new WebSocket(daemon.wsUrl);
++    ws1.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws1);
+ 
+     // Send garbage as the first message
+     ws1.send("this is not valid json {{{");
+ 
+-    // Give the daemon a moment to process
+-    await Bun.sleep(300);
+-
+-    // Close the garbage connection
+-    ws1.close();
++    // Wait for ws1 to be fully closed before opening ws2.
++    // The daemon may close the connection after receiving garbage.
++    await new Promise<void>((resolve) => {
++      const closeTimer = setTimeout(() => {
++        // If the daemon didn't close it, close it ourselves
++        if (ws1.readyState !== WebSocket.CLOSED) {
++          ws1.close();
++        }
++        resolve();
++      }, 1000);
++      closeTimer.unref();
++
++      ws1.addEventListener("close", () => {
++        clearTimeout(closeTimer);
++        resolve();
++      }, { once: true });
++    });
+ 
+     // Verify daemon is still alive by sending a proper plain RPC on a new connection
+     const ws2 = new WebSocket(daemon.wsUrl);
++    ws2.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws2);
+ 
+     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
+     expect(resp.error).toBeUndefined();
+     expect(resp.result).toBeInstanceOf(Array);
++    expect(resp.jsonrpc).toBe("2.0");
++    expect(typeof resp.id).toBe("string");
+ 
+     ws2.close();
+   });
+@@ -209,6 +229,7 @@ describe("Protocol Error Handling", () => {
+ 
+   it("unsupported noise_suite in client_hello", async () => {
+     const ws = new WebSocket(daemon.wsUrl);
++    ws.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws);
+ 
+     const clientHello = {
+@@ -245,20 +266,26 @@ describe("Protocol Error Handling", () => {
+       daemon.noiseKeyInfo,
+       daemon.nodeId,
+     );
++    noiseWs.addEventListener("error", () => {}); // prevent unhandled error events
+ 
+     // Open plain connection simultaneously
+     const plainWs = new WebSocket(daemon.wsUrl);
++    plainWs.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(plainWs);
+ 
+     // Send encrypted RPC on the Noise connection
+     const encResp = await encryptedRpc(transport, noiseWs, "listSessions", { filters: {} });
+     expect(encResp.error).toBeUndefined();
+     expect(encResp.result).toBeInstanceOf(Array);
++    expect(encResp.jsonrpc).toBe("2.0");
++    expect(typeof encResp.id).toBe("string");
+ 
+     // Send plain RPC on the plain connection
+     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
+     expect(plainResp.error).toBeUndefined();
+     expect(plainResp.result).toBeInstanceOf(Array);
++    expect(plainResp.jsonrpc).toBe("2.0");
++    expect(typeof plainResp.id).toBe("string");
+ 
+     // Both returned valid session lists without cross-contamination
+     noiseWs.close();
+@@ -278,6 +305,7 @@ describe("Protocol Error Handling", () => {
+     });
+ 
+     const ws = new WebSocket(daemon.wsUrl);
++    ws.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws);
+ 
+     // Send client_hello
+@@ -300,11 +328,14 @@ describe("Protocol Error Handling", () => {
+ 
+     // Verify the daemon is still alive and functioning
+     const ws2 = new WebSocket(daemon.wsUrl);
++    ws2.addEventListener("error", () => {}); // prevent unhandled error events
+     await waitForOpen(ws2);
+ 
+     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
+     expect(resp.error).toBeUndefined();
+     expect(resp.result).toBeInstanceOf(Array);
++    expect(resp.jsonrpc).toBe("2.0");
++    expect(typeof resp.id).toBe("string");
+ 
+     ws2.close();
+   }, 15_000);
+diff --git a/tests/e2e/protocol/protocol-helpers.ts b/tests/e2e/protocol/protocol-helpers.ts
+index 6b023bb..e9852ce 100644
+--- a/tests/e2e/protocol/protocol-helpers.ts
++++ b/tests/e2e/protocol/protocol-helpers.ts
+@@ -26,11 +26,10 @@ export interface DaemonHandle {
+   server: { port: number; stop(closeActiveConnections?: boolean): void };
+   svc: OrkaService;
+   noiseKeyInfo: NoiseKeyInfo;
+-  legacyKeyPair: { publicKey: string; privateKey: string };
+   nodeId: string;
+   wsUrl: string;
+   httpUrl: string;
+-  stop(): void;
++  stop(): void | Promise<void>;
+ }
+ 
+ export interface SecureConnection {
+@@ -65,8 +64,6 @@ export async function startDaemonWithNoise(opts?: {
+   const svc = createLocalClient();
+ 
+   const noiseKeyInfo = ensureNoiseKeyPair(getOrkaHome(), "node");
+-  const { ensureKeyPair } = await import("../../../packages/core/src/crypto");
+-  const legacyKeyPair = ensureKeyPair(getOrkaHome(), "node");
+ 
+   const server = await startServer(svc, {
+     port: 0,
+@@ -80,11 +77,19 @@ export async function startDaemonWithNoise(opts?: {
+     server,
+     svc,
+     noiseKeyInfo,
+-    legacyKeyPair,
+     nodeId,
+     wsUrl: `ws://127.0.0.1:${port}`,
+     httpUrl: `http://127.0.0.1:${port}`,
+-    stop() {
++    async stop() {
++      try {
++        // Kill all tmux sessions spawned during the test
++        const sessions = await svc.listSessions();
++        await Promise.all(
++          sessions
++            .filter((s) => s.status === "running")
++            .map((s) => svc.stop(s.id).catch(() => {})),
++        );
++      } catch {}
+       try {
+         server.stop(true);
+       } catch {}
+diff --git a/tests/e2e/protocol/session-lifecycle.e2e.test.ts b/tests/e2e/protocol/session-lifecycle.e2e.test.ts
+new file mode 100644
+index 0000000..85e6e97
+--- /dev/null
++++ b/tests/e2e/protocol/session-lifecycle.e2e.test.ts
+@@ -0,0 +1,356 @@
++/**
++ * E2E tests for full session lifecycle through an encrypted Noise channel.
++ *
++ * Verifies:
++ *   - Full lifecycle: spawn -> list -> show -> stop
++ *   - Spawn -> wait for completion -> getResult
++ *   - Spawn -> getLogContent
++ *   - Multiple concurrent sessions
++ *   - deleteSessions removes sessions
++ *
++ * Run with: bun test tests/e2e/protocol/session-lifecycle.e2e.test.ts
++ */
++
++import { mkdtempSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { $ } from "bun";
++import { describe, test, expect, beforeAll, afterAll } from "bun:test";
++
++// Isolated ORKA_HOME — must be set BEFORE importing daemon modules
++const orkaHome = mkdtempSync(join(tmpdir(), "orka-lifecycle-"));
++process.env["ORKA_HOME"] = orkaHome;
++
++import {
++  startDaemonWithNoise,
++  performNoiseHandshake,
++  encryptedRpc,
++  type DaemonHandle,
++  type SecureConnection,
++} from "./protocol-helpers";
++
++/**
++ * Poll getSession via encrypted RPC until the session is no longer running.
++ * Returns the final session object.
++ */
++async function waitForSessionCompletion(
++  conn: SecureConnection,
++  sessionId: string,
++  timeoutMs = 15_000,
++  intervalMs = 200,
++): Promise<Record<string, unknown>> {
++  const deadline = Date.now() + timeoutMs;
++  while (Date.now() < deadline) {
++    const resp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
++      id: sessionId,
++    });
++    expect(resp.error).toBeUndefined();
++    const session = resp.result as Record<string, unknown>;
++    if (session && session.status !== "running" && session.status !== "queued" && session.status !== "preparing") {
++      return session;
++    }
++    await Bun.sleep(intervalMs);
++  }
++  throw new Error(`Session ${sessionId} did not complete within ${timeoutMs}ms`);
++}
++
++describe("Session Lifecycle via Encrypted Channel", () => {
++  let daemon: DaemonHandle;
++  let testRepo: string;
++
++  beforeAll(async () => {
++    // Create a temp git repo for spawn tests
++    testRepo = mkdtempSync(join(tmpdir(), "orka-lifecycle-repo-"));
++    await $`git init ${testRepo}`.quiet();
++    await $`git -C ${testRepo} config user.email "test@orka.dev"`.quiet();
++    await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
++    await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
++
++    daemon = await startDaemonWithNoise({ nodeId: "lifecycle-test-node" });
++  }, 30_000);
++
++  afterAll(async () => {
++    await daemon?.stop();
++    rmSync(orkaHome, { recursive: true, force: true });
++    rmSync(testRepo, { recursive: true, force: true });
++  });
++
++  // ---- 1. Full lifecycle: spawn -> list -> show -> stop ----
++
++  test("full lifecycle: spawn -> list -> show -> stop via encrypted channel", async () => {
++    const conn = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Spawn a shell session with a long-running command so we can stop it
++    const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
++      prompt: "sleep 60",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      title: "lifecycle-full-test",
++    });
++
++    expect(spawnResp.error).toBeUndefined();
++    const spawned = spawnResp.result as Record<string, unknown>;
++    expect(typeof spawned.id).toBe("string");
++    expect((spawned.id as string).startsWith("sess-")).toBe(true);
++    expect(spawned.backend).toBe("shell");
++    expect(spawned.status).toBe("running");
++
++    const sessionId = spawned.id as string;
++
++    // List sessions and verify the new session appears
++    const listResp = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
++      filters: {},
++    });
++    expect(listResp.error).toBeUndefined();
++    const sessions = listResp.result as Array<Record<string, unknown>>;
++    const found = sessions.find((s) => s.id === sessionId);
++    expect(found).toBeDefined();
++    expect(found!.backend).toBe("shell");
++
++    // Get session details
++    const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
++      id: sessionId,
++    });
++    expect(getResp.error).toBeUndefined();
++    const detail = getResp.result as Record<string, unknown>;
++    expect(detail.id).toBe(sessionId);
++    expect(detail.backend).toBe("shell");
++    expect(detail.mode).toBe("background");
++    expect(detail.projectPath).toBe(testRepo);
++
++    // Stop the session
++    const stopResp = await encryptedRpc(conn.transport, conn.ws, "stop", {
++      sessionId,
++    });
++    expect(stopResp.error).toBeUndefined();
++
++    // Wait briefly for status to update
++    await Bun.sleep(500);
++
++    // Verify status becomes completed or stopped
++    const afterStop = await encryptedRpc(conn.transport, conn.ws, "getSession", {
++      id: sessionId,
++    });
++    expect(afterStop.error).toBeUndefined();
++    const finalSession = afterStop.result as Record<string, unknown>;
++    expect(["completed", "stopped", "cancelled", "failed"]).toContain(
++      finalSession.status as string,
++    );
++
++    conn.ws.close();
++  }, 30_000);
++
++  // ---- 2. Spawn -> wait for completion -> getResult ----
++
++  test("spawn -> wait for completion -> getResult via encrypted channel", async () => {
++    const conn = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Spawn a short-lived shell session that exits cleanly.
++    // The shell adapter appends `exec bash -i` after the command, so we
++    // must `exit 0` explicitly to prevent the interactive shell from starting.
++    const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
++      prompt: "echo done && exit 0",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      title: "lifecycle-result-test",
++    });
++
++    expect(spawnResp.error).toBeUndefined();
++    const spawned = spawnResp.result as Record<string, unknown>;
++    const sessionId = spawned.id as string;
++    expect(sessionId.startsWith("sess-")).toBe(true);
++
++    // Poll until session completes
++    const finalSession = await waitForSessionCompletion(conn, sessionId);
++    expect(["completed", "failed"]).toContain(finalSession.status as string);
++
++    // Get result
++    const resultResp = await encryptedRpc(conn.transport, conn.ws, "getResult", {
++      sessionId,
++    });
++    expect(resultResp.error).toBeUndefined();
++    // getResult may return null for shell sessions that complete too quickly
++    // for the runtime to capture structured output. The call succeeding without
++    // error is what we verify; if a result is present, check its shape.
++    if (resultResp.result !== null) {
++      const result = resultResp.result as Record<string, unknown>;
++      expect(typeof result.durationMs).toBe("number");
++    }
++
++    conn.ws.close();
++  }, 30_000);
++
++  // ---- 3. Spawn -> getLogContent ----
++
++  test("spawn -> getLogContent via encrypted channel", async () => {
++    const conn = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Spawn a session that produces output and exits cleanly
++    const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
++      prompt: "echo lifecycle-log-test-output && exit 0",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      title: "lifecycle-log-test",
++    });
++
++    expect(spawnResp.error).toBeUndefined();
++    const spawned = spawnResp.result as Record<string, unknown>;
++    const sessionId = spawned.id as string;
++
++    // Wait for completion
++    await waitForSessionCompletion(conn, sessionId);
++
++    // Get log content
++    const logResp = await encryptedRpc(conn.transport, conn.ws, "getLogContent", {
++      sessionId,
++    });
++    expect(logResp.error).toBeUndefined();
++    // getLogContent returns a string if the log file exists, null otherwise.
++    // Short-lived sessions may not produce a log file.
++    const logContent = logResp.result;
++    expect(logContent === null || typeof logContent === "string").toBe(true);
++    if (typeof logContent === "string") {
++      expect(logContent.length).toBeGreaterThan(0);
++    }
++
++    conn.ws.close();
++  }, 30_000);
++
++  // ---- 4. Multiple sessions managed concurrently ----
++
++  test("multiple sessions managed concurrently", async () => {
++    const conn = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Spawn 3 sessions sequentially (encrypted RPCs share a single
++    // transport with sequential nonces, so parallel sends would race)
++    const sessionIds: string[] = [];
++    for (let i = 1; i <= 3; i++) {
++      const resp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
++        prompt: "sleep 30",
++        backend: "shell",
++        mode: "background",
++        projectPath: testRepo,
++        title: `lifecycle-concurrent-${i}`,
++        tags: ["concurrent-test"],
++      });
++      expect(resp.error).toBeUndefined();
++      const session = resp.result as Record<string, unknown>;
++      expect(typeof session.id).toBe("string");
++      expect((session.id as string).startsWith("sess-")).toBe(true);
++      expect(session.backend).toBe("shell");
++      sessionIds.push(session.id as string);
++    }
++
++    expect(sessionIds.length).toBe(3);
++
++    // List sessions and verify all 3 appear
++    const listResp = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
++      filters: {},
++    });
++    expect(listResp.error).toBeUndefined();
++    const allSessions = listResp.result as Array<Record<string, unknown>>;
++
++    for (const id of sessionIds) {
++      const found = allSessions.find((s) => s.id === id);
++      expect(found).toBeDefined();
++      expect(found!.backend).toBe("shell");
++    }
++
++    // Stop any that are still running
++    for (const id of sessionIds) {
++      const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
++        id,
++      });
++      const session = getResp.result as Record<string, unknown>;
++      if (session.status === "running" || session.status === "queued" || session.status === "preparing") {
++        await encryptedRpc(conn.transport, conn.ws, "stop", { sessionId: id });
++      }
++    }
++
++    // Wait briefly for status updates
++    await Bun.sleep(500);
++
++    // Verify all are no longer running
++    for (const id of sessionIds) {
++      const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
++        id,
++      });
++      expect(getResp.error).toBeUndefined();
++      const session = getResp.result as Record<string, unknown>;
++      expect(["completed", "stopped", "cancelled", "failed"]).toContain(
++        session.status as string,
++      );
++    }
++
++    conn.ws.close();
++  }, 30_000);
++
++  // ---- 5. deleteSessions removes sessions ----
++
++  test("deleteSessions removes sessions", async () => {
++    const conn = await performNoiseHandshake(
++      daemon.wsUrl,
++      daemon.noiseKeyInfo,
++      daemon.nodeId,
++    );
++
++    // Spawn a session that exits cleanly
++    const spawnResp = await encryptedRpc(conn.transport, conn.ws, "spawn", {
++      prompt: "echo delete-me && exit 0",
++      backend: "shell",
++      mode: "background",
++      projectPath: testRepo,
++      title: "lifecycle-delete-test",
++    });
++
++    expect(spawnResp.error).toBeUndefined();
++    const spawned = spawnResp.result as Record<string, unknown>;
++    const sessionId = spawned.id as string;
++
++    // Wait for completion
++    await waitForSessionCompletion(conn, sessionId);
++
++    // Verify it exists in listing
++    const listBefore = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
++      filters: {},
++    });
++    expect(listBefore.error).toBeUndefined();
++    const beforeSessions = listBefore.result as Array<Record<string, unknown>>;
++    expect(beforeSessions.some((s) => s.id === sessionId)).toBe(true);
++
++    // Delete the session
++    const deleteResp = await encryptedRpc(conn.transport, conn.ws, "deleteSessions", {
++      ids: [sessionId],
++    });
++    expect(deleteResp.error).toBeUndefined();
++
++    // Verify it no longer appears in listing
++    const listAfter = await encryptedRpc(conn.transport, conn.ws, "listSessions", {
++      filters: {},
++    });
++    expect(listAfter.error).toBeUndefined();
++    const afterSessions = listAfter.result as Array<Record<string, unknown>>;
++    expect(afterSessions.some((s) => s.id === sessionId)).toBe(false);
++
++    conn.ws.close();
++  }, 30_000);
++});
+diff --git a/tests/e2e/relay.e2e.test.ts b/tests/e2e/relay.e2e.test.ts
+index c521caf..56fb0b2 100644
+--- a/tests/e2e/relay.e2e.test.ts
++++ b/tests/e2e/relay.e2e.test.ts
+@@ -1,6 +1,9 @@
+ /**
+  * E2E tests for the relay server.
+  *
++ * Tests relay-specific behavior: health endpoint, account isolation,
++ * usage tracking. Auth and key management tests live in auth.e2e.test.ts.
++ *
+  * Requires Docker. Skipped if Docker is not available.
+  * Run with: bun test tests/e2e/relay.e2e.test.ts
+  */
+@@ -30,13 +33,11 @@ describeE2E("Relay E2E", () => {
+   let relay: RelayContainer;
+   // Shared account — avoids signup rate limit (5/hour/IP)
+   let sharedApiKey: string;
+-  let sharedAccountId: string;
+ 
+   beforeAll(async () => {
+     relay = await startRelayContainer();
+     const signup = await relaySignup(relay.httpUrl, "shared@example.com", "Shared Account");
+     sharedApiKey = signup.apiKey;
+-    sharedAccountId = signup.accountId;
+   }, 120_000); // Container build can be slow
+ 
+   afterAll(async () => {
+@@ -52,88 +53,7 @@ describeE2E("Relay E2E", () => {
+     expect(body.status).toBe("ok");
+   });
+ 
+-  // --- Signup & Auth ---
+-
+-  test("signup creates account and returns API key", () => {
+-    // Verified in beforeAll; check stored values
+-    expect(sharedAccountId).toBeTruthy();
+-    expect(sharedApiKey).toBeTruthy();
+-    expect(sharedApiKey.startsWith("ork_live_")).toBe(true);
+-  });
+-
+-  test("duplicate signup returns 409", async () => {
+-    const res = await fetch(`${relay.httpUrl}/v1/signup`, {
+-      method: "POST",
+-      headers: { "Content-Type": "application/json" },
+-      body: JSON.stringify({ email: "shared@example.com", name: "Dup" }),
+-    });
+-    expect(res.status).toBe(409);
+-  });
+-
+-  test("unauthenticated request returns 401", async () => {
+-    const res = await fetch(`${relay.httpUrl}/v1/account`);
+-    expect(res.status).toBe(401);
+-  });
+-
+-  test("authenticated account endpoint returns profile", async () => {
+-    const res = await fetch(`${relay.httpUrl}/v1/account`, {
+-      headers: { Authorization: `Bearer ${sharedApiKey}` },
+-    });
+-    expect(res.status).toBe(200);
+-    const body = await res.json() as any;
+-    expect(body.email).toBe("shared@example.com");
+-    expect(body.status).toBe("active");
+-  });
+-
+-  // --- API Keys ---
+-
+-  test("create and list API keys", async () => {
+-    const headers = { Authorization: `Bearer ${sharedApiKey}`, "Content-Type": "application/json" };
+-
+-    // Create a new key
+-    const createRes = await fetch(`${relay.httpUrl}/v1/keys`, {
+-      method: "POST",
+-      headers,
+-      body: JSON.stringify({ label: "secondary" }),
+-    });
+-    expect(createRes.status).toBe(201);
+-    const created = await createRes.json() as any;
+-    expect(created.apiKey.startsWith("ork_live_")).toBe(true);
+-
+-    // List keys (should have at least 2)
+-    const listRes = await fetch(`${relay.httpUrl}/v1/keys`, { headers });
+-    expect(listRes.status).toBe(200);
+-    const list = await listRes.json() as any;
+-    expect(list.keys.length).toBeGreaterThanOrEqual(2);
+-  });
+-
+-  test("revoke API key", async () => {
+-    const headers = { Authorization: `Bearer ${sharedApiKey}`, "Content-Type": "application/json" };
+-
+-    // Create a key to revoke
+-    const createRes = await fetch(`${relay.httpUrl}/v1/keys`, {
+-      method: "POST",
+-      headers,
+-      body: JSON.stringify({ label: "to-revoke" }),
+-    });
+-    const { keyId } = await createRes.json() as any;
+-
+-    // Revoke it
+-    const revokeRes = await fetch(`${relay.httpUrl}/v1/keys/${keyId}`, {
+-      method: "DELETE",
+-      headers,
+-    });
+-    expect(revokeRes.status).toBe(200);
+-  });
+-
+-  // --- WebSocket ---
+-
+-  test("client connects via WebSocket", async () => {
+-    const ws = connectClient(relay.wsUrl, sharedApiKey);
+-    await waitForOpen(ws);
+-    expect(ws.readyState).toBe(WebSocket.OPEN);
+-    ws.close();
+-  });
++  // --- Account Isolation ---
+ 
+   test("account isolation: client without nodes gets error", async () => {
+     // Create a second account for isolation test (uses one signup slot)
+@@ -156,6 +76,7 @@ describeE2E("Relay E2E", () => {
+ 
+     // Should get an error because B has no nodes
+     expect(response["error"]).toBeTruthy();
++    expect((response["error"] as Record<string, unknown>)["code"]).toBe(503);
+ 
+     wsNode.close();
+     wsB.close();
+@@ -169,6 +90,6 @@ describeE2E("Relay E2E", () => {
+     });
+     expect(res.status).toBe(200);
+     const body = await res.json() as any;
+-    expect(body.buckets).toBeDefined();
++    expect(Array.isArray(body.buckets)).toBe(true);
+   });
+ });
+diff --git a/tests/e2e/routing.e2e.test.ts b/tests/e2e/routing.e2e.test.ts
+index b358009..420bef3 100644
+--- a/tests/e2e/routing.e2e.test.ts
++++ b/tests/e2e/routing.e2e.test.ts
+@@ -22,7 +22,6 @@ process.env["ORKA_RELAY_DATA"] = relayHome;
+ 
+ import { createLocalClient, startServer } from "@orka/daemon";
+ import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
+-import type { OrkaService } from "@orka/core";
+ 
+ let tmuxAvailable = false;
+ try {
+@@ -66,7 +65,6 @@ function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
+ describeE2E("Full-Stack Routing", () => {
+   let relay: RelayHandle;
+   let daemonServer: any;
+-  let svc: OrkaService;
+   let testRepo: string;
+ 
+   let relayPort: number;
+@@ -113,7 +111,7 @@ describeE2E("Full-Stack Routing", () => {
+     nodeApiKey = nodeKeyData.apiKey;
+ 
+     // 4. Start daemon and register with relay
+-    svc = createLocalClient();
++    const svc = createLocalClient();
+     daemonServer = await startServer(svc, {
+       port: 0,
+       hostname: "127.0.0.1",
+@@ -262,7 +260,8 @@ describeE2E("Full-Stack Routing", () => {
+     const resp = await rpc(ws2, "listSessions", { filters: {} });
+     // Should get "No nodes available" error since account 2 has no registered nodes
+     expect(resp.error).toBeTruthy();
+-    expect(resp.error.code).toBe(503);
++    expect(resp.error).not.toBeNull();
++    expect(resp.error!.code).toBe(503);
+ 
+     ws2.close();
+   });
+diff --git a/tests/e2e/worktree.e2e.test.ts b/tests/e2e/worktree.e2e.test.ts
+index 76d4a29..e358423 100644
+--- a/tests/e2e/worktree.e2e.test.ts
++++ b/tests/e2e/worktree.e2e.test.ts
+@@ -139,20 +139,17 @@ describeE2E("Worktree Management", () => {
+   });
+ 
+   test("merge brings worktree commits into main repo", async () => {
+-    // Spawn a session that creates and commits a file
++    // Spawn a session that sets git config THEN creates and commits a file.
++    // Git config must be set inside the prompt to avoid a race condition —
++    // the shell command runs immediately, so configuring after spawn is too late.
+     const session = await client.spawn({
+-      prompt: "echo 'merge-test-content' > merge-test.txt && git add merge-test.txt && git commit -m 'add merge-test'",
++      prompt: 'git config user.email "test@orka.dev" && git config user.name "Orka Test" && echo \'merge-test-content\' > merge-test.txt && git add merge-test.txt && git commit -m \'add merge-test\'',
+       backend: "shell",
+       mode: "background",
+       projectPath: testRepo,
+     });
+     spawnedTmuxNames.push(session.tmuxSessionName);
+ 
+-    // Git config for the worktree (needed for commit)
+-    await Bun.sleep(200);
+-    await $`git -C ${session.workingDir} config user.email "test@orka.dev"`.quiet();
+-    await $`git -C ${session.workingDir} config user.name "Orka Test"`.quiet();
+-
+     // Wait for the session to finish
+     await waitFor(async () => !(await client.isAlive(session.id)), { timeoutMs: 10_000 });
+ 

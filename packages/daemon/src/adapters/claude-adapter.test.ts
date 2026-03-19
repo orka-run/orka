@@ -66,6 +66,122 @@ describe("mapClaudeEvent", () => {
     });
   });
 
+  test("maps system task_progress to tool.progress", () => {
+    const event = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "task_progress",
+      tool_use_id: "tool-1",
+      last_tool_name: "Read",
+      progress_text: "Reading src/db.ts",
+      elapsed_seconds: 2,
+    }, { turnId: "turn-1" });
+
+    expect(event).not.toBeNull();
+    expect(event?.type).toBe("tool.progress");
+    expect(event?.turnId).toBe("turn-1");
+    expect(event?.itemId).toBe("tool-1");
+    expect(event?.payload).toEqual({
+      toolName: "Read",
+      summary: "Reading src/db.ts",
+      elapsedSeconds: 2,
+    });
+  });
+
+  test("maps system task lifecycle events", () => {
+    const started = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-1",
+      tool_use_id: "tool-1",
+      description: "Explore dashboard structure",
+      prompt: "Inspect chat timeline rendering",
+      subagent_type: "research",
+    }, { turnId: "turn-1" });
+
+    const completed = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-1",
+      tool_use_id: "tool-1",
+      status: "completed",
+      summary: "Found the timeline renderer and summarized the missing cases.",
+    }, { turnId: "turn-1" });
+
+    expect(started?.type).toBe("task.started");
+    expect(started?.turnId).toBe("turn-1");
+    expect(started?.itemId).toBe("tool-1");
+    expect(started?.payload).toEqual({
+      taskId: "task-1",
+      toolUseId: "tool-1",
+      title: "Explore dashboard structure",
+      detail: "Inspect chat timeline rendering",
+      taskKind: "research",
+    });
+
+    expect(completed?.type).toBe("task.completed");
+    expect(completed?.turnId).toBe("turn-1");
+    expect(completed?.itemId).toBe("tool-1");
+    expect(completed?.payload).toEqual({
+      taskId: "task-1",
+      toolUseId: "tool-1",
+      summary: "Found the timeline renderer and summarized the missing cases.",
+      status: "completed",
+    });
+  });
+
+  test("maps hook, status, and compaction system events", () => {
+    const hookStarted = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "hook_started",
+      hook_name: "SessionStart:startup",
+      matcher: "startup",
+    });
+    const hookResponse = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "hook_response",
+      hook_name: "SessionStart:startup",
+      approved: true,
+      reason: "Hook completed",
+    });
+    const status = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "status",
+      status: "compacting",
+      message: "Preparing to trim context",
+    });
+    const compacted = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "compact_boundary",
+      pre_compaction_token_count: 120000,
+      post_compaction_token_count: 64000,
+    });
+
+    expect(hookStarted?.type).toBe("hook.started");
+    expect(hookStarted?.payload).toEqual({
+      hookName: "SessionStart:startup",
+      matcher: "startup",
+    });
+
+    expect(hookResponse?.type).toBe("hook.response");
+    expect(hookResponse?.payload).toEqual({
+      hookName: "SessionStart:startup",
+      decision: "allowed",
+      reason: "Hook completed",
+    });
+
+    expect(status?.type).toBe("session.status");
+    expect(status?.payload).toEqual({
+      status: "compacting",
+      detail: "Preparing to trim context",
+    });
+
+    expect(compacted?.type).toBe("session.compacted");
+    expect(compacted?.payload).toEqual({
+      tokenCountBefore: 120000,
+      tokenCountAfter: 64000,
+    });
+  });
+
   test("maps assistant text to content.delta", () => {
     const event = mapClaudeEvent("thread-1", {
       type: "assistant",

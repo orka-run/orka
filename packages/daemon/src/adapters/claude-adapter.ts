@@ -418,8 +418,9 @@ export function mapClaudeEvent(
   }
 
   switch (raw["type"]) {
-    case "system":
-      if (raw["subtype"] === "init") {
+    case "system": {
+      const subtype = raw["subtype"];
+      if (subtype === "init") {
         return createEvent(
           "session.started",
           threadId,
@@ -428,7 +429,7 @@ export function mapClaudeEvent(
         );
       }
 
-      if (raw["subtype"] === "api_retry") {
+      if (subtype === "api_retry") {
         const retry = normalizeClaudeApiRetryInfo(raw);
         if (!retry) {
           return null;
@@ -447,7 +448,144 @@ export function mapClaudeEvent(
         );
       }
 
+      if (subtype === "task_progress") {
+        const progress = normalizeClaudeTaskProgress(raw);
+        if (!progress) {
+          return null;
+        }
+
+        return createEvent(
+          "tool.progress",
+          threadId,
+          {
+            ...(progress.toolName ? { toolName: progress.toolName } : {}),
+            ...(progress.summary ? { summary: progress.summary } : {}),
+            ...(progress.elapsedSeconds !== undefined ? { elapsedSeconds: progress.elapsedSeconds } : {}),
+          },
+          {
+            provider: "claude-code",
+            ...(turnId ? { turnId } : {}),
+            ...(progress.toolUseId ? { itemId: progress.toolUseId } : {}),
+          },
+        );
+      }
+
+      if (subtype === "task_started") {
+        const task = normalizeClaudeTaskStarted(raw);
+        if (!task) {
+          return null;
+        }
+
+        return createEvent(
+          "task.started",
+          threadId,
+          {
+            ...(task.taskId ? { taskId: task.taskId } : {}),
+            ...(task.toolUseId ? { toolUseId: task.toolUseId } : {}),
+            ...(task.title ? { title: task.title } : {}),
+            ...(task.detail ? { detail: task.detail } : {}),
+            ...(task.taskKind ? { taskKind: task.taskKind } : {}),
+          },
+          {
+            provider: "claude-code",
+            ...(turnId ? { turnId } : {}),
+            ...(task.toolUseId ? { itemId: task.toolUseId } : {}),
+          },
+        );
+      }
+
+      if (subtype === "task_notification") {
+        const task = normalizeClaudeTaskCompleted(raw);
+        if (!task) {
+          return null;
+        }
+
+        return createEvent(
+          "task.completed",
+          threadId,
+          {
+            ...(task.taskId ? { taskId: task.taskId } : {}),
+            ...(task.toolUseId ? { toolUseId: task.toolUseId } : {}),
+            ...(task.summary ? { summary: task.summary } : {}),
+            ...(task.status ? { status: task.status } : {}),
+          },
+          {
+            provider: "claude-code",
+            ...(turnId ? { turnId } : {}),
+            ...(task.toolUseId ? { itemId: task.toolUseId } : {}),
+          },
+        );
+      }
+
+      if (subtype === "hook_started") {
+        const hook = normalizeClaudeHookStarted(raw);
+        if (!hook) {
+          return null;
+        }
+
+        return createEvent(
+          "hook.started",
+          threadId,
+          {
+            hookName: hook.hookName,
+            ...(hook.matcher ? { matcher: hook.matcher } : {}),
+          },
+          { provider: "claude-code", ...(turnId ? { turnId } : {}) },
+        );
+      }
+
+      if (subtype === "hook_response") {
+        const hook = normalizeClaudeHookResponse(raw);
+        if (!hook) {
+          return null;
+        }
+
+        return createEvent(
+          "hook.response",
+          threadId,
+          {
+            ...(hook.hookName ? { hookName: hook.hookName } : {}),
+            ...(hook.decision ? { decision: hook.decision } : {}),
+            ...(hook.reason ? { reason: hook.reason } : {}),
+          },
+          { provider: "claude-code", ...(turnId ? { turnId } : {}) },
+        );
+      }
+
+      if (subtype === "status") {
+        const status = normalizeClaudeSystemStatus(raw);
+        if (!status) {
+          return null;
+        }
+
+        return createEvent(
+          "session.status",
+          threadId,
+          {
+            status: status.status,
+            ...(status.detail ? { detail: status.detail } : {}),
+          },
+          { provider: "claude-code", ...(turnId ? { turnId } : {}) },
+        );
+      }
+
+      if (subtype === "compact_boundary") {
+        const compact = normalizeClaudeCompactBoundary(raw);
+        return createEvent(
+          "session.compacted",
+          threadId,
+          {
+            ...(compact.trigger ? { trigger: compact.trigger } : {}),
+            ...(compact.reason ? { reason: compact.reason } : {}),
+            ...(compact.tokenCountBefore !== undefined ? { tokenCountBefore: compact.tokenCountBefore } : {}),
+            ...(compact.tokenCountAfter !== undefined ? { tokenCountAfter: compact.tokenCountAfter } : {}),
+          },
+          { provider: "claude-code", ...(turnId ? { turnId } : {}) },
+        );
+      }
+
       return null;
+    }
 
     case "rate_limit_event": {
       const rateLimitInfo = normalizeClaudeRateLimitInfo(raw["rate_limit_info"]);
@@ -861,6 +999,141 @@ function normalizeClaudeApiRetryInfo(raw: Record<string, unknown>): ClaudeApiRet
   };
 }
 
+function normalizeClaudeTaskProgress(
+  raw: Record<string, unknown>,
+): { toolUseId?: string; toolName?: string; summary?: string; elapsedSeconds?: number } | undefined {
+  const records = getClaudeNestedRecords(raw, "task", "task_progress");
+  const toolUseId = readClaudeString(records, "tool_use_id", "toolUseId", "parent_tool_use_id", "parentToolUseId");
+  const toolName = readClaudeString(records, "last_tool_name", "lastToolName", "tool_name", "toolName");
+  const summary = readClaudeText(records, "progress_text", "progressText", "summary", "message", "text", "detail", "content");
+  const elapsedSeconds = readClaudeNumber(records, "elapsed_seconds", "elapsedSeconds", "duration_seconds", "durationSeconds");
+
+  if (!toolName && !summary && elapsedSeconds === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(toolUseId ? { toolUseId } : {}),
+    ...(toolName ? { toolName } : {}),
+    ...(summary ? { summary } : {}),
+    ...(elapsedSeconds !== undefined ? { elapsedSeconds } : {}),
+  };
+}
+
+function normalizeClaudeTaskStarted(
+  raw: Record<string, unknown>,
+): { taskId?: string; toolUseId?: string; title?: string; detail?: string; taskKind?: string } | undefined {
+  const records = getClaudeNestedRecords(raw, "task", "task_started");
+  const taskId = readClaudeString(records, "task_id", "taskId", "subagent_id", "subagentId");
+  const toolUseId = readClaudeString(records, "tool_use_id", "toolUseId", "parent_tool_use_id", "parentToolUseId");
+  const taskKind = readClaudeString(records, "task_type", "taskType", "subagent_type", "subagentType", "agent_type", "agentType");
+  const title = readClaudeString(records, "description", "title", "name") ?? taskKind;
+  const detail = readClaudeText(records, "prompt", "message", "detail", "content");
+
+  if (!taskId && !toolUseId && !title && !detail) {
+    return undefined;
+  }
+
+  return {
+    ...(taskId ? { taskId } : {}),
+    ...(toolUseId ? { toolUseId } : {}),
+    ...(title ? { title } : {}),
+    ...(detail ? { detail } : {}),
+    ...(taskKind ? { taskKind } : {}),
+  };
+}
+
+function normalizeClaudeTaskCompleted(
+  raw: Record<string, unknown>,
+): { taskId?: string; toolUseId?: string; summary?: string; status?: string } | undefined {
+  const records = getClaudeNestedRecords(raw, "task", "task_notification");
+  const taskId = readClaudeString(records, "task_id", "taskId", "subagent_id", "subagentId");
+  const toolUseId = readClaudeString(records, "tool_use_id", "toolUseId", "parent_tool_use_id", "parentToolUseId");
+  const status = readClaudeString(records, "status", "result", "completion_status", "completionStatus");
+  const summary = readClaudeText(records, "summary", "message", "detail", "result", "content");
+
+  if (!taskId && !toolUseId && !status && !summary) {
+    return undefined;
+  }
+
+  return {
+    ...(taskId ? { taskId } : {}),
+    ...(toolUseId ? { toolUseId } : {}),
+    ...(summary ? { summary } : {}),
+    ...(status ? { status } : {}),
+  };
+}
+
+function normalizeClaudeHookStarted(
+  raw: Record<string, unknown>,
+): { hookName: string; matcher?: string } | undefined {
+  const records = getClaudeNestedRecords(raw, "hook", "hook_started");
+  const hookName = readClaudeString(records, "hook_name", "hookName", "event_name", "eventName", "name", "hook_event_name", "hookEventName");
+  const matcher = readClaudeString(records, "matcher", "pattern");
+
+  if (!hookName) {
+    return undefined;
+  }
+
+  return {
+    hookName,
+    ...(matcher ? { matcher } : {}),
+  };
+}
+
+function normalizeClaudeHookResponse(
+  raw: Record<string, unknown>,
+): { hookName?: string; decision?: string; reason?: string } | undefined {
+  const records = getClaudeNestedRecords(raw, "hook", "hook_response");
+  const hookName = readClaudeString(records, "hook_name", "hookName", "event_name", "eventName", "name", "hook_event_name", "hookEventName");
+  const decisionText = readClaudeString(records, "decision", "result", "status");
+  const decisionFlag = readClaudeBoolean(records, "approved", "allow", "allowed", "success");
+  const decision = decisionText ?? (decisionFlag === undefined ? undefined : (decisionFlag ? "allowed" : "denied"));
+  const reason = readClaudeText(records, "reason", "message", "detail", "stdout", "stderr", "content");
+
+  if (!hookName && !decision && !reason) {
+    return undefined;
+  }
+
+  return {
+    ...(hookName ? { hookName } : {}),
+    ...(decision ? { decision } : {}),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+function normalizeClaudeSystemStatus(raw: Record<string, unknown>): { status: string; detail?: string } | undefined {
+  const records = getClaudeNestedRecords(raw, "status");
+  const status = readClaudeString(records, "status", "session_status", "sessionStatus", "state");
+  const detail = readClaudeText(records, "message", "detail", "reason", "content");
+
+  if (!status) {
+    return undefined;
+  }
+
+  return {
+    status,
+    ...(detail ? { detail } : {}),
+  };
+}
+
+function normalizeClaudeCompactBoundary(
+  raw: Record<string, unknown>,
+): { trigger?: string; reason?: string; tokenCountBefore?: number; tokenCountAfter?: number } {
+  const records = getClaudeNestedRecords(raw, "compact_boundary");
+  const trigger = readClaudeString(records, "trigger", "status", "phase");
+  const reason = readClaudeText(records, "message", "detail", "reason", "content");
+  const tokenCountBefore = readClaudeNumber(records, "token_count_before", "tokenCountBefore", "pre_compaction_token_count", "preCompactTokenCount");
+  const tokenCountAfter = readClaudeNumber(records, "token_count_after", "tokenCountAfter", "post_compaction_token_count", "postCompactTokenCount");
+
+  return {
+    ...(trigger ? { trigger } : {}),
+    ...(reason ? { reason } : {}),
+    ...(tokenCountBefore !== undefined ? { tokenCountBefore } : {}),
+    ...(tokenCountAfter !== undefined ? { tokenCountAfter } : {}),
+  };
+}
+
 function firstModelUsage(value: unknown): unknown {
   if (!isRecord(value)) {
     return undefined;
@@ -868,6 +1141,77 @@ function firstModelUsage(value: unknown): unknown {
 
   const first = Object.values(value)[0];
   return isRecord(first) ? first : undefined;
+}
+
+function getClaudeNestedRecords(raw: Record<string, unknown>, ...keys: string[]): Record<string, unknown>[] {
+  const records = [raw];
+  for (const key of keys) {
+    const value = raw[key];
+    if (isRecord(value)) {
+      records.push(value);
+    }
+  }
+
+  return records;
+}
+
+function readClaudeString(records: Record<string, unknown>[], ...keys: string[]): string | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "string") {
+        const normalized = value.trim();
+        if (normalized.length > 0) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readClaudeText(records: Record<string, unknown>[], ...keys: string[]): string | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      if (!(key in record)) {
+        continue;
+      }
+
+      const normalized = extractClaudeText(record[key]).trim();
+      if (normalized.length > 0) {
+        return normalized;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readClaudeNumber(records: Record<string, unknown>[], ...keys: string[]): number | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readClaudeBoolean(records: Record<string, unknown>[], ...keys: string[]): boolean | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "boolean") {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function normalizeClaudeUsageValue(value: unknown): ClaudeUsage | undefined {

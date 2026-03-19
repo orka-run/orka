@@ -154,6 +154,44 @@ export interface ToolProgressPayload {
   elapsedSeconds?: number;
 }
 
+export interface TaskStartedPayload {
+  taskId?: string;
+  toolUseId?: string;
+  title?: string;
+  detail?: string;
+  taskKind?: string;
+}
+
+export interface TaskCompletedPayload {
+  taskId?: string;
+  toolUseId?: string;
+  summary?: string;
+  status?: string;
+}
+
+export interface HookStartedPayload {
+  hookName: string;
+  matcher?: string;
+}
+
+export interface HookResponsePayload {
+  hookName?: string;
+  decision?: string;
+  reason?: string;
+}
+
+export interface SessionStatusPayload {
+  status: string;
+  detail?: string;
+}
+
+export interface SessionCompactedPayload {
+  trigger?: string;
+  reason?: string;
+  tokenCountBefore?: number;
+  tokenCountAfter?: number;
+}
+
 export interface RuntimeWarningPayload {
   message: string;
 }
@@ -202,6 +240,12 @@ export type ContentDeltaEvent = ProviderRuntimeEventEnvelope<"content.delta", Co
 export type RequestOpenedEvent = ProviderRuntimeEventEnvelope<"request.opened", RequestOpenedPayload>;
 export type RequestResolvedEvent = ProviderRuntimeEventEnvelope<"request.resolved", RequestResolvedPayload>;
 export type ToolProgressEvent = ProviderRuntimeEventEnvelope<"tool.progress", ToolProgressPayload>;
+export type TaskStartedEvent = ProviderRuntimeEventEnvelope<"task.started", TaskStartedPayload>;
+export type TaskCompletedEvent = ProviderRuntimeEventEnvelope<"task.completed", TaskCompletedPayload>;
+export type HookStartedEvent = ProviderRuntimeEventEnvelope<"hook.started", HookStartedPayload>;
+export type HookResponseEvent = ProviderRuntimeEventEnvelope<"hook.response", HookResponsePayload>;
+export type SessionStatusEvent = ProviderRuntimeEventEnvelope<"session.status", SessionStatusPayload>;
+export type SessionCompactedEvent = ProviderRuntimeEventEnvelope<"session.compacted", SessionCompactedPayload>;
 export type RuntimeErrorEvent = ProviderRuntimeEventEnvelope<"runtime.error", RuntimeErrorPayload>;
 export type RuntimeWarningEvent = ProviderRuntimeEventEnvelope<"runtime.warning", RuntimeWarningPayload>;
 export type RateLimitEvent = ProviderRuntimeEventEnvelope<"rate.limit", RateLimitPayload>;
@@ -221,6 +265,12 @@ export type ProviderRuntimeEvent =
   | RequestOpenedEvent
   | RequestResolvedEvent
   | ToolProgressEvent
+  | TaskStartedEvent
+  | TaskCompletedEvent
+  | HookStartedEvent
+  | HookResponseEvent
+  | SessionStatusEvent
+  | SessionCompactedEvent
   | RuntimeErrorEvent
   | RuntimeWarningEvent
   | RateLimitEvent
@@ -240,6 +290,12 @@ export interface ProviderRuntimeEventPayloads {
   "request.opened": RequestOpenedPayload;
   "request.resolved": RequestResolvedPayload;
   "tool.progress": ToolProgressPayload;
+  "task.started": TaskStartedPayload;
+  "task.completed": TaskCompletedPayload;
+  "hook.started": HookStartedPayload;
+  "hook.response": HookResponsePayload;
+  "session.status": SessionStatusPayload;
+  "session.compacted": SessionCompactedPayload;
   "runtime.error": RuntimeErrorPayload;
   "runtime.warning": RuntimeWarningPayload;
   "rate.limit": RateLimitPayload;

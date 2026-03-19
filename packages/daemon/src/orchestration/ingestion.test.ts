@@ -69,6 +69,100 @@ describe("mapProviderEvent", () => {
     });
   });
 
+  test("maps task, hook, status, and compaction events", () => {
+    const taskStarted = mapProviderEvent("session-1", {
+      eventId: "evt-task-started",
+      provider: "claude-code",
+      threadId: "thread-1",
+      createdAt: "2026-03-18T00:00:02.000Z",
+      turnId: "turn-1",
+      itemId: "tool-1",
+      type: "task.started",
+      payload: {
+        taskId: "task-1",
+        toolUseId: "tool-1",
+        title: "Explore dashboard structure",
+        detail: "Inspect chat timeline rendering",
+        taskKind: "research",
+      },
+    } as unknown as ProviderRuntimeEvent);
+    const hookResponse = mapProviderEvent("session-1", {
+      eventId: "evt-hook-response",
+      provider: "claude-code",
+      threadId: "thread-1",
+      createdAt: "2026-03-18T00:00:03.000Z",
+      type: "hook.response",
+      payload: {
+        hookName: "SessionStart:startup",
+        decision: "allowed",
+      },
+    } as unknown as ProviderRuntimeEvent);
+    const sessionStatus = mapProviderEvent("session-1", {
+      eventId: "evt-session-status",
+      provider: "claude-code",
+      threadId: "thread-1",
+      createdAt: "2026-03-18T00:00:04.000Z",
+      type: "session.status",
+      payload: {
+        status: "compacting",
+        detail: "Preparing to trim context",
+      },
+    } as unknown as ProviderRuntimeEvent);
+    const compacted = mapProviderEvent("session-1", {
+      eventId: "evt-session-compacted",
+      provider: "claude-code",
+      threadId: "thread-1",
+      createdAt: "2026-03-18T00:00:05.000Z",
+      type: "session.compacted",
+      payload: {
+        tokenCountBefore: 120000,
+        tokenCountAfter: 64000,
+      },
+    } as unknown as ProviderRuntimeEvent);
+
+    expect(taskStarted).toEqual({
+      v: 1,
+      eventId: "evt-task-started",
+      type: "task.started",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      itemId: "tool-1",
+      taskId: "task-1",
+      toolUseId: "tool-1",
+      title: "Explore dashboard structure",
+      detail: "Inspect chat timeline rendering",
+      taskKind: "research",
+      timestamp: "2026-03-18T00:00:02.000Z",
+    });
+    expect(hookResponse).toEqual({
+      v: 1,
+      eventId: "evt-hook-response",
+      type: "hook.response",
+      sessionId: "session-1",
+      hookName: "SessionStart:startup",
+      decision: "allowed",
+      timestamp: "2026-03-18T00:00:03.000Z",
+    });
+    expect(sessionStatus).toEqual({
+      v: 1,
+      eventId: "evt-session-status",
+      type: "session.status",
+      sessionId: "session-1",
+      status: "compacting",
+      detail: "Preparing to trim context",
+      timestamp: "2026-03-18T00:00:04.000Z",
+    });
+    expect(compacted).toEqual({
+      v: 1,
+      eventId: "evt-session-compacted",
+      type: "session.compacted",
+      sessionId: "session-1",
+      tokenCountBefore: 120000,
+      tokenCountAfter: 64000,
+      timestamp: "2026-03-18T00:00:05.000Z",
+    });
+  });
+
   test("maps unknown provider events to event.passthrough", () => {
     const rawPayload = {
       foo: "bar",

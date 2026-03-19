@@ -113,6 +113,42 @@ export type OrchestrationEvent =
       summary?: string;
       elapsedSeconds?: number;
     }>
+  | OrchestrationEventEnvelope<"task.started", {
+      turnId: string;
+      itemId?: string;
+      taskId?: string;
+      toolUseId?: string;
+      title?: string;
+      detail?: string;
+      taskKind?: string;
+    }>
+  | OrchestrationEventEnvelope<"task.completed", {
+      turnId: string;
+      itemId?: string;
+      taskId?: string;
+      toolUseId?: string;
+      summary?: string;
+      status?: string;
+    }>
+  | OrchestrationEventEnvelope<"hook.started", {
+      hookName: string;
+      matcher?: string;
+    }>
+  | OrchestrationEventEnvelope<"hook.response", {
+      hookName?: string;
+      decision?: string;
+      reason?: string;
+    }>
+  | OrchestrationEventEnvelope<"session.status", {
+      status: string;
+      detail?: string;
+    }>
+  | OrchestrationEventEnvelope<"session.compacted", {
+      trigger?: string;
+      reason?: string;
+      tokenCountBefore?: number;
+      tokenCountAfter?: number;
+    }>
   | OrchestrationEventEnvelope<"runtime.error", {
       turnId?: string;
       itemId?: string;
@@ -174,6 +210,12 @@ export const KnownOrchestrationEventTypeSchema = z.enum([
   "request.opened",
   "request.resolved",
   "tool.progress",
+  "task.started",
+  "task.completed",
+  "hook.started",
+  "hook.response",
+  "session.status",
+  "session.compacted",
   "runtime.error",
   "runtime.warning",
   "session.rate_limited",
@@ -318,6 +360,54 @@ const WireEventVariants: Record<string, z.ZodType> = {
     toolName: z.string().optional(),
     summary: z.string().optional(),
     elapsedSeconds: z.number().optional(),
+  }).passthrough(),
+
+  "task.started": WireEventBaseSchema.extend({
+    type: z.literal("task.started"),
+    turnId: z.string(),
+    itemId: z.string().optional(),
+    taskId: z.string().optional(),
+    toolUseId: z.string().optional(),
+    title: z.string().optional(),
+    detail: z.string().optional(),
+    taskKind: z.string().optional(),
+  }).passthrough(),
+
+  "task.completed": WireEventBaseSchema.extend({
+    type: z.literal("task.completed"),
+    turnId: z.string(),
+    itemId: z.string().optional(),
+    taskId: z.string().optional(),
+    toolUseId: z.string().optional(),
+    summary: z.string().optional(),
+    status: z.string().optional(),
+  }).passthrough(),
+
+  "hook.started": WireEventBaseSchema.extend({
+    type: z.literal("hook.started"),
+    hookName: z.string(),
+    matcher: z.string().optional(),
+  }).passthrough(),
+
+  "hook.response": WireEventBaseSchema.extend({
+    type: z.literal("hook.response"),
+    hookName: z.string().optional(),
+    decision: z.string().optional(),
+    reason: z.string().optional(),
+  }).passthrough(),
+
+  "session.status": WireEventBaseSchema.extend({
+    type: z.literal("session.status"),
+    status: z.string(),
+    detail: z.string().optional(),
+  }).passthrough(),
+
+  "session.compacted": WireEventBaseSchema.extend({
+    type: z.literal("session.compacted"),
+    trigger: z.string().optional(),
+    reason: z.string().optional(),
+    tokenCountBefore: z.number().optional(),
+    tokenCountAfter: z.number().optional(),
   }).passthrough(),
 
   "runtime.error": WireEventBaseSchema.extend({

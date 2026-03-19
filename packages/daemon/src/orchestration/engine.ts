@@ -253,7 +253,14 @@ export class OrchestrationEngine {
         case "item.updated":
         case "item.completed":
         case "tool.progress":
+        case "task.started":
+        case "task.completed":
           setRunning(projection, event.turnId);
+          break;
+        case "hook.started":
+        case "hook.response":
+        case "session.status":
+        case "session.compacted":
           break;
         case "request.opened":
           setRunning(projection);

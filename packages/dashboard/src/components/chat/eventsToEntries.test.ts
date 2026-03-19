@@ -106,4 +106,73 @@ describe("eventsToEntries", () => {
       queued: false,
     });
   });
+
+  test("renders task progress, hook, and compaction events as inline system entries", () => {
+    const entries = eventsToEntries([
+      {
+        type: "tool.progress",
+        sessionId: "s1",
+        turnId: "turn-1",
+        toolName: "Read",
+        summary: "Reading src/db.ts",
+        timestamp: "2026-03-11T00:00:01Z",
+      },
+      {
+        type: "task.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-1",
+        title: "Explore dashboard structure",
+        detail: "Inspect chat timeline rendering",
+        timestamp: "2026-03-11T00:00:02Z",
+      },
+      {
+        type: "hook.response",
+        sessionId: "s1",
+        hookName: "PreToolUse:Bash",
+        decision: "allowed",
+        timestamp: "2026-03-11T00:00:03Z",
+      },
+      {
+        type: "session.compacted",
+        sessionId: "s1",
+        tokenCountBefore: 120000,
+        tokenCountAfter: 64000,
+        timestamp: "2026-03-11T00:00:04Z",
+      },
+    ]);
+
+    expect(entries).toContainEqual({
+      id: "tool-progress-2026-03-11T00:00:01Z-turn-1",
+      type: "system",
+      timestamp: "2026-03-11T00:00:01Z",
+      title: "Read",
+      body: "Reading src/db.ts",
+      tone: "info",
+    });
+    expect(entries).toContainEqual({
+      id: "task-started-2026-03-11T00:00:02Z-task-1",
+      type: "system",
+      timestamp: "2026-03-11T00:00:02Z",
+      title: "Task started",
+      body: "Explore dashboard structure - Inspect chat timeline rendering",
+      tone: "info",
+    });
+    expect(entries).toContainEqual({
+      id: "hook-hook.response-2026-03-11T00:00:03Z-PreToolUse:Bash",
+      type: "system",
+      timestamp: "2026-03-11T00:00:03Z",
+      title: "Hook",
+      body: "PreToolUse:Bash - allowed",
+      tone: "info",
+    });
+    expect(entries).toContainEqual({
+      id: "session-compacted-2026-03-11T00:00:04Z",
+      type: "system",
+      timestamp: "2026-03-11T00:00:04Z",
+      title: "Context compacted",
+      body: "Trimmed context from 120000 to 64000 tokens.",
+      tone: "info",
+    });
+  });
 });

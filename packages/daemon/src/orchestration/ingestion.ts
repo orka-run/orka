@@ -165,6 +165,78 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         ...(event.payload.elapsedSeconds !== undefined ? { elapsedSeconds: event.payload.elapsedSeconds } : {}),
         timestamp: event.createdAt,
       };
+    case "task.started":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "task.started",
+        sessionId,
+        turnId: getTurnId(event),
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        ...(event.payload.taskId ? { taskId: event.payload.taskId } : {}),
+        ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+        ...(event.payload.title ? { title: event.payload.title } : {}),
+        ...(event.payload.detail ? { detail: event.payload.detail } : {}),
+        ...(event.payload.taskKind ? { taskKind: event.payload.taskKind } : {}),
+        timestamp: event.createdAt,
+      };
+    case "task.completed":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "task.completed",
+        sessionId,
+        turnId: getTurnId(event),
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        ...(event.payload.taskId ? { taskId: event.payload.taskId } : {}),
+        ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+        ...(event.payload.summary ? { summary: event.payload.summary } : {}),
+        ...(event.payload.status ? { status: event.payload.status } : {}),
+        timestamp: event.createdAt,
+      };
+    case "hook.started":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "hook.started",
+        sessionId,
+        hookName: event.payload.hookName,
+        ...(event.payload.matcher ? { matcher: event.payload.matcher } : {}),
+        timestamp: event.createdAt,
+      };
+    case "hook.response":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "hook.response",
+        sessionId,
+        ...(event.payload.hookName ? { hookName: event.payload.hookName } : {}),
+        ...(event.payload.decision ? { decision: event.payload.decision } : {}),
+        ...(event.payload.reason ? { reason: event.payload.reason } : {}),
+        timestamp: event.createdAt,
+      };
+    case "session.status":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "session.status",
+        sessionId,
+        status: event.payload.status,
+        ...(event.payload.detail ? { detail: event.payload.detail } : {}),
+        timestamp: event.createdAt,
+      };
+    case "session.compacted":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "session.compacted",
+        sessionId,
+        ...(event.payload.trigger ? { trigger: event.payload.trigger } : {}),
+        ...(event.payload.reason ? { reason: event.payload.reason } : {}),
+        ...(event.payload.tokenCountBefore !== undefined ? { tokenCountBefore: event.payload.tokenCountBefore } : {}),
+        ...(event.payload.tokenCountAfter !== undefined ? { tokenCountAfter: event.payload.tokenCountAfter } : {}),
+        timestamp: event.createdAt,
+      };
     case "runtime.error":
       return {
         v: 1,
