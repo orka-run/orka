@@ -20,7 +20,7 @@ interface ChatInputComposerProps {
 
 const STATE_PLACEHOLDERS: Record<InputState, string> = {
   waiting: "Send a follow-up message...",
-  busy: "Agent is working...",
+  busy: "Queue a message for when agent finishes...",
   disabled: "Session completed",
   not_started: "Session is starting...",
 };
@@ -31,7 +31,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
   const editorRef = useRef<ComposerEditorHandle>(null);
   const previousInputStateRef = useRef<InputState>(inputState);
 
-  const isEditable = inputState === "waiting" && !isSending;
+  const isEditable = (inputState === "waiting" || inputState === "busy") && !isSending;
   const canSend = isEditable && text.trim().length > 0;
 
   useEffect(() => {
