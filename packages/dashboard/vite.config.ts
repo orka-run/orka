@@ -4,7 +4,14 @@ import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react({
+      babel: {
+        plugins: [["babel-plugin-react-compiler", {}]],
+      },
+    }),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),
