@@ -179,7 +179,9 @@ function parseClaudeSystem(parsed: JsonRecord): LogEvent | null {
 
     return {
       kind: "info",
-      text: `API retry (attempt ${String(retry.attempt)}/${String(retry.maxAttempts)}) - ${formatRetryError(retry.error)}, waiting ${formatRetryDelay(retry.delayMs)}`,
+      text: isRateLimitRetryError(retry.error)
+        ? `Rate limited - retrying in ${formatRetryDelay(retry.delayMs)} (attempt ${String(retry.attempt)}/${String(retry.maxAttempts)})`
+        : `API retry (attempt ${String(retry.attempt)}/${String(retry.maxAttempts)}) - ${formatRetryError(retry.error)}, waiting ${formatRetryDelay(retry.delayMs)}`,
     };
   }
 
@@ -192,17 +194,29 @@ function parseClaudeRateLimit(parsed: JsonRecord): LogEvent | null {
     return null;
   }
 
-  if (info.status === "rejected") {
+  if (isUsageBudgetType(info.rateLimitType)) {
+    const budgetWindow = formatBudgetWindow(info.rateLimitType);
+    if (info.status === "rejected") {
+      return {
+        kind: "error",
+        text: `Usage limit reached - ${budgetWindow ? `${budgetWindow} budget resets at ${formatResetTime(info.resetsAt)}` : `resets at ${formatResetTime(info.resetsAt)}`}`,
+      };
+    }
+
     return {
-      kind: "error",
-      text: `Rate limit exceeded - resets at ${formatResetTime(info.resetsAt)}`,
+      kind: "warning",
+      text: `Usage: ${formatUtilization(info.utilization)}${budgetWindow ? ` of ${budgetWindow} budget` : ""} (resets in ${formatResetDistance(info.resetsAt)})`,
     };
   }
 
-  return {
-    kind: "warning",
-    text: `Rate limit: ${formatUtilization(info.utilization)} used (resets in ${formatResetDistance(info.resetsAt)})`,
-  };
+  if (info.status === "rejected") {
+    return {
+      kind: "error",
+      text: `Rate limited - retry after ${formatResetTime(info.resetsAt)}`,
+    };
+  }
+
+  return { kind: "warning", text: "Rate limited - retrying" };
 }
 
 function normalizeApiRetryInfo(parsed: JsonRecord): { attempt: number; maxAttempts: number; error: string; delayMs: number } | null {
@@ -229,13 +243,14 @@ function normalizeApiRetryInfo(parsed: JsonRecord): { attempt: number; maxAttemp
   return { attempt, maxAttempts, error, delayMs };
 }
 
-function normalizeRateLimitInfo(value: unknown): { status: string; resetsAt: number; utilization?: number } | null {
+function normalizeRateLimitInfo(value: unknown): { status: string; resetsAt: number; rateLimitType?: string; utilization?: number } | null {
   if (!isRecord(value)) {
     return null;
   }
 
   const status = typeof value["status"] === "string" ? value["status"] : null;
   const resetsAt = typeof value["resetsAt"] === "number" ? value["resetsAt"] : null;
+  const rateLimitType = typeof value["rateLimitType"] === "string" ? value["rateLimitType"] : undefined;
   const utilization = typeof value["utilization"] === "number" ? value["utilization"] : undefined;
   if (status == null || resetsAt == null) {
     return null;
@@ -244,8 +259,28 @@ function normalizeRateLimitInfo(value: unknown): { status: string; resetsAt: num
   return {
     status,
     resetsAt,
+    ...(rateLimitType ? { rateLimitType } : {}),
     ...(utilization !== undefined ? { utilization } : {}),
   };
+}
+
+function isUsageBudgetType(rateLimitType?: string): boolean {
+  return rateLimitType === "five_hour" || rateLimitType === "seven_day";
+}
+
+function formatBudgetWindow(rateLimitType?: string): string | null {
+  switch (rateLimitType) {
+    case "five_hour":
+      return "5h";
+    case "seven_day":
+      return "7d";
+    default:
+      return null;
+  }
+}
+
+function isRateLimitRetryError(error: string): boolean {
+  return /\b429\b|rate[_ -]?limit/i.test(error);
 }
 
 function formatRetryError(error: string): string {

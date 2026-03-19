@@ -137,7 +137,7 @@ describe("parseLine", () => {
       }));
       expect(event).toEqual({
         kind: "warning",
-        text: "Rate limit: 78% used (resets in 2h)",
+        text: "Usage: 78% of 7d budget (resets in 2h)",
       });
     } finally {
       Date.now = realNow;
@@ -156,7 +156,24 @@ describe("parseLine", () => {
     }));
     expect(event).toEqual({
       kind: "error",
-      text: "Rate limit exceeded - resets at 15:00",
+      text: "Usage limit reached - 7d budget resets at 15:00",
+    });
+  });
+
+  test("parses api_retry rate limit retries distinctly", () => {
+    const event = parseLine(JSON.stringify({
+      type: "system",
+      subtype: "api_retry",
+      api_retry_info: {
+        attempt: 2,
+        max_attempts: 10,
+        error: "rate_limit_error",
+        delay_ms: 2000,
+      },
+    }));
+    expect(event).toEqual({
+      kind: "info",
+      text: "Rate limited - retrying in 2s (attempt 2/10)",
     });
   });
 
@@ -432,7 +449,7 @@ describe("formatLog", () => {
 
       const result = formatLog(log);
       expect(result).toContain("API retry (attempt 1/10) - overloaded, waiting 1s");
-      expect(result).toContain("Rate limit: 78% used (resets in 2h)");
+      expect(result).toContain("Usage: 78% of 7d budget (resets in 2h)");
     } finally {
       Date.now = realNow;
     }
