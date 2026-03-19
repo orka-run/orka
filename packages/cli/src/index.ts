@@ -2,7 +2,17 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import type { BackendKind, OrchestrationEvent, PermissionMode, OrkaService, ReasoningEffort, SpawnRequest, WorkspaceInfo } from "@orka/core";
+import type {
+  BackendKind,
+  OrchestrationEvent,
+  PermissionMode,
+  OrkaService,
+  ReasoningEffort,
+  SessionAction,
+  SessionDetailResponse,
+  SpawnRequest,
+  WorkspaceInfo,
+} from "@orka/core";
 import { isMethodNotFound, canonicalTransportOrigin } from "@orka/core";
 import {
   ensureNoiseKeyPair,
@@ -1240,14 +1250,14 @@ const stopCmd = command({
   handler: async ({ sessionId, tag }) => runCliCommand("stop", async () => {
     if (tag) {
       const sessions = await svc.listSessions({ tag });
-      const running = sessions.filter((s) => s.status === "running" || s.status === "preparing" || s.status === "rate_limited");
-      if (running.length === 0) {
-        console.log(`no running sessions with tag "${tag}"`);
+      const stoppable = sessions.filter((s) => allowsAnyAction(s.allowedActions, ["stop", "cancel"]));
+      if (stoppable.length === 0) {
+        console.log(`no stoppable sessions with tag "${tag}"`);
         return;
       }
 
       // Confirm before batch stop
-      process.stdout.write(`Stop ${running.length} session(s) with tag "${tag}"? [y/N] `);
+      process.stdout.write(`Stop ${stoppable.length} session(s) with tag "${tag}"? [y/N] `);
       const answer = await new Promise<string>((resolve) => {
         process.stdin.setEncoding("utf-8");
         process.stdin.once("data", (data) => resolve(String(data).trim().toLowerCase()));
@@ -1257,10 +1267,10 @@ const stopCmd = command({
         return;
       }
 
-      for (const s of running) {
+      for (const s of stoppable) {
         const children = await svc.getChildSessions(s.id);
-        const runningChildren = children.filter((c) => c.status === "running");
-        for (const child of runningChildren) {
+        const stoppableChildren = children.filter((c) => allowsAnyAction(c.allowedActions, ["stop", "cancel"]));
+        for (const child of stoppableChildren) {
           await svc.stop(child.id);
           console.log(`stopped child session ${child.id}`);
         }
@@ -1279,15 +1289,15 @@ const stopCmd = command({
       fail(`session not found: ${sessionId}`);
     }
 
-    if (session.status !== "running" && session.status !== "preparing" && session.status !== "rate_limited") {
-      console.warn(`warning: session ${session.id} is already ${session.status}`);
+    if (!allowsAnyAction(session.allowedActions, ["stop", "cancel"])) {
+      console.warn(`warning: session ${session.id} does not allow stop (status: ${session.status})`);
       return;
     }
 
     // Check for running children and stop them first
     const children = await svc.getChildSessions(session.id);
-    const runningChildren = children.filter((c) => c.status === "running");
-    for (const child of runningChildren) {
+    const stoppableChildren = children.filter((c) => allowsAnyAction(c.allowedActions, ["stop", "cancel"]));
+    for (const child of stoppableChildren) {
       await svc.stop(child.id);
       console.log(`stopped child session ${child.id}`);
     }
@@ -1740,6 +1750,8 @@ const sendCmd = command({
       fail(`session not found: ${sessionId}`);
     }
 
+    assertSessionAction(session, "sendTurn", "send");
+
     try {
       await svc.sendTurn(session.id, text.join(" "));
       console.log(`sent to ${session.id}`);
@@ -1805,15 +1817,15 @@ const mergeCmd = command({
   handler: async ({ sessionId, tag, noCleanup }) => runCliCommand("merge", async () => {
     if (tag) {
       const sessions = await svc.listSessions({ tag });
-      const completed = sessions.filter((s) => s.status === "completed");
-      if (completed.length === 0) {
-        console.log(`no completed sessions with tag "${tag}"`);
+      const mergeable = sessions.filter((s) => s.allowedActions.includes("merge"));
+      if (mergeable.length === 0) {
+        console.log(`no mergeable sessions with tag "${tag}"`);
         return;
       }
 
       let merged = 0;
       let failed = 0;
-      for (const s of completed) {
+      for (const s of mergeable) {
         try {
           const { branch, commits, cleaned } = await svc.merge(s.id, !noCleanup);
           console.log(`merged ${commits} commit(s) from ${branch} (${s.id})`);
@@ -1826,7 +1838,7 @@ const mergeCmd = command({
           failed++;
         }
       }
-      console.log(`\n${merged} merged, ${failed} failed out of ${completed.length} session(s)`);
+      console.log(`\n${merged} merged, ${failed} failed out of ${mergeable.length} session(s)`);
       return;
     }
 
@@ -1838,6 +1850,8 @@ const mergeCmd = command({
     if (!session) {
       fail(`session not found: ${sessionId}`);
     }
+
+    assertSessionAction(session, "merge", "merge");
 
     try {
       const { branch, commits, cleaned } = await svc.merge(session.id, !noCleanup);
@@ -3393,6 +3407,23 @@ async function findSession(query: string) {
     process.exit(1);
   }
   return null;
+}
+
+function allowsAnyAction(allowedActions: readonly string[], actions: readonly SessionAction[]): boolean {
+  return actions.some((action) => allowedActions.includes(action));
+}
+
+function assertSessionAction(
+  session: Pick<SessionDetailResponse, "id" | "status" | "allowedActions">,
+  action: SessionAction,
+  commandName: string,
+): void {
+  if (session.allowedActions.includes(action)) {
+    return;
+  }
+
+  const allowed = session.allowedActions.length > 0 ? session.allowedActions.join(", ") : "none";
+  fail(`session ${session.id} does not allow ${commandName} in status ${session.status} (allowed actions: ${allowed})`);
 }
 
 function formatAge(isoDate: string): string {

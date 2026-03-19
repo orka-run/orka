@@ -1,4 +1,4 @@
-import type { OrchestrationEvent } from "@orka/core";
+import type { OrchestrationEvent, SessionAction } from "@orka/core";
 
 export type InputState = "disabled" | "waiting" | "busy" | "not_started";
 
@@ -9,13 +9,15 @@ const PRESTART_SESSION_STATUSES = new Set(["queued", "preparing"]);
 export function deriveInputState(
   events: OrchestrationEvent[],
   sessionStatus: string,
+  allowedActions: SessionAction[],
   backend: string,
   mode?: string,
 ): InputState {
   void backend;
   void mode;
+  const canSendTurn = allowedActions.includes("sendTurn");
 
-  if (TERMINAL_SESSION_STATUSES.has(sessionStatus)) {
+  if (TERMINAL_SESSION_STATUSES.has(sessionStatus) && !canSendTurn) {
     return "disabled";
   }
 
@@ -44,7 +46,7 @@ export function deriveInputState(
       case "turn.completed":
       case "turn.aborted":
         completedTurnIds.add(event.turnId);
-        if (ACTIVE_SESSION_STATUSES.has(sessionStatus)) {
+        if (ACTIVE_SESSION_STATUSES.has(sessionStatus) || canSendTurn) {
           return "waiting";
         }
         break;
@@ -58,18 +60,19 @@ export function deriveInputState(
     }
   }
 
-  if (sessionStatus === "rate_limited" || sessionStatus === "hibernated") {
+  if ((sessionStatus === "rate_limited" || sessionStatus === "hibernated") && canSendTurn) {
     return "waiting";
   }
 
-  return "disabled";
+  return canSendTurn ? "waiting" : "disabled";
 }
 
 export function useInputState(
   events: OrchestrationEvent[],
   sessionStatus: string,
+  allowedActions: SessionAction[],
   backend: string,
   mode?: string,
 ): InputState {
-  return deriveInputState(events, sessionStatus, backend, mode);
+  return deriveInputState(events, sessionStatus, allowedActions, backend, mode);
 }

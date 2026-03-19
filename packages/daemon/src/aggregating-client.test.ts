@@ -17,6 +17,7 @@ function mockDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
   return {
     id: overrides.id ?? "sess-local-1",
     status: "completed",
+    allowedActions: overrides.allowedActions ?? ["sendTurn", "merge", "archive", "delete"],
     backend: "claude-code",
 
     title: "test session",
@@ -46,6 +47,7 @@ function mockListResponse(overrides: Partial<SessionListResponse> = {}): Session
   return {
     id: overrides.id ?? "sess-local-1",
     status: "completed",
+    allowedActions: overrides.allowedActions ?? ["sendTurn", "merge", "archive", "delete"],
     backend: "claude-code",
     title: "test session",
     model: null,
@@ -78,7 +80,8 @@ function mockSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: overrides.id ?? "sess-remote-1",
     status: "running",
-    backend: "claude",
+    allowedActions: overrides.allowedActions ?? ["sendTurn", "stop"],
+    backend: "claude-code",
     title: "test session",
     createdAt: "2026-01-02T00:00:00Z",
     nodeId: "node-1",
@@ -567,6 +570,20 @@ describe("AggregatingClient", () => {
     });
 
     it("updates cache on sessionUpdated push", async () => {
+      (remote.request as any).mockImplementation(async (_nodeId: string, method: string, params: { id: string }) => {
+        if (method === "getSession" && params.id === "sess-remote-new") {
+          return mockDetailResponse({
+            id: "sess-remote-new",
+            status: "running",
+            allowedActions: ["sendTurn", "stop"],
+            backend: "claude-code",
+            title: "new session",
+            createdAt: "2026-01-05T00:00:00Z",
+          });
+        }
+        return null;
+      });
+
       const handlers =
         remote._pushHandlers
           .get("node-1")
@@ -581,9 +598,13 @@ describe("AggregatingClient", () => {
         createdAt: "2026-01-05T00:00:00Z",
       });
 
+      await Promise.resolve();
+
       // Should now appear in listSessions
       const sessions = await svc.listSessions();
-      expect(sessions.find((s) => s.id === "sess-remote-new")).toBeTruthy();
+      expect(sessions.find((s) => s.id === "sess-remote-new")).toMatchObject({
+        allowedActions: ["sendTurn", "stop"],
+      });
     });
 
     it("removes from cache on sessionDeleted push", async () => {

@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import type { SessionAction } from "./service";
 
 // --- IDs ---
 
@@ -134,6 +135,7 @@ export interface SessionListItem extends Session {
 export interface SessionSummary {
   id: SessionId;
   status: SessionStatus;
+  allowedActions?: SessionAction[];
   backend: BackendKind;
   title: string;
   createdAt: string;

@@ -24,6 +24,32 @@ afterEach(() => {
 });
 
 describe("LocalClient provider runtime support", () => {
+  test("includes server-driven allowedActions in session responses", async () => {
+    seedSession("sess-completed");
+    seedSession("sess-idle", { status: "idle" });
+
+    const handle: ProviderSessionHandle = {
+      threadId: "sess-idle",
+      provider: "codex",
+      events: (async function* () {})(),
+      meta: {},
+    };
+    const originalGetHandle = ctx.providerService.getHandle;
+    (ctx.providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-idle" ? handle : undefined);
+
+    try {
+      const client = createLocalClient(ctx);
+      const completed = await client.getSession("sess-completed");
+      const sessions = await client.listSessions();
+      const idle = sessions.find((session) => session.id === "sess-idle");
+
+      expect(completed?.allowedActions).toEqual(["sendTurn", "archive", "delete"]);
+      expect(idle?.allowedActions).toEqual(["sendTurn", "stop"]);
+    } finally {
+      (ctx.providerService as any).getHandle = originalGetHandle;
+    }
+  });
+
   test("captures provider output and builds results from orchestration events", async () => {
     seedSession("sess-provider");
     seedProviderEvents("sess-provider");

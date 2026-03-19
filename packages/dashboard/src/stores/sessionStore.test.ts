@@ -11,10 +11,25 @@ class MockRpcClient {
   spawnParams: SpawnRequest | null = null;
 
   listSessions = async () => this.sessions;
+  getSession = async (id: string) => this.sessions.find((session) => session.id === id) ?? null;
 
   spawn = async (req: SpawnRequest) => {
     if (!this.spawnResult) throw new Error("Missing spawn result");
     this.spawnParams = req;
+    this.sessions = [
+      makeSession({
+        id: this.spawnResult.id,
+        status: this.spawnResult.status,
+        title: this.spawnResult.title,
+        backend: req.backend,
+        model: req.model ?? null,
+        prompt: req.prompt,
+        projectPath: req.projectPath,
+        autoMerge: req.autoMerge ?? false,
+        tags: req.tags ?? [],
+      }),
+      ...this.sessions,
+    ];
     return this.spawnResult;
   };
 
@@ -40,6 +55,7 @@ function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListR
     startedAt: null,
     finishedAt: null,
     exitCode: null,
+    allowedActions: ["cancel"],
     kept: false,
     autoMerge: false,
     title: "Dashboard task",
@@ -86,8 +102,9 @@ describe("sessionStore", () => {
       {
         id: "sess-1",
         status: "queued",
+        allowedActions: ["cancel"],
         backend: "codex",
-            title: "First session",
+        title: "First session",
         model: "gpt-5",
         createdAt: "2026-03-11T10:00:00.000Z",
         startedAt: null,
@@ -123,6 +140,7 @@ describe("sessionStore", () => {
         {
           id: session.id,
           status: session.status,
+          allowedActions: session.allowedActions,
           backend: session.backend,
           title: "First session",
           model: "gpt-5",
@@ -156,6 +174,7 @@ describe("sessionStore", () => {
         {
           id: session.id,
           status: session.status,
+          allowedActions: session.allowedActions,
           backend: session.backend,
           title: "First session",
           model: "gpt-5",
@@ -197,7 +216,7 @@ describe("sessionStore", () => {
       title: "Ship dashboard store",
       projectPath: "/tmp/project",
       backend: "codex",
-        model: "gpt-5",
+      model: "gpt-5",
       autoMerge: true,
       tags: ["dashboard", "polish"],
       systemPrompt: "Keep the response concise and implementation-focused.",
@@ -212,6 +231,7 @@ describe("sessionStore", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe("sess-2");
     expect(sessions[0].status).toBe("queued");
+    expect(sessions[0].allowedActions).toEqual(["cancel"]);
     expect(sessions[0].backend).toBe("codex");
     expect(sessions[0].title).toBe("Ship dashboard store");
     expect(sessions[0].model).toBe("gpt-5");

@@ -3,7 +3,6 @@ import type {
   OrchestrationEvent,
   ServerWelcomeData,
   SessionDeletedData,
-  SessionUpdatedData,
   WorkspaceSettings,
 } from "@orka/core";
 import { parseWireEvent } from "@orka/core";
@@ -144,7 +143,6 @@ function AppShell({ transport, client }: AppShellProps) {
   const selectedId = useSessionStore((state) => state.selectedId);
   const selectSession = useSessionStore((state) => state.selectSession);
   const fetchSessions = useSessionStore((state) => state.fetchSessions);
-  const handleSessionUpdated = useSessionStore((state) => state.handleSessionUpdated);
   const handleSessionDeleted = useSessionStore((state) => state.handleSessionDeleted);
   const nodes = useNodeStore((state) => state.nodes);
   const pairedNodes = useNodeStore((state) => state.pairedNodes);
@@ -313,18 +311,7 @@ function AppShell({ transport, client }: AppShellProps) {
     const unsubscribeWelcome = transport.subscribe("server.welcome", (data) => {
       setServerSessionCount((data as ServerWelcomeData).sessionCount);
     });
-    const unsubscribeUpdated = transport.subscribe("orchestration.sessionUpdated", (data) => {
-      const typedData = data as SessionUpdatedData;
-      const known = useSessionStore
-        .getState()
-        .sessions
-        .some((session) => session.id === typedData.sessionId);
-
-      if (known) {
-        handleSessionUpdated(typedData);
-        return;
-      }
-
+    const unsubscribeUpdated = transport.subscribe("orchestration.sessionUpdated", (_data) => {
       fetchSessionsWithNodes();
     });
     const unsubscribeEvent = transport.subscribe("orchestration.event", (data) => {
@@ -417,7 +404,7 @@ function AppShell({ transport, client }: AppShellProps) {
       unsubscribeState();
       transport.disconnect();
     };
-  }, [transport, client, mode, fetchSessions, fetchNodes, fetchPairedNodes, fetchWorkspaces, handleSessionDeleted, handleSessionUpdated, setConnectionStatus, setProtocolMismatch, updateNodeStatus, incrementPending, decrementPending]);
+  }, [transport, client, mode, fetchSessions, fetchNodes, fetchPairedNodes, fetchWorkspaces, handleSessionDeleted, setConnectionStatus, setProtocolMismatch, updateNodeStatus, incrementPending, decrementPending]);
 
   const handleOnboardingComplete = useCallback(() => {
     setShowOnboarding(false);

@@ -70,20 +70,47 @@ export function createAggregatingClient(
 
   /** Subscribe to push events from a remote node to keep cache in sync. */
   function subscribeNodePush(nodeId: string): void {
+    function refreshCachedSession(sessionId: string, fallback?: Partial<SessionSummary>): void {
+      void remoteNodes
+        .request<SessionDetailResponse | null>(nodeId, "getSession", { id: sessionId })
+        .then((session) => {
+          if (!session) {
+            sessionCache.removeSession(sessionId);
+            return;
+          }
+          sessionCache.upsertSession(nodeId, detailResponseToSummary(session, nodeId));
+        })
+        .catch(() => {
+          sessionCache.upsertSession(nodeId, {
+            id: sessionId,
+            status: (fallback?.status as SessionSummary["status"]) ?? "running",
+            allowedActions: fallback?.allowedActions ?? [],
+            backend: (fallback?.backend as SessionSummary["backend"]) ?? "",
+            title: fallback?.title ?? "",
+            createdAt: fallback?.createdAt ?? new Date().toISOString(),
+            nodeId,
+          });
+        });
+    }
+
     try {
       const unsub1 = remoteNodes.subscribePush(
         nodeId,
         "orchestration.sessionUpdated",
         (data: unknown) => {
-          const d = data as Record<string, unknown> | null;
-          if (!d?.sessionId) return;
-          sessionCache.upsertSession(nodeId, {
-            id: d.sessionId as string,
-            status: (d.status as SessionSummary["status"]) ?? "running",
-            backend: (d.backend as SessionSummary["backend"]) ?? "",
-            title: (d.title as string) ?? "",
-            createdAt: (d.createdAt as string) ?? new Date().toISOString(),
-            nodeId,
+          const payload = data as {
+            sessionId?: string;
+            status?: SessionSummary["status"];
+            backend?: SessionSummary["backend"];
+            title?: string;
+            createdAt?: string;
+          } | null;
+          if (!payload?.sessionId) return;
+          refreshCachedSession(payload.sessionId, {
+            status: payload.status ?? "running",
+            backend: payload.backend ?? "",
+            title: payload.title ?? "",
+            createdAt: payload.createdAt ?? new Date().toISOString(),
           });
         },
       );
@@ -91,8 +118,8 @@ export function createAggregatingClient(
         nodeId,
         "orchestration.sessionDeleted",
         (data: unknown) => {
-          const d = data as Record<string, unknown> | null;
-          if (d?.sessionId) sessionCache.removeSession(d.sessionId as string);
+          const payload = data as { sessionId?: string } | null;
+          if (payload?.sessionId) sessionCache.removeSession(payload.sessionId);
         },
       );
       pushUnsubs.push(unsub1, unsub2);
@@ -205,6 +232,19 @@ export function createAggregatingClient(
     return {
       id: s.id,
       status: s.status,
+      allowedActions: s.allowedActions,
+      backend: s.backend,
+      title: s.title,
+      createdAt: s.createdAt,
+      nodeId,
+    };
+  }
+
+  function detailResponseToSummary(s: SessionDetailResponse, nodeId: string): SessionSummary {
+    return {
+      id: s.id,
+      status: s.status,
+      allowedActions: s.allowedActions,
       backend: s.backend,
       title: s.title,
       createdAt: s.createdAt,
@@ -217,6 +257,7 @@ export function createAggregatingClient(
     return {
       id: s.id,
       status: s.status,
+      allowedActions: s.allowedActions ?? [],
       backend: s.backend,
       title: s.title,
       model: null,
@@ -349,6 +390,7 @@ export function createAggregatingClient(
         sessionCache.upsertSession(req.nodeId, {
           id: result.id,
           status: result.status,
+          allowedActions: [],
           backend: req.backend,
           title: result.title,
           createdAt: new Date().toISOString(),

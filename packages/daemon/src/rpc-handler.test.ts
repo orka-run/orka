@@ -20,6 +20,7 @@ function makeDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
   return {
     id: "sess-1",
     status: "running",
+    allowedActions: ["sendTurn", "stop"],
     backend: "codex",
 
     title: "Test session",

@@ -3,6 +3,16 @@ import type { ApprovalRequest, ApprovalDecision } from "./approval";
 import type { OrchestrationEvent } from "./orchestration";
 import type { PushChannel } from "./push-protocol";
 
+export type SessionAction =
+  | "sendTurn"
+  | "stop"
+  | "resume"
+  | "cancel"
+  | "merge"
+  | "retry"
+  | "archive"
+  | "delete";
+
 // --- Spawn Result (minimal DTO returned by spawn) ---
 
 export interface SpawnResult {
@@ -17,6 +27,7 @@ export interface SpawnResult {
 export interface SessionDetailResponse {
   id: SessionId;
   status: SessionStatus;
+  allowedActions: SessionAction[];
   backend: BackendKind;
   title: string;
   model: string | null;
@@ -48,6 +59,7 @@ export interface SessionDetailResponse {
 export interface SessionListResponse {
   id: SessionId;
   status: SessionStatus;
+  allowedActions: SessionAction[];
   backend: BackendKind;
   title: string;
   model: string | null;

@@ -26,8 +26,8 @@ function isRunning(status: SessionSummary["status"]): boolean {
   return status === "queued" || status === "preparing" || status === "running";
 }
 
-function canStop(status: SessionSummary["status"]): boolean {
-  return status === "queued" || status === "preparing" || status === "running" || status === "rate_limited";
+function canStop(allowedActions: SessionSummary["allowedActions"]): boolean {
+  return allowedActions.includes("stop");
 }
 
 export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
@@ -41,7 +41,12 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     ...(onSelectionLoadSettled ? { onSelectionLoadSettled } : {}),
   });
 
-  const inputState = useInputState(events, session?.status ?? "queued", session?.backend ?? "unknown");
+  const inputState = useInputState(
+    events,
+    session?.status ?? "queued",
+    session?.allowedActions ?? [],
+    session?.backend ?? "unknown",
+  );
   const [stopping, setStopping] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const { autoScroll, bottomRef, scrollRef, handleScroll, scrollToBottom, newMessagesCount } = useChatScroll({
@@ -176,7 +181,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onSend={handleSend}
           sendError={sendError}
           onClearError={() => { setSendError(null); }}
-          {...(canStop(session.status) ? { onStop: () => { void handleStop(); } } : {})}
+          {...(canStop(session.allowedActions) ? { onStop: () => { void handleStop(); } } : {})}
           isStopping={stopping}
         />
       </div>

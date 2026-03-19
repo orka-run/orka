@@ -31,7 +31,6 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
   interrupted: { bg: "bg-orange-500/10", text: "text-orange-600", dot: "bg-orange-500" },
 };
 
-const ACTIVE_STATUSES = new Set(["queued", "preparing", "running", "rate_limited"]);
 function StatusBadge({ status }: { status: string }) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS["cancelled"]!;
   return (
@@ -100,7 +99,7 @@ export function SessionView({
   }
 
   const activeSession = session;
-  const isStoppable = ACTIVE_STATUSES.has(activeSession.status);
+  const isStoppable = activeSession.allowedActions.includes("stop");
 
   async function handleStopSession() {
     if (!isStoppable || isStopping) return;

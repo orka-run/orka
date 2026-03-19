@@ -16,6 +16,7 @@ import type {
   MergeResult,
   SessionResult,
   SessionDetailResponse,
+  SessionAction,
   SessionListResponse,
   TimelineParams,
   TimelineResponse,
@@ -118,7 +119,7 @@ class LocalClient implements OrkaService {
     if (!session) return null;
     const task = this.ctx.db.getTask(session.taskId);
     const tags = this.ctx.db.getSessionTags(id);
-    return sessionToDetail(session, task, tags);
+    return sessionToDetail(session, task, tags, this.ctx.orkaHome, !!this.ctx.providerService.getHandle(id));
   }
 
   async listSessions(filters?: SessionFilters): Promise<SessionListResponse[]> {
@@ -135,12 +136,22 @@ class LocalClient implements OrkaService {
     } else {
       items = this.ctx.db.listSessionItems(filters?.status, includeArchived);
     }
-    return sessionItemsToListResponse(this.ctx.db, items);
+    return sessionItemsToListResponse(
+      this.ctx.db,
+      this.ctx.orkaHome,
+      (sessionId) => !!this.ctx.providerService.getHandle(sessionId),
+      items,
+    );
   }
 
   async getChildSessions(sessionId: string): Promise<SessionListResponse[]> {
     const items = this.ctx.db.listChildSessionItems(sessionId);
-    return sessionItemsToListResponse(this.ctx.db, items);
+    return sessionItemsToListResponse(
+      this.ctx.db,
+      this.ctx.orkaHome,
+      (id) => !!this.ctx.providerService.getHandle(id),
+      items,
+    );
   }
 
   async getTask(id: string): Promise<Task | null> {
@@ -996,10 +1007,60 @@ export function eventsToChat(events: OrchestrationEvent[]): ChatEntry[] {
 
 // --- DTO Mappers ---
 
-function sessionToDetail(session: Session, task: Task | null, tags: string[]): SessionDetailResponse {
+function hasSessionWorktree(session: Session, orkaHome: string): boolean {
+  if (session.noWorktree) {
+    return false;
+  }
+
+  const worktreeRoot = getWorktreeDir(orkaHome);
+  return session.workingDir.startsWith(worktreeRoot) && existsSync(session.workingDir);
+}
+
+function computeAllowedActions(session: Session, hasLiveHandle: boolean, hasWorktree: boolean): SessionAction[] {
+  void hasLiveHandle;
+  const actions: SessionAction[] = [];
+
+  switch (session.status) {
+    case "running":
+      actions.push("sendTurn", "stop");
+      break;
+    case "idle":
+      actions.push("sendTurn", "stop");
+      if (hasWorktree && !session.noWorktree) {
+        actions.push("merge");
+      }
+      break;
+    case "rate_limited":
+      actions.push("sendTurn", "stop");
+      break;
+    case "hibernated":
+    case "completed":
+      actions.push("sendTurn");
+      if (hasWorktree && !session.noWorktree) {
+        actions.push("merge");
+      }
+      actions.push("archive", "delete");
+      break;
+    case "failed":
+    case "cancelled":
+    case "interrupted":
+      actions.push("sendTurn", "retry", "archive", "delete");
+      break;
+    case "queued":
+    case "preparing":
+      actions.push("cancel");
+      break;
+  }
+
+  return actions;
+}
+
+function sessionToDetail(session: Session, task: Task | null, tags: string[], orkaHome: string, hasLiveHandle: boolean): SessionDetailResponse {
+  const allowedActions = computeAllowedActions(session, hasLiveHandle, hasSessionWorktree(session, orkaHome));
   return {
     id: session.id,
     status: session.status,
+    allowedActions,
     backend: session.backend,
     title: task?.title ?? session.id,
     model: task?.model ?? null,
@@ -1023,10 +1084,17 @@ function sessionToDetail(session: Session, task: Task | null, tags: string[]): S
   };
 }
 
-function sessionItemToListResponse(item: SessionListItem, tags: string[]): SessionListResponse {
+function sessionItemToListResponse(
+  item: SessionListItem,
+  tags: string[],
+  orkaHome: string,
+  hasLiveHandle: boolean,
+): SessionListResponse {
+  const allowedActions = computeAllowedActions(item, hasLiveHandle, hasSessionWorktree(item, orkaHome));
   return {
     id: item.id,
     status: item.status,
+    allowedActions,
     backend: item.backend,
     title: item.title ?? item.id,
     model: item.model ?? null,
@@ -1047,11 +1115,13 @@ function sessionItemToListResponse(item: SessionListItem, tags: string[]): Sessi
 
 function sessionItemsToListResponse(
   db: { getSessionTagsBatch(ids: string[]): Map<string, string[]> },
+  orkaHome: string,
+  hasHandle: (sessionId: string) => boolean,
   items: SessionListItem[],
 ): SessionListResponse[] {
   const ids = items.map((i) => i.id);
   const tagMap = db.getSessionTagsBatch(ids);
-  return items.map((item) => sessionItemToListResponse(item, tagMap.get(item.id) ?? []));
+  return items.map((item) => sessionItemToListResponse(item, tagMap.get(item.id) ?? [], orkaHome, hasHandle(item.id)));
 }
 
 /** Capture committed changes on the session branch vs the parent branch. */
