@@ -75,7 +75,7 @@ describe("Daemon Session Lifecycle", () => {
     for (const id of sessionIds) {
       try { await client.stop(id); } catch { /* already stopped */ }
     }
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     ctx?.db.close();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -251,7 +251,7 @@ describe("Daemon Session Lifecycle", () => {
     sessionIds.push(session.id);
 
     // Wait for output to be captured
-    await Bun.sleep(500);
+    await Bun.sleep(200);
 
     const output = await client.captureOutput(session.id);
     expect(output).toContain("capture-marker");
@@ -269,7 +269,7 @@ describe("Daemon Session Lifecycle", () => {
     });
     sessionIds.push(session.id);
 
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     await client.sendTurn(session.id, "hello-from-test");
 
     await waitForTerminal(client, session.id);

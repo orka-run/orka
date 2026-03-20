@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { waitFor } from "../helpers/polling";
 
 // Isolated data dirs — must be set BEFORE importing daemon/relay modules
 // so their module-level DB initialization uses isolated paths.
@@ -215,7 +216,17 @@ describe("Noise NK through Relay", () => {
     noiseKeyB = await fetchNoiseKeyInfo(daemonPortB);
 
     // Wait for nodes to register with relay
-    await Bun.sleep(500);
+    await waitFor(async () => {
+      try {
+        const res = await fetch(`http://127.0.0.1:${relayPort}/health`, {
+          headers: { Authorization: `Bearer ${clientApiKey}` },
+        });
+        if (!res.ok) return false;
+        const body = await res.json() as { account?: { nodes?: Array<{ id: string }> } };
+        const nodes = body.account?.nodes ?? [];
+        return nodes.some((n) => n.id === "node-A") && nodes.some((n) => n.id === "node-B");
+      } catch { return false; }
+    });
   }, 30_000);
 
   afterAll(async () => {
@@ -233,7 +244,7 @@ describe("Noise NK through Relay", () => {
     try { daemonServerA?.stop?.(true); } catch {}
     try { daemonServerB?.stop?.(true); } catch {}
     // Let background event consumers finalize before closing DB
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     ctxA?.db.close();
     ctxB?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
@@ -323,8 +334,8 @@ describe("Noise NK through Relay", () => {
       expect(resp1["error"]).toBeUndefined();
       expect((resp1["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
 
-      // Idle for 3 seconds
-      await Bun.sleep(3_000);
+      // Idle for 1 second (proves session survives idle)
+      await Bun.sleep(1_000);
 
       // Second RPC -- nonce state must be preserved
       const resp2 = await encryptedRpc(transport, ws, "listSessions", { filters: {} }, { id: "idle-2" });

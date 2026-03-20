@@ -71,7 +71,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
 
   afterAll(async () => {
     await daemon?.stop();
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     daemon?.closeDb();
     rmSync(orkaHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -131,7 +131,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     expect(stopResp["error"]).toBeUndefined();
 
     // Wait briefly for status to update
-    await Bun.sleep(500);
+    await Bun.sleep(200);
 
     // Verify status becomes completed or stopped
     const afterStop = await encryptedRpc(conn.transport, conn.ws, "getSession", {
@@ -288,7 +288,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     }
 
     // Wait briefly for status updates
-    await Bun.sleep(500);
+    await Bun.sleep(200);
 
     // Verify all reached terminal status
     for (const id of sessionIds) {

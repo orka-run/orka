@@ -19,7 +19,7 @@ const relayHome = mkdtempSync(join(tmpdir(), "orka-e2e-pairing-relay-"));
 process.env["ORKA_HOME"] = daemonHome;
 process.env["ORKA_RELAY_DATA"] = relayHome;
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, setSystemTime } from "bun:test";
 import {
   PairingClient,
   type PairingClientResult,
@@ -43,6 +43,7 @@ import type { PairingConfig } from "@orka/daemon";
 import { createDaemonContext, createLocalClient, startServer } from "@orka/daemon";
 import { startRelay, type RelayHandle } from "../../../packages/relay/src/index";
 import { waitForOpen } from "./protocol-helpers";
+import { waitForRelayNode } from "../helpers/polling";
 
 // ---------------------------------------------------------------------------
 // Helper: drive the full pairing flow on the client side via WebSocket
@@ -112,7 +113,7 @@ async function runClientPairing(opts: {
           // Confirm Noise verify (sends pair_done via onSend)
           client.confirmNoiseVerified();
           // Give the server a moment to process pair_done
-          await Bun.sleep(200);
+          await Bun.sleep(50);
           ws.close();
           if (!settled) {
             settled = true;
@@ -227,7 +228,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     daemonPort = daemonServer.port;
 
     // Wait for relay registration
-    await Bun.sleep(500);
+    await waitForRelayNode(relayPort, NODE_ID, clientApiKey);
   }, 30_000);
 
   afterAll(async () => {
@@ -238,7 +239,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
       );
     } catch {}
     try { daemonServer?.stop?.(true); } catch {}
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     ctx?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });
@@ -258,8 +259,8 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     // Parse the pairing code on the client side
     const parsed = parsePairingCode(pairingResult.pairingCode);
 
-    // Give the daemon time to connect to the relay pairing endpoint
-    await Bun.sleep(500);
+    // Wait for daemon to connect to the relay pairing endpoint
+    await Bun.sleep(100);
 
     // Run the client-side pairing
     const result = await runClientPairing({
@@ -306,7 +307,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     // Complete pairing first
     const pairingResult = await svc.startPairing({ ttlSec: 30 });
     const parsed = parsePairingCode(pairingResult.pairingCode);
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     const bootstrapResult = await runClientPairing({
       relayPort,
@@ -413,7 +414,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
   test("wrong pairing code fails", async () => {
     // Start pairing on daemon
     const pairingResult = await svc.startPairing({ ttlSec: 30 });
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     // Use a completely different secret (random bytes)
     const wrongSecret = new Uint8Array(10);
@@ -439,21 +440,26 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     const pairingResult = await svc.startPairing({ ttlSec: 1 });
     const parsed = parsePairingCode(pairingResult.pairingCode);
 
-    // Wait for the enrollment to expire
-    await Bun.sleep(2500);
+    // Fast-forward past TTL expiry instead of sleeping
+    setSystemTime(new Date(Date.now() + 2000));
+    await Bun.sleep(50); // let event loop settle
 
     // Attempt pairing — the daemon's PairingServer should reject it
     // because the enrollment is expired. The relay slot may also have timed out.
-    await expect(
-      runClientPairing({
-        relayPort,
-        enrollId: pairingResult.enrollId,
-        secret: parsed.secret,
-        apiKey: clientApiKey,
-        relayOrigin,
-        timeoutMs: 5_000,
-      }),
-    ).rejects.toThrow(/expired|timed out|not_found|closed/i);
+    try {
+      await expect(
+        runClientPairing({
+          relayPort,
+          enrollId: pairingResult.enrollId,
+          secret: parsed.secret,
+          apiKey: clientApiKey,
+          relayOrigin,
+          timeoutMs: 5_000,
+        }),
+      ).rejects.toThrow(/expired|timed out|not_found|closed/i);
+    } finally {
+      setSystemTime(); // restore real time
+    }
   }, 15_000);
 
   // ---- Test 5: Pairing code format is valid ----
@@ -507,7 +513,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     // Complete pairing to simulate having bootstrap data
     const pairingResult = await svc.startPairing({ ttlSec: 30 });
     const parsed = parsePairingCode(pairingResult.pairingCode);
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     const bootstrapResult = await runClientPairing({
       relayPort,

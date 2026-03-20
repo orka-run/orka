@@ -49,7 +49,7 @@ describe("Noise NK Transport — Advanced", () => {
 
   afterAll(async () => {
     await daemon?.stop();
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     daemon?.closeDb();
     rmSync(orkaHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -308,7 +308,7 @@ describe("Noise NK Transport — Advanced", () => {
     await Promise.allSettled(promises);
 
     // Brief pause to let the daemon settle
-    await Bun.sleep(500);
+    await Bun.sleep(200);
 
     // Verify daemon is still responsive with a full Noise session
     const { ws: verifyWs, transport: verifyTransport } =

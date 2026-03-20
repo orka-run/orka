@@ -24,6 +24,7 @@ import { createDaemonContext, createLocalClient, startServer } from "@orka/daemo
 import type { DaemonContext } from "@orka/daemon";
 import type { OrkaService } from "@orka/core";
 import { startRelay, type RelayHandle } from "../../packages/relay/src/index";
+import { waitForRelayNode } from "./helpers/polling";
 
 function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -119,7 +120,7 @@ describe("Relay Routing & Auth", () => {
     }));
 
     // Wait for node registration to propagate
-    await Bun.sleep(500);
+    await waitForRelayNode(relayPort, "test-daemon", clientApiKey);
   }, 30_000);
 
   afterAll(async () => {
@@ -133,7 +134,7 @@ describe("Relay Routing & Auth", () => {
       }
     } catch {}
     try { daemonServer?.stop?.(true); } catch {}
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     ctx?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });

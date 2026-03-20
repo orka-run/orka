@@ -20,6 +20,7 @@ process.env["ORKA_HOME"] = testHome;
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, SessionDetailResponse } from "@orka/core";
 import { registerTestAdapter } from "./helpers/test-adapter";
+import { waitFor } from "./helpers/polling";
 
 /** Wait for a session to reach a terminal status. */
 async function waitForTerminal(
@@ -63,7 +64,7 @@ describe("Worktree Management", () => {
       try { await client.stop(id); } catch { /* already stopped */ }
     }
     try { await $`git -C ${testRepo} worktree prune`.quiet(); } catch {}
-    await Bun.sleep(500);
+    await Bun.sleep(200);
     ctx?.db.close();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -136,8 +137,10 @@ describe("Worktree Management", () => {
     });
     sessionIds.push(result.id);
 
-    // Wait for the file to be created
-    await Bun.sleep(500);
+    // Wait for the file to be created in the worktree
+    const session = await client.getSession(result.id);
+    const diffFilePath = join(session!.workingDir, "test-file.txt");
+    await waitFor(async () => existsSync(diffFilePath), { timeoutMs: 5000 });
 
     const diff = await client.getDiff(result.id);
     expect(diff.status).toContain("test-file.txt");
@@ -159,7 +162,10 @@ describe("Worktree Management", () => {
     expect(session).not.toBeNull();
 
     // Wait for the commit to be made
-    await Bun.sleep(1000);
+    await waitFor(async () => {
+      const log = (await $`git -C ${session!.workingDir} log --oneline -1`.quiet().text()).trim();
+      return log.includes("merge-test");
+    }, { timeoutMs: 5000 });
 
     // Verify the commit was made in the worktree
     const wtLog = (await $`git -C ${session!.workingDir} log --oneline -1`.quiet().text()).trim();
@@ -190,7 +196,7 @@ describe("Worktree Management", () => {
     });
     sessionIds.push(result.id);
 
-    await Bun.sleep(500);
+    await Bun.sleep(200);
 
     // Keep to prevent auto-cleanup
     await client.setKept(result.id, true);
