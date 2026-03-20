@@ -545,7 +545,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
       const timer = setTimeout(() => {
         ws.close();
         resolve("failed");
-      }, 5_000);
+      }, 200);
       timer.unref();
 
       ws.addEventListener("message", (event) => {

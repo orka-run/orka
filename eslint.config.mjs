@@ -1,5 +1,6 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import testPerfPlugin from "./eslint-rules/test-performance.mjs";
 
 const typeCheckedFiles = [
   "packages/*/src/**/*.{ts,tsx,mts,cts}",
@@ -54,6 +55,16 @@ export default tseslint.config(
         selector: "CallExpression[callee.property.name='request'][callee.object.name='transport']",
         message: "Use typed RPC client instead of raw transport.request(). Import useRpcClient from lib/transportContext.",
       }],
+    },
+  },
+  // Test performance rules — only apply to test files
+  {
+    files: ["**/*.test.ts", "tests/**/*.ts"],
+    plugins: { "test-perf": testPerfPlugin },
+    rules: {
+      "test-perf/no-disk-sqlite": "error",
+      "test-perf/no-long-sleep": "error",
+      "test-perf/no-env-mutation": "error",
     },
   },
 );

@@ -200,7 +200,7 @@ describe("Protocol Error Handling", () => {
           ws1.close();
         }
         resolve();
-      }, 1000);
+      }, 200);
       closeTimer.unref();
 
       ws1.addEventListener("close", () => {

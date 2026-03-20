@@ -1,21 +1,6 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { parseLine, formatEvent, formatLog } from "./log-formatter";
 import type { LogEvent } from "./log-formatter";
-
-// Force NO_COLOR so ANSI codes don't interfere with assertions
-const origNoColor = process.env["NO_COLOR"];
-
-beforeEach(() => {
-  process.env["NO_COLOR"] = "1";
-});
-
-afterEach(() => {
-  if (origNoColor !== undefined) {
-    process.env["NO_COLOR"] = origNoColor;
-  } else {
-    delete process.env["NO_COLOR"];
-  }
-});
 
 function requireEventKind<TKind extends LogEvent["kind"]>(
   event: LogEvent | null,
