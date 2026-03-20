@@ -156,12 +156,13 @@ describe("Pairing Code", () => {
     const { code } = generatePairingCode();
     const stripped = code.replace(/-/g, "");
 
-    // Flip the last character to a different valid Crockford char
-    const lastChar = stripped[stripped.length - 1];
-    const altChar = lastChar === "0" ? "1" : "0";
+    // Flip a character in the SECRET portion (not the CRC suffix) to guarantee checksum mismatch.
+    // Flipping the last char could land on the CRC itself and accidentally produce a valid code.
+    const idx = 2; // well inside the secret portion
+    const origChar = stripped[idx]!;
+    const altChar = origChar === "0" ? "1" : "0";
 
-    const tampered = stripped.slice(0, -1) + altChar;
-    // Reformat with dashes
+    const tampered = stripped.slice(0, idx) + altChar + stripped.slice(idx + 1);
     const formatted = [
       tampered.slice(0, 4),
       tampered.slice(4, 8),
