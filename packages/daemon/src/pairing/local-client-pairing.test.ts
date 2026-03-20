@@ -14,7 +14,7 @@ beforeAll(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-pairing-test-"));
   mkdirSync(testHome, { recursive: true });
   writeFileSync(join(testHome, "config.toml"), "");
-  ctx = await createDaemonContext(testHome);
+  ctx = await createDaemonContext(testHome, { inMemoryDb: true });
 });
 
 afterEach(() => ctx.db.clearAllData());

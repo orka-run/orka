@@ -13,7 +13,7 @@ let ctx: DaemonContext;
 beforeAll(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-actions-test-"));
   mkdirSync(testHome, { recursive: true });
-  ctx = await createDaemonContext(testHome);
+  ctx = await createDaemonContext(testHome, { inMemoryDb: true });
 });
 
 afterEach(() => {
