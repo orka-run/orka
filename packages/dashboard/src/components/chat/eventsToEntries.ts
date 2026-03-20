@@ -534,9 +534,6 @@ export function eventsToEntries(
       event.type === "user.input" ||
       event.type === "session.rate_limited" ||
       event.type === "session.api_retry" ||
-      event.type === "tool.progress" ||
-      event.type === "task.started" ||
-      event.type === "task.completed" ||
       event.type === "hook.started" ||
       event.type === "hook.response" ||
       event.type === "session.status" ||
@@ -546,41 +543,19 @@ export function eventsToEntries(
       flushToolGroup();
     }
 
-    if (event.type === "session.created" || event.type === "session.started" || event.type === "turn.started") {
+    if (
+      event.type === "session.created" ||
+      event.type === "session.started" ||
+      event.type === "turn.started" ||
+      // tool.progress/task.started/task.completed are already shown in tool call groups — skip standalone entries
+      event.type === "tool.progress" ||
+      event.type === "task.started" ||
+      event.type === "task.completed"
+    ) {
       continue;
     }
 
     switch (event.type) {
-      case "tool.progress":
-        entries.push({
-          id: `tool-progress-${event.timestamp}-${event.itemId ?? event.turnId}`,
-          type: "system",
-          timestamp: event.timestamp,
-          title: event.toolName ? humanizeInlineLabel(event.toolName) : "Progress",
-          body: formatProgressBody(event, workDir),
-          tone: "info",
-        });
-        break;
-      case "task.started":
-        entries.push({
-          id: `task-started-${event.timestamp}-${event.taskId ?? event.itemId ?? event.turnId}`,
-          type: "system",
-          timestamp: event.timestamp,
-          title: "Task started",
-          body: formatTaskStartedBody(event, workDir),
-          tone: "info",
-        });
-        break;
-      case "task.completed":
-        entries.push({
-          id: `task-completed-${event.timestamp}-${event.taskId ?? event.itemId ?? event.turnId}`,
-          type: "system",
-          timestamp: event.timestamp,
-          title: "Task completed",
-          body: formatTaskCompletedBody(event, workDir),
-          tone: "info",
-        });
-        break;
       case "hook.started":
       case "hook.response":
         entries.push({
