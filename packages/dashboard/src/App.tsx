@@ -23,6 +23,7 @@ import { OnboardingWizard } from "./components/OnboardingWizard";
 import { PairNodeDialog } from "./components/PairNodeDialog";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
+import { SettingsView } from "./components/SettingsView";
 import { StatusBar } from "./components/StatusBar";
 import { WorkspaceDetailView } from "./components/WorkspaceDetailView";
 import { useMobileBreakpoint } from "./hooks/useMobileBreakpoint";
@@ -152,6 +153,7 @@ function AppShell({ transport, client }: AppShellProps) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [mobileActiveTab, setMobileActiveTab] = useState<MobileSessionTab>("chat");
   const [isDevOverlayOpen, setIsDevOverlayOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [serverSessionCount, setServerSessionCount] = useState<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
@@ -210,6 +212,7 @@ function AppShell({ transport, client }: AppShellProps) {
     };
 
     selectSession(id);
+    setIsSettingsOpen(false);
     setIsMobileSidebarOpen(false);
     // When selecting a session on mobile, go to chat tab
     setMobileActiveTab("chat");
@@ -240,6 +243,7 @@ function AppShell({ transport, client }: AppShellProps) {
 
   const activateDraft = useCallback(() => {
     setIsDraftActive(true);
+    setIsSettingsOpen(false);
     selectSession(null);
     setIsMobileSidebarOpen(false);
   }, [selectSession]);
@@ -540,8 +544,16 @@ function AppShell({ transport, client }: AppShellProps) {
     </div>
   );
 
+  const handleOpenSettings = () => {
+    setIsSettingsOpen(true);
+    selectSession(null);
+    setIsDraftActive(false);
+  };
+
   // Desktop main content
-  const desktopMainContent = selectedId ? (
+  const desktopMainContent = isSettingsOpen ? (
+    <SettingsView projectPath={defaultProjectPath || undefined} />
+  ) : selectedId ? (
     <SessionView
       sessionId={selectedId}
       onSelectionLoadSettled={handleSelectionLoadSettled}
@@ -626,6 +638,8 @@ function AppShell({ transport, client }: AppShellProps) {
                 sessionCount={sessions.length}
                 serverSessionCount={serverSessionCount}
                 onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
+                onOpenSettings={handleOpenSettings}
+                isSettingsOpen={isSettingsOpen}
                 onToggleDevOverlay={() => setIsDevOverlayOpen((v) => !v)}
                 isDevOverlayOpen={isDevOverlayOpen}
               />

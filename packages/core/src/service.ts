@@ -205,6 +205,45 @@ export interface PairWithNodeResult {
   nodeName: string;
 }
 
+// --- Config Response DTO ---
+
+/** Daemon configuration response — excludes env vars for security. */
+export interface ConfigResponse {
+  defaults: {
+    backend: string;
+    model: string;
+    project: string;
+    systemPrompt: string;
+    reasoningEffort: string;
+    tags: string[];
+    permissionMode: string;
+  };
+  limits: {
+    maxConcurrent: number;
+    sessionTimeoutMinutes: number;
+    approvalTimeoutMinutes: number;
+    idleTimeoutMinutes: number;
+  };
+  hooks: {
+    postWorktreeCreate: string[];
+    beforeSpawn?: string;
+    afterComplete?: string;
+  };
+  permissions: {
+    mode: "auto" | "supervised" | "bypass";
+    autoApprove: string[];
+    alwaysDeny: string[];
+    approvalTimeout: number;
+    bypassConsent: boolean;
+  };
+  backendDefaults: Record<string, {
+    model?: string;
+    reasoningEffort?: string;
+    systemPrompt?: string;
+    tags?: string[];
+  }>;
+}
+
 // --- OrkaService Interface ---
 
 /**
@@ -307,4 +346,9 @@ export interface OrkaService {
   deleteWorkspace(id: string): Promise<void>;
   addWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void>;
   removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void>;
+
+  // --- Config ---
+  getConfig(): Promise<ConfigResponse>;
+  updateConfig(section: string, values: Record<string, unknown>): Promise<void>;
+  getProjectConfig(projectPath: string): Promise<ConfigResponse | null>;
 }

@@ -12,6 +12,7 @@ import type { ChatEntry, Checkpoint, NodeInfo, SpawnRequest, StoredNode, Task, W
 import type { ApprovalDecision, ApprovalRequest } from "./approval";
 import type { PushChannel } from "./push-protocol";
 import type {
+  ConfigResponse,
   DiffResult,
   MergeResult,
   PairWithNodeParams,
@@ -167,6 +168,11 @@ export interface RpcMethodMap {
   deleteWorkspace: { params: { id: string }; result: void };
   addWorkspacePath: { params: { workspaceId: string; path: string; nodeId?: string | undefined }; result: void };
   removeWorkspacePath: { params: { workspaceId: string; path: string; nodeId?: string | undefined }; result: void };
+
+  // --- Config ---
+  getConfig: { params: undefined; result: ConfigResponse };
+  updateConfig: { params: { section: string; values: Record<string, unknown> }; result: void };
+  getProjectConfig: { params: { projectPath: string }; result: ConfigResponse | null };
 
   // --- Dashboard-only (not in OrkaService, handled directly by rpc-handler) ---
   reportClientError: {

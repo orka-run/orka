@@ -3,6 +3,7 @@ import type {
   ApprovalRequest,
   ChatEntry,
   Checkpoint,
+  ConfigResponse,
   DiffResult,
   MergeResult,
   NodeInfo,
@@ -405,6 +406,25 @@ export class OrkaClient implements OrkaService {
     options?: RequestOptions,
   ): Promise<void> {
     return this.request("removeWorkspacePath", { workspaceId, path, nodeId }, options);
+  }
+
+  async getConfig(options?: RequestOptions): Promise<ConfigResponse> {
+    return this.request("getConfig", undefined, options);
+  }
+
+  async updateConfig(
+    section: string,
+    values: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("updateConfig", { section, values }, options);
+  }
+
+  async getProjectConfig(
+    projectPath: string,
+    options?: RequestOptions,
+  ): Promise<ConfigResponse | null> {
+    return this.request("getProjectConfig", { projectPath }, options);
   }
 }
 

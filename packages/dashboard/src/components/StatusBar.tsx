@@ -9,6 +9,8 @@ interface StatusBarProps {
   sessionCount: number;
   serverSessionCount?: number | null;
   onOpenConnectionSettings?: () => void;
+  onOpenSettings?: () => void;
+  isSettingsOpen?: boolean;
   onToggleDevOverlay?: () => void;
   isDevOverlayOpen?: boolean;
 }
@@ -34,7 +36,7 @@ function getConnectionIndicator(status: ReturnType<typeof useConnectionStore.get
   };
 }
 
-export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConnectionSettings, onToggleDevOverlay, isDevOverlayOpen }: StatusBarProps) {
+export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConnectionSettings, onOpenSettings, isSettingsOpen, onToggleDevOverlay, isDevOverlayOpen }: StatusBarProps) {
   const status = useConnectionStore((state) => state.status);
   const reconnectAttempts = useConnectionStore((state) => state.reconnectAttempts);
   const endpointUrl = useConnectionSettingsStore((s) => s.endpointUrl);
@@ -75,6 +77,16 @@ export function StatusBar({ sessionCount, serverSessionCount = null, onOpenConne
       <div className="flex items-center gap-2">
         <NotificationIndicator />
         <SoundToggle />
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className={`inline-flex items-center gap-1 transition hover:text-ink ${isSettingsOpen ? "text-accent-strong" : ""}`}
+            title="Settings"
+          >
+            <Settings className="h-3 w-3" />
+          </button>
+        )}
         <span>orka dashboard</span>
         {onToggleDevOverlay && (
           <button
