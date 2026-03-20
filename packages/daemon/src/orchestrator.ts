@@ -17,6 +17,7 @@ import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges } from "./worktree";
 import { assertBackendInstalled } from "./backends";
 import type { DaemonContext } from "./daemon-context";
+import { loadProjectConfig, mergeConfigs, resolveProjectEnv } from "./config";
 import { getDaemonMetrics, withSpan } from "./tracing";
 
 // --- Idle timer management ---
@@ -250,6 +251,7 @@ function buildConsumerCallbacks(
     projectPath: string;
     autoMerge: boolean;
     model: string | null;
+    afterCompleteHook?: string;
   },
 ) {
   const permissionRules =
@@ -312,6 +314,16 @@ function buildConsumerCallbacks(
       });
       return true;
     },
+    onAfterComplete: opts.afterCompleteHook
+      ? async () => {
+          // Fire-and-forget: run after_complete hook in the session's workingDir
+          Bun.spawn(["sh", "-c", opts.afterCompleteHook!], {
+            cwd: opts.workingDir,
+            stdout: "ignore",
+            stderr: "ignore",
+          });
+        }
+      : undefined,
   };
 }
 
@@ -435,6 +447,25 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
 
     span.setAttribute("orka.workdir", workingDir);
 
+    // 2b. Load project config for env propagation and hooks
+    const projectConfig = loadProjectConfig(projectPath);
+    const spawnConfig = projectConfig ? mergeConfigs(ctx.config, projectConfig) : ctx.config;
+
+    // 2c. Resolve project env (static + dynamic + CLI)
+    const resolvedEnv = await resolveProjectEnv(spawnConfig, projectPath, req.env);
+
+    // 2d. Run before_spawn hook if defined
+    if (spawnConfig.hooks.beforeSpawn) {
+      await withSpan("orka.hooks.before_spawn", { "orka.session.id": sessionId }, async () => {
+        const proc = Bun.spawn(["sh", "-c", spawnConfig.hooks.beforeSpawn!], {
+          cwd: workingDir,
+          stdout: "ignore",
+          stderr: "ignore",
+        });
+        await proc.exited;
+      });
+    }
+
     // 3. Log file
     const logsDir = join(ctx.orkaHome, "logs");
     mkdirSync(logsDir, { recursive: true });
@@ -462,7 +493,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
-      ...(req.env ? { env: req.env } : {}),
+      ...(resolvedEnv ? { env: resolvedEnv } : {}),
       ...(providerSessionId ? { providerSessionId } : {}),
       ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
       ...(inPlace ? { noWorktree: true } : {}),
@@ -489,7 +520,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.model ? { model: req.model } : {}),
       ...(req.reasoningEffort ? { reasoningEffort: req.reasoningEffort } : {}),
       ...(providerSessionId ? { providerSessionId } : {}),
-      ...(req.env ? { env: req.env } : {}),
+      ...(resolvedEnv ? { env: resolvedEnv } : {}),
     });
 
     const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
@@ -517,6 +548,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
         projectPath,
         autoMerge: session.autoMerge,
         model: req.model ?? null,
+        afterCompleteHook: spawnConfig.hooks.afterComplete,
       }),
     )
       .catch((error) => {
@@ -528,7 +560,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       });
 
     span.addEvent("session.started");
-    return { ...session, status: "running", startedAt };
+    return { ...session, status: "running", startedAt, env: resolvedEnv };
   });
 }
 

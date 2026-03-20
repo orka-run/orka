@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadConfig, loadProjectConfig, mergeConfigs, resolveDefaults, ConfigSchema } from "./config";
+import { loadConfig, loadProjectConfig, mergeConfigs, resolveDefaults, ConfigSchema, evaluateDynamicEnv, resolveProjectEnv } from "./config";
 import type { OrkaConfig } from "./config";
 
 function makeTmpDir(): string {
@@ -337,6 +337,106 @@ describe("loadProjectConfig", () => {
       rmSync(testDir, { recursive: true, force: true });
     }
   });
+
+  test("parses [env] static env vars", () => {
+    const testDir = makeTmpDir();
+    writeFileSync(
+      join(testDir, ".orka.toml"),
+      [
+        "[env]",
+        'NODE_ENV = "development"',
+        'BEADS_DOLT_HOST = "127.0.0.1"',
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const config = loadProjectConfig(testDir);
+      expect(config).not.toBeNull();
+      expect(config!.env).toEqual({
+        NODE_ENV: "development",
+        BEADS_DOLT_HOST: "127.0.0.1",
+      });
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  test("parses [env.dynamic] shell commands", () => {
+    const testDir = makeTmpDir();
+    writeFileSync(
+      join(testDir, ".orka.toml"),
+      [
+        "[env]",
+        'STATIC = "value"',
+        "",
+        "[env.dynamic]",
+        'BRANCH = "git rev-parse --abbrev-ref HEAD"',
+        'PORT = "echo 14003"',
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const config = loadProjectConfig(testDir);
+      expect(config).not.toBeNull();
+      expect(config!.env).toEqual({ STATIC: "value" });
+      expect(config!.envDynamic).toEqual({
+        BRANCH: "git rev-parse --abbrev-ref HEAD",
+        PORT: "echo 14003",
+      });
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  test("parses [backends.*] as alternative to [defaults.*] for per-backend overrides", () => {
+    const testDir = makeTmpDir();
+    writeFileSync(
+      join(testDir, ".orka.toml"),
+      [
+        "[backends.codex]",
+        'model = "gpt-5.4"',
+        'reasoning_effort = "high"',
+        "",
+        "[backends.claude-code]",
+        'model = "opus"',
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const config = loadProjectConfig(testDir);
+      expect(config).not.toBeNull();
+      expect(config!.backendDefaults["codex"]?.model).toBe("gpt-5.4");
+      expect(config!.backendDefaults["codex"]?.reasoningEffort).toBe("high");
+      expect(config!.backendDefaults["claude-code"]?.model).toBe("opus");
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  test("parses hooks.before_spawn and hooks.after_complete", () => {
+    const testDir = makeTmpDir();
+    writeFileSync(
+      join(testDir, ".orka.toml"),
+      [
+        "[hooks]",
+        'before_spawn = "echo starting"',
+        'after_complete = "bd dolt push 2>/dev/null"',
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const config = loadProjectConfig(testDir);
+      expect(config).not.toBeNull();
+      expect(config!.hooks.beforeSpawn).toBe("echo starting");
+      expect(config!.hooks.afterComplete).toBe("bd dolt push 2>/dev/null");
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("mergeConfigs", () => {
@@ -447,6 +547,48 @@ describe("mergeConfigs", () => {
     // shell kept from user
     expect(merged.backendDefaults["shell"]?.model).toBe("bash");
   });
+
+  test("env vars are merged with project overriding user", () => {
+    const user = emptyConfig();
+    user.env = { SHARED: "user-value", USER_ONLY: "keep" };
+
+    const project = emptyConfig();
+    project.env = { SHARED: "project-value", PROJ_ONLY: "new" };
+
+    const merged = mergeConfigs(user, project);
+    expect(merged.env).toEqual({
+      SHARED: "project-value",
+      USER_ONLY: "keep",
+      PROJ_ONLY: "new",
+    });
+  });
+
+  test("envDynamic vars are merged with project overriding user", () => {
+    const user = emptyConfig();
+    user.envDynamic = { PORT: "echo 3000" };
+
+    const project = emptyConfig();
+    project.envDynamic = { PORT: "echo 4000", BRANCH: "git branch --show-current" };
+
+    const merged = mergeConfigs(user, project);
+    expect(merged.envDynamic).toEqual({
+      PORT: "echo 4000",
+      BRANCH: "git branch --show-current",
+    });
+  });
+
+  test("hooks.beforeSpawn and afterComplete merge with project winning", () => {
+    const user = emptyConfig();
+    user.hooks.beforeSpawn = "echo user-before";
+    user.hooks.afterComplete = "echo user-after";
+
+    const project = emptyConfig();
+    project.hooks.beforeSpawn = "echo project-before";
+
+    const merged = mergeConfigs(user, project);
+    expect(merged.hooks.beforeSpawn).toBe("echo project-before");
+    expect(merged.hooks.afterComplete).toBe("echo user-after"); // fallback to user
+  });
 });
 
 describe("resolveDefaults", () => {
@@ -518,5 +660,58 @@ describe("resolveDefaults", () => {
 
     const resolved = resolveDefaults(config, "claude-code");
     expect(resolved.model).toBe("sonnet");
+  });
+});
+
+describe("evaluateDynamicEnv", () => {
+  test("evaluates shell commands and returns stdout", async () => {
+    const result = await evaluateDynamicEnv(
+      { PORT: "echo 14003", NAME: "echo hello" },
+      "/tmp",
+    );
+    expect(result).toEqual({ PORT: "14003", NAME: "hello" });
+  });
+
+  test("skips commands that fail (non-zero exit)", async () => {
+    const result = await evaluateDynamicEnv(
+      { OK: "echo works", FAIL: "false" },
+      "/tmp",
+    );
+    expect(result).toEqual({ OK: "works" });
+  });
+
+  test("returns empty object for empty input", async () => {
+    const result = await evaluateDynamicEnv({}, "/tmp");
+    expect(result).toEqual({});
+  });
+});
+
+describe("resolveProjectEnv", () => {
+  test("merges static + dynamic + CLI env with correct priority", async () => {
+    const config = ConfigSchema.parse({
+      env: { STATIC: "from-config", SHARED: "config-value" },
+      envDynamic: { DYNAMIC: "echo resolved" },
+    });
+
+    const result = await resolveProjectEnv(config, "/tmp", { SHARED: "cli-wins" });
+    expect(result).toEqual({
+      STATIC: "from-config",
+      SHARED: "cli-wins",
+      DYNAMIC: "resolved",
+    });
+  });
+
+  test("returns undefined when no env vars", async () => {
+    const config = ConfigSchema.parse({});
+    const result = await resolveProjectEnv(config, "/tmp");
+    expect(result).toBeUndefined();
+  });
+
+  test("returns only static env when no dynamic or CLI", async () => {
+    const config = ConfigSchema.parse({
+      env: { KEY: "value" },
+    });
+    const result = await resolveProjectEnv(config, "/tmp");
+    expect(result).toEqual({ KEY: "value" });
   });
 });
