@@ -47,23 +47,7 @@ const ALLOWLIST: AllowlistEntry[] = [
   {
     file: "packages/daemon/src/server.test.ts",
     rule: "no-bare-env-mutation",
-    reason: "server test needs ORKA_HOME for daemon startup",
-  },
-  // E2E tests: TestShellAdapter reads ORKA_HOME for script isolation
-  {
-    file: "tests/e2e/protocol/noise-advanced.e2e.test.ts",
-    rule: "no-bare-env-mutation",
-    reason: "TestShellAdapter reads ORKA_HOME for provider-scripts isolation",
-  },
-  {
-    file: "tests/e2e/protocol/session-lifecycle.e2e.test.ts",
-    rule: "no-bare-env-mutation",
-    reason: "TestShellAdapter reads ORKA_HOME for provider-scripts isolation",
-  },
-  {
-    file: "tests/e2e/protocol/noise-transport.e2e.test.ts",
-    rule: "no-bare-env-mutation",
-    reason: "TestShellAdapter reads ORKA_HOME for provider-scripts isolation",
+    reason: "server test writes traces to ORKA_HOME/traces.jsonl for /v1/traces endpoint test",
   },
 ];
 

@@ -13,9 +13,7 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-// Isolated ORKA_HOME — must be set BEFORE importing daemon
 const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-wt-"));
-process.env["ORKA_HOME"] = testHome;
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, SessionDetailResponse } from "@orka/core";

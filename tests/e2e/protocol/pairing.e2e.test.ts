@@ -13,11 +13,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Isolated data dirs — must be set BEFORE importing daemon/relay
+// Isolated data dirs
 const daemonHome = mkdtempSync(join(tmpdir(), "orka-e2e-pairing-daemon-"));
 const relayHome = mkdtempSync(join(tmpdir(), "orka-e2e-pairing-relay-"));
-process.env["ORKA_HOME"] = daemonHome;
-process.env["ORKA_RELAY_DATA"] = relayHome;
 
 import { describe, test, expect, beforeAll, afterAll, setSystemTime } from "bun:test";
 import {

@@ -89,13 +89,18 @@ function getWritableStdin(proc: ShellProcess): WritableStdin | null {
  */
 export class TestShellAdapter implements ProviderAdapter {
   readonly kind = "claude-code" as const;
+  private readonly orkaHome: string;
+
+  constructor(orkaHome: string) {
+    this.orkaHome = orkaHome;
+  }
 
   async startSession(input: ProviderSessionStartInput): Promise<ProviderSessionHandle> {
     const threadId = input.threadId;
     const cwd = input.cwd ?? process.cwd();
     const prompt = input.prompt ?? "";
 
-    const orkaHome = process.env["ORKA_HOME"] ?? join(process.env["HOME"] ?? "/tmp", ".orka");
+    const orkaHome = this.orkaHome;
     const scriptsDir = join(orkaHome, "provider-scripts");
     const scriptPath = join(scriptsDir, `${threadId.replace(/[^a-zA-Z0-9_-]/g, "-")}.sh`);
 
@@ -230,6 +235,6 @@ export class TestShellAdapter implements ProviderAdapter {
  * Override the daemon context's adapter registry with the test adapter.
  * Call this after createDaemonContext() in E2E test setup.
  */
-export function registerTestAdapter(ctx: { providerAdapterRegistry: { register(kind: "claude-code", adapter: ProviderAdapter): void } }): void {
-  ctx.providerAdapterRegistry.register("claude-code", new TestShellAdapter());
+export function registerTestAdapter(ctx: { orkaHome: string; providerAdapterRegistry: { register(kind: "claude-code", adapter: ProviderAdapter): void } }): void {
+  ctx.providerAdapterRegistry.register("claude-code", new TestShellAdapter(ctx.orkaHome));
 }

@@ -22,8 +22,6 @@ import { waitFor } from "../helpers/polling";
 const daemonHomeA = mkdtempSync(join(tmpdir(), "orka-e2e-noise-daemonA-"));
 const daemonHomeB = mkdtempSync(join(tmpdir(), "orka-e2e-noise-daemonB-"));
 const relayHome = mkdtempSync(join(tmpdir(), "orka-e2e-noise-relay-"));
-process.env["ORKA_HOME"] = daemonHomeA;
-process.env["ORKA_RELAY_DATA"] = relayHome;
 
 import type { OrkaService, DataFrame } from "@orka/core";
 import { canonicalTransportOrigin } from "@orka/core";

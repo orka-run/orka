@@ -21,9 +21,7 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-// Isolated ORKA_HOME — needed by TestShellAdapter for script isolation
 const orkaHome = mkdtempSync(join(tmpdir(), "orka-e2e-noise-"));
-process.env["ORKA_HOME"] = orkaHome;
 
 import {
   startDaemonWithNoise,

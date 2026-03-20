@@ -14,11 +14,9 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-// Isolated data dirs — must be set BEFORE importing daemon/relay
+// Isolated data dirs
 const daemonHome = mkdtempSync(join(tmpdir(), "orka-e2e-routing-daemon-"));
 const relayHome = mkdtempSync(join(tmpdir(), "orka-e2e-routing-relay-"));
-process.env["ORKA_HOME"] = daemonHome;
-process.env["ORKA_RELAY_DATA"] = relayHome;
 
 import { createDaemonContext, createLocalClient, startServer } from "@orka/daemon";
 import type { DaemonContext } from "@orka/daemon";
