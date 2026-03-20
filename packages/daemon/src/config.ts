@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { parse, stringify, TomlDate, type TomlTable, type TomlValue } from "smol-toml";
 import { z } from "zod/v4";
+import type { ConfigResponse } from "@orka/core";
 import { withSpanSync } from "./tracing";
 
 const DefaultsSchema = z.object({
@@ -473,4 +474,59 @@ export function writeBypassConsent(orkaHome: string): void {
   (toml["permissions"] as Record<string, any>)["bypass_consent"] = true;
 
   writeFileSync(configPath, stringify(toml as any), "utf-8");
+}
+
+/** camelCase → snake_case for TOML keys. */
+function toSnakeCase(key: string): string {
+  return key.replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
+}
+
+/**
+ * Update a section of ~/.orka/config.toml with the given key-value pairs.
+ * Creates the file if it doesn't exist. Keys are converted to snake_case.
+ */
+export function updateConfigSection(
+  orkaHome: string,
+  section: string,
+  values: Record<string, unknown>,
+): void {
+  const configPath = join(orkaHome, "config.toml");
+  let toml: Record<string, any> = {};
+
+  if (existsSync(configPath)) {
+    try {
+      toml = parse(readFileSync(configPath, "utf-8")) as Record<string, any>;
+    } catch {
+      // If parse fails, start fresh
+    }
+  }
+
+  if (!toml[section] || typeof toml[section] !== "object") {
+    toml[section] = {};
+  }
+
+  const table = toml[section] as Record<string, any>;
+  for (const [key, value] of Object.entries(values)) {
+    const snakeKey = toSnakeCase(key);
+    if (value === undefined || value === null || value === "") {
+      delete table[snakeKey];
+    } else {
+      table[snakeKey] = value;
+    }
+  }
+
+  writeFileSync(configPath, stringify(toml as any), "utf-8");
+}
+
+/**
+ * Strip env/envDynamic from OrkaConfig and return a ConfigResponse DTO.
+ */
+export function configToResponse(config: OrkaConfig): ConfigResponse {
+  return {
+    defaults: { ...config.defaults },
+    limits: { ...config.limits },
+    hooks: { ...config.hooks },
+    permissions: { ...config.permissions },
+    backendDefaults: { ...config.backendDefaults },
+  };
 }

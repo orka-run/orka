@@ -287,6 +287,13 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             await svc.removeWorkspacePath(params.workspaceId, params.path, params.nodeId);
             return null;
           }
+          case "getConfig":
+            return svc.getConfig();
+          case "updateConfig":
+            await svc.updateConfig(params.section, params.values);
+            return null;
+          case "getProjectConfig":
+            return svc.getProjectConfig(params.projectPath);
           case "getMetrics":
             return svc.getMetrics();
           case "queryTraces":

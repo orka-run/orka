@@ -5,6 +5,7 @@ import { generateId } from "@orka/core";
 import type {
   ChatEntry,
   Checkpoint,
+  ConfigResponse,
   NodeInfo,
   OrchestrationEvent,
   OrkaService,
@@ -55,6 +56,7 @@ import { PairingServer } from "./pairing/pairing-server";
 import type { PairMessage } from "@orka/core";
 import { performClientPairing } from "./client-pairing";
 import { deleteCheckpointRefsAfter, getCheckpointDiff, pruneCheckpoints, revertToCheckpoint as restoreCheckpoint } from "./checkpointing";
+import { loadConfig, loadProjectConfig, configToResponse, updateConfigSection } from "./config";
 
 export interface PairingConfig {
   /** Node ID for pairing enrollment (e.g. "fra1-gpu-01"). */
@@ -829,6 +831,22 @@ class LocalClient implements OrkaService {
 
   async removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
     this.ctx.db.removeWorkspacePath(workspaceId, resolve(path), nodeId);
+  }
+
+  // --- Config ---
+
+  async getConfig(): Promise<ConfigResponse> {
+    const config = loadConfig(this.ctx.orkaHome);
+    return configToResponse(config);
+  }
+
+  async updateConfig(section: string, values: Record<string, unknown>): Promise<void> {
+    updateConfigSection(this.ctx.orkaHome, section, values);
+  }
+
+  async getProjectConfig(projectPath: string): Promise<ConfigResponse | null> {
+    const config = loadProjectConfig(projectPath);
+    return config ? configToResponse(config) : null;
   }
 }
 
