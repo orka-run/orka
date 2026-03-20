@@ -522,11 +522,25 @@ export function updateConfigSection(
  * Strip env/envDynamic from OrkaConfig and return a ConfigResponse DTO.
  */
 export function configToResponse(config: OrkaConfig): ConfigResponse {
+  const hooks: ConfigResponse["hooks"] = {
+    postWorktreeCreate: config.hooks.postWorktreeCreate,
+    ...(config.hooks.beforeSpawn !== undefined ? { beforeSpawn: config.hooks.beforeSpawn } : {}),
+    ...(config.hooks.afterComplete !== undefined ? { afterComplete: config.hooks.afterComplete } : {}),
+  };
+  const backendDefaults: ConfigResponse["backendDefaults"] = {};
+  for (const [key, val] of Object.entries(config.backendDefaults)) {
+    const entry: Record<string, string | string[]> = {};
+    if (val.model !== undefined) entry["model"] = val.model;
+    if (val.reasoningEffort !== undefined) entry["reasoningEffort"] = val.reasoningEffort;
+    if (val.systemPrompt !== undefined) entry["systemPrompt"] = val.systemPrompt;
+    if (val.tags !== undefined) entry["tags"] = val.tags;
+    backendDefaults[key] = entry as ConfigResponse["backendDefaults"][string];
+  }
   return {
     defaults: { ...config.defaults },
     limits: { ...config.limits },
-    hooks: { ...config.hooks },
+    hooks,
     permissions: { ...config.permissions },
-    backendDefaults: { ...config.backendDefaults },
+    backendDefaults,
   };
 }

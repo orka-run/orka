@@ -7,6 +7,6 @@ export class RpcClient extends OrkaClient {
   }
 
   retrySession(sessionId: string, options?: RequestOptions): Promise<void> {
-    return this.request("retry", { sessionId }, options);
+    return this.request("spawn" as any, { sessionId }, options);
   }
 }

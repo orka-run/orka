@@ -3,6 +3,7 @@ import type {
   ApprovalRequest,
   ChatEntry,
   Checkpoint,
+  ConfigResponse,
   DiffResult,
   MergeResult,
   NodeInfo,
@@ -60,10 +61,10 @@ export function createAggregatingClient(
   function initNodeCache(nodeId: string): void {
     remoteNodes
       .request(nodeId, "listSessions", { filters: {} })
-      .then((sessions) => {
+      .then((result) => {
         sessionCache.setNodeSessions(
           nodeId,
-          sessions.map((s) => listResponseToSummary(s, nodeId)),
+          result.sessions.map((s: SessionListResponse) => listResponseToSummary(s, nodeId)),
         );
       })
       .catch(() => {
@@ -408,6 +409,10 @@ export function createAggregatingClient(
       return routeBySession(sessionId, "closeSession", { sessionId });
     },
 
+    async cancelTurn(sessionId: string): Promise<void> {
+      return routeBySession(sessionId, "cancelTurn", { sessionId });
+    },
+
     async sendTurn(sessionId: string, text: string): Promise<void> {
       return routeBySession(sessionId, "sendTurn", { sessionId, text });
     },
@@ -426,6 +431,10 @@ export function createAggregatingClient(
 
     async revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void> {
       return routeBySession(sessionId, "revertToCheckpoint", { sessionId, turnSeq });
+    },
+
+    async revertSession(sessionId: string, turnSeq: number, mode: "files" | "files_and_conversation"): Promise<void> {
+      return routeBySession(sessionId, "revertSession", { sessionId, turnSeq, mode });
     },
 
     async setKept(sessionId: string, kept: boolean): Promise<void> {
@@ -694,6 +703,17 @@ export function createAggregatingClient(
     },
     async removeWorkspacePath(workspaceId: string, path: string, nodeId?: string): Promise<void> {
       return localClient.removeWorkspacePath(workspaceId, path, nodeId);
+    },
+
+    // --- Config (local only) ---
+    async getConfig(): Promise<ConfigResponse> {
+      return localClient.getConfig();
+    },
+    async updateConfig(section: string, values: Record<string, unknown>): Promise<void> {
+      return localClient.updateConfig(section, values);
+    },
+    async getProjectConfig(projectPath: string): Promise<ConfigResponse | null> {
+      return localClient.getProjectConfig(projectPath);
     },
   };
 

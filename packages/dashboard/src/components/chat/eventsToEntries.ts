@@ -168,47 +168,6 @@ function humanizeInlineLabel(value: string): string {
   return value.replace(/_/g, " ").trim();
 }
 
-function formatProgressBody(
-  event: Extract<OrchestrationEvent, { type: "tool.progress" }>,
-  workDir?: string,
-): string {
-  const summary = event.summary ? shortenPath(event.summary, workDir) : "";
-  if (summary) {
-    return summary;
-  }
-
-  if (event.toolName) {
-    return `${humanizeInlineLabel(event.toolName)}...`;
-  }
-
-  return "Working...";
-}
-
-function formatTaskStartedBody(
-  event: Extract<OrchestrationEvent, { type: "task.started" }>,
-  workDir?: string,
-): string {
-  const title = event.title ? shortenPath(event.title, workDir) : "";
-  const detail = event.detail ? shortenPath(event.detail, workDir) : "";
-  if (title && detail && detail !== title) {
-    return `${title} - ${detail}`;
-  }
-
-  return title || detail || "Subtask started.";
-}
-
-function formatTaskCompletedBody(
-  event: Extract<OrchestrationEvent, { type: "task.completed" }>,
-  workDir?: string,
-): string {
-  const summary = event.summary ? shortenPath(event.summary, workDir) : "";
-  const status = event.status ? humanizeInlineLabel(event.status) : "";
-  if (summary && status && summary !== status) {
-    return `${summary} (${status})`;
-  }
-
-  return summary || status || "Subtask completed.";
-}
 
 function formatHookBody(
   event: Extract<OrchestrationEvent, { type: "hook.started" | "hook.response" }>,

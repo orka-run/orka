@@ -166,10 +166,10 @@ describe("RemoteNodeManager", () => {
     const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
-    mockRequest.mockImplementationOnce(async () => []);
+    mockRequest.mockImplementationOnce(async () => ({ sessions: [], snapshotSequence: 0 }));
     const result = await mgr.request("node-test", "listSessions", { filters: { status: "running" } });
 
-    expect(result).toEqual([]);
+    expect(result).toEqual({ sessions: [], snapshotSequence: 0 });
     expect(mockRequest).toHaveBeenCalledWith("listSessions", { filters: { status: "running" } });
 
     mgr.shutdown();

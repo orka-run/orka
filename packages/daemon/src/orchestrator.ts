@@ -314,16 +314,16 @@ function buildConsumerCallbacks(
       });
       return true;
     },
-    onAfterComplete: opts.afterCompleteHook
-      ? async () => {
-          // Fire-and-forget: run after_complete hook in the session's workingDir
-          Bun.spawn(["sh", "-c", opts.afterCompleteHook!], {
-            cwd: opts.workingDir,
-            stdout: "ignore",
-            stderr: "ignore",
-          });
-        }
-      : undefined,
+    ...(opts.afterCompleteHook ? {
+      onAfterComplete: async () => {
+        // Fire-and-forget: run after_complete hook in the session's workingDir
+        Bun.spawn(["sh", "-c", opts.afterCompleteHook!], {
+          cwd: opts.workingDir,
+          stdout: "ignore",
+          stderr: "ignore",
+        });
+      },
+    } : {}),
   };
 }
 
@@ -548,7 +548,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
         projectPath,
         autoMerge: session.autoMerge,
         model: req.model ?? null,
-        afterCompleteHook: spawnConfig.hooks.afterComplete,
+        ...(spawnConfig.hooks.afterComplete ? { afterCompleteHook: spawnConfig.hooks.afterComplete } : {}),
       }),
     )
       .catch((error) => {
@@ -560,7 +560,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       });
 
     span.addEvent("session.started");
-    return { ...session, status: "running", startedAt, env: resolvedEnv };
+    return { ...session, status: "running", startedAt, ...(resolvedEnv ? { env: resolvedEnv } : {}) };
   });
 }
 

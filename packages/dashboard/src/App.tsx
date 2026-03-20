@@ -552,7 +552,7 @@ function AppShell({ transport, client }: AppShellProps) {
 
   // Desktop main content
   const desktopMainContent = isSettingsOpen ? (
-    <SettingsView projectPath={defaultProjectPath || undefined} />
+    <SettingsView {...(defaultProjectPath ? { projectPath: defaultProjectPath } : {})} />
   ) : selectedId ? (
     <SessionView
       sessionId={selectedId}

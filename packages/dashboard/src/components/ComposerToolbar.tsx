@@ -166,7 +166,7 @@ export function ComposerToolbar({
   isSending,
 }: ComposerToolbarProps) {
   const models = MODELS_BY_BACKEND[backend];
-  const permConfig = PERMISSION_MODES.find((p) => p.value === permissionMode) ?? PERMISSION_MODES[0];
+  const permConfig = PERMISSION_MODES.find((p) => p.value === permissionMode) ?? PERMISSION_MODES[0]!;
 
   return (
     <div className="flex items-center gap-1 border-t border-border/50 px-2 py-1">

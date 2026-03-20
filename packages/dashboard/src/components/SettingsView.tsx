@@ -25,6 +25,7 @@ function useSectionStatus(): [SectionStatus, (s: SectionStatus) => void] {
       const t = setTimeout(() => setStatus("idle"), 2000);
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [status]);
   return [status, setStatus];
 }
