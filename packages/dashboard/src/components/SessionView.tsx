@@ -1,7 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, ScrollText, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, Pause, RotateCcw, ScrollText, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
 import { LogPanel } from "./LogPanel";
@@ -82,6 +82,7 @@ export function SessionView({
   // Desktop uses its own local tab state; mobile tab is driven externally via MobileTabBar
   const [desktopTab, setDesktopTab] = useState<"overview" | "chat" | "logs" | "diff">("chat");
   const [isStopping, setIsStopping] = useState(false);
+  const [isCancellingTurn, setIsCancellingTurn] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const notifiedSessionRef = useRef<string | null>(null);
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
@@ -112,6 +113,7 @@ export function SessionView({
 
   const activeSession = session;
   const isStoppable = ACTIVE_STATUSES.has(activeSession.status);
+  const canCancelTurn = activeSession.allowedActions.includes("cancelTurn");
   const isRetryable = TERMINAL_STATUSES.has(activeSession.status);
   const [isRetrying, setIsRetrying] = useState(false);
 
@@ -133,6 +135,18 @@ export function SessionView({
       setStopError(error instanceof Error ? error.message : "Failed to stop session.");
     } finally {
       setIsStopping(false);
+    }
+  }
+
+  async function handleCancelTurn() {
+    if (isCancellingTurn) return;
+    setIsCancellingTurn(true);
+    try {
+      await client.cancelTurn(activeSession.id);
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : "Failed to cancel turn.");
+    } finally {
+      setIsCancellingTurn(false);
     }
   }
 
@@ -158,6 +172,18 @@ export function SessionView({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {canCancelTurn && (
+            <button
+              type="button"
+              onClick={() => { void handleCancelTurn(); }}
+              disabled={isCancellingTurn}
+              title="Cancel current turn (keep session alive)"
+              className="inline-flex items-center gap-1 rounded-sm border border-status-warning/30 bg-status-warning/10 px-2 py-1 text-[11px] font-medium text-status-warning transition hover:bg-status-warning/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isCancellingTurn ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3 w-3" />}
+              Interrupt
+            </button>
+          )}
           {isStoppable && (
             <button
               type="button"

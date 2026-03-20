@@ -1795,6 +1795,34 @@ const sendCmd = command({
   }),
 });
 
+const interruptCmd = command({
+  name: "interrupt",
+  description: "Cancel the current turn without stopping the session",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId }) => runCliCommand("interrupt", async () => {
+    if (!sessionId) {
+      fail("usage: orka interrupt <session-id>");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    assertSessionAction(session, "cancelTurn", "interrupt");
+
+    try {
+      await svc.cancelTurn(session.id);
+      console.log(`interrupted turn for ${session.id}`);
+    } catch (e: any) {
+      fail(`error: ${e.message}`);
+    }
+  }),
+});
+
 const keepCmd = command({
   name: "keep",
   description: "Protect a session's worktree from auto-cleanup (survives prune/reap)",
@@ -3124,6 +3152,7 @@ const app = subcommands({
     backfill: backfillCmd,
     usage: usageCmd,
     send: sendCmd,
+    interrupt: interruptCmd,
     keep: keepCmd,
     unkeep: unkeepCmd,
     merge: mergeCmd,
