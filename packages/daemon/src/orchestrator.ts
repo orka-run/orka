@@ -12,7 +12,7 @@ import {
   type Task,
   type SpawnRequest,
 } from "@orka/core";
-import { captureCheckpoint } from "./checkpointing";
+import { captureCheckpoint, revertToCheckpoint, deleteCheckpointRefsAfter } from "./checkpointing";
 import { consumeProviderEvents } from "./orchestration";
 import { worktreeCreate, worktreeRemove, getWorktreeDir, worktreeHasCommitsAhead, worktreeHasChanges } from "./worktree";
 import { assertBackendInstalled } from "./backends";
@@ -686,6 +686,98 @@ export async function resumeSession(
         ctx.providerService.clearHandle(sessionId);
         clearIdleTimer(ctx, sessionId);
       });
+  });
+}
+
+// --- Revert ---
+
+/** Revert a session to a previous checkpoint.
+ *  - files mode: restore worktree files to checkpoint state, keep conversation intact
+ *  - files_and_conversation mode: restore files, kill process, truncate events,
+ *    generate new providerSessionId so the next resume starts a fresh conversation
+ *    with history up to the reverted turn injected as context */
+export async function revertSessionToTurn(
+  ctx: DaemonContext,
+  sessionId: string,
+  turnSeq: number,
+  mode: "files" | "files_and_conversation",
+): Promise<void> {
+  await withSpan("orka.revert", {
+    "orka.session.id": sessionId,
+    "orka.turn.seq": turnSeq,
+    "orka.revert.mode": mode,
+  }, async (span) => {
+    const session = ctx.db.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    const checkpoint = ctx.db.getCheckpoint(sessionId, turnSeq);
+    if (!checkpoint) throw new Error(`Checkpoint not found for session ${sessionId} turn ${turnSeq}`);
+    if (checkpoint.status !== "ready") {
+      throw new Error(`Checkpoint ${turnSeq} is not revertible (status=${checkpoint.status})`);
+    }
+
+    // For files_and_conversation mode, we need to stop the process first
+    if (mode === "files_and_conversation") {
+      const activeStatuses = new Set(["running", "idle", "rate_limited"]);
+      if (activeStatuses.has(session.status)) {
+        // Stop the process
+        clearIdleTimer(ctx, sessionId);
+        ctx.sessionRuntime.pendingMessages.delete(sessionId);
+        clearRateLimitState(ctx, sessionId);
+        ctx.hookApprovalBridge.denyAllForSession(sessionId);
+
+        const handle = ctx.providerService.getHandle(sessionId);
+        if (handle) {
+          await ctx.providerService.stopSession(sessionId);
+        }
+      }
+    } else {
+      // files-only: must not be running
+      if (session.status === "running" || session.status === "preparing") {
+        throw new Error(`Session ${sessionId} must not be running to revert files`);
+      }
+    }
+
+    // 1. Restore worktree files to checkpoint state
+    const gitDir = session.noWorktree ? session.workingDir : session.projectPath;
+    await revertToCheckpoint(session.workingDir, checkpoint.gitRef);
+    span.addEvent("files.reverted");
+
+    // 2. Clean up checkpoint refs and DB records after the target turn
+    await deleteCheckpointRefsAfter(gitDir, sessionId, turnSeq);
+    ctx.db.deleteCheckpoints(sessionId, turnSeq);
+    ctx.sessionRuntime.turnCounts.set(sessionId, turnSeq);
+
+    // 3. For files_and_conversation mode: truncate events and reset conversation
+    if (mode === "files_and_conversation") {
+      // Delete orchestration events that happened after the checkpoint
+      ctx.db.deleteOrchestrationEventsAfter(sessionId, checkpoint.createdAt);
+      span.addEvent("events.truncated");
+
+      // Generate a new provider session ID so the next --resume starts a fresh conversation
+      // (the old provider session ID still has the full history in Claude's system)
+      const newProviderSessionId = session.backend === "claude-code" ? crypto.randomUUID() : undefined;
+      if (newProviderSessionId) {
+        ctx.db.updateSessionProviderSessionId(sessionId, newProviderSessionId);
+      }
+
+      // Mark session as completed so it can be resumed with the new context
+      ctx.db.updateSessionStatus(sessionId, "completed", { finishedAt: new Date().toISOString() });
+      ctx.pushHub.broadcast("orchestration.sessionUpdated", { sessionId, status: "completed" });
+      span.addEvent("conversation.reset");
+    }
+
+    // 4. Emit session.reverted event
+    ctx.orchestrationEngine.emitDirect({
+      type: "session.reverted",
+      sessionId,
+      turnSeq,
+      mode,
+      timestamp: new Date().toISOString(),
+      v: 1,
+    });
+
+    span.addEvent("session.reverted");
   });
 }
 

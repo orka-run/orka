@@ -1,8 +1,8 @@
 // Attribution: Diff panel concept inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import hljs from "highlight.js/lib/common";
-import { FileDiff, LoaderCircle, RefreshCw } from "lucide-react";
+import { FileDiff, LoaderCircle, RefreshCw, RotateCcw } from "lucide-react";
 import type { Checkpoint } from "@orka/core";
 import { parseDiff, type DiffFile, type DiffLine } from "../lib/parseDiff";
 import { formatRelativeTime } from "../lib/sessionUi";
@@ -222,6 +222,20 @@ export function DiffPanel({ sessionId, onSelectionLoadSettled }: DiffPanelProps)
     }
   };
 
+  const revertMutation = useMutation({
+    mutationFn: ({ turnSeq, mode }: { turnSeq: number; mode: "files" | "files_and_conversation" }) =>
+      client.revertSession(sessionId, turnSeq, mode),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["session-checkpoints", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["session-diff", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["session-detail", sessionId] });
+    },
+  });
+
+  const handleRevert = (turnSeq: number, mode: "files" | "files_and_conversation") => {
+    revertMutation.mutate({ turnSeq, mode });
+  };
+
   if (viewMode === "full" && fullDiffQuery.isLoading) {
     return <LoadingState />;
   }
@@ -284,6 +298,8 @@ export function DiffPanel({ sessionId, onSelectionLoadSettled }: DiffPanelProps)
           transitions={turnTransitions}
           selectedTurnSeq={selectedTransition?.toTurn ?? null}
           onSelectTurn={setSelectedTurnSeq}
+          onRevert={handleRevert}
+          isReverting={revertMutation.isPending}
         />
       ) : null}
       {viewMode === "turn" && turnTransitions.length === 0 ? <NoTurnDiffsState /> : null}
@@ -361,11 +377,17 @@ function TurnTimeline({
   transitions,
   selectedTurnSeq,
   onSelectTurn,
+  onRevert,
+  isReverting,
 }: {
   transitions: TurnTransition[];
   selectedTurnSeq: number | null;
   onSelectTurn: (turnSeq: number) => void;
+  onRevert: (turnSeq: number, mode: "files" | "files_and_conversation") => void;
+  isReverting: boolean;
 }) {
+  const [revertMenuTurn, setRevertMenuTurn] = useState<number | null>(null);
+
   if (transitions.length === 0) {
     return null;
   }
@@ -382,45 +404,91 @@ function TurnTimeline({
           {transitions.map((transition) => {
             const isSelected = transition.toTurn === selectedTurnSeq;
             const changedFileCount = transition.files?.length ?? 0;
+            const showRevertMenu = revertMenuTurn === transition.toTurn;
 
             return (
-              <button
-                key={transition.key}
-                type="button"
-                onClick={() => onSelectTurn(transition.toTurn)}
-                className={`min-w-[11rem] rounded-sm border px-3 py-2 text-left transition ${
-                  isSelected
-                    ? "border-accent/40 bg-accent/10"
-                    : "border-border bg-surface-alt hover:border-ink-muted/50 hover:bg-surface-hover"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-[11px] font-semibold text-ink">
-                      T{transition.fromTurn} to T{transition.toTurn}
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-ink-muted">
-                      {formatRelativeTime(transition.createdAt)}
-                    </p>
+              <div key={transition.key} className="relative">
+                <button
+                  type="button"
+                  onClick={() => onSelectTurn(transition.toTurn)}
+                  className={`min-w-[11rem] rounded-sm border px-3 py-2 text-left transition ${
+                    isSelected
+                      ? "border-accent/40 bg-accent/10"
+                      : "border-border bg-surface-alt hover:border-ink-muted/50 hover:bg-surface-hover"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-semibold text-ink">
+                        T{transition.fromTurn} to T{transition.toTurn}
+                      </p>
+                      <p className="mt-0.5 text-[10px] text-ink-muted">
+                        {formatRelativeTime(transition.createdAt)}
+                      </p>
+                    </div>
+                    {transition.status !== "ready" ? (
+                      <span className="rounded-sm border border-status-warning/30 bg-status-warning/10 px-1.5 py-0.5 text-[10px] font-medium uppercase text-status-warning">
+                        {transition.status}
+                      </span>
+                    ) : null}
                   </div>
-                  {transition.status !== "ready" ? (
-                    <span className="rounded-sm border border-status-warning/30 bg-status-warning/10 px-1.5 py-0.5 text-[10px] font-medium uppercase text-status-warning">
-                      {transition.status}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-2 text-[11px] text-ink-secondary">
-                  {changedFileCount} file{changedFileCount === 1 ? "" : "s"}
-                </p>
-                <div className="mt-1 flex items-center gap-2 font-mono text-[10px]">
-                  <span className="rounded-sm bg-emerald-600/10 px-1.5 py-0.5 text-emerald-700">
-                    +{transition.additions}
-                  </span>
-                  <span className="rounded-sm bg-status-error/10 px-1.5 py-0.5 text-status-error">
-                    -{transition.deletions}
-                  </span>
-                </div>
-              </button>
+                  <p className="mt-2 text-[11px] text-ink-secondary">
+                    {changedFileCount} file{changedFileCount === 1 ? "" : "s"}
+                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 font-mono text-[10px]">
+                      <span className="rounded-sm bg-emerald-600/10 px-1.5 py-0.5 text-emerald-700">
+                        +{transition.additions}
+                      </span>
+                      <span className="rounded-sm bg-status-error/10 px-1.5 py-0.5 text-status-error">
+                        -{transition.deletions}
+                      </span>
+                    </div>
+                    {transition.status === "ready" ? (
+                      <button
+                        type="button"
+                        title="Revert to this turn"
+                        disabled={isReverting}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setRevertMenuTurn(showRevertMenu ? null : transition.toTurn);
+                        }}
+                        className="rounded-sm p-0.5 text-ink-muted transition hover:bg-surface hover:text-ink-secondary disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                      </button>
+                    ) : null}
+                  </div>
+                </button>
+                {showRevertMenu ? (
+                  <div className="absolute left-0 top-full z-10 mt-1 w-52 rounded-sm border border-border bg-surface shadow-lg">
+                    <button
+                      type="button"
+                      disabled={isReverting}
+                      onClick={() => {
+                        setRevertMenuTurn(null);
+                        onRevert(transition.toTurn, "files");
+                      }}
+                      className="w-full px-3 py-2 text-left text-[11px] text-ink-secondary transition hover:bg-surface-alt disabled:opacity-50"
+                    >
+                      <p className="font-medium text-ink">Revert files only</p>
+                      <p className="mt-0.5 text-ink-muted">Restore worktree, keep conversation</p>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isReverting}
+                      onClick={() => {
+                        setRevertMenuTurn(null);
+                        onRevert(transition.toTurn, "files_and_conversation");
+                      }}
+                      className="w-full border-t border-border/70 px-3 py-2 text-left text-[11px] text-ink-secondary transition hover:bg-surface-alt disabled:opacity-50"
+                    >
+                      <p className="font-medium text-ink">Revert files + conversation</p>
+                      <p className="mt-0.5 text-ink-muted">Restore worktree, truncate history</p>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             );
           })}
         </div>
