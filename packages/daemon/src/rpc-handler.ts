@@ -10,11 +10,17 @@ const SLOW_RPC_THRESHOLD_MS = 1_000;
  * Dispatch a JSON-RPC request to the OrkaService implementation.
  * Returns a JSON-RPC response string. Never throws.
  */
+export interface RpcHandlerOptions {
+  slowThresholdMs?: number;
+}
+
 export async function handleRpcRequest(
   ctx: DaemonContext,
   svc: OrkaService,
   raw: string,
+  options?: RpcHandlerOptions,
 ): Promise<string> {
+  const slowThresholdMs = options?.slowThresholdMs ?? SLOW_RPC_THRESHOLD_MS;
   const requestStartedAt = performance.now();
   let req: RpcRequest;
   try {
@@ -59,7 +65,7 @@ export async function handleRpcRequest(
       let isError = false;
 
       try {
-        const result = await dispatch(ctx, svc, req.method, req.params ?? {}, trace.setSpan(parentContext, span));
+        const result = await dispatch(ctx, svc, req.method, req.params ?? {}, trace.setSpan(parentContext, span), slowThresholdMs);
         const response: any = { jsonrpc: "2.0", id, result };
 
         span.setStatus({ code: SpanStatusCode.OK });
@@ -76,7 +82,7 @@ export async function handleRpcRequest(
         } as RpcResponse);
       } finally {
         const durationMs = performance.now() - requestStartedAt;
-        applyRpcTiming(span, durationMs);
+        applyRpcTiming(span, durationMs, slowThresholdMs);
         recordRpcMetrics(method, durationMs, isError);
         span.end();
       }
@@ -91,7 +97,7 @@ export async function handleRpcRequest(
  * OrkaService + RpcMethodMap without a dispatch case results in a runtime
  * METHOD_NOT_FOUND error (caught by E2E tests).
  */
-async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, params: any, parentContext = ROOT_CONTEXT): Promise<any> {
+async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, params: any, parentContext = ROOT_CONTEXT, slowThresholdMs = SLOW_RPC_THRESHOLD_MS): Promise<any> {
   return withSpan("orka.rpc.dispatch", { "orka.method": method }, async (span) => {
     const { pushHub } = ctx;
     const startedAt = performance.now();
@@ -312,7 +318,7 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
         }
       })();
     } finally {
-      applyRpcTiming(span, performance.now() - startedAt);
+      applyRpcTiming(span, performance.now() - startedAt, slowThresholdMs);
     }
   }, parentContext);
 }
@@ -328,14 +334,14 @@ function addPayloadEvent(span: Span, name: string, payload: string): void {
   span.addEvent(name, { size, "orka.rpc.size_bytes": size });
 }
 
-function applyRpcTiming(span: Span, durationMs: number): void {
+function applyRpcTiming(span: Span, durationMs: number, threshold = SLOW_RPC_THRESHOLD_MS): void {
   span.setAttribute("orka.rpc.duration_ms", durationMs);
-  if (durationMs > SLOW_RPC_THRESHOLD_MS) {
+  if (durationMs > threshold) {
     span.setAttribute("orka.rpc.slow", true);
     span.addEvent("rpc.warning", {
       severity: "warning",
       "orka.rpc.duration_ms": durationMs,
-      "orka.rpc.slow_threshold_ms": SLOW_RPC_THRESHOLD_MS,
+      "orka.rpc.slow_threshold_ms": threshold,
     });
   }
 }

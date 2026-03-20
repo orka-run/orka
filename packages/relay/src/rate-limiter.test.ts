@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, setSystemTime } from "bun:test";
 import { RateLimiter, GlobalRateLimiter } from "./rate-limiter";
 import type { RateLimitConfig } from "./db";
 
@@ -96,14 +96,20 @@ describe("GlobalRateLimiter", () => {
     expect(gl.check()).toBe(false);
   });
 
-  test("resets on new second boundary", async () => {
-    const gl = new GlobalRateLimiter(2);
-    expect(gl.check()).toBe(true);
-    expect(gl.check()).toBe(true);
-    expect(gl.check()).toBe(false);
+  test("resets on new second boundary", () => {
+    const now = Date.now();
+    setSystemTime(new Date(now));
+    try {
+      const gl = new GlobalRateLimiter(2);
+      expect(gl.check()).toBe(true);
+      expect(gl.check()).toBe(true);
+      expect(gl.check()).toBe(false);
 
-    // Wait for next second
-    await new Promise((r) => setTimeout(r, 1100));
-    expect(gl.check()).toBe(true);
+      // Advance past the second boundary
+      setSystemTime(new Date(now + 1100));
+      expect(gl.check()).toBe(true);
+    } finally {
+      setSystemTime();
+    }
   });
 });

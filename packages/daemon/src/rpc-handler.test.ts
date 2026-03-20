@@ -318,7 +318,7 @@ describe("handleRpcRequest", () => {
       const { ctx } = makeMockCtx();
       const svc = {
         async reap() {
-          await Bun.sleep(1_050);
+          await Bun.sleep(10); // any nonzero duration triggers slow with threshold=0
           return 9;
         },
       } as unknown as OrkaService;
@@ -327,6 +327,7 @@ describe("handleRpcRequest", () => {
         ctx,
         svc,
         JSON.stringify({ jsonrpc: "2.0", id: 6, method: "reap", params: {} }),
+        { slowThresholdMs: 0 },
       );
 
       expect(JSON.parse(response)).toEqual({
@@ -342,8 +343,8 @@ describe("handleRpcRequest", () => {
 
       expect(rpcSpan?.attributes["orka.rpc.slow"]).toBe(true);
       expect(dispatchSpan?.attributes["orka.rpc.slow"]).toBe(true);
-      expect(Number(rpcSpan?.attributes["orka.rpc.duration_ms"])).toBeGreaterThan(1_000);
-      expect(Number(dispatchSpan?.attributes["orka.rpc.duration_ms"])).toBeGreaterThan(1_000);
+      expect(Number(rpcSpan?.attributes["orka.rpc.duration_ms"])).toBeGreaterThan(0);
+      expect(Number(dispatchSpan?.attributes["orka.rpc.duration_ms"])).toBeGreaterThan(0);
     });
   });
 
