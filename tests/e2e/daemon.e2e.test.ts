@@ -65,7 +65,7 @@ describe("Daemon Session Lifecycle", () => {
     await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
     await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
 
-    ctx = await createDaemonContext(testHome);
+    ctx = await createDaemonContext(testHome, { inMemoryDb: true });
     registerTestAdapter(ctx);
     client = createLocalClient(ctx);
   }, 30_000);

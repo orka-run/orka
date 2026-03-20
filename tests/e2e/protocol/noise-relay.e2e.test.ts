@@ -188,7 +188,7 @@ describe("Noise NK through Relay", () => {
     const nodeApiKeyB = ((await nodeKeyResB.json()) as { apiKey: string }).apiKey;
 
     // 3. Start daemon A with encryption + relay registration
-    ctxA = await createDaemonContext(daemonHomeA);
+    ctxA = await createDaemonContext(daemonHomeA, { inMemoryDb: true });
     svcA = createLocalClient(ctxA);
     ({ server: daemonServerA } = await startServer(ctxA, svcA, {
       port: 0,
@@ -202,7 +202,7 @@ describe("Noise NK through Relay", () => {
     noiseKeyA = await fetchNoiseKeyInfo(daemonPortA);
 
     // 4. Start daemon B with encryption + relay registration
-    ctxB = await createDaemonContext(daemonHomeB);
+    ctxB = await createDaemonContext(daemonHomeB, { inMemoryDb: true });
     svcB = createLocalClient(ctxB);
     ({ server: daemonServerB } = await startServer(ctxB, svcB, {
       port: 0,

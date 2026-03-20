@@ -215,7 +215,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     };
 
     // 4. Start daemon with pairing enabled
-    ctx = await createDaemonContext(daemonHome);
+    ctx = await createDaemonContext(daemonHome, { inMemoryDb: true });
     svc = createLocalClient(ctx, pairingConfig);
     ({ server: daemonServer } = await startServer(ctx, svc, {
       port: 0,

@@ -109,7 +109,7 @@ describe("Relay Routing & Auth", () => {
     nodeApiKey = nodeKeyData.apiKey;
 
     // 4. Start daemon and register with relay
-    ctx = await createDaemonContext(daemonHome);
+    ctx = await createDaemonContext(daemonHome, { inMemoryDb: true });
     svc = createLocalClient(ctx);
     ({ server: daemonServer } = await startServer(ctx, svc, {
       port: 0,

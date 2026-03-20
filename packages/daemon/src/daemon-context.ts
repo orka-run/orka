@@ -56,12 +56,18 @@ export interface DaemonContext {
  * This is the composition root for the daemon — all dependencies are
  * created here and passed down via the context object.
  */
-export async function createDaemonContext(orkaHome?: string): Promise<DaemonContext> {
+export async function createDaemonContext(orkaHome?: string, opts?: { inMemoryDb?: boolean }): Promise<DaemonContext> {
   const home = orkaHome ?? getOrkaHome();
   const config = loadConfig(home);
-  const rawDb = openDb(home);
-  await migrateDb(rawDb, home);
-  const db = new DatabaseRepository(rawDb);
+  let db: DatabaseRepository;
+  if (opts?.inMemoryDb) {
+    const { openTestDb } = await import("./db");
+    db = await openTestDb();
+  } else {
+    const rawDb = openDb(home);
+    await migrateDb(rawDb, home);
+    db = new DatabaseRepository(rawDb);
+  }
   const pushHub = new PushHub();
   const approvalManager = new ApprovalManager({
     approvalTimeoutMinutes: config.limits.approvalTimeoutMinutes,
