@@ -54,6 +54,37 @@ export class ProviderService {
     });
   }
 
+  async steerTurn(threadId: string, input: ProviderSendTurnInput): Promise<void> {
+    await withSpan("orka.provider.steer_turn", { "orka.session.id": threadId }, async () => {
+      const handle = this.requireHandle(threadId);
+      const adapter = this.registry.get(handle.provider);
+      if (!adapter.steerTurn) {
+        throw new Error(`Backend "${handle.provider}" does not support mid-turn steering`);
+      }
+      await adapter.steerTurn(handle, input);
+    });
+  }
+
+  async cancelTurn(threadId: string): Promise<void> {
+    await withSpan("orka.provider.cancel_turn", { "orka.session.id": threadId }, async () => {
+      const handle = this.requireHandle(threadId);
+      const adapter = this.registry.get(handle.provider);
+      if (adapter.cancelTurn) {
+        await adapter.cancelTurn(handle);
+      } else {
+        // Fall back to interruptTurn for adapters that don't implement cancelTurn
+        await adapter.interruptTurn(handle);
+      }
+    });
+  }
+
+  supportsSteer(threadId: string): boolean {
+    const handle = this.sessions.get(threadId);
+    if (!handle) return false;
+    const adapter = this.registry.get(handle.provider);
+    return typeof adapter.steerTurn === "function";
+  }
+
   async stopSession(threadId: string): Promise<void> {
     await withSpan("orka.provider.stop_session", { "orka.session.id": threadId }, async () => {
       const handle = this.requireHandle(threadId);

@@ -41,7 +41,7 @@ import type {
 import { generatePairingCode } from "@orka/core/crypto/protocol";
 import { EnrollmentStore } from "./pairing/enrollment-store";
 import type { DaemonContext } from "./daemon-context";
-import { spawnSession, closeSession, stopSession, reapSessions, cleanupOrphanedWorktrees, sendTurnToSession } from "./orchestrator";
+import { spawnSession, closeSession, stopSession, reapSessions, cleanupOrphanedWorktrees, sendTurnToSession, cancelTurnInSession } from "./orchestrator";
 import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
 import {
@@ -283,6 +283,10 @@ class LocalClient implements OrkaService {
 
   async sendTurn(sessionId: string, text: string): Promise<void> {
     await sendTurnToSession(this.ctx, sessionId, text);
+  }
+
+  async cancelTurn(sessionId: string): Promise<void> {
+    await cancelTurnInSession(this.ctx, sessionId);
   }
 
   async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {
@@ -1022,7 +1026,7 @@ function computeAllowedActions(session: Session, hasLiveHandle: boolean, hasWork
 
   switch (session.status) {
     case "running":
-      actions.push("sendTurn", "stop");
+      actions.push("sendTurn", "cancelTurn", "stop");
       break;
     case "idle":
       actions.push("sendTurn", "stop");

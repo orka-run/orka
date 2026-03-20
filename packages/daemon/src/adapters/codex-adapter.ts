@@ -18,7 +18,7 @@ import { prependSystemPrompt } from "../backends";
 import { withSpan } from "../tracing";
 import { buildAgentEnv } from "./env-filter";
 
-type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/interrupt" | "thread/unsubscribe";
+type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/steer" | "turn/interrupt" | "thread/unsubscribe";
 type CodexClientNotificationMethod = "initialized";
 type CodexProcess = ReturnType<typeof Bun.spawn>;
 type CodexSpawn = typeof Bun.spawn;
@@ -318,6 +318,52 @@ export class CodexAdapter implements ProviderAdapter {
       "orka.provider.codex.interrupt_turn",
       { "orka.session.id": handle.threadId, "orka.backend": this.kind },
       async () => {
+        const meta = getCodexHandleMeta(handle);
+
+        if (!meta.providerThreadId || !meta.activeTurnId) {
+          return;
+        }
+
+        await meta.sendRequest("turn/interrupt", {
+          threadId: meta.providerThreadId,
+          turnId: meta.activeTurnId,
+        });
+      },
+    );
+  }
+
+  async steerTurn(handle: ProviderSessionHandle, input: ProviderSendTurnInput): Promise<void> {
+    await withSpan(
+      "orka.provider.codex.steer_turn",
+      { "orka.session.id": handle.threadId, "orka.backend": this.kind },
+      async () => {
+        const meta = getCodexHandleMeta(handle);
+
+        if (!meta.providerThreadId || !meta.activeTurnId) {
+          throw new Error("No active Codex turn to steer");
+        }
+
+        await meta.sendRequest("turn/steer", {
+          threadId: meta.providerThreadId,
+          expectedTurnId: meta.activeTurnId,
+          input: [
+            {
+              type: "text",
+              text: input.input ?? "",
+              text_elements: [],
+            },
+          ],
+        });
+      },
+    );
+  }
+
+  async cancelTurn(handle: ProviderSessionHandle): Promise<void> {
+    await withSpan(
+      "orka.provider.codex.cancel_turn",
+      { "orka.session.id": handle.threadId, "orka.backend": this.kind },
+      async () => {
+        // cancelTurn delegates to interruptTurn — Codex's turn/interrupt is the cancel mechanism
         const meta = getCodexHandleMeta(handle);
 
         if (!meta.providerThreadId || !meta.activeTurnId) {

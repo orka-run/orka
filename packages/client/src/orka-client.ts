@@ -176,6 +176,10 @@ export class OrkaClient implements OrkaService {
     return this.request("sendTurn", { sessionId, text }, options);
   }
 
+  async cancelTurn(sessionId: string, options?: RequestOptions): Promise<void> {
+    return this.request("cancelTurn", { sessionId }, options);
+  }
+
   async getCheckpoints(sessionId: string, options?: RequestOptions): Promise<Checkpoint[]> {
     return this.request("getCheckpoints", { sessionId }, options);
   }

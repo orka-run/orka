@@ -49,6 +49,15 @@ export interface ProviderAdapter {
   startSession(input: ProviderSessionStartInput): Promise<ProviderSessionHandle>;
   sendTurn(handle: ProviderSessionHandle, input: ProviderSendTurnInput): Promise<void>;
   interruptTurn(handle: ProviderSessionHandle): Promise<void>;
+  /** Inject a message into an active turn without starting a new one.
+   *  Only supported by Codex (turn/steer). Claude Code absorbs stdin mid-turn
+   *  into the current context — use interruptTurn (SIGINT) instead. */
+  steerTurn?(handle: ProviderSessionHandle, input: ProviderSendTurnInput): Promise<void>;
+  /** Cancel the active turn. Codex uses turn/interrupt; Claude Code uses SIGINT.
+   *  Unlike interruptTurn, cancelTurn is exposed as an RPC endpoint for
+   *  dashboard/CLI consumers. Adapters that don't implement this fall back
+   *  to interruptTurn. */
+  cancelTurn?(handle: ProviderSessionHandle): Promise<void>;
   stopSession(handle: ProviderSessionHandle): Promise<void>;
   respondToRequest(
     handle: ProviderSessionHandle,
