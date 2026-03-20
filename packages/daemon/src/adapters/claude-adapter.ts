@@ -243,6 +243,17 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     );
   }
 
+  // steerTurn: NOT implemented for Claude Code.
+  // Claude Code has no explicit mid-turn steering protocol. Writing to stdin during
+  // an active turn causes the message to be absorbed into the current turn's context
+  // (delivered alongside the next tool result), NOT processed as a separate turn.
+  // The message is consumed and effectively lost. See docs/claude-stream-json-mid-turn.md.
+  // The only interruption mechanism is SIGINT (interruptTurn), which kills the current
+  // turn and exits the process.
+
+  // cancelTurn: NOT implemented — falls back to interruptTurn (SIGINT) via ProviderService.
+  // After SIGINT, Claude Code exits immediately; follow-up requires session resume.
+
   async stopSession(handle: ProviderSessionHandle): Promise<void> {
     await withSpan(
       "orka.provider.claude_code.stop_session",

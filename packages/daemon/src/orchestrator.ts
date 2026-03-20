@@ -741,7 +741,7 @@ export async function sendTurnToSession(
     switch (session.status) {
       case "running":
       case "idle": {
-        // Process is alive — queue during an active turn, or write directly when idle
+        // Process is alive — steer mid-turn (codex) or queue (claude), or write directly when idle
         const handle = ctx.providerService.getHandle(sessionId);
         if (!handle) {
           // Process died but status wasn't updated — resume instead
@@ -750,6 +750,18 @@ export async function sendTurnToSession(
         }
 
         if (session.status === "running") {
+          // Codex supports mid-turn steering — inject immediately instead of queuing
+          if (ctx.providerService.supportsSteer(sessionId)) {
+            try {
+              await ctx.providerService.steerTurn(sessionId, { input: text });
+              emitUserInputEvent(ctx, sessionId, text, handle.provider);
+              return;
+            } catch {
+              // steerTurn failed (e.g. no active turn) — fall through to queue
+            }
+          }
+
+          // Claude Code (and steer failures): queue for delivery after turn completes
           const pending = ctx.sessionRuntime.pendingMessages.get(sessionId) ?? [];
           pending.push(text);
           ctx.sessionRuntime.pendingMessages.set(sessionId, pending);
@@ -782,6 +794,24 @@ export async function sendTurnToSession(
       default:
         throw new Error(`Cannot send turn to session in "${session.status}" state`);
     }
+  });
+}
+
+// --- Cancel Turn ---
+
+/** Cancel the active turn for a running session. No-op if no turn is active. */
+export async function cancelTurnInSession(ctx: DaemonContext, sessionId: string): Promise<void> {
+  return withSpan("orka.cancelTurn", { "orka.session.id": sessionId }, async () => {
+    const session = ctx.db.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+    const handle = ctx.providerService.getHandle(sessionId);
+    if (!handle) return; // No active process — nothing to cancel
+
+    await ctx.providerService.cancelTurn(sessionId);
+
+    // Clear any queued messages — user explicitly cancelled, don't deliver pending input
+    ctx.sessionRuntime.pendingMessages.delete(sessionId);
   });
 }
 

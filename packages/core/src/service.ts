@@ -5,6 +5,7 @@ import type { PushChannel } from "./push-protocol";
 
 export type SessionAction =
   | "sendTurn"
+  | "cancelTurn"
   | "stop"
   | "resume"
   | "cancel"
@@ -233,6 +234,9 @@ export interface OrkaService {
   getLogContent(sessionId: string): Promise<string | null>;
   isAlive(sessionId: string): Promise<boolean>;
   sendTurn(sessionId: string, text: string): Promise<void>;
+  /** Cancel the active turn for a running session. Uses turn/interrupt (Codex)
+   *  or SIGINT (Claude Code). No-op if no turn is active. */
+  cancelTurn(sessionId: string): Promise<void>;
   getCheckpoints(sessionId: string): Promise<Checkpoint[]>;
   getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }>;
   revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void>;
