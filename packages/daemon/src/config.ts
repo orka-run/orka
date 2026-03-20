@@ -36,6 +36,8 @@ const HookCommandSchema = z.object({
 
 const HooksSchema = z.object({
   postWorktreeCreate: z.array(z.string()).default([]),
+  beforeSpawn: z.string().optional(),
+  afterComplete: z.string().optional(),
 });
 
 const PermissionsSchema = z.object({
@@ -52,6 +54,8 @@ export const ConfigSchema = z.object({
   hooks: HooksSchema.default(HooksSchema.parse({})),
   permissions: PermissionsSchema.default(PermissionsSchema.parse({})),
   backendDefaults: z.record(z.string(), PerBackendDefaultsSchema).default({}),
+  env: z.record(z.string(), z.string()).default({}),
+  envDynamic: z.record(z.string(), z.string()).default({}),
 });
 
 export type OrkaConfig = z.infer<typeof ConfigSchema>;
@@ -107,13 +111,46 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
     const limits = getTable(toml["limits"]);
     const hooks = getTable(toml["hooks"]);
     const permissions = getTable(toml["permissions"]);
+    const envTable = getTable(toml["env"]);
 
     const backendDefaults: Record<string, Record<string, unknown>> = {};
+    // Parse per-backend defaults from [defaults.<backend>] subtables
     if (defaults) {
       for (const [key, value] of Object.entries(defaults)) {
         const sub = getTable(value);
         if (sub) {
           backendDefaults[key] = parsePerBackendDefaults(sub);
+        }
+      }
+    }
+    // Also parse [backends.<backend>] as an alternative syntax
+    const backendsTable = getTable(toml["backends"]);
+    if (backendsTable) {
+      for (const [key, value] of Object.entries(backendsTable)) {
+        const sub = getTable(value);
+        if (sub) {
+          // [backends.*] entries merge on top of [defaults.*] entries
+          backendDefaults[key] = { ...backendDefaults[key], ...parsePerBackendDefaults(sub) };
+        }
+      }
+    }
+
+    // Parse [env] and [env.dynamic] sections
+    const staticEnv: Record<string, string> = {};
+    const dynamicEnv: Record<string, string> = {};
+    if (envTable) {
+      for (const [key, value] of Object.entries(envTable)) {
+        if (key === "dynamic") {
+          const dynamicTable = getTable(value);
+          if (dynamicTable) {
+            for (const [dk, dv] of Object.entries(dynamicTable)) {
+              const sv = getString(dv);
+              if (sv !== undefined) dynamicEnv[dk] = sv;
+            }
+          }
+        } else {
+          const sv = getString(value);
+          if (sv !== undefined) staticEnv[key] = sv;
         }
       }
     }
@@ -141,8 +178,18 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
             }
           : undefined,
       hooks:
-        hooks?.["post_worktree_create"] !== undefined
-          ? { postWorktreeCreate: normalizeHookCommands(hooks["post_worktree_create"]) }
+        hooks !== undefined
+          ? {
+              ...(hooks["post_worktree_create"] !== undefined
+                ? { postWorktreeCreate: normalizeHookCommands(hooks["post_worktree_create"]) }
+                : {}),
+              ...(getString(hooks["before_spawn"]) !== undefined
+                ? { beforeSpawn: getString(hooks["before_spawn"]) }
+                : {}),
+              ...(getString(hooks["after_complete"]) !== undefined
+                ? { afterComplete: getString(hooks["after_complete"]) }
+                : {}),
+            }
           : undefined,
       permissions:
         permissions !== undefined
@@ -164,6 +211,10 @@ function loadConfigFromFile(configPath: string): OrkaConfig {
           : undefined,
       backendDefaults:
         Object.keys(backendDefaults).length > 0 ? backendDefaults : undefined,
+      env:
+        Object.keys(staticEnv).length > 0 ? staticEnv : undefined,
+      envDynamic:
+        Object.keys(dynamicEnv).length > 0 ? dynamicEnv : undefined,
     });
   } catch {
     return ConfigSchema.parse({});
@@ -221,6 +272,8 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
       postWorktreeCreate: projectConfig.hooks.postWorktreeCreate.length > 0
         ? projectConfig.hooks.postWorktreeCreate
         : userConfig.hooks.postWorktreeCreate,
+      beforeSpawn: projectConfig.hooks.beforeSpawn ?? userConfig.hooks.beforeSpawn,
+      afterComplete: projectConfig.hooks.afterComplete ?? userConfig.hooks.afterComplete,
     },
     permissions: (() => {
       const pd = PermissionsSchema.parse({});
@@ -254,6 +307,14 @@ export function mergeConfigs(userConfig: OrkaConfig, projectConfig: OrkaConfig |
           }];
         }),
       ),
+    },
+    env: {
+      ...userConfig.env,
+      ...projectConfig.env,
+    },
+    envDynamic: {
+      ...userConfig.envDynamic,
+      ...projectConfig.envDynamic,
     },
   };
 }
@@ -344,6 +405,50 @@ function normalizeHookCommands(value: TomlValue | undefined): string[] | undefin
   }
 
   return z.array(HookCommandSchema).parse(value).map((item) => item.run);
+}
+
+/**
+ * Evaluate dynamic env commands: run each shell command and capture stdout.
+ * Commands that fail (non-zero exit) are silently skipped.
+ */
+export async function evaluateDynamicEnv(
+  dynamicEnv: Record<string, string>,
+  cwd: string,
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  for (const [key, cmd] of Object.entries(dynamicEnv)) {
+    const proc = Bun.spawn(["sh", "-c", cmd], { cwd, stdout: "pipe", stderr: "ignore" });
+    const output = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode === 0) {
+      result[key] = output.trim();
+    }
+  }
+  return result;
+}
+
+/**
+ * Resolve project env: merge static env, dynamic env (evaluated), and CLI env.
+ * Priority: CLI env > dynamic env > static env.
+ * Returns undefined if no env vars to propagate.
+ */
+export async function resolveProjectEnv(
+  config: OrkaConfig,
+  projectPath: string,
+  cliEnv?: Record<string, string>,
+): Promise<Record<string, string> | undefined> {
+  const staticEnv = config.env;
+  const dynamicEnv = Object.keys(config.envDynamic).length > 0
+    ? await evaluateDynamicEnv(config.envDynamic, projectPath)
+    : {};
+
+  const merged = {
+    ...staticEnv,
+    ...dynamicEnv,
+    ...(cliEnv ?? {}),
+  };
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 /**

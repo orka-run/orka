@@ -68,6 +68,8 @@ export interface ProviderEventConsumerCallbacks {
   ) => void;
   /** Shared set tracking which sessions have already auto-merged (injected from DaemonContext). */
   autoMergeFired?: Set<string>;
+  /** Called after a session reaches a terminal state (completed/failed/cancelled). Fire-and-forget. */
+  onAfterComplete?: (sessionId: string) => Promise<void> | void;
 }
 
 export async function consumeProviderEvents(
@@ -328,6 +330,9 @@ async function finalizeSession(
     sessionId,
     status,
   });
+
+  // Fire-and-forget after_complete hook
+  void callbacks.onAfterComplete?.(sessionId);
 
   if (status === "cancelled") {
     await callbacks.cleanupWorktree?.();
