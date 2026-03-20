@@ -38,7 +38,6 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getOrkaHome } from "./db";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -129,11 +128,7 @@ export interface TraceLogEntry {
   }>;
 }
 
-export function getTraceLogPath(): string {
-  const dir = getOrkaHome();
-  mkdirSync(dir, { recursive: true });
-  return join(dir, "traces.jsonl");
-}
+
 
 export interface TraceQuery {
   /** Filter by service name (e.g. "orka-dashboard") */
@@ -148,8 +143,8 @@ export interface TraceQuery {
   since?: string;
 }
 
-export function queryTraceLog(query: TraceQuery = {}): TraceLogEntry[] {
-  const logPath = getTraceLogPath();
+export function queryTraceLog(query: TraceQuery = {}, dataDir: string): TraceLogEntry[] {
+  const logPath = join(dataDir, "traces.jsonl");
   const limit = query.limit ?? 50;
   const sinceMs = query.since ? new Date(query.since).getTime() : 0;
   const results: TraceLogEntry[] = [];
@@ -261,13 +256,13 @@ function rotateTraceFileIfNeeded(logFile: string): void {
   compressWithZstdAsync(`${logFile}.rotating`, `${logFile}.1.zst`);
 }
 
-function appendTraceLogEntries(entries: TraceLogEntry[], dataDir?: string): void {
+function appendTraceLogEntries(entries: TraceLogEntry[], dataDir: string): void {
   if (entries.length === 0) {
     return;
   }
 
-  const logFile = dataDir ? join(dataDir, "traces.jsonl") : getTraceLogPath();
-  if (dataDir) mkdirSync(dataDir, { recursive: true });
+  const logFile = join(dataDir, "traces.jsonl");
+  mkdirSync(dataDir, { recursive: true });
   rotateTraceFileIfNeeded(logFile);
   const payload = entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
   appendFileSync(logFile, payload);
@@ -303,8 +298,7 @@ export function serializeReadableSpan(span: ReadableSpan): TraceLogEntry {
 
 /** Custom exporter that writes spans as JSON lines to ~/.orka/traces.jsonl */
 class FileSpanExporter implements SpanExporter {
-  private dataDir: string | undefined;
-  constructor(dataDir?: string) { this.dataDir = dataDir; }
+  constructor(private readonly dataDir: string) {}
 
   export(spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
     try {
@@ -425,7 +419,7 @@ export function initTracing(options: TracingInitOptions = {}): void {
   if (_initialized) return;
   _initialized = true;
 
-  const resolvedDataDir = options.dataDir; // undefined = lazy read from env (production)
+  if (!options.dataDir && !options.disableFileExporter) throw new Error("initTracing requires dataDir when file exporter is enabled");
 
   const traceEndpoint = options.otlpHttpEndpoint ?? process.env["OTEL_EXPORTER_OTLP_ENDPOINT"];
   const metricEndpoint = process.env["OTEL_EXPORTER_OTLP_ENDPOINT"];
@@ -436,7 +430,7 @@ export function initTracing(options: TracingInitOptions = {}): void {
   });
 
   const processors: SimpleSpanProcessor[] = [];
-  const fileExporter = new FileSpanExporter(resolvedDataDir);
+  const fileExporter = new FileSpanExporter(options.dataDir!);
 
   if (traceEndpoint) {
     processors.push(
@@ -631,8 +625,8 @@ export function withSpanSync<T>(
   });
 }
 
-export function persistOtlpJsonTraces(payload: unknown): void {
-  appendTraceLogEntries(parseOtlpJsonTraceEntries(payload));
+export function persistOtlpJsonTraces(payload: unknown, dataDir: string): void {
+  appendTraceLogEntries(parseOtlpJsonTraceEntries(payload), dataDir);
 }
 
 function serializeSpansToOtlpJson(spans: ReadableSpan[]): { resourceSpans: Array<Record<string, unknown>> } {

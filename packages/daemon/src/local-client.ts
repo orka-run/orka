@@ -733,7 +733,7 @@ class LocalClient implements OrkaService {
     limit?: number;
     since?: string;
   }): Promise<Array<Record<string, unknown>>> {
-    return queryTraceLog(query ?? {}) as unknown as Array<Record<string, unknown>>;
+    return queryTraceLog(query ?? {}, this.ctx.orkaHome) as unknown as Array<Record<string, unknown>>;
   }
 
   async reportEventGap(_channel: PushChannel, _expectedSeq: number, _gotSeq: number): Promise<void> {}

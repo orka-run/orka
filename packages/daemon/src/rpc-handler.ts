@@ -309,7 +309,7 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
               namePattern: params.namePattern,
               limit: params.limit,
               since: params.since,
-            });
+            }, ctx.orkaHome);
           default: {
             const err = new Error(`Method not found: ${method}`);
             (err as any).rpcCode = RPC_METHOD_NOT_FOUND;

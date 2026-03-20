@@ -123,7 +123,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
 
           try {
             const body = await req.json();
-            persistOtlpJsonTraces(body);
+            persistOtlpJsonTraces(body, ctx.orkaHome);
             return new Response(JSON.stringify({ ok: true }), {
               status: 200,
               headers: { "content-type": "application/json" },
