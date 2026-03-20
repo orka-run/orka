@@ -34,6 +34,7 @@ function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListR
   return {
     id: "sess-1",
     status: "queued",
+    allowedActions: [],
     backend: "codex",
     projectPath: "/tmp/project",
     createdAt: "2026-03-11T10:00:00.000Z",
@@ -75,7 +76,7 @@ describe("sessionStore", () => {
         id: "sess-1",
         status: "queued",
         backend: "codex",
-            title: "First session",
+        title: "First session",
         model: "gpt-5",
         createdAt: "2026-03-11T10:00:00.000Z",
         startedAt: null,
@@ -90,6 +91,7 @@ describe("sessionStore", () => {
         permissionMode: null,
         tags: [],
         nodeId: null,
+        allowedActions: [],
       },
     ]);
     expect(store.getState().isLoading).toBe(false);
@@ -128,6 +130,7 @@ describe("sessionStore", () => {
           permissionMode: null,
           tags: [],
           nodeId: null,
+          allowedActions: [],
         },
       ],
     });
@@ -162,6 +165,7 @@ describe("sessionStore", () => {
           permissionMode: null,
           tags: [],
           nodeId: null,
+          allowedActions: [],
         },
       ],
       selectedId: session.id,
@@ -202,15 +206,16 @@ describe("sessionStore", () => {
 
     const sessions = store.getState().sessions;
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].id).toBe("sess-2");
-    expect(sessions[0].status).toBe("queued");
-    expect(sessions[0].backend).toBe("codex");
-    expect(sessions[0].title).toBe("Ship dashboard store");
-    expect(sessions[0].model).toBe("gpt-5");
-    expect(sessions[0].projectPath).toBe("/tmp/project");
-    expect(sessions[0].autoMerge).toBe(true);
-    expect(sessions[0].noWorktree).toBe(true);
-    expect(sessions[0].nodeId).toBeNull();
+    const first = sessions[0]!;
+    expect(first.id).toBe("sess-2");
+    expect(first.status).toBe("queued");
+    expect(first.backend).toBe("codex");
+    expect(first.title).toBe("Ship dashboard store");
+    expect(first.model).toBe("gpt-5");
+    expect(first.projectPath).toBe("/tmp/project");
+    expect(first.autoMerge).toBe(true);
+    expect(first.noWorktree).toBe(true);
+    expect(first.nodeId).toBeNull();
     expect(store.getState().selectedId).toBe("sess-2");
   });
 });

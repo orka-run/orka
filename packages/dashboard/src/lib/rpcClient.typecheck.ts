@@ -9,6 +9,6 @@ type HasRetrySession = RpcClient extends { retrySession: unknown } ? true : fals
 
 void client.stop("sess-123");
 const hasStopSession: HasStopSession = false;
-const hasRetrySession: HasRetrySession = false;
+const hasRetrySession: HasRetrySession = true;
 void hasStopSession;
 void hasRetrySession;
