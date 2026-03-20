@@ -12,7 +12,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { ConnectionSettingsDialog } from "./components/ConnectionSettingsDialog";
 import { DevOverlay } from "./components/DevOverlay";
-import { DraftChatView } from "./components/DraftChatView";
+import { SpawnComposer } from "./components/SpawnComposer";
 import { ErrorBoundary, type ClientErrorReport } from "./components/ErrorBoundary";
 import { MobileHeader } from "./components/MobileHeader";
 import { MobileSidebarDrawer } from "./components/MobileSidebarDrawer";
@@ -492,7 +492,7 @@ function AppShell({ transport, client }: AppShellProps) {
       : {}),
   };
 
-  // Mobile main content: show SessionView, DraftChatView, WorkspaceDetailView, or empty state
+  // Mobile main content: show SessionView, SpawnComposer, WorkspaceDetailView, or empty state
   const mobileMainContent = selectedId ? (
     <SessionView
       sessionId={selectedId}
@@ -502,7 +502,7 @@ function AppShell({ transport, client }: AppShellProps) {
       onMobileTabChange={setMobileActiveTab}
     />
   ) : isDraftActive ? (
-    <DraftChatView
+    <SpawnComposer
       key={activeWorkspaceId ?? "all"}
       defaultProjectPath={defaultProjectPath}
       nodes={nodes}
@@ -541,7 +541,7 @@ function AppShell({ transport, client }: AppShellProps) {
       onSelectionLoadSettled={handleSelectionLoadSettled}
     />
   ) : isDraftActive ? (
-    <DraftChatView
+    <SpawnComposer
       key={activeWorkspaceId ?? "all"}
       defaultProjectPath={defaultProjectPath}
       nodes={nodes}
