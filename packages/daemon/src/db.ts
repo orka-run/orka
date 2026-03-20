@@ -861,7 +861,7 @@ export class DatabaseRepository {
     withSpanSync("orka.db.addWorkspacePath", { "orka.workspace.id": workspaceId }, () => {
       this.db
         .prepare("INSERT OR IGNORE INTO workspace_paths (workspace_id, node_id, project_path) VALUES (?, ?, ?)")
-        .run(workspaceId, nodeId ?? null, projectPath);
+        .run(workspaceId, nodeId ?? "", projectPath);
     });
   }
 
@@ -869,7 +869,7 @@ export class DatabaseRepository {
     withSpanSync("orka.db.removeWorkspacePath", { "orka.workspace.id": workspaceId }, () => {
       this.db
         .prepare("DELETE FROM workspace_paths WHERE workspace_id = ? AND COALESCE(node_id, '') = COALESCE(?, '') AND project_path = ?")
-        .run(workspaceId, nodeId ?? null, projectPath);
+        .run(workspaceId, nodeId ?? "", projectPath);
     });
   }
 
@@ -892,9 +892,9 @@ export class DatabaseRepository {
           .get(projectPath, nodeId) as { workspace_id: string } | undefined;
         if (row) return row.workspace_id;
       }
-      // Fall back to local (node_id IS NULL)
+      // Fall back to local (node_id is empty string or NULL)
       const row = this.db
-        .prepare("SELECT workspace_id FROM workspace_paths WHERE project_path = ? AND node_id IS NULL")
+        .prepare("SELECT workspace_id FROM workspace_paths WHERE project_path = ? AND (node_id = '' OR node_id IS NULL)")
         .get(projectPath) as { workspace_id: string } | undefined;
       return row?.workspace_id ?? null;
     });
