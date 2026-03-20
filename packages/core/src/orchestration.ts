@@ -65,6 +65,9 @@ export type OrchestrationEvent =
       text: string;
       queued?: boolean;
     }>
+  | OrchestrationEventEnvelope<"user.input_cancelled", {
+      text: string;
+    }>
   | OrchestrationEventEnvelope<"content.delta", {
       turnId: string;
       streamKind: RuntimeContentStreamKind;
@@ -203,6 +206,7 @@ export const KnownOrchestrationEventTypeSchema = z.enum([
   "turn.completed",
   "turn.aborted",
   "user.input",
+  "user.input_cancelled",
   "content.delta",
   "item.started",
   "item.updated",
@@ -298,6 +302,11 @@ const WireEventVariants: Record<string, z.ZodType> = {
     turnId: z.string().optional(),
     text: z.string(),
     queued: z.boolean().optional(),
+  }).passthrough(),
+
+  "user.input_cancelled": WireEventBaseSchema.extend({
+    type: z.literal("user.input_cancelled"),
+    text: z.string(),
   }).passthrough(),
 
   "content.delta": WireEventBaseSchema.extend({

@@ -24,11 +24,6 @@ export const UserMessage = memo(function UserMessage({ entry }: { entry: UserEnt
       <div className="flex max-w-full items-start gap-2 lg:max-w-3xl">
         <div className="min-w-0 rounded-sm rounded-tr-none border border-accent/20 bg-accent/5 px-2 py-1.5 [overflow-wrap:anywhere]">
           <MarkdownContent content={entry.body} />
-          {entry.queued ? (
-            <p className="mt-1 text-[10px] text-ink-muted">
-              Queued - will be delivered when agent finishes current task
-            </p>
-          ) : null}
           <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
         </div>
         <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">

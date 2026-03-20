@@ -1,5 +1,5 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ArrowDown, LoaderCircle } from "lucide-react";
 import type { SessionSummary } from "../stores/sessionStore";
 import { withDashboardSpan } from "../lib/tracing";
@@ -11,7 +11,8 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useRpcClient } from "../lib/transportContext";
 import { useChatUiStore } from "../stores/chatUiStore";
 import { ChatTimelineEntry, ThinkingIndicator } from "./chat/TimelineEntry";
-import { deriveThinkingState, type UserEntry } from "./chat/eventsToEntries";
+import { QueuedMessageBar } from "./chat/QueuedMessageBar";
+import { deriveThinkingState, type ChatEntry, type UserEntry } from "./chat/eventsToEntries";
 
 const EMPTY_SET = new Set<string>();
 
@@ -48,9 +49,23 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   );
   const [stopping, setStopping] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // Split entries: queued messages go to the queue bar, rest to timeline
+  const { timelineEntries, queuedMessages } = useMemo(() => {
+    const timeline: ChatEntry[] = [];
+    const queued: UserEntry[] = [];
+    for (const entry of entries) {
+      if (entry.type === "user" && entry.queued) {
+        queued.push(entry);
+      } else {
+        timeline.push(entry);
+      }
+    }
+    return { timelineEntries: timeline, queuedMessages: queued };
+  }, [entries]);
+
   const { autoScroll, bottomRef, scrollRef, handleScroll, scrollToBottom, newMessagesCount } = useChatScroll({
     sessionId,
-    entriesLength: entries.length,
+    entriesLength: timelineEntries.length,
   });
 
   const handleToggleGroup = useCallback((groupId: string, isOpen: boolean) => {
@@ -67,14 +82,18 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   async function handleSend(text: string) {
     setSendError(null);
 
+    const isBusy = inputState === "busy";
     const optimisticEntry: UserEntry = {
       id: `user-optimistic-${String(Date.now())}`,
       type: "user",
       timestamp: new Date().toISOString(),
       body: text,
+      ...(isBusy ? { queued: true } : {}),
     };
     setEntries((prev) => [...prev, optimisticEntry]);
-    useChatUiStore.getState().update(sessionId, { autoScroll: true });
+    if (!isBusy) {
+      useChatUiStore.getState().update(sessionId, { autoScroll: true });
+    }
 
     try {
       await withDashboardSpan(
@@ -96,6 +115,13 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     }
   }
 
+  async function handleCancelQueuedMessage(text: string) {
+    try {
+      await client.cancelQueuedMessage(sessionId, text);
+    } catch {
+      // Event stream will reconcile — ignore transient errors
+    }
+  }
 
   async function handleStop() {
     setStopping(true);
@@ -142,11 +168,11 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onScroll={handleScroll}
           className={`h-full overflow-y-auto ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}
         >
-          {entries.length === 0 ? (
+          {timelineEntries.length === 0 ? (
             <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
           ) : (
             <div className="min-w-0 space-y-2">
-              {entries.map((entry) => (
+              {timelineEntries.map((entry) => (
                 <ChatTimelineEntry
                   key={entry.id}
                   entry={entry}
@@ -173,6 +199,10 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           </button>
         ) : null}
       </div>
+      <QueuedMessageBar
+        messages={queuedMessages}
+        onCancel={(text) => { void handleCancelQueuedMessage(text); }}
+      />
       <div className="border-t border-border">
         <ChatInputComposer
           sessionId={sessionId}
