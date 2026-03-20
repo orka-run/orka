@@ -13,6 +13,8 @@ export interface SessionState {
   selectedId: string | null;
   isLoading: boolean;
   error: string | null;
+  /** Global push sequence from the last snapshot — used for reconnect dedup. */
+  snapshotSequence: number;
   selectSession: (id: string | null) => void;
   /** Fetch sessions. If nodeIds provided, fetches from each node in parallel and tags results. */
   fetchSessions: (client: RpcClient, nodeIds?: string[]) => Promise<void>;
@@ -65,12 +67,39 @@ function clearSelectedStorage(): void {
   }
 }
 
+/**
+ * Merge a fresh snapshot into existing sessions — upsert changed, remove deleted.
+ * Avoids replacing the entire array so React can skip re-rendering unchanged items.
+ */
+function mergeSessions(existing: SessionSummary[], incoming: SessionSummary[]): SessionSummary[] {
+  const incomingById = new Map(incoming.map((s) => [s.id, s]));
+  const merged: SessionSummary[] = [];
+
+  // Update existing sessions that are still present in the snapshot
+  for (const session of existing) {
+    const fresh = incomingById.get(session.id);
+    if (fresh) {
+      merged.push(fresh);
+      incomingById.delete(session.id);
+    }
+    // Session not in snapshot → deleted, skip it
+  }
+
+  // Add new sessions from the snapshot that weren't in existing
+  for (const session of incomingById.values()) {
+    merged.push(session);
+  }
+
+  return sortSessions(merged);
+}
+
 function createSessionState(set: (partial: Partial<SessionState> | ((state: SessionState) => Partial<SessionState>)) => void): SessionState {
   return {
     sessions: [],
     selectedId: null,
     isLoading: false,
     error: null,
+    snapshotSequence: 0,
     selectSession: (id) => {
       set({ selectedId: id });
       try {
@@ -89,6 +118,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
 
       try {
         let allSummaries: SessionSummary[];
+        let nextSnapshotSequence = 0;
 
         if (nodeIds && nodeIds.length > 0) {
           // Multi-node: fetch from each node in parallel, tag with nodeId
@@ -100,18 +130,24 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           );
           allSummaries = results.flat();
         } else {
-          const sessions = await client.listSessions();
-          allSummaries = sessions.map((session) => toSessionSummary(session));
+          const snapshot = await client.listSessionsSnapshot();
+          allSummaries = snapshot.sessions.map((session) => toSessionSummary(session));
+          nextSnapshotSequence = snapshot.snapshotSequence;
         }
 
-        set((state) => ({
-          sessions: sortSessions(allSummaries),
-          selectedId: state.selectedId && allSummaries.some((session) => session.id === state.selectedId)
-            ? state.selectedId
-            : null,
-          isLoading: false,
-          error: null,
-        }));
+        set((state) => {
+          // Merge instead of replace — keeps existing data stable while updating
+          const merged = mergeSessions(state.sessions, allSummaries);
+          return {
+            sessions: merged,
+            selectedId: state.selectedId && merged.some((session) => session.id === state.selectedId)
+              ? state.selectedId
+              : null,
+            snapshotSequence: Math.max(state.snapshotSequence, nextSnapshotSequence),
+            isLoading: false,
+            error: null,
+          };
+        });
       } catch (error) {
         set({
           isLoading: false,

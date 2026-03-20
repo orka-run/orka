@@ -10,6 +10,7 @@ class MockRpcClient {
   spawnParams: SpawnRequest | null = null;
 
   listSessions = () => Promise.resolve(this.sessions);
+  listSessionsSnapshot = () => Promise.resolve({ sessions: this.sessions, snapshotSequence: 0 });
 
   spawn = (req: SpawnRequest) => {
     if (!this.spawnResult) return Promise.reject(new Error("Missing spawn result"));

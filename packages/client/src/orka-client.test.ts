@@ -98,7 +98,7 @@ describe("OrkaClient", () => {
     socket.receive({
       jsonrpc: "2.0",
       id: 1,
-      result: [],
+      result: { sessions: [], snapshotSequence: 0 },
     });
 
     await expect(resultPromise).resolves.toEqual([]);
@@ -135,7 +135,7 @@ describe("OrkaClient", () => {
     socket.receive({
       jsonrpc: "2.0",
       id: 1,
-      result: [],
+      result: { sessions: [], snapshotSequence: 0 },
     });
 
     await expect(resultPromise).resolves.toEqual([]);
@@ -165,7 +165,7 @@ describe("OrkaClient", () => {
     socket.receive({
       jsonrpc: "2.0",
       id: 1,
-      result: [],
+      result: { sessions: [], snapshotSequence: 0 },
     });
 
     await expect(resultPromise).resolves.toEqual([]);

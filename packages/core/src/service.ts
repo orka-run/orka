@@ -80,6 +80,13 @@ export interface SessionListResponse {
   // No: workspaceId, logFile, rawLogFile, taskId, workingDir, systemPrompt, allowedTools, env
 }
 
+/** Snapshot result from listSessions RPC — includes push sequence for delta sync. */
+export interface SessionListResult {
+  sessions: SessionListResponse[];
+  /** Global push sequence at the time of the snapshot (used for reconnect dedup). */
+  snapshotSequence: number;
+}
+
 // --- Timeline Response (returned by getSessionTimeline) ---
 
 export interface TimelineResponse {

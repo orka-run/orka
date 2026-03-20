@@ -25,6 +25,7 @@ export class PushHub {
   private readonly directSequences = new Map<ServerWebSocket<unknown>, number>();
   private readonly broadcastSequences = new Map<PushChannel, number>();
   private readonly clientEncoders = new Map<ServerWebSocket<unknown>, PushEncoder>();
+  private globalSequence = 0;
 
   /** Register a custom encoder for a client (e.g. Noise encryption). */
   setClientEncoder(ws: ServerWebSocket<unknown>, encoder: PushEncoder): void {
@@ -97,7 +98,13 @@ export class PushHub {
     });
   }
 
+  /** Current global push sequence — snapshot-safe read for RPC responses. */
+  getGlobalSequence(): number {
+    return this.globalSequence;
+  }
+
   broadcast<T>(channel: PushChannel, data: T): void {
+    this.globalSequence++;
     const sequence = this.nextBroadcastSequence(channel);
     const sessionId = getSessionId(data);
     getDaemonMetrics().pushEvents.add(1, { channel });

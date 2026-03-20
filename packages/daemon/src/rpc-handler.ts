@@ -121,8 +121,10 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             return svc.reap();
           case "getSession":
             return svc.getSession(params.id);
-          case "listSessions":
-            return svc.listSessions(params.filters);
+          case "listSessions": {
+            const sessions = await svc.listSessions(params.filters);
+            return { sessions, snapshotSequence: pushHub.getGlobalSequence() };
+          }
           case "getChildSessions":
             return svc.getChildSessions(params.sessionId);
           case "getTask":

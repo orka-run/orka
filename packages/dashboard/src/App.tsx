@@ -321,8 +321,14 @@ function AppShell({ transport, client }: AppShellProps) {
   useEffect(() => {
     transport.connect();
 
+    let wasReconnecting = false;
     const unsubscribeState = transport.onStateChange((connection) => {
       setConnectionStatus(connection.state, connection.reconnectAttempts);
+      // On reconnect: fetch snapshot in background — merge keeps existing data visible
+      if (connection.state === "connected" && wasReconnecting) {
+        fetchSessionsWithNodes();
+      }
+      wasReconnecting = connection.state === "reconnecting";
     });
     const unsubscribeMismatch = transport.onProtocolMismatch((info) => {
       setProtocolMismatch(info);

@@ -21,6 +21,7 @@ import type {
   SessionDetailResponse,
   SessionFilters,
   SessionListResponse,
+  SessionListResult,
   SessionResult,
   SpawnResult,
   StartPairingParams,
@@ -46,7 +47,7 @@ export interface RpcMethodMap {
 
   // --- Queries ---
   getSession: { params: { id: string }; result: SessionDetailResponse | null };
-  listSessions: { params: { filters?: SessionFilters } | undefined; result: SessionListResponse[] };
+  listSessions: { params: { filters?: SessionFilters } | undefined; result: SessionListResult };
   getChildSessions: { params: { sessionId: string }; result: SessionListResponse[] };
   getTask: { params: { id: string }; result: Task | null };
 

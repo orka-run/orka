@@ -19,6 +19,7 @@ import type {
   SessionDetailResponse,
   SessionFilters,
   SessionListResponse,
+  SessionListResult,
   SessionResult,
   SpawnRequest,
   SpawnResult,
@@ -111,6 +112,11 @@ export class OrkaClient implements OrkaService {
   }
 
   async listSessions(filters?: SessionFilters, options?: RequestOptions): Promise<SessionListResponse[]> {
+    const result = await this.request("listSessions", filters === undefined ? undefined : { filters }, options);
+    return result.sessions;
+  }
+
+  async listSessionsSnapshot(filters?: SessionFilters, options?: RequestOptions): Promise<SessionListResult> {
     return this.request("listSessions", filters === undefined ? undefined : { filters }, options);
   }
 
