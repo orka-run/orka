@@ -84,6 +84,13 @@ export async function handleRpcRequest(
   );
 }
 
+/**
+ * Dispatch an RPC method to the OrkaService.
+ * Method names and params shapes are defined in RpcMethodMap (@orka/core/rpc-methods).
+ * The switch cases must stay in sync with RpcMethodMap — adding a method to
+ * OrkaService + RpcMethodMap without a dispatch case results in a runtime
+ * METHOD_NOT_FOUND error (caught by E2E tests).
+ */
 async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, params: any, parentContext = ROOT_CONTEXT): Promise<any> {
   return withSpan("orka.rpc.dispatch", { "orka.method": method }, async (span) => {
     const { pushHub } = ctx;

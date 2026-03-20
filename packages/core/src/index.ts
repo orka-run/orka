@@ -5,6 +5,7 @@ export * from "./provider-events";
 export * from "./orchestration";
 export * from "./service";
 export * from "./rpc";
+export * from "./rpc-methods";
 // crypto.ts uses node:crypto — import directly from "@orka/core/crypto" in server code.
 // Do NOT re-export here to avoid breaking browser bundles (dashboard).
 export * from "./push-protocol";

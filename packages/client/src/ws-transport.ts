@@ -1,5 +1,5 @@
 // Attribution: WsTransport design inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData, DataFrame, TransportPayload } from "@orka/core";
+import type { PushEnvelope, RpcRequest, RpcResponse, ServerCapabilities, ServerWelcomeData, DataFrame, TransportPayload, RpcMethodName, RpcParams, RpcResult } from "@orka/core";
 import { isProtocolCompatible, MethodNotFoundError, PROTOCOL_VERSION_RANGE, RPC_METHOD_NOT_FOUND } from "@orka/core";
 import type { NoiseClientTransport } from "@orka/core/transport/noise-transport";
 import type { Span } from "@opentelemetry/api";
@@ -235,7 +235,7 @@ export class WsTransport {
     return this.disposed;
   }
 
-  async request<T>(method: string, params?: unknown, options?: RequestOptions): Promise<T> {
+  async request<M extends RpcMethodName>(method: M, params?: RpcParams<M>, options?: RequestOptions): Promise<RpcResult<M>> {
     if (this.disposed) throw new Error("Transport is disposed");
     const id = ++this.requestId;
     const { span, startedAt } = startSpan("orka.client.rpc", {
@@ -256,7 +256,7 @@ export class WsTransport {
     };
     const payload = JSON.stringify(request);
 
-    return new Promise<T>((resolve, reject) => {
+    return new Promise<RpcResult<M>>((resolve, reject) => {
       const timer = setTimeout(() => {
         const pending = this.pending.get(id);
         if (!pending) {
@@ -272,7 +272,7 @@ export class WsTransport {
       }, this.options?.timeout ?? 60_000);
 
       this.pending.set(id, {
-        resolve: (value) => resolve(value as T),
+        resolve: (value) => resolve(value as RpcResult<M>),
         reject,
         timer,
         sent: false,

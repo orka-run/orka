@@ -166,18 +166,18 @@ describe("RemoteNodeManager", () => {
     const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
-    mockRequest.mockImplementationOnce(async () => ({ sessions: [] }));
-    const result = await mgr.request("node-test", "listSessions", { status: "running" });
+    mockRequest.mockImplementationOnce(async () => []);
+    const result = await mgr.request("node-test", "listSessions", { filters: { status: "running" } });
 
-    expect(result).toEqual({ sessions: [] });
-    expect(mockRequest).toHaveBeenCalledWith("listSessions", { status: "running" });
+    expect(result).toEqual([]);
+    expect(mockRequest).toHaveBeenCalledWith("listSessions", { filters: { status: "running" } });
 
     mgr.shutdown();
   });
 
   it("request() throws for unknown node", () => {
     const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
-    expect(() => mgr.request("unknown", "test")).toThrow("No connection to node unknown");
+    expect(() => mgr.request("unknown", "reap")).toThrow("No connection to node unknown");
     mgr.shutdown();
   });
 
