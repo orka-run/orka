@@ -37,7 +37,7 @@ class MockWebSocket {
     }
 
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.({ code: 1000, reason: "", wasClean: true } as any);
+    this.onclose?.({ code: 1000, reason: "", wasClean: true });
   }
 
   open(): void {
@@ -73,14 +73,15 @@ let provider: WebTracerProvider;
 let exporter: InMemorySpanExporter;
 let currentTime = 0;
 
-beforeEach(() => {
-  MockWebSocket.instances = [];
-  scheduledTimers = [];
-  timerId = 0;
-  currentTime = 0;
-  rpcLatencyStore.reset();
-
+/** Install MockWebSocket as the global WebSocket constructor for testing. */
+function installMockWebSocket(): void {
+  // MockWebSocket covers the subset of the WebSocket API that WsTransport uses.
+  // Full browser WebSocket has extra methods (addEventListener, etc.) that are unused.
   globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+}
+
+/** Install deterministic timer stubs for testing reconnect delays. */
+function installMockTimers(): void {
   globalThis.setTimeout = ((handler: TimerHandler, delay?: number) => {
     const callback = () => {
       if (typeof handler === "function") {
@@ -95,14 +96,26 @@ beforeEach(() => {
       cleared: false,
     };
     scheduledTimers.push(timer);
-    return timer.id as unknown as ReturnType<typeof setTimeout>;
-  }) as unknown as typeof setTimeout;
-  globalThis.clearTimeout = ((timeoutId: ReturnType<typeof setTimeout>) => {
+    // Timer IDs are plain numbers in this mock but Timeout objects in Node types
+    return timer.id as unknown as ReturnType<typeof originalSetTimeout>;
+  }) as unknown as typeof originalSetTimeout;
+  globalThis.clearTimeout = ((timeoutId: ReturnType<typeof originalSetTimeout>) => {
     const timer = scheduledTimers.find((entry) => entry.id === Number(timeoutId));
     if (timer) {
       timer.cleared = true;
     }
-  }) as typeof clearTimeout;
+  }) as typeof originalClearTimeout;
+}
+
+beforeEach(() => {
+  MockWebSocket.instances = [];
+  scheduledTimers = [];
+  timerId = 0;
+  currentTime = 0;
+  rpcLatencyStore.reset();
+
+  installMockWebSocket();
+  installMockTimers();
   Date.now = () => currentTime;
 
   exporter = new InMemorySpanExporter();

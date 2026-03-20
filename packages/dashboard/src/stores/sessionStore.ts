@@ -1,4 +1,4 @@
-import type { PermissionMode, Session, SessionListResponse, SpawnRequest } from "@orka/core";
+import type { Session, SessionAction, SessionListResponse, SpawnRequest } from "@orka/core";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RpcClient } from "../lib/rpcClient";
@@ -6,27 +6,7 @@ import type { RpcClient } from "../lib/rpcClient";
 const FALLBACK_TITLE_LENGTH = 80;
 const SELECTED_SESSION_KEY = "orka:selectedSession";
 
-export interface SessionSummary {
-  id: string;
-  status: Session["status"];
-  backend: Session["backend"];
-  title: string;
-  model: string | null;
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  exitCode: number | null;
-  projectPath: string;
-  kept: boolean;
-  autoMerge: boolean;
-  noWorktree: boolean;
-  prompt: string | null;
-  parentSessionId: string | null;
-  permissionMode: PermissionMode | null;
-  tags: string[];
-  nodeId: string | null;
-  allowedActions: string[];
-}
+export type SessionSummary = SessionListResponse & { nodeId: string | null };
 
 export interface SessionState {
   sessions: SessionSummary[];
@@ -47,28 +27,10 @@ function toSessionSummary(
   session: SessionListResponse,
   options?: { fallbackTitle?: string; nodeId?: string },
 ): SessionSummary {
-  const title = options?.fallbackTitle ?? session.title;
-
   return {
-    id: session.id,
-    status: session.status,
-    backend: session.backend,
-    title,
-    model: session.model ?? null,
-    createdAt: session.createdAt,
-    startedAt: session.startedAt,
-    finishedAt: session.finishedAt,
-    exitCode: session.exitCode,
-    projectPath: session.projectPath,
-    kept: session.kept,
-    autoMerge: session.autoMerge,
-    noWorktree: session.noWorktree,
-    prompt: session.prompt,
-    parentSessionId: session.parentSessionId,
-    permissionMode: session.permissionMode,
-    tags: session.tags,
+    ...session,
+    title: options?.fallbackTitle ?? session.title,
     nodeId: options?.nodeId ?? null,
-    allowedActions: session.allowedActions ?? [],
   };
 }
 
@@ -166,6 +128,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
 
         // Build a minimal summary from SpawnResult + request data.
         // The next fetchSessions will fill in the full SessionListItem fields.
+        const allowedActions: SessionAction[] = ["sendTurn", "stop"];
         const summary: SessionSummary = {
           id: result.id,
           status: result.status,
@@ -183,9 +146,10 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           prompt: request.prompt,
           parentSessionId: request.parentSessionId ?? null,
           permissionMode: request.permissionMode ?? null,
+          // SpawnRequest.tags is optional — fallback to empty array for the optimistic summary
           tags: request.tags ?? [],
           nodeId: request.nodeId ?? null,
-          allowedActions: ["sendTurn", "stop"],
+          allowedActions,
         };
 
         set((state) => ({

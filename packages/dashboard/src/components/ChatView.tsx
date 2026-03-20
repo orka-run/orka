@@ -41,6 +41,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     ...(onSelectionLoadSettled ? { onSelectionLoadSettled } : {}),
   });
 
+  // Hooks must be called before early returns — fallback to [] when session is null
   const inputState = useInputState(
     events,
     session?.allowedActions ?? [],
