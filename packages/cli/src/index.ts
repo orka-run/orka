@@ -2110,10 +2110,38 @@ command({
 const restartCmd = command({
   name: "restart",
   description: "Restart the daemon process (applies migrations and code changes)",
-  args: {},
-  handler: async () => {
+  args: {
+    force: flag({ long: "force", short: "f", description: "Force restart even if sessions are running" }),
+  },
+  handler: async ({ force }) => {
     const wasRunning = await isDaemonRunning();
+    if (wasRunning && !force) {
+      // Check for running sessions before killing daemon
+      try {
+        const resp = await fetch(DEFAULT_DAEMON_HEALTH, { signal: AbortSignal.timeout(2000) });
+        const body = await resp.json() as { activeSessions?: number };
+        const active = body.activeSessions ?? 0;
+        if (active > 0) {
+          console.error(`${active} session(s) are currently running. Restarting will interrupt them.`);
+          console.error("Use --force to restart anyway.");
+          process.exit(1);
+        }
+      } catch {
+        // Health check failed — daemon may be unhealthy, proceed with restart
+      }
+    }
     if (wasRunning) {
+      if (force) {
+        // With --force, show which sessions will be interrupted
+        try {
+          const resp = await fetch(DEFAULT_DAEMON_HEALTH, { signal: AbortSignal.timeout(2000) });
+          const body = await resp.json() as { activeSessions?: number };
+          const active = body.activeSessions ?? 0;
+          if (active > 0) {
+            console.log(`warning: ${active} running session(s) will be interrupted`);
+          }
+        } catch { /* proceed anyway */ }
+      }
       process.stdout.write("stopping daemon... ");
       const stopped = await stopDaemon();
       if (!stopped) {

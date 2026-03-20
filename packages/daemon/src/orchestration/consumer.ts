@@ -290,8 +290,8 @@ async function finalizeSession(
 
   // Check current session state — if already hibernated (by idle timer), don't overwrite
   const currentSession = callbacks.getSession?.(sessionId);
-  if (currentSession?.status === "hibernated" || currentSession?.status === "completed") {
-    // Process was killed for hibernation or session was already closed — don't change status
+  if (currentSession?.status === "hibernated" || currentSession?.status === "completed" || currentSession?.status === "interrupted") {
+    // Process was killed for hibernation, session was already closed, or daemon restart interrupted it — don't change status
     return;
   }
 

@@ -1046,9 +1046,9 @@ function rowToCheckpoint(row: unknown): Checkpoint {
 const VALID_TRANSITIONS: Record<SessionStatus, readonly SessionStatus[]> = {
   queued: ["preparing", "cancelled"],
   preparing: ["running", "cancelled", "failed"],
-  running: ["idle", "rate_limited", "completed", "failed", "cancelled"],
-  idle: ["running", "hibernated", "completed", "failed", "cancelled"],
-  rate_limited: ["running", "hibernated", "completed", "cancelled"],
+  running: ["idle", "rate_limited", "completed", "failed", "cancelled", "interrupted"],
+  idle: ["running", "hibernated", "completed", "failed", "cancelled", "interrupted"],
+  rate_limited: ["running", "hibernated", "completed", "cancelled", "interrupted"],
   hibernated: ["running"],
   completed: ["running"], // resume
   failed: ["running"], // resume after failure
