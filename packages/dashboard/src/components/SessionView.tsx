@@ -1,7 +1,7 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, ScrollText, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Eye, FileCode, LoaderCircle, MessageSquare, RotateCcw, Shield, ShieldCheck, ShieldOff, Square } from "lucide-react";
 import { ChatView } from "./ChatView";
 import { DiffPanel } from "./DiffPanel";
 import { LogPanel } from "./LogPanel";
@@ -68,7 +68,6 @@ function InPlaceBadge() {
 const TAB_ICONS: Record<string, React.ReactNode> = {
   overview: <Eye className="h-4 w-4" />,
   chat: <MessageSquare className="h-4 w-4" />,
-  logs: <ScrollText className="h-4 w-4" />,
   diff: <FileCode className="h-4 w-4" />,
 };
 
@@ -80,7 +79,7 @@ export function SessionView({
 }: SessionViewProps) {
   const client = useRpcClient();
   // Desktop uses its own local tab state; mobile tab is driven externally via MobileTabBar
-  const [desktopTab, setDesktopTab] = useState<"overview" | "chat" | "logs" | "diff">("chat");
+  const [desktopTab, setDesktopTab] = useState<"overview" | "chat" | "diff">("chat");
   const [isStopping, setIsStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const notifiedSessionRef = useRef<string | null>(null);
@@ -183,7 +182,7 @@ export function SessionView({
             </button>
           )}
           <div className="flex rounded-sm border border-border bg-surface-alt p-0.5">
-            {(["overview", "chat", "logs", "diff"] as const).map((tab) => (
+            {(["overview", "chat", "diff"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -221,13 +220,8 @@ export function SessionView({
           />
         </div>
         {activeTab !== "chat" && (
-          <div className={`h-full ${isMobile ? "p-1" : "p-3"} ${activeTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
-            {activeTab === "logs" ? (
-              <LogPanel
-                sessionId={sessionId}
-                onInitialLoadSettled={reportSelectionLoad}
-              />
-            ) : activeTab === "overview" ? (
+          <div className={`h-full ${isMobile ? "p-1" : "p-3"} overflow-y-auto`}>
+            {activeTab === "overview" ? (
               <OverviewTab
                 session={session}
                 onSelectionLoadSettled={reportSelectionLoad}
@@ -251,6 +245,7 @@ function OverviewTab({
 }) {
   const client = useRpcClient();
   const [promptExpanded, setPromptExpanded] = useState(false);
+  const [logsExpanded, setLogsExpanded] = useState(false);
   const isFinished = session.status === "completed" || session.status === "failed" || session.status === "cancelled";
 
   const resultQuery = useQuery({
@@ -380,6 +375,29 @@ function OverviewTab({
           )}
         </section>
       )}
+
+      <section className="rounded-sm border border-border bg-surface-alt p-3">
+        <button
+          type="button"
+          onClick={() => { setLogsExpanded(!logsExpanded); }}
+          className="flex w-full items-center gap-2 text-left"
+        >
+          {logsExpanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+          )}
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Logs</p>
+        </button>
+        {logsExpanded && (
+          <div className="mt-2 h-96 overflow-hidden rounded-sm border border-border">
+            <LogPanel
+              sessionId={session.id}
+              onInitialLoadSettled={onSelectionLoadSettled}
+            />
+          </div>
+        )}
+      </section>
     </div>
   );
 }

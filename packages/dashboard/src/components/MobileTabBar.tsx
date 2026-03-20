@@ -1,6 +1,6 @@
-import { Eye, FileCode2, LayoutList, MessageSquare, ScrollText } from "lucide-react";
+import { Eye, FileCode2, LayoutList, MessageSquare } from "lucide-react";
 
-export type MobileSessionTab = "chat" | "logs" | "diff" | "overview";
+export type MobileSessionTab = "chat" | "diff" | "overview";
 
 interface MobileTabBarProps {
   hasSelectedSession: boolean;
@@ -11,7 +11,6 @@ interface MobileTabBarProps {
 
 const SESSION_TABS: { id: MobileSessionTab; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "logs", label: "Logs", icon: ScrollText },
   { id: "diff", label: "Diff", icon: FileCode2 },
   { id: "overview", label: "Info", icon: Eye },
 ];
