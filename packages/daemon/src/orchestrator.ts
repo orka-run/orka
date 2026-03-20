@@ -875,6 +875,7 @@ export async function sendTurnToSession(
 
       case "rate_limited":
       case "hibernated":
+      case "interrupted":
       case "completed":
       case "failed":
       case "cancelled": {
@@ -998,7 +999,9 @@ export async function reapSessions(): Promise<number> {
   return withSpan("orka.reap", {}, async () => 0);
 }
 
-/** Detect sessions left in active statuses from a previous daemon and mark them. */
+/** Detect sessions left in active statuses from a previous daemon and mark them.
+ *  Sessions that were actively running are marked "interrupted" (not "cancelled")
+ *  to distinguish daemon restarts from explicit user cancellation. */
 export function recoverStaleSessions(ctx: DaemonContext): number {
   const staleStatuses: Array<"running" | "preparing" | "idle" | "rate_limited"> = ["running", "preparing", "idle", "rate_limited"];
   let recovered = 0;
@@ -1009,24 +1012,22 @@ export function recoverStaleSessions(ctx: DaemonContext): number {
     for (const session of sessions) {
       if (ctx.providerService.getHandle(session.id)) continue;
 
-      // Sessions with provider_session_id can be resumed → hibernated
-      // Sessions without it (old or preparing) → cancelled
       clearRateLimitTimer(ctx, session.id);
       clearPendingRateLimit(ctx, session.id);
-      const canResume = status !== "preparing" && (status === "rate_limited" || !!session.providerSessionId);
-      const newStatus = canResume ? "hibernated" : "cancelled";
-      ctx.db.updateSessionStatus(session.id, newStatus, newStatus === "cancelled" ? { finishedAt: now } : undefined);
 
-      if (newStatus === "cancelled") {
-        ctx.orchestrationEngine.ingest(session.id, {
-          type: "session.exited",
-          threadId: session.id,
-          eventId: generateId("evt"),
-          createdAt: now,
-          provider: session.backend,
-          payload: { reason: "daemon_restart", exitKind: "error" },
-        });
-      }
+      // "preparing" sessions never ran → cancelled
+      // All others were active when daemon died → interrupted
+      const newStatus = status === "preparing" ? "cancelled" : "interrupted";
+      ctx.db.updateSessionStatus(session.id, newStatus, { finishedAt: now });
+
+      ctx.orchestrationEngine.ingest(session.id, {
+        type: "session.exited",
+        threadId: session.id,
+        eventId: generateId("evt"),
+        createdAt: now,
+        provider: session.backend,
+        payload: { reason: "daemon_restart", exitKind: "error" },
+      });
       recovered++;
     }
   }
@@ -1086,7 +1087,7 @@ export async function cleanupOrphanedWorktrees(ctx: DaemonContext): Promise<numb
 
     const allSessions = ctx.db.listSessions();
     // Sessions that still need their worktrees
-    const activeStatuses = new Set(["running", "preparing", "idle", "rate_limited", "hibernated"]);
+    const activeStatuses = new Set(["running", "preparing", "idle", "rate_limited", "hibernated", "interrupted"]);
     const activeWorkdirs = new Set(
       allSessions
         .filter((s) => activeStatuses.has(s.status))

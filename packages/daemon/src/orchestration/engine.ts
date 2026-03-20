@@ -323,7 +323,7 @@ function isKnownTurnId(turnId: string): boolean {
 }
 
 function isTerminalStatus(status: SessionStatus): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
 }
 
 function mapRuntimeState(state: RuntimeSessionState, currentStatus: SessionStatus): SessionStatus {

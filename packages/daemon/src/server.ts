@@ -422,6 +422,16 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
     });
 
     // Register cleanup tasks for graceful shutdown
+    gracefulShutdown.onShutdown("stop-sessions", async () => {
+      // Signal all running provider sessions to stop so they can checkpoint
+      const handles = ctx.providerService.listActiveSessions();
+      if (handles.length > 0) {
+        console.log(`stopping ${handles.length} running session(s) for graceful shutdown...`);
+        await Promise.allSettled(
+          handles.map((h) => ctx.providerService.stopSession(h.threadId).catch(() => {})),
+        );
+      }
+    });
     gracefulShutdown.onShutdown("log-tailer", async () => logTailer.stop());
     gracefulShutdown.onShutdown("notify-clients", async () => {
       pushHub.broadcast("server.shutdown", {});
