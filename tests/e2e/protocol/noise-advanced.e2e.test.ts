@@ -44,7 +44,7 @@ describe("Noise NK Transport — Advanced", () => {
     await $`git -C ${testRepo} config user.name "Orka Test"`.quiet();
     await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
 
-    daemon = await startDaemonWithNoise({ nodeId: "noise-adv-test-node" });
+    daemon = await startDaemonWithNoise({ nodeId: "noise-adv-test-node", orkaHome });
   }, 30_000);
 
   afterAll(async () => {

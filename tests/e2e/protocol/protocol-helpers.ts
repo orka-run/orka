@@ -51,10 +51,10 @@ export { NoiseClientTransport, computeKeyId };
  * The caller MUST have already set `process.env.ORKA_HOME` to an isolated temp
  * directory before calling this (and before any daemon module import).
  */
-export async function startDaemonWithNoise(opts?: {
+export async function startDaemonWithNoise(opts: {
   nodeId?: string;
+  orkaHome: string;
 }): Promise<DaemonHandle> {
-  // Dynamic import so ORKA_HOME is already in the env when daemon modules load.
   const { createDaemonContext, createLocalClient, startServer } = await import("@orka/daemon");
   const { ensureNoiseKeyPair } = await import(
     "../../../packages/core/src/crypto"
@@ -62,8 +62,8 @@ export async function startDaemonWithNoise(opts?: {
 
   const { registerTestAdapter } = await import("../helpers/test-adapter");
 
-  const nodeId = opts?.nodeId ?? "test-node";
-  const ctx = await createDaemonContext();
+  const nodeId = opts.nodeId ?? "test-node";
+  const ctx = await createDaemonContext(opts.orkaHome);
   registerTestAdapter(ctx);
   const svc = createLocalClient(ctx);
 

@@ -35,7 +35,7 @@ describe("Protocol Error Handling", () => {
   let daemon: DaemonHandle;
 
   beforeAll(async () => {
-    daemon = await startDaemonWithNoise({ nodeId: "proto-err-node" });
+    daemon = await startDaemonWithNoise({ nodeId: "proto-err-node", orkaHome: testHome });
   }, 30_000);
 
   afterAll(async () => {
