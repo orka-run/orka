@@ -1,4 +1,4 @@
-import type { StoredNode, PushChannel } from "@orka/core";
+import type { StoredNode, PushChannel, RpcMethodName, RpcParams, RpcResult } from "@orka/core";
 import {
   WsTransport,
   appendAuthToken,
@@ -32,7 +32,7 @@ export interface RemoteNodeManager {
   getHandle(nodeId: string): RemoteNodeHandle | null;
   listHandles(): RemoteNodeHandle[];
   /** Make an RPC request to a specific remote node */
-  request<T>(nodeId: string, method: string, params?: unknown): Promise<T>;
+  request<M extends RpcMethodName>(nodeId: string, method: M, params?: RpcParams<M>): Promise<RpcResult<M>>;
   /** Subscribe to push events from a specific remote node */
   subscribePush(
     nodeId: string,
@@ -179,16 +179,16 @@ export function createRemoteNodeManager(
     return Array.from(handles.values());
   }
 
-  function request<T>(
+  function request<M extends RpcMethodName>(
     nodeId: string,
-    method: string,
-    params?: unknown,
-  ): Promise<T> {
+    method: M,
+    params?: RpcParams<M>,
+  ): Promise<RpcResult<M>> {
     const handle = handles.get(nodeId);
     if (!handle) {
       throw new Error(`No connection to node ${nodeId}`);
     }
-    return handle.transport.request<T>(method, params);
+    return handle.transport.request(method, params);
   }
 
   function subscribePush(

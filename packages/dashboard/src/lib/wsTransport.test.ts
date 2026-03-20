@@ -131,7 +131,8 @@ describe("WsTransport", () => {
     const socket = latestSocket();
     socket.open();
 
-    const resultPromise = transport.request<string>("listSessions", { filter: "all" });
+    // Transport-level test: params and result shapes intentionally don't match RPC types
+    const resultPromise = transport.request("listSessions", { filter: "all" } as any) as Promise<unknown>;
     advanceTime(12);
 
     expect(socket.sent).toHaveLength(1);
@@ -247,7 +248,7 @@ describe("WsTransport", () => {
     const socket = latestSocket();
     socket.open();
 
-    const successPromise = transport.request<string>("listSessions");
+    const successPromise = transport.request("listSessions") as Promise<unknown>;
     advanceTime(12);
     socket.receive({
       jsonrpc: "2.0",
@@ -493,7 +494,7 @@ describe("WsTransport", () => {
     firstSocket.open();
     firstSocket.close();
 
-    const resultPromise = transport.request<string>("listSessions");
+    const resultPromise = transport.request("listSessions") as Promise<unknown>;
     expect(firstSocket.sent).toEqual([]);
 
     runTimer(500);

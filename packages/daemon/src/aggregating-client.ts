@@ -12,6 +12,9 @@ import type {
   PruneOptions,
   PruneResult,
   PushChannel,
+  RpcMethodName,
+  RpcParams,
+  RpcResult,
   SessionDetailResponse,
   SessionFilters,
   SessionListResponse,
@@ -56,7 +59,7 @@ export function createAggregatingClient(
   /** Fetch remote sessions and populate cache for a node. */
   function initNodeCache(nodeId: string): void {
     remoteNodes
-      .request<SessionListResponse[]>(nodeId, "listSessions", { filters: {} })
+      .request(nodeId, "listSessions", { filters: {} })
       .then((sessions) => {
         sessionCache.setNodeSessions(
           nodeId,
@@ -116,87 +119,89 @@ export function createAggregatingClient(
   }
 
   /** Route a session-specific RPC to the owning node. */
-  async function routeBySession<T>(
+  async function routeBySession<M extends RpcMethodName>(
     sessionId: string,
-    method: string,
-    params: Record<string, unknown>,
-  ): Promise<T> {
+    method: M,
+    params: RpcParams<M>,
+  ): Promise<RpcResult<M>> {
     const nodeId = sessionCache.getOwningNode(sessionId);
     if (!nodeId || nodeId === "local") {
-      return callLocal<T>(method, params);
+      return callLocal(method, params);
     }
     ensureReachable(nodeId);
-    return remoteNodes.request<T>(nodeId, method, params);
+    return remoteNodes.request(nodeId, method, params);
   }
 
   /** Call a method on localClient by name. */
-  async function callLocal<T>(
-    method: string,
-    params: Record<string, unknown>,
-  ): Promise<T> {
-    // Map RPC method names to localClient method calls
+  async function callLocal<M extends RpcMethodName>(
+    method: M,
+    params: RpcParams<M>,
+  ): Promise<RpcResult<M>> {
+    // Map RPC method names to localClient method calls.
+    // params is cast to any because TypeScript cannot narrow M inside the switch.
     const svc = localClient as any;
+    const p = params as any;
     switch (method) {
       case "getSession":
-        return svc.getSession(params["id"]);
+        return svc.getSession(p["id"]);
       case "getSessionTimeline":
-        return svc.getSessionTimeline(params as any);
+        return svc.getSessionTimeline(p);
       case "getChatMessages":
-        return svc.getChatMessages(params["sessionId"]);
+        return svc.getChatMessages(p["sessionId"]);
       case "getResult":
-        return svc.getResult(params["sessionId"]);
+        return svc.getResult(p["sessionId"]);
       case "captureOutput":
-        return svc.captureOutput(params["sessionId"]);
+        return svc.captureOutput(p["sessionId"]);
       case "getLogContent":
-        return svc.getLogContent(params["sessionId"]);
+        return svc.getLogContent(p["sessionId"]);
       case "getDiff":
-        return svc.getDiff(params["sessionId"]);
+        return svc.getDiff(p["sessionId"]);
       case "getTags":
-        return svc.getTags(params["sessionId"]);
+        return svc.getTags(p["sessionId"]);
       case "stop":
-        return svc.stop(params["sessionId"]);
+        return svc.stop(p["sessionId"]);
       case "sendTurn":
-        return svc.sendTurn(params["sessionId"], params["text"]);
+        return svc.sendTurn(p["sessionId"], p["text"]);
       case "getCheckpoints":
-        return svc.getCheckpoints(params["sessionId"]);
+        return svc.getCheckpoints(p["sessionId"]);
       case "getTurnDiff":
-        return svc.getTurnDiff(params["sessionId"], params["fromTurn"], params["toTurn"]);
+        return svc.getTurnDiff(p["sessionId"], p["fromTurn"], p["toTurn"]);
       case "revertToCheckpoint":
-        return svc.revertToCheckpoint(params["sessionId"], params["turnSeq"]);
+        return svc.revertToCheckpoint(p["sessionId"], p["turnSeq"]);
       case "setKept":
-        return svc.setKept(params["sessionId"], params["kept"]);
+        return svc.setKept(p["sessionId"], p["kept"]);
       case "merge":
-        return svc.merge(params["sessionId"], params["cleanup"]);
+        return svc.merge(p["sessionId"], p["cleanup"]);
       case "isAlive":
-        return svc.isAlive(params["sessionId"]);
+        return svc.isAlive(p["sessionId"]);
       case "archiveSession":
-        return svc.archiveSession(params["sessionId"]);
+        return svc.archiveSession(p["sessionId"]);
       case "unarchiveSession":
-        return svc.unarchiveSession(params["sessionId"]);
+        return svc.unarchiveSession(p["sessionId"]);
       case "backfillSession":
-        return svc.backfillSession(params["sessionId"]);
+        return svc.backfillSession(p["sessionId"]);
       case "deleteSessions":
-        return svc.deleteSessions(params["ids"]);
+        return svc.deleteSessions(p["ids"]);
       case "getChildSessions":
-        return svc.getChildSessions(params["sessionId"]);
+        return svc.getChildSessions(p["sessionId"]);
       case "getTask":
-        return svc.getTask(params["id"]);
+        return svc.getTask(p["id"]);
       case "getPendingApprovals":
-        return svc.getPendingApprovals(params["sessionId"]);
+        return svc.getPendingApprovals(p["sessionId"]);
       case "resolveApproval":
-        return svc.resolveApproval(params["requestId"], params["decision"]);
+        return svc.resolveApproval(p["requestId"], p["decision"]);
       case "terminalOpen":
-        return svc.terminalOpen(params["sessionId"], params["opts"]);
+        return svc.terminalOpen(p["sessionId"], p["opts"]);
       case "terminalWrite":
-        return svc.terminalWrite(params["termId"], params["data"]);
+        return svc.terminalWrite(p["termId"], p["data"]);
       case "terminalResize":
-        return svc.terminalResize(params["termId"], params["cols"], params["rows"]);
+        return svc.terminalResize(p["termId"], p["cols"], p["rows"]);
       case "terminalClose":
-        return svc.terminalClose(params["termId"]);
+        return svc.terminalClose(p["termId"]);
       case "terminalList":
-        return svc.terminalList(params["sessionId"]);
+        return svc.terminalList(p["sessionId"]);
       default:
-        return svc[method](params);
+        return svc[method](p);
     }
   }
 
@@ -301,14 +306,14 @@ export function createAggregatingClient(
       opts?: { sessionId?: string; since?: string; backend?: string },
     ): Promise<UsageSummary> {
       if (opts?.sessionId) {
-        return routeBySession<UsageSummary>(opts.sessionId, "getUsage", opts);
+        return routeBySession(opts.sessionId, "getUsage", opts);
       }
 
       // Aggregate local + all connected remote nodes
       const promises: Promise<UsageSummary>[] = [localClient.getUsage(opts)];
       for (const nodeId of connectedNodeIds()) {
         promises.push(
-          remoteNodes.request<UsageSummary>(nodeId, "getUsage", opts ?? {}),
+          remoteNodes.request(nodeId, "getUsage", opts ?? {}),
         );
       }
 
@@ -340,7 +345,7 @@ export function createAggregatingClient(
     async spawn(req: SpawnRequest): Promise<SpawnResult> {
       if (req.nodeId && req.nodeId !== "local") {
         ensureReachable(req.nodeId);
-        const result = await remoteNodes.request<SpawnResult>(
+        const result = await remoteNodes.request(
           req.nodeId,
           "spawn",
           req,
@@ -361,85 +366,85 @@ export function createAggregatingClient(
 
     // --- Route to owning node ---
     async getSession(id: string): Promise<SessionDetailResponse | null> {
-      return routeBySession<SessionDetailResponse | null>(id, "getSession", { id });
+      return routeBySession(id, "getSession", { id });
     },
 
     async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
-      return routeBySession<TimelineResponse>(params.sessionId, "getSessionTimeline", { ...params });
+      return routeBySession(params.sessionId, "getSessionTimeline", { ...params });
     },
 
     async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
-      return routeBySession<ChatEntry[]>(sessionId, "getChatMessages", { sessionId });
+      return routeBySession(sessionId, "getChatMessages", { sessionId });
     },
 
     async getResult(sessionId: string): Promise<SessionResult | null> {
-      return routeBySession<SessionResult | null>(sessionId, "getResult", { sessionId });
+      return routeBySession(sessionId, "getResult", { sessionId });
     },
 
     async captureOutput(sessionId: string): Promise<string> {
-      return routeBySession<string>(sessionId, "captureOutput", { sessionId });
+      return routeBySession(sessionId, "captureOutput", { sessionId });
     },
 
     async getLogContent(sessionId: string): Promise<string | null> {
-      return routeBySession<string | null>(sessionId, "getLogContent", { sessionId });
+      return routeBySession(sessionId, "getLogContent", { sessionId });
     },
 
     async getDiff(sessionId: string): Promise<DiffResult> {
-      return routeBySession<DiffResult>(sessionId, "getDiff", { sessionId });
+      return routeBySession(sessionId, "getDiff", { sessionId });
     },
 
     async getTags(sessionId: string): Promise<string[]> {
-      return routeBySession<string[]>(sessionId, "getTags", { sessionId });
+      return routeBySession(sessionId, "getTags", { sessionId });
     },
 
     async stop(sessionId: string): Promise<void> {
-      return routeBySession<void>(sessionId, "stop", { sessionId });
+      return routeBySession(sessionId, "stop", { sessionId });
     },
 
     async closeSession(sessionId: string): Promise<void> {
-      return routeBySession<void>(sessionId, "closeSession", { sessionId });
+      return routeBySession(sessionId, "closeSession", { sessionId });
     },
 
     async sendTurn(sessionId: string, text: string): Promise<void> {
-      return routeBySession<void>(sessionId, "sendTurn", { sessionId, text });
+      return routeBySession(sessionId, "sendTurn", { sessionId, text });
     },
 
     async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {
-      return routeBySession<Checkpoint[]>(sessionId, "getCheckpoints", { sessionId });
+      return routeBySession(sessionId, "getCheckpoints", { sessionId });
     },
 
     async getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }> {
-      return routeBySession<{ diff: string }>(sessionId, "getTurnDiff", { sessionId, fromTurn, toTurn });
+      return routeBySession(sessionId, "getTurnDiff", { sessionId, fromTurn, toTurn });
     },
 
     async revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void> {
-      return routeBySession<void>(sessionId, "revertToCheckpoint", { sessionId, turnSeq });
+      return routeBySession(sessionId, "revertToCheckpoint", { sessionId, turnSeq });
     },
 
     async setKept(sessionId: string, kept: boolean): Promise<void> {
-      return routeBySession<void>(sessionId, "setKept", { sessionId, kept });
+      return routeBySession(sessionId, "setKept", { sessionId, kept });
     },
 
     async merge(sessionId: string, cleanup?: boolean): Promise<MergeResult> {
-      return routeBySession<MergeResult>(sessionId, "merge", { sessionId, cleanup });
+      return routeBySession(sessionId, "merge", { sessionId, cleanup });
     },
 
     async isAlive(sessionId: string): Promise<boolean> {
-      return routeBySession<boolean>(sessionId, "isAlive", { sessionId });
+      return routeBySession(sessionId, "isAlive", { sessionId });
     },
 
     async archiveSession(sessionId: string): Promise<void> {
-      return routeBySession<void>(sessionId, "archiveSession", { sessionId });
+      return routeBySession(sessionId, "archiveSession", { sessionId });
     },
 
     async unarchiveSession(sessionId: string): Promise<void> {
-      return routeBySession<void>(sessionId, "unarchiveSession", { sessionId });
+      return routeBySession(sessionId, "unarchiveSession", { sessionId });
     },
 
     async backfillSession(
       sessionId: string,
     ): Promise<{ eventsReplayed: number }> {
-      return routeBySession<{ eventsReplayed: number }>(
+      return routeBySession(
         sessionId,
         "backfillSession",
         { sessionId },
@@ -447,7 +452,7 @@ export function createAggregatingClient(
     },
 
     async getChildSessions(sessionId: string): Promise<SessionListResponse[]> {
-      return routeBySession<SessionListResponse[]>(sessionId, "getChildSessions", { sessionId });
+      return routeBySession(sessionId, "getChildSessions", { sessionId });
     },
 
     async getTask(id: string): Promise<Task | null> {
@@ -476,7 +481,7 @@ export function createAggregatingClient(
         } else {
           ensureReachable(nodeId);
           promises.push(
-            remoteNodes.request<void>(nodeId, "deleteSessions", {
+            remoteNodes.request(nodeId, "deleteSessions", {
               ids: nodeIds,
             }),
           );
@@ -551,7 +556,7 @@ export function createAggregatingClient(
     // --- Approvals ---
     async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {
       if (sessionId) {
-        return routeBySession<ApprovalRequest[]>(
+        return routeBySession(
           sessionId,
           "getPendingApprovals",
           { sessionId },
@@ -576,7 +581,7 @@ export function createAggregatingClient(
       for (const handle of remoteNodes.listHandles()) {
         if (handle.status !== "connected") continue;
         try {
-          await remoteNodes.request<void>(handle.nodeId, "resolveApproval", {
+          await remoteNodes.request(handle.nodeId, "resolveApproval", {
             requestId,
             decision,
           });
@@ -602,7 +607,7 @@ export function createAggregatingClient(
         result = await localClient.terminalOpen(sessionId, opts);
       } else {
         ensureReachable(nodeId);
-        result = await remoteNodes.request<{ termId: string }>(
+        result = await remoteNodes.request(
           nodeId,
           "terminalOpen",
           { sessionId, opts },
@@ -618,7 +623,7 @@ export function createAggregatingClient(
         return localClient.terminalWrite(termId, data);
       }
       ensureReachable(nodeId);
-      return remoteNodes.request<void>(nodeId, "terminalWrite", {
+      return remoteNodes.request(nodeId, "terminalWrite", {
         termId,
         data,
       });
@@ -634,7 +639,7 @@ export function createAggregatingClient(
         return localClient.terminalResize(termId, cols, rows);
       }
       ensureReachable(nodeId);
-      return remoteNodes.request<void>(nodeId, "terminalResize", {
+      return remoteNodes.request(nodeId, "terminalResize", {
         termId,
         cols,
         rows,
@@ -648,13 +653,13 @@ export function createAggregatingClient(
         return localClient.terminalClose(termId);
       }
       ensureReachable(nodeId);
-      return remoteNodes.request<void>(nodeId, "terminalClose", { termId });
+      return remoteNodes.request(nodeId, "terminalClose", { termId });
     },
 
     async terminalList(
       sessionId: string,
     ): Promise<Array<{ id: string; cols: number; rows: number }>> {
-      return routeBySession<Array<{ id: string; cols: number; rows: number }>>(
+      return routeBySession(
         sessionId,
         "terminalList",
         { sessionId },

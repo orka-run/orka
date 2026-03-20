@@ -13,6 +13,9 @@ import type {
   PruneOptions,
   PruneResult,
   PushChannel,
+  RpcMethodName,
+  RpcParams,
+  RpcResult,
   SessionDetailResponse,
   SessionFilters,
   SessionListResponse,
@@ -77,8 +80,8 @@ export class OrkaClient implements OrkaService {
     this.ownsTransport = true;
   }
 
-  protected request<T>(method: string, params?: unknown, options?: RequestOptions): Promise<T> {
-    return this.transport.request<T>(method, params, options);
+  protected request<M extends RpcMethodName>(method: M, params?: RpcParams<M>, options?: RequestOptions): Promise<RpcResult<M>> {
+    return this.transport.request(method, params, options);
   }
 
   close(): void {
@@ -132,8 +135,9 @@ export class OrkaClient implements OrkaService {
   }
 
   async getSessionTimeline(params: TimelineParams, options?: RequestOptions): Promise<TimelineResponse> {
-    const raw = await this.request<{ events?: unknown[]; total?: unknown }>("getSessionTimeline", params, options);
-    const rawEvents = Array.isArray(raw.events) ? raw.events : [];
+    const raw = await this.request("getSessionTimeline", params, options);
+    // Wire events need validation — cast to unknown[] for parseWireEvent
+    const rawEvents = raw.events as unknown as unknown[];
     const events: OrchestrationEvent[] = [];
     for (const item of rawEvents) {
       const event = parseWireEvent(item);
@@ -141,7 +145,7 @@ export class OrkaClient implements OrkaService {
     }
     return {
       events,
-      total: typeof raw.total === "number" ? raw.total : events.length,
+      total: raw.total,
     };
   }
 
