@@ -9,7 +9,7 @@ import {
   PushControlRequestSchema,
   canonicalTransportOrigin,
 } from "@orka/core";
-import { statfsSync, unlinkSync } from "node:fs";
+import { existsSync, statSync, statfsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ReconnectStrategy } from "@orka/client";
 import type { PushChannel, DataFrame, TransportPayload } from "@orka/core";
@@ -23,6 +23,13 @@ import { handleRpcRequest } from "./rpc-handler";
 import { LogTailer } from "./log-tailer";
 import { getDaemonMetrics, getTracer, persistOtlpJsonTraces, withSpan } from "./tracing";
 
+export interface DashboardOptions {
+  /** Serve static files from this directory (prod mode). */
+  staticDir?: string;
+  /** Spawn Vite dev server from this directory (dev mode). */
+  devDir?: string;
+}
+
 export interface ServerOptions {
   port: number;
   hostname?: string;
@@ -34,6 +41,8 @@ export interface ServerOptions {
   relayToken?: string;
   /** Enable E2E encryption. Auto-generates a node keypair if needed. */
   encrypt?: boolean;
+  /** Dashboard serving configuration. */
+  dashboard?: DashboardOptions;
 }
 
 interface ServerWebSocketData {
@@ -63,6 +72,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
   return withSpan("orka.server.start", {}, async () => {
     const { pushHub } = ctx;
     const gracefulShutdown = new GracefulShutdown();
+    const dashboardStaticDir = opts.dashboard?.staticDir;
 
     // Load or generate Noise keypair for E2E encryption
     let noiseKeyInfo: NoiseKeyInfo | undefined;
@@ -176,7 +186,13 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
         if (server.upgrade(req, { data: {} })) {
           return undefined;
         }
-        return new Response("WebSocket upgrade required", { status: 426 });
+
+        // Dashboard static file serving (prod mode)
+        if (dashboardStaticDir) {
+          return serveDashboardFile(dashboardStaticDir, url.pathname);
+        }
+
+        return new Response("Not found", { status: 404 });
       },
 
       websocket: {
@@ -445,8 +461,42 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
       registerWithRelay(ctx, svc, opts.relayUrl, nodeId, opts.relayToken, noiseKeyInfo);
     }
 
+    // Spawn Vite dev server if dashboard dev mode is enabled
+    let viteProc: ReturnType<typeof Bun.spawn> | undefined;
+    if (opts.dashboard?.devDir) {
+      const devDir = opts.dashboard.devDir;
+      viteProc = Bun.spawn(["bunx", "vite", "--host", "0.0.0.0"], {
+        cwd: devDir,
+        stdin: "ignore",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      console.log(`dashboard dev server starting (pid ${viteProc.pid}, cwd ${devDir})`);
+      gracefulShutdown.onShutdown("vite-dev-server", async () => {
+        viteProc?.kill();
+      });
+    }
+
+    if (dashboardStaticDir) {
+      console.log(`dashboard serving static files from ${dashboardStaticDir}`);
+    }
+
     return { server, gracefulShutdown };
   });
+}
+
+function serveDashboardFile(staticDir: string, pathname: string): Response {
+  const filePath = pathname === "/" ? "/index.html" : pathname;
+  const resolved = join(staticDir, filePath);
+  // Prevent path traversal
+  if (!resolved.startsWith(staticDir)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  if (existsSync(resolved) && statSync(resolved).isFile()) {
+    return new Response(Bun.file(resolved));
+  }
+  // SPA fallback — serve index.html for client-side routing
+  return new Response(Bun.file(join(staticDir, "index.html")));
 }
 
 function checkDbHealth(ctx: DaemonContext): boolean {

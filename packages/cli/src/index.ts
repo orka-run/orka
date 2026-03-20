@@ -2217,6 +2217,7 @@ const serveCmd = command({
   examples: [
     { description: "Start on default port", command: "orka serve" },
     { description: "Register with relay", command: "orka serve --relay ws://relay:7390 --node-id mynode" },
+    { description: "With dashboard", command: "orka serve --dashboard" },
   ],
   args: {
     port: option({ type: optional(str), long: "port", description: "Port to listen on (default: 7394)" }),
@@ -2224,6 +2225,9 @@ const serveCmd = command({
     relay: option({ type: optional(str), long: "relay", description: "Relay URL to register with (e.g. ws://relay:7390)" }),
     nodeId: option({ type: optional(str), long: "node-id", description: "Node ID for relay registration" }),
     relayToken: option({ type: optional(str), long: "relay-token", description: "Auth token for relay connection" }),
+    dashboard: flag({ long: "dashboard", description: "Enable dashboard serving" }),
+    noDashboard: flag({ long: "no-dashboard", description: "Disable dashboard serving" }),
+    dashboardDev: flag({ long: "dashboard-dev", description: "Force Vite dev mode even if dist/ exists" }),
   },
   handler: async (args) => {
     // serve is the daemon itself — uses LocalClient directly, no getSvc()
@@ -2247,6 +2251,29 @@ const serveCmd = command({
         };
       }
 
+      // Determine dashboard mode
+      const dashboardDir = getDashboardDir();
+      const distDir = join(dashboardDir, "dist");
+      const distExists = existsSync(join(distDir, "index.html"));
+      const srcExists = existsSync(join(dashboardDir, "src"));
+
+      let dashboardOpts: import("@orka/daemon").DashboardOptions | undefined;
+      if (args.noDashboard) {
+        // Explicitly disabled
+      } else if (args.dashboardDev) {
+        if (!srcExists) {
+          console.error("dashboard source not found at " + dashboardDir);
+          process.exit(1);
+        }
+        dashboardOpts = { devDir: dashboardDir };
+      } else if (args.dashboard || distExists || srcExists) {
+        if (distExists && !args.dashboardDev) {
+          dashboardOpts = { staticDir: distDir };
+        } else if (srcExists) {
+          dashboardOpts = { devDir: dashboardDir };
+        }
+      }
+
       const ctx = await createDaemonContext();
       const localSvc = createLocalClient(ctx, pairingConfig);
       const relayToken = args.relayToken ?? process.env["ORKA_TOKEN"];
@@ -2257,6 +2284,7 @@ const serveCmd = command({
         ...(args.relay ? { relayUrl: args.relay } : {}),
         ...(relayToken ? { relayToken } : {}),
         ...(useEncrypt ? { encrypt: true } : {}),
+        ...(dashboardOpts ? { dashboard: dashboardOpts } : {}),
       };
       const { server } = await startServer(ctx, localSvc, serverOptions);
       console.log(`orka daemon listening on ws://${hostname}:${server.port}`);
