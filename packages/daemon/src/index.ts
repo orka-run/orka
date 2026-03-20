@@ -2,7 +2,7 @@
 export { createLocalClient } from "./local-client";
 export type { PairingConfig } from "./local-client";
 export { startServer } from "./server";
-export type { ServerOptions } from "./server";
+export type { ServerOptions, DashboardOptions } from "./server";
 export { createDaemonContext } from "./daemon-context";
 export type { DaemonContext } from "./daemon-context";
 
