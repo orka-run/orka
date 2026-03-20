@@ -217,6 +217,7 @@ export function createAggregatingClient(
     return {
       id: s.id,
       status: s.status,
+      allowedActions: s.allowedActions ?? [],
       backend: s.backend,
       title: s.title,
       model: null,

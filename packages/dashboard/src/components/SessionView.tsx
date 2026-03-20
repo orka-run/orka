@@ -35,7 +35,7 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "running", "rate_limited
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function StatusBadge({ status }: { status: string }) {
-  const colors = STATUS_COLORS[status] ?? STATUS_COLORS.cancelled;
+  const colors = STATUS_COLORS[status] ?? STATUS_COLORS["cancelled"]!;
   return (
     <span className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${colors.bg} ${colors.text}`}>
       <span className={`h-1.5 w-1.5 rounded-sm ${colors.dot}`} />

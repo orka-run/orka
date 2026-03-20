@@ -17,6 +17,7 @@ function mockDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
   return {
     id: overrides.id ?? "sess-local-1",
     status: "completed",
+    allowedActions: [],
     backend: "claude-code",
 
     title: "test session",
@@ -46,6 +47,7 @@ function mockListResponse(overrides: Partial<SessionListResponse> = {}): Session
   return {
     id: overrides.id ?? "sess-local-1",
     status: "completed",
+    allowedActions: [],
     backend: "claude-code",
     title: "test session",
     model: null,
