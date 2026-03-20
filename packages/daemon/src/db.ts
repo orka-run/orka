@@ -283,6 +283,15 @@ export class DatabaseRepository {
     });
   }
 
+  /** Update the provider session ID (e.g. after conversation revert). */
+  updateSessionProviderSessionId(id: string, providerSessionId: string): void {
+    withSpanSync("orka.db.updateSessionProviderSessionId", { "orka.session.id": id }, () => {
+      this.db
+        .prepare("UPDATE sessions SET provider_session_id = ? WHERE id = ?")
+        .run(providerSessionId, id);
+    });
+  }
+
   /** Reset a completed/failed session back to running for continuation. */
   resetSessionForContinue(id: string, startedAt: string): void {
     withSpanSync("orka.db.resetSessionForContinue", { "orka.session.id": id }, () => {
@@ -640,6 +649,15 @@ export class DatabaseRepository {
         .prepare("SELECT COUNT(*) AS cnt FROM orchestration_events WHERE session_id = ?")
         .get(sessionId) as { cnt: number } | undefined;
       return row?.cnt ?? 0;
+    });
+  }
+
+  /** Delete orchestration events for a session that were recorded after a given timestamp. */
+  deleteOrchestrationEventsAfter(sessionId: string, afterTimestamp: string): void {
+    withSpanSync("orka.db.deleteOrchestrationEventsAfter", { "orka.session.id": sessionId }, () => {
+      this.db
+        .prepare("DELETE FROM orchestration_events WHERE session_id = ? AND timestamp > ?")
+        .run(sessionId, afterTimestamp);
     });
   }
 

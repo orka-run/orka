@@ -236,6 +236,7 @@ export interface OrkaService {
   getCheckpoints(sessionId: string): Promise<Checkpoint[]>;
   getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }>;
   revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void>;
+  revertSession(sessionId: string, turnSeq: number, mode: "files" | "files_and_conversation"): Promise<void>;
 
   // --- Worktree ---
   getDiff(sessionId: string): Promise<DiffResult>;

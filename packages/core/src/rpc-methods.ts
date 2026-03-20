@@ -72,6 +72,10 @@ export interface RpcMethodMap {
     result: { diff: string };
   };
   revertToCheckpoint: { params: { sessionId: string; turnSeq: number }; result: void };
+  revertSession: {
+    params: { sessionId: string; turnSeq: number; mode: "files" | "files_and_conversation" };
+    result: void;
+  };
 
   // --- Worktree ---
   getDiff: { params: { sessionId: string }; result: DiffResult };

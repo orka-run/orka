@@ -156,6 +156,13 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
           case "revertToCheckpoint":
             await svc.revertToCheckpoint(params.sessionId, params.turnSeq);
             return null;
+          case "revertSession":
+            await svc.revertSession(params.sessionId, params.turnSeq, params.mode);
+            pushHub.broadcast("orchestration.sessionUpdated", {
+              sessionId: params.sessionId,
+              status: "completed",
+            });
+            return null;
           case "startPairing":
             return svc.startPairing(params);
           case "pairWithNode":

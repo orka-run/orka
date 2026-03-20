@@ -176,6 +176,10 @@ export type OrchestrationEvent =
       error: string;
       delayMs: number;
     }>
+  | OrchestrationEventEnvelope<"session.reverted", {
+      turnSeq: number;
+      mode: "files" | "files_and_conversation";
+    }>
   | OrchestrationEventEnvelope<"event.passthrough", {
       turnId?: string;
       originalType: string;
@@ -220,6 +224,7 @@ export const KnownOrchestrationEventTypeSchema = z.enum([
   "runtime.warning",
   "session.rate_limited",
   "session.api_retry",
+  "session.reverted",
   "event.passthrough",
 ]);
 
@@ -443,6 +448,12 @@ const WireEventVariants: Record<string, z.ZodType> = {
     maxAttempts: z.number(),
     error: z.string(),
     delayMs: z.number(),
+  }).passthrough(),
+
+  "session.reverted": WireEventBaseSchema.extend({
+    type: z.literal("session.reverted"),
+    turnSeq: z.number(),
+    mode: z.enum(["files", "files_and_conversation"]),
   }).passthrough(),
 
   "event.passthrough": WireEventBaseSchema.extend({

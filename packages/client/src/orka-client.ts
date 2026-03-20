@@ -193,6 +193,15 @@ export class OrkaClient implements OrkaService {
     return this.request("revertToCheckpoint", { sessionId, turnSeq }, options);
   }
 
+  async revertSession(
+    sessionId: string,
+    turnSeq: number,
+    mode: "files" | "files_and_conversation",
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.request("revertSession", { sessionId, turnSeq, mode }, options);
+  }
+
   async startPairing(params: StartPairingParams, options?: RequestOptions): Promise<StartPairingResult> {
     return this.request("startPairing", params, options);
   }

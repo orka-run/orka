@@ -592,6 +592,7 @@ const TOP_LEVEL_COMMANDS = new Set([
   "diff",
   "retry",
   "close",
+  "revert",
   "show",
   "workdir",
   "wait",
@@ -1404,6 +1405,40 @@ const closeCmd = command({
 
     await svc.closeSession(session.id);
     console.log(`closed session ${session.id}`);
+  }),
+});
+
+const revertCmd = command({
+  name: "revert",
+  description: "Revert a session to a previous turn checkpoint (files only or files + conversation)",
+  args: {
+    sessionId: positional({ type: optional(str), displayName: "session-id", description: "Session ID or prefix" }),
+    toTurn: option({ type: optional(str), long: "to-turn", description: "Turn sequence number to revert to" }),
+    conversation: flag({ type: optional(bool), long: "conversation", description: "Also reset conversation (kill process, truncate history)" }),
+    rest: restPositionals({ type: str, displayName: "args" }),
+  },
+  handler: async ({ sessionId, toTurn, conversation }) => runCliCommand("revert", async () => {
+    if (!sessionId) {
+      fail("usage: orka revert <session-id> --to-turn <N> [--conversation]");
+    }
+
+    if (!toTurn) {
+      fail("usage: orka revert <session-id> --to-turn <N> [--conversation]\n  --to-turn is required");
+    }
+
+    const turnSeq = parseInt(toTurn, 10);
+    if (!Number.isFinite(turnSeq) || turnSeq < 0) {
+      fail("error: --to-turn must be a non-negative integer");
+    }
+
+    const session = await findSession(sessionId);
+    if (!session) {
+      fail(`session not found: ${sessionId}`);
+    }
+
+    const mode = conversation ? "files_and_conversation" : "files";
+    await svc.revertSession(session.id, turnSeq, mode);
+    console.log(`reverted session ${session.id} to turn ${turnSeq} (${mode === "files" ? "files only" : "files + conversation"})`);
   }),
 });
 
@@ -3081,6 +3116,7 @@ const app = subcommands({
     diff: diffCmd,
     retry: retryCmd,
     close: closeCmd,
+    revert: revertCmd,
     show: showCmd,
     workdir: workdirCmd,
     wait: waitCmd,
