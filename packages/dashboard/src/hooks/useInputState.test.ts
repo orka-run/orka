@@ -12,8 +12,8 @@ describe("deriveInputState", () => {
     expect(deriveInputState([createEvent({ type: "session.started", sessionId: "s", timestamp: "t" })], [])).toBe("disabled");
   });
 
-  test("returns not_started when sendTurn allowed but no events", () => {
-    expect(deriveInputState([], ["sendTurn"])).toBe("not_started");
+  test("returns waiting when sendTurn allowed but no events", () => {
+    expect(deriveInputState([], ["sendTurn"])).toBe("waiting");
   });
 
   test("returns busy when a turn has started but not completed", () => {

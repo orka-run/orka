@@ -257,7 +257,7 @@ describe("Noise NK through Relay", () => {
 
       const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
       expect(resp["error"]).toBeUndefined();
-      expect(resp["result"]).toBeInstanceOf(Array);
+      expect((resp["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
     } finally {
       ws.close();
     }
@@ -321,7 +321,7 @@ describe("Noise NK through Relay", () => {
       // First RPC
       const resp1 = await encryptedRpc(transport, ws, "listSessions", { filters: {} }, { id: "idle-1" });
       expect(resp1["error"]).toBeUndefined();
-      expect(resp1["result"]).toBeInstanceOf(Array);
+      expect((resp1["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
 
       // Idle for 3 seconds
       await Bun.sleep(3_000);
@@ -329,7 +329,7 @@ describe("Noise NK through Relay", () => {
       // Second RPC -- nonce state must be preserved
       const resp2 = await encryptedRpc(transport, ws, "listSessions", { filters: {} }, { id: "idle-2" });
       expect(resp2["error"]).toBeUndefined();
-      expect(resp2["result"]).toBeInstanceOf(Array);
+      expect((resp2["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
 
       // Third RPC to confirm channel health
       const resp3 = await encryptedRpc(transport, ws, "reap", {}, { id: "idle-3" });
@@ -354,7 +354,7 @@ describe("Noise NK through Relay", () => {
 
       const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
       expect(resp["error"]).toBeUndefined();
-      expect(resp["result"]).toBeInstanceOf(Array);
+      expect((resp["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
     } finally {
       ws.close();
     }
@@ -404,7 +404,7 @@ describe("Noise NK through Relay", () => {
       for (let i = 0; i < 5; i++) {
         const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} }, { id: `multi-${i}` });
         expect(resp["error"]).toBeUndefined();
-        expect(resp["result"]).toBeInstanceOf(Array);
+        expect((resp["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
       }
     } finally {
       ws.close();

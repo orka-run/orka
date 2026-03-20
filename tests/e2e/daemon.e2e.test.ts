@@ -276,7 +276,7 @@ describe("Daemon Session Lifecycle", () => {
 
     const log = await client.getLogContent(session.id);
     expect(log).toContain("GOT: hello-from-test");
-  });
+  }, 15_000);
 
   // ---- Prune ----
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -9,7 +9,7 @@ import { createLocalClient } from "./local-client";
 let testHome = "";
 let ctx: DaemonContext;
 
-beforeEach(async () => {
+beforeAll(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-local-client-test-"));
   mkdirSync(testHome, { recursive: true });
   ctx = await createDaemonContext(testHome);
@@ -19,6 +19,10 @@ afterEach(() => {
   for (const handle of ctx.providerService.listActiveSessions()) {
     ctx.providerService.clearHandle(handle.threadId);
   }
+  ctx.db.clearAllData();
+});
+
+afterAll(() => {
   ctx.db.close();
   rmSync(testHome, { recursive: true, force: true });
 });

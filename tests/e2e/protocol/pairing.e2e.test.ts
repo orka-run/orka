@@ -403,7 +403,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     expect(rpcResponse).toBeTruthy();
     expect((rpcResponse as any).jsonrpc).toBe("2.0");
     expect((rpcResponse as any).id).toBe("test-noise-rpc");
-    expect((rpcResponse as any).result).toBeInstanceOf(Array);
+    expect((rpcResponse as any).result.sessions).toBeInstanceOf(Array);
 
     ws.close();
   }, 30_000);

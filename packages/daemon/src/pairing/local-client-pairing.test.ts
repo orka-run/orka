@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,14 +10,16 @@ import { parsePairingCode } from "@orka/core/crypto/protocol";
 let testHome = "";
 let ctx: DaemonContext;
 
-beforeEach(async () => {
+beforeAll(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-pairing-test-"));
   mkdirSync(testHome, { recursive: true });
   writeFileSync(join(testHome, "config.toml"), "");
   ctx = await createDaemonContext(testHome);
 });
 
-afterEach(() => {
+afterEach(() => ctx.db.clearAllData());
+
+afterAll(() => {
   ctx.db.close();
   rmSync(testHome, { recursive: true, force: true });
 });

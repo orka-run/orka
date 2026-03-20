@@ -149,9 +149,10 @@ describe("Noise_NK_25519_ChaChaPoly_SHA256", () => {
     const { msg: msg2, result: serverResult } = responder.writeMessage2();
     const { result: clientResult } = initiator.readMessage2(msg2);
 
+    clientResult.sendCipher.encrypt(textBytes("msg-0")); // advance sender nonce to 1
     const ct1 = clientResult.sendCipher.encrypt(textBytes("msg-1"));
 
-    // Try to decrypt ct1 first (nonce mismatch)
+    // Try to decrypt ct1 first, skipping ct0 (nonce mismatch: receiver expects 0, ct1 was encrypted with nonce 1)
     expect(() => serverResult.recvCipher.decrypt(ct1)).toThrow();
   });
 

@@ -16,7 +16,7 @@ import type {
   ProviderSessionHandle,
   ProviderSessionStartInput,
 } from "@orka/core";
-import { createEvent } from "@orka/core";
+import { createEvent, generateId } from "@orka/core";
 
 const CTRL_C = "\u0003";
 
@@ -123,8 +123,18 @@ export class TestShellAdapter implements ProviderAdapter {
       exitEmitted: false,
     };
 
+    const initTurnId = generateId("turn");
     runtime.queue.push(
       createEvent("session.started", threadId, { message: `test session started (pid ${proc.pid})` }, { provider: this.kind }),
+    );
+    // Emit turn lifecycle to match real adapter behavior:
+    // session.started → turn.started → turn.completed (init turn completes immediately)
+    // This transitions the session to "idle", enabling sendTurn to deliver input directly.
+    runtime.queue.push(
+      createEvent("turn.started", threadId, {}, { provider: this.kind, turnId: initTurnId }),
+    );
+    runtime.queue.push(
+      createEvent("turn.completed", threadId, { state: "completed" }, { provider: this.kind, turnId: initTurnId }),
     );
 
     void this.streamOutput(threadId, runtime);

@@ -46,7 +46,7 @@ async function waitForSessionCompletion(
     });
     expect(resp["error"]).toBeUndefined();
     const session = resp["result"] as Record<string, unknown>;
-    if (session && session["status"] !== "running" && session["status"] !== "queued" && session["status"] !== "preparing") {
+    if (session && session["status"] !== "running" && session["status"] !== "queued" && session["status"] !== "preparing" && session["status"] !== "idle") {
       return session;
     }
     await Bun.sleep(intervalMs);
@@ -109,7 +109,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       filters: {},
     });
     expect(listResp["error"]).toBeUndefined();
-    const sessions = listResp["result"] as Array<Record<string, unknown>>;
+    const sessions = (listResp["result"] as { sessions: Record<string, unknown>[] }).sessions;
     const found = sessions.find((s) => s["id"] === sessionId);
     expect(found).toBeDefined();
     expect(found!["backend"]).toBe("claude-code");
@@ -268,7 +268,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       filters: {},
     });
     expect(listResp["error"]).toBeUndefined();
-    const allSessions = listResp["result"] as Array<Record<string, unknown>>;
+    const allSessions = (listResp["result"] as { sessions: Record<string, unknown>[] }).sessions;
 
     for (const id of sessionIds) {
       const found = allSessions.find((s) => s["id"] === id);
@@ -282,7 +282,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
         id,
       });
       const session = getResp["result"] as Record<string, unknown>;
-      if (session["status"] === "running" || session["status"] === "queued" || session["status"] === "preparing") {
+      if (session["status"] === "running" || session["status"] === "queued" || session["status"] === "preparing" || session["status"] === "idle") {
         await encryptedRpc(conn.transport, conn.ws, "stop", { sessionId: id });
       }
     }
@@ -290,7 +290,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     // Wait briefly for status updates
     await Bun.sleep(500);
 
-    // Verify all are no longer running
+    // Verify all reached terminal status
     for (const id of sessionIds) {
       const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
         id,
@@ -335,7 +335,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       filters: {},
     });
     expect(listBefore["error"]).toBeUndefined();
-    const beforeSessions = listBefore["result"] as Array<Record<string, unknown>>;
+    const beforeSessions = (listBefore["result"] as { sessions: Record<string, unknown>[] }).sessions;
     expect(beforeSessions.some((s) => s["id"] === sessionId)).toBe(true);
 
     // Delete the session
@@ -349,7 +349,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       filters: {},
     });
     expect(listAfter["error"]).toBeUndefined();
-    const afterSessions = listAfter["result"] as Array<Record<string, unknown>>;
+    const afterSessions = (listAfter["result"] as { sessions: Record<string, unknown>[] }).sessions;
     expect(afterSessions.some((s) => s["id"] === sessionId)).toBe(false);
 
     conn.ws.close();

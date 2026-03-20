@@ -218,7 +218,7 @@ describe("Protocol Error Handling", () => {
 
     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
     expect(resp["error"]).toBeUndefined();
-    expect(resp["result"]).toBeInstanceOf(Array);
+    expect((resp["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
     expect(resp["jsonrpc"]).toBe("2.0");
     expect(typeof resp["id"]).toBe("string");
 
@@ -278,14 +278,14 @@ describe("Protocol Error Handling", () => {
     // Send encrypted RPC on the Noise connection
     const encResp = await encryptedRpc(transport, noiseWs, "listSessions", { filters: {} });
     expect(encResp["error"]).toBeUndefined();
-    expect(encResp["result"]).toBeInstanceOf(Array);
+    expect((encResp["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
     expect(encResp["jsonrpc"]).toBe("2.0");
     expect(typeof encResp["id"]).toBe("string");
 
     // Send plain RPC on the plain connection
     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
     expect(plainResp["error"]).toBeUndefined();
-    expect(plainResp["result"]).toBeInstanceOf(Array);
+    expect((plainResp["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
     expect(plainResp["jsonrpc"]).toBe("2.0");
     expect(typeof plainResp["id"]).toBe("string");
 
@@ -335,7 +335,7 @@ describe("Protocol Error Handling", () => {
 
     const resp = await plainRpc(ws2, "listSessions", { filters: {} });
     expect(resp["error"]).toBeUndefined();
-    expect(resp["result"]).toBeInstanceOf(Array);
+    expect((resp["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
     expect(resp["jsonrpc"]).toBe("2.0");
     expect(typeof resp["id"]).toBe("string");
 

@@ -111,6 +111,20 @@ export function openDb(orkaHome: string): Database {
 }
 
 /**
+ * Open an in-memory SQLite database and run migrations.
+ * ~70x faster than disk-backed openDb+migrateDb (4ms vs 277ms).
+ * Use in unit tests that don't need filesystem persistence.
+ */
+export async function openTestDb(): Promise<DatabaseRepository> {
+  const { runMigrations } = await import("@orka/core/migrate");
+  const { daemonMigrations } = await import("./migrations");
+  const db = new Database(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  await runMigrations(db, ":memory:", daemonMigrations, 2);
+  return new DatabaseRepository(db);
+}
+
+/**
  * Run Kysely migrations on an open daemon database.
  * Handles transition from the legacy schema_migrations table automatically.
  */
@@ -153,6 +167,24 @@ export class DatabaseRepository {
 
   close(): void {
     this.db.close();
+  }
+
+  /** Execute raw SQL. Exposed for migrations and tests. */
+  exec(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  /** Delete all data rows (FK-safe order). Schema is preserved. For tests only. */
+  clearAllData(): void {
+    this.db.exec("DELETE FROM orchestration_events");
+    this.db.exec("DELETE FROM checkpoints");
+    this.db.exec("DELETE FROM usage_log");
+    this.db.exec("DELETE FROM session_tags");
+    this.db.exec("DELETE FROM client_errors");
+    this.db.exec("DELETE FROM workspace_paths");
+    this.db.exec("DELETE FROM sessions");
+    this.db.exec("DELETE FROM workspaces");
+    this.db.exec("DELETE FROM tasks");
   }
 
   /** Quick health check — runs SELECT 1 to verify DB is responsive. */

@@ -105,7 +105,8 @@ describe("Noise NK Transport", () => {
     const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
 
     expect(resp["error"]).toBeUndefined();
-    expect(Array.isArray(resp["result"])).toBe(true);
+    const lr = resp["result"] as { sessions: unknown[] };
+    expect(Array.isArray(lr.sessions)).toBe(true);
 
     ws.close();
   });
@@ -122,7 +123,8 @@ describe("Noise NK Transport", () => {
     for (let i = 0; i < 5; i++) {
       const resp = await encryptedRpc(transport, ws, "listSessions", { filters: {} });
       expect(resp["error"]).toBeUndefined();
-      expect(Array.isArray(resp["result"])).toBe(true);
+      const lr = resp["result"] as { sessions: unknown[] };
+      expect(Array.isArray(lr.sessions)).toBe(true);
     }
 
     ws.close();
@@ -174,7 +176,8 @@ describe("Noise NK Transport", () => {
     const resp = await plainRpc(ws, "listSessions", { filters: {} });
 
     expect(resp["error"]).toBeUndefined();
-    expect(Array.isArray(resp["result"])).toBe(true);
+    const lr2 = resp["result"] as { sessions: unknown[] };
+    expect(Array.isArray(lr2.sessions)).toBe(true);
 
     ws.close();
   });
@@ -192,14 +195,16 @@ describe("Noise NK Transport", () => {
       filters: {},
     });
     expect(noiseResp["error"]).toBeUndefined();
-    expect(Array.isArray(noiseResp["result"])).toBe(true);
+    const noiseLr = noiseResp["result"] as { sessions: unknown[] };
+    expect(Array.isArray(noiseLr.sessions)).toBe(true);
 
     // 2. Plaintext connection
     const plainWs = new WebSocket(daemon.wsUrl);
     await waitForOpen(plainWs);
     const plainResp = await plainRpc(plainWs, "listSessions", { filters: {} });
     expect(plainResp["error"]).toBeUndefined();
-    expect(Array.isArray(plainResp["result"])).toBe(true);
+    const plainLr = plainResp["result"] as { sessions: unknown[] };
+    expect(Array.isArray(plainLr.sessions)).toBe(true);
 
     noiseWs.close();
     plainWs.close();

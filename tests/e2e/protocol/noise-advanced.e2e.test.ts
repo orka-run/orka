@@ -79,7 +79,7 @@ describe("Noise NK Transport — Advanced", () => {
     expect(results.length).toBe(count);
     for (let i = 0; i < count; i++) {
       expect(results[i]!["error"]).toBeUndefined();
-      expect(Array.isArray(results[i]!["result"])).toBe(true);
+      expect(Array.isArray((results[i]!["result"] as { sessions: unknown[] }).sessions)).toBe(true);
     }
 
     // All response IDs should be unique (each RPC got its own response)
@@ -125,7 +125,7 @@ describe("Noise NK Transport — Advanced", () => {
     expect(rpcResults.length).toBe(connectionCount);
     for (const { resp } of rpcResults) {
       expect(resp["error"]).toBeUndefined();
-      expect(Array.isArray(resp["result"])).toBe(true);
+      expect(Array.isArray((resp["result"] as { sessions: unknown[] }).sessions)).toBe(true);
     }
 
     // Do a second round to confirm all connections are still functional
@@ -135,7 +135,7 @@ describe("Noise NK Transport — Advanced", () => {
     const round2Results = await Promise.all(round2Promises);
     for (const resp of round2Results) {
       expect(resp["error"]).toBeUndefined();
-      expect(Array.isArray(resp["result"])).toBe(true);
+      expect(Array.isArray((resp["result"] as { sessions: unknown[] }).sessions)).toBe(true);
     }
 
     // Clean up all connections
@@ -327,7 +327,7 @@ describe("Noise NK Transport — Advanced", () => {
       { filters: {} },
     );
     expect(resp["error"]).toBeUndefined();
-    expect(Array.isArray(resp["result"])).toBe(true);
+    expect(Array.isArray((resp["result"] as { sessions: unknown[] }).sessions)).toBe(true);
 
     verifyWs.close();
   }, 30_000);

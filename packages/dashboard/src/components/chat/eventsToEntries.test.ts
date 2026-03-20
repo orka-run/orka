@@ -107,7 +107,7 @@ describe("eventsToEntries", () => {
     });
   });
 
-  test("renders task progress, hook, and compaction events as inline system entries", () => {
+  test("renders hook and compaction events as system entries, skips tool.progress/task.started", () => {
     const entries = eventsToEntries([
       {
         type: "tool.progress",
@@ -142,22 +142,13 @@ describe("eventsToEntries", () => {
       },
     ]);
 
-    expect(entries).toContainEqual({
-      id: "tool-progress-2026-03-11T00:00:01Z-turn-1",
-      type: "system",
-      timestamp: "2026-03-11T00:00:01Z",
-      title: "Read",
-      body: "Reading src/db.ts",
-      tone: "info",
-    });
-    expect(entries).toContainEqual({
-      id: "task-started-2026-03-11T00:00:02Z-task-1",
-      type: "system",
-      timestamp: "2026-03-11T00:00:02Z",
-      title: "Task started",
-      body: "Explore dashboard structure - Inspect chat timeline rendering",
-      tone: "info",
-    });
+    // tool.progress and task.started are now absorbed into tool call groups, not standalone entries
+    expect(entries).not.toContainEqual(
+      expect.objectContaining({ id: "tool-progress-2026-03-11T00:00:01Z-turn-1" }),
+    );
+    expect(entries).not.toContainEqual(
+      expect.objectContaining({ id: "task-started-2026-03-11T00:00:02Z-task-1" }),
+    );
     expect(entries).toContainEqual({
       id: "hook-hook.response-2026-03-11T00:00:03Z-PreToolUse:Bash",
       type: "system",

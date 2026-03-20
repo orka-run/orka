@@ -1,24 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { openDb, migrateDb, DatabaseRepository } from "./db";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { openTestDb, type DatabaseRepository } from "./db";
 import type { SessionStatus } from "@orka/core";
 
-let testHome = "";
 let db: DatabaseRepository;
 
-beforeEach(async () => {
-  testHome = mkdtempSync(join(tmpdir(), "orka-sm-test-"));
-  const rawDb = openDb(testHome);
-  await migrateDb(rawDb, testHome);
-  db = new DatabaseRepository(rawDb);
+beforeAll(async () => {
+  db = await openTestDb();
 });
 
-afterEach(() => {
-  db.close();
-  rmSync(testHome, { recursive: true, force: true });
-});
+afterEach(() => db.clearAllData());
+afterAll(() => db.close());
 
 function seedSession(sessionId: string, status: SessionStatus): void {
   db.insertTask({
