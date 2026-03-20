@@ -176,13 +176,12 @@ export class OrkaClient implements OrkaService {
     return this.request("sendTurn", { sessionId, text }, options);
   }
 
-<<<<<<< HEAD
   async cancelTurn(sessionId: string, options?: RequestOptions): Promise<void> {
     return this.request("cancelTurn", { sessionId }, options);
-=======
+  }
+
   async cancelQueuedMessage(sessionId: string, text: string, options?: RequestOptions): Promise<void> {
     return this.request("cancelQueuedMessage", { sessionId, text }, options);
->>>>>>> orka/sess-bc8c014c
   }
 
   async getCheckpoints(sessionId: string, options?: RequestOptions): Promise<Checkpoint[]> {

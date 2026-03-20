@@ -889,7 +889,6 @@ export async function sendTurnToSession(
   });
 }
 
-<<<<<<< HEAD
 // --- Cancel Turn ---
 
 /** Cancel the active turn for a running session. No-op if no turn is active. */
@@ -906,7 +905,8 @@ export async function cancelTurnInSession(ctx: DaemonContext, sessionId: string)
     // Clear any queued messages — user explicitly cancelled, don't deliver pending input
     ctx.sessionRuntime.pendingMessages.delete(sessionId);
   });
-=======
+}
+
 // --- Cancel queued message ---
 
 /** Remove a queued (not yet delivered) message from the pending queue by text match. */
@@ -947,7 +947,6 @@ export function cancelQueuedMessageFromSession(
     eventId: generateId("evt"),
   });
   ctx.pushHub.broadcast("orchestration.event", event);
->>>>>>> orka/sess-bc8c014c
 }
 
 // --- Stop ---
