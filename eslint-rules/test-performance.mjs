@@ -184,6 +184,7 @@ const noEnvMutation = {
 
 /** Plugin export */
 export default {
+  meta: { name: "test-perf" },
   rules: {
     "no-disk-sqlite": noDiskSqlite,
     "no-long-sleep": noLongSleep,

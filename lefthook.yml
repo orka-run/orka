@@ -3,6 +3,8 @@ pre-commit:
   commands:
     typecheck:
       run: bun run typecheck
+    lint:
+      run: bun run lint
     test-unit:
       # Unset git env vars leaked by the commit process — they break worktree tests
       run: unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE; bun test packages/

@@ -1,0 +1,48 @@
+{
+  "plugins": ["typescript"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-unused-vars": "off",
+    "no-unused-expressions": "warn",
+    "no-unsafe-finally": "warn",
+    "typescript/ban-ts-comment": "error",
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-non-null-assertion": "warn",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/consistent-type-imports": "warn",
+    "typescript/no-floating-promises": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "test-perf/no-disk-sqlite": "off",
+    "test-perf/no-long-sleep": "off",
+    "test-perf/no-env-mutation": "off",
+    "dashboard/no-raw-transport": "off"
+  },
+  "jsPlugins": [
+    "./eslint-rules/test-performance.mjs",
+    "./eslint-rules/dashboard.mjs"
+  ],
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "tests/**/*.ts"],
+      "rules": {
+        "test-perf/no-disk-sqlite": "error",
+        "test-perf/no-long-sleep": "error",
+        "test-perf/no-env-mutation": "error"
+      }
+    },
+    {
+      "files": ["packages/dashboard/src/**/*.ts", "packages/dashboard/src/**/*.tsx"],
+      "rules": {
+        "dashboard/no-raw-transport": "error"
+      }
+    }
+  ],
+  "ignorePatterns": ["**/dist/**"]
+}
