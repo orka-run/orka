@@ -33,13 +33,7 @@ interface AllowlistEntry {
   reason: string;
 }
 
-const ALLOWLIST: AllowlistEntry[] = [
-  {
-    file: "tests/e2e/protocol/noise-relay.e2e.test.ts",
-    rule: "no-long-sleep",
-    reason: "1000ms idle persistence test requires real delay",
-  },
-];
+const ALLOWLIST: AllowlistEntry[] = [];
 
 function isAllowlisted(relPath: string, rule: string): boolean {
   return ALLOWLIST.some((a) => a.file === relPath && a.rule === rule);
@@ -99,9 +93,9 @@ for (const file of files) {
         }
       }
 
-      // Match setTimeout(_, N) where N > 200
+      // Match setTimeout(_, N) where N > 200, but skip timeout guards (reject/Error patterns)
       const setTimeoutMatch = line.match(/setTimeout\([^,]+,\s*(\d[\d_]*)\s*\)/);
-      if (setTimeoutMatch) {
+      if (setTimeoutMatch && !line.includes("reject(") && !line.includes("new Error")) {
         const ms = parseInt(setTimeoutMatch[1]!.replace(/_/g, ""), 10);
         if (ms > 200) {
           violations.push({

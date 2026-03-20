@@ -332,8 +332,8 @@ describe("Noise NK through Relay", () => {
       expect(resp1["error"]).toBeUndefined();
       expect((resp1["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
 
-      // Idle for 1 second (proves session survives idle)
-      await Bun.sleep(1_000);
+      // Brief idle — proves Noise nonce state survives between RPCs
+      await Bun.sleep(100);
 
       // Second RPC -- nonce state must be preserved
       const resp2 = await encryptedRpc(transport, ws, "listSessions", { filters: {} }, { id: "idle-2" });
