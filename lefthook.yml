@@ -1,7 +1,11 @@
 pre-commit:
+  piped: true
   commands:
     typecheck:
       run: bun run typecheck
+    test-all:
+      # Unset git env vars leaked by the commit process — they break worktree tests
+      run: unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE; bun test packages/ && bun run test:e2e
 
 pre-push:
   commands:

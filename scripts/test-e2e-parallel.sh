@@ -2,11 +2,16 @@
 # Run E2E test files in parallel with process isolation.
 # Each file gets its own bun process — no shared module cache or env.
 # Usage: ./scripts/test-e2e-parallel.sh [--verbose]
+#
+# Performance budget: warns if total wall time exceeds E2E_BUDGET_MS (default 5000ms).
+# Set E2E_BUDGET_MS=0 to disable.
 set -euo pipefail
 
 VERBOSE="${1:-}"
+E2E_BUDGET_MS="${E2E_BUDGET_MS:-5000}"
 TMPDIR_BASE=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
+START_MS=$(($(date +%s%N) / 1000000))
 
 files=($(find tests/e2e -name '*.test.ts' | sort))
 pids=()
@@ -40,8 +45,17 @@ for entry in "${pids[@]}"; do
   fi
 done
 
+END_MS=$(($(date +%s%N) / 1000000))
+ELAPSED_MS=$((END_MS - START_MS))
+
 echo ""
-echo "  ${total_files} files, $((total_pass + total_fail)) tests: ${total_pass} pass, ${total_fail} fail"
+echo "  ${total_files} files, $((total_pass + total_fail)) tests: ${total_pass} pass, ${total_fail} fail  (${ELAPSED_MS}ms)"
+
+if [ "$E2E_BUDGET_MS" -gt 0 ] && [ "$ELAPSED_MS" -gt "$E2E_BUDGET_MS" ]; then
+  echo ""
+  echo "  ⚠ E2E performance budget exceeded: ${ELAPSED_MS}ms > ${E2E_BUDGET_MS}ms"
+  echo "  Set E2E_BUDGET_MS=0 to disable or E2E_BUDGET_MS=<new_limit> to adjust."
+fi
 
 if [ ${#failed_files[@]} -gt 0 ]; then
   echo ""
