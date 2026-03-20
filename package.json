@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "lint:di": "bun run scripts/lint-di.ts",
     "check": "bun run typecheck && bun run lint && bun run lint:di",
-    "test": "bun test packages/"
+    "test": "bun test packages/",
+    "test:coverage": "bun test --coverage packages/",
+    "test:e2e": "bun test tests/e2e/"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
