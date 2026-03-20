@@ -99,6 +99,8 @@ export interface TracingInitOptions {
   disableFileExporter?: boolean;
   serviceName?: string;
   serviceVersion?: string;
+  /** Explicit data directory for trace files. When omitted, falls back to ORKA_HOME env / ~/.orka. */
+  dataDir?: string;
 }
 
 export interface TraceLogEntry {
@@ -259,12 +261,13 @@ function rotateTraceFileIfNeeded(logFile: string): void {
   compressWithZstdAsync(`${logFile}.rotating`, `${logFile}.1.zst`);
 }
 
-function appendTraceLogEntries(entries: TraceLogEntry[]): void {
+function appendTraceLogEntries(entries: TraceLogEntry[], dataDir?: string): void {
   if (entries.length === 0) {
     return;
   }
 
-  const logFile = getTraceLogPath();
+  const logFile = dataDir ? join(dataDir, "traces.jsonl") : getTraceLogPath();
+  if (dataDir) mkdirSync(dataDir, { recursive: true });
   rotateTraceFileIfNeeded(logFile);
   const payload = entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
   appendFileSync(logFile, payload);
@@ -300,9 +303,12 @@ export function serializeReadableSpan(span: ReadableSpan): TraceLogEntry {
 
 /** Custom exporter that writes spans as JSON lines to ~/.orka/traces.jsonl */
 class FileSpanExporter implements SpanExporter {
+  private dataDir: string | undefined;
+  constructor(dataDir?: string) { this.dataDir = dataDir; }
+
   export(spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
     try {
-      appendTraceLogEntries(spans.map(serializeReadableSpan));
+      appendTraceLogEntries(spans.map(serializeReadableSpan), this.dataDir);
       resultCallback({ code: ExportResultCode.SUCCESS });
     } catch (error) {
       resultCallback({
@@ -419,6 +425,8 @@ export function initTracing(options: TracingInitOptions = {}): void {
   if (_initialized) return;
   _initialized = true;
 
+  const resolvedDataDir = options.dataDir; // undefined = lazy read from env (production)
+
   const traceEndpoint = options.otlpHttpEndpoint ?? process.env["OTEL_EXPORTER_OTLP_ENDPOINT"];
   const metricEndpoint = process.env["OTEL_EXPORTER_OTLP_ENDPOINT"];
 
@@ -428,7 +436,7 @@ export function initTracing(options: TracingInitOptions = {}): void {
   });
 
   const processors: SimpleSpanProcessor[] = [];
-  const fileExporter = new FileSpanExporter();
+  const fileExporter = new FileSpanExporter(resolvedDataDir);
 
   if (traceEndpoint) {
     processors.push(

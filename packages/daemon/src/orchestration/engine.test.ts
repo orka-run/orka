@@ -3,10 +3,9 @@ import { createEvent, type OrchestrationEvent, type ProviderRuntimeEvent } from 
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initTracing } from "../tracing";
+import { initTracing, shutdownTracing } from "../tracing";
 import { OrchestrationEngine } from "./engine";
 
-const previousOrkaHome = process.env["ORKA_HOME"];
 let testHome = "";
 
 function versioned<T extends Record<string, unknown>>(event: T): T & { v: number } {
@@ -18,17 +17,12 @@ function versioned<T extends Record<string, unknown>>(event: T): T & { v: number
 
 beforeEach(() => {
   testHome = mkdtempSync(join(tmpdir(), "orka-engine-home-"));
-  process.env["ORKA_HOME"] = testHome;
-  initTracing();
+  initTracing({ dataDir: testHome });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await shutdownTracing();
   rmSync(testHome, { recursive: true, force: true });
-  if (previousOrkaHome === undefined) {
-    delete process.env["ORKA_HOME"];
-  } else {
-    process.env["ORKA_HOME"] = previousOrkaHome;
-  }
 });
 
 describe("OrchestrationEngine", () => {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { $ } from "bun";
 import { createEvent, type ProviderRuntimeEvent, type SessionStatus, type UsageRecord } from "@orka/core";
 import { ApprovalManager } from "../approval-manager";
-import { initTracing } from "../tracing";
+import { initTracingForTest } from "../test-helpers";
 import { worktreeCreate } from "../worktree";
 import { OrchestrationEngine } from "./engine";
 import { consumeProviderEvents } from "./consumer";
@@ -101,7 +101,7 @@ let testHome = "";
 let repoPaths: string[] = [];
 
 beforeEach(() => {
-  initTracing();
+  initTracingForTest();
   testHome = mkdtempSync(join(tmpdir(), "orka-consumer-home-"));
   repoPaths = [];
 });

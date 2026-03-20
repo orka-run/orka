@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { openTestDb, type DatabaseRepository } from "./db";
+import type { SessionStatus } from "@orka/core";
+import { seedSession as sharedSeedSession } from "./test-helpers";
 
 let db: DatabaseRepository;
 
@@ -14,30 +16,9 @@ function seedSession(
   sessionId: string,
   opts?: { status?: string; workspaceId?: string },
 ): void {
-  const taskId = `task-${sessionId}`;
-  db.insertTask({
-    id: taskId,
-    title: `Task ${sessionId}`,
-    prompt: "Fix issue",
-    backend: "claude-code",
-    model: "claude-sonnet",
-    createdAt: "2026-01-01T00:00:00.000Z",
-  });
-  db.insertSession({
-    id: sessionId,
-    taskId,
-    workspaceId: opts?.workspaceId ?? "",
-    status: (opts?.status ?? "completed") as any,
-    backend: "claude-code",
-    projectPath: "/tmp/project",
-    workingDir: "/tmp/project",
-    logFile: `/tmp/${sessionId}.log`,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    startedAt: "2026-01-01T00:01:00.000Z",
-    finishedAt: "2026-01-01T00:02:00.000Z",
-    exitCode: 0,
-    kept: false,
-    autoMerge: false,
+  sharedSeedSession(db, sessionId, {
+    status: (opts?.status as SessionStatus) ?? "completed",
+    ...(opts?.workspaceId != null ? { workspaceId: opts.workspaceId } : {}),
   });
 }
 

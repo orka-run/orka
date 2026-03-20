@@ -4,26 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEvent } from "@orka/core";
 import { CodexAdapter, CodexSessionProjection, mapCodexEvent } from "./codex-adapter";
-import { initTracing } from "../tracing";
+import { initTracing, shutdownTracing } from "../tracing";
 
-const originalOrkaHome = process.env["ORKA_HOME"];
 type CodexMeta = NonNullable<NonNullable<Parameters<typeof mapCodexEvent>[2]>["meta"]>;
 
 let testHome = "";
 
 beforeEach(() => {
   testHome = mkdtempSync(join(tmpdir(), "orka-codex-adapter-"));
-  process.env["ORKA_HOME"] = testHome;
-  initTracing();
+  initTracing({ dataDir: testHome });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await shutdownTracing();
   rmSync(testHome, { recursive: true, force: true });
-  if (originalOrkaHome === undefined) {
-    delete process.env["ORKA_HOME"];
-  } else {
-    process.env["ORKA_HOME"] = originalOrkaHome;
-  }
 });
 
 function createMeta(): CodexMeta {

@@ -49,37 +49,21 @@ const ALLOWLIST: AllowlistEntry[] = [
     rule: "no-bare-env-mutation",
     reason: "server test needs ORKA_HOME for daemon startup",
   },
-  // initTracing() -> getTraceLogPath() -> getOrkaHome() reads ORKA_HOME from env (global OTel singleton)
-  {
-    file: "packages/daemon/src/adapters/codex-adapter.test.ts",
-    rule: "no-bare-env-mutation",
-    reason: "initTracing() reads ORKA_HOME from env for trace file path (OTel global singleton)",
-  },
-  {
-    file: "packages/daemon/src/orchestration/engine.test.ts",
-    rule: "no-bare-env-mutation",
-    reason: "initTracing() reads ORKA_HOME from env for trace file path (OTel global singleton)",
-  },
-  // E2E tests: daemon tracing and internal getOrkaHome() calls read ORKA_HOME from env
+  // E2E tests: TestShellAdapter reads ORKA_HOME for script isolation
   {
     file: "tests/e2e/protocol/noise-advanced.e2e.test.ts",
     rule: "no-bare-env-mutation",
-    reason: "daemon tracing reads ORKA_HOME from env (OTel global singleton)",
+    reason: "TestShellAdapter reads ORKA_HOME for provider-scripts isolation",
   },
   {
     file: "tests/e2e/protocol/session-lifecycle.e2e.test.ts",
     rule: "no-bare-env-mutation",
-    reason: "daemon tracing reads ORKA_HOME from env (OTel global singleton)",
+    reason: "TestShellAdapter reads ORKA_HOME for provider-scripts isolation",
   },
   {
     file: "tests/e2e/protocol/noise-transport.e2e.test.ts",
     rule: "no-bare-env-mutation",
-    reason: "daemon tracing reads ORKA_HOME from env (OTel global singleton)",
-  },
-  {
-    file: "tests/e2e/protocol/protocol-errors.e2e.test.ts",
-    rule: "no-bare-env-mutation",
-    reason: "daemon tracing reads ORKA_HOME from env (OTel global singleton)",
+    reason: "TestShellAdapter reads ORKA_HOME for provider-scripts isolation",
   },
 ];
 

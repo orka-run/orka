@@ -14,9 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 
-// Isolated ORKA_HOME — must be set BEFORE importing daemon modules
 const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-protocol-errors-"));
-process.env["ORKA_HOME"] = testHome;
 
 import { generateX25519KeyPair } from "../../../packages/core/src/crypto/noise";
 import type { DaemonHandle } from "./protocol-helpers";

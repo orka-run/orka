@@ -11,6 +11,7 @@ import { PushHub } from "./push-hub";
 import { createNodeRegistry, type NodeRegistry } from "./node-registry";
 import { createRemoteNodeManager, type RemoteNodeManager } from "./remote-nodes";
 import { recoverStaleSessions, cleanupOrphanedWorktrees } from "./orchestrator";
+import { initTracing } from "./tracing";
 
 /** Per-session runtime state that lives in-memory (not persisted).
  *  Moved here from module-level singletons for DI/testability. */
@@ -58,6 +59,7 @@ export interface DaemonContext {
  */
 export async function createDaemonContext(orkaHome?: string, opts?: { inMemoryDb?: boolean }): Promise<DaemonContext> {
   const home = orkaHome ?? getOrkaHome();
+  initTracing({ dataDir: home });
   const config = loadConfig(home);
   let db: DatabaseRepository;
   if (opts?.inMemoryDb) {

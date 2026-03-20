@@ -6,6 +6,7 @@ import { createDaemonContext, type DaemonContext } from "./daemon-context";
 import { createLocalClient } from "./local-client";
 import { getWorktreeDir } from "./worktree";
 import type { SessionStatus } from "@orka/core";
+import { seedSession as sharedSeedSession } from "./test-helpers";
 
 let testHome = "";
 let ctx: DaemonContext;
@@ -32,32 +33,7 @@ function seedSession(
   sessionId: string,
   opts?: { status?: SessionStatus; noWorktree?: boolean; workingDir?: string },
 ): void {
-  ctx.db.insertTask({
-    id: `task-${sessionId}`,
-    title: `Task ${sessionId}`,
-    prompt: "test prompt",
-    backend: "claude-code",
-    model: "claude-sonnet",
-    createdAt: "2026-01-01T00:00:00.000Z",
-  });
-
-  ctx.db.insertSession({
-    id: sessionId,
-    taskId: `task-${sessionId}`,
-    workspaceId: "",
-    status: (opts?.status ?? "completed") as any,
-    backend: "claude-code",
-    projectPath: "/tmp/project",
-    workingDir: opts?.workingDir ?? "/tmp/project",
-    logFile: join(testHome, "logs", `${sessionId}.log`),
-    createdAt: "2026-01-01T00:00:00.000Z",
-    startedAt: "2026-01-01T00:01:00.000Z",
-    finishedAt: "2026-01-01T00:02:00.000Z",
-    exitCode: 0,
-    kept: false,
-    autoMerge: false,
-    ...(opts?.noWorktree != null ? { noWorktree: opts.noWorktree } : {}),
-  });
+  sharedSeedSession(ctx.db, sessionId, opts);
 }
 
 describe("computeAllowedActions for all session statuses", () => {

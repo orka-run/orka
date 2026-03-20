@@ -1,11 +1,10 @@
 import { context, propagation, trace } from "@opentelemetry/api";
-import { W3CTraceContextPropagator } from "@opentelemetry/core";
-import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { OrkaService, SpawnResult, SessionDetailResponse } from "@orka/core";
 import { describe, expect, test } from "bun:test";
 import { PushHub } from "./push-hub";
 import type { DaemonContext } from "./daemon-context";
 import { handleRpcRequest } from "./rpc-handler";
+import { withTestTracing } from "./test-helpers";
 
 function makeSpawnResult(overrides: Partial<SpawnResult> = {}): SpawnResult {
   return {
@@ -44,29 +43,6 @@ function makeDetailResponse(overrides: Partial<SessionDetailResponse> = {}): Ses
     tags: [],
     ...overrides,
   };
-}
-
-async function withTestTracing(
-  fn: (ctx: { exporter: InMemorySpanExporter; provider: BasicTracerProvider }) => Promise<void>,
-): Promise<void> {
-  trace.disable();
-  propagation.disable();
-
-  const exporter = new InMemorySpanExporter();
-  const provider = new BasicTracerProvider({
-    spanProcessors: [new SimpleSpanProcessor(exporter)],
-  });
-  trace.setGlobalTracerProvider(provider);
-  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
-
-  try {
-    await fn({ exporter, provider });
-    await provider.forceFlush();
-  } finally {
-    await provider.shutdown();
-    trace.disable();
-    propagation.disable();
-  }
 }
 
 function makeMockCtx(): { ctx: DaemonContext; events: Array<{ channel: string; data: unknown }> } {

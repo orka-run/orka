@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { openTestDb, type DatabaseRepository } from "./db";
+import { seedSession as sharedSeedSession } from "./test-helpers";
 
 let db: DatabaseRepository;
 
@@ -18,33 +19,7 @@ afterEach(() => db.clearAllData());
 afterAll(() => db.close());
 
 function seedSession(sessionId: string, taskId = `task-${sessionId}`): void {
-  db.insertTask({
-    id: taskId,
-    title: `Task ${sessionId}`,
-    prompt: "Fix issue",
-    backend: "claude-code",
-
-    model: "claude-sonnet",
-    createdAt: "2026-01-01T00:00:00.000Z",
-  });
-
-  db.insertSession({
-    id: sessionId,
-    taskId,
-    workspaceId: `ws-${sessionId}`,
-    status: "completed",
-    backend: "claude-code",
-
-    projectPath: "/tmp/project",
-    workingDir: "/tmp/project",
-    logFile: `/tmp/project/${sessionId}.log`,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    startedAt: "2026-01-01T00:01:00.000Z",
-    finishedAt: "2026-01-01T00:02:00.000Z",
-    exitCode: 0,
-    kept: false,
-    autoMerge: false,
-  });
+  sharedSeedSession(db, sessionId, { taskId });
 }
 
 describe("usage_log helpers", () => {

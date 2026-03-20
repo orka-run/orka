@@ -27,6 +27,7 @@ const TRACE_SKIP_ALLOWLIST = new Set([
   "migrations/002_backfill_workspaces.ts:up",
   "migrations/003_checkpoints.ts:up",
   "rpc-handler.ts:handleRpcRequest",
+  "test-helpers.ts:withTestTracing",
   "tracing.ts:shutdownTracing",
   "tracing.ts:withSpan",
 ]);

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { openTestDb, type DatabaseRepository } from "./db";
 import type { SessionStatus } from "@orka/core";
+import { seedSession as sharedSeedSession } from "./test-helpers";
 
 let db: DatabaseRepository;
 
@@ -12,30 +13,7 @@ afterEach(() => db.clearAllData());
 afterAll(() => db.close());
 
 function seedSession(sessionId: string, status: SessionStatus): void {
-  db.insertTask({
-    id: `task-${sessionId}`,
-    title: `Task ${sessionId}`,
-    prompt: "test prompt",
-    backend: "claude-code",
-    model: "claude-sonnet",
-    createdAt: "2026-01-01T00:00:00.000Z",
-  });
-  db.insertSession({
-    id: sessionId,
-    taskId: `task-${sessionId}`,
-    workspaceId: "",
-    status,
-    backend: "claude-code",
-    projectPath: "/tmp/project",
-    workingDir: "/tmp/project",
-    logFile: `/tmp/${sessionId}.log`,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    startedAt: "2026-01-01T00:01:00.000Z",
-    finishedAt: null,
-    exitCode: null,
-    kept: false,
-    autoMerge: false,
-  });
+  sharedSeedSession(db, sessionId, { status });
 }
 
 // The VALID_TRANSITIONS map from db.ts (mirrored here for test verification)
