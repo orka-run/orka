@@ -2153,6 +2153,22 @@ const restartCmd = command({
     process.stdout.write("starting daemon... ");
     await startDaemonBackground();
     console.log("done");
+
+    // Restart dashboard if it was running
+    if (await isDashboardRunning()) {
+      process.stdout.write("dashboard already running\n");
+    } else {
+      try {
+        const dashboardDir = getDashboardDir();
+        if (existsSync(join(dashboardDir, "package.json"))) {
+          process.stdout.write("restarting dashboard... ");
+          await startDashboardBackground();
+          console.log("done");
+        }
+      } catch {
+        // Dashboard not available — skip silently
+      }
+    }
   },
 });
 
