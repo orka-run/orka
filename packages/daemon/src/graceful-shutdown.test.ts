@@ -62,7 +62,7 @@ describe("GracefulShutdown", () => {
     console.error = (...args: unknown[]) => { errors.push(String(args[1] ?? args[0])); };
 
     shutdown.onShutdown("hang", async () => {
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(() => {}); // never resolves — simulates a hung cleanup task
     });
 
     await shutdown.shutdown({ timeout: 50 });

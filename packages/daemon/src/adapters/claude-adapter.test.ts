@@ -512,7 +512,7 @@ async function collectEvents(events: AsyncIterable<ProviderRuntimeEvent>): Promi
     const result = await Promise.race([
       iterator.next(),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("Timed out waiting for Claude adapter event")), 2_000);
+        setTimeout(() => reject(new Error("Timed out waiting for Claude adapter event")), 200);
       }),
     ]);
 

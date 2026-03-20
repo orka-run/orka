@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:di": "bun run scripts/lint-di.ts",
-    "check": "bun run typecheck && bun run lint && bun run lint:di",
+    "lint:tests": "bun run scripts/lint-tests.ts",
+    "check": "bun run typecheck && bun run lint && bun run lint:di && bun run lint:tests",
     "test": "bun test packages/",
     "test:coverage": "bun test --coverage packages/",
     "test:e2e": "bash scripts/test-e2e-parallel.sh"
