@@ -4,7 +4,10 @@ import { createSessionStore } from "./sessionStore";
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import type { RpcClient } from "../lib/rpcClient";
 
-class MockRpcClient {
+/** Subset of RpcClient methods that sessionStore actually calls. */
+type SessionStoreRpc = Pick<RpcClient, "listSessions" | "spawn" | "stop" | "deleteSessions">;
+
+class MockRpcClient implements SessionStoreRpc {
   sessions: SessionListResponse[] = [];
   spawnResult: SpawnResult | null = null;
   spawnParams: SpawnRequest | null = null;
@@ -26,8 +29,9 @@ class MockRpcClient {
   };
 }
 
-function asClient(mock: MockRpcClient): RpcClient {
-  return mock as unknown as RpcClient;
+/** Test helper: cast narrow mock to full RpcClient for store methods. */
+function asClient(mock: SessionStoreRpc): RpcClient {
+  return mock as RpcClient;
 }
 
 function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListResponse {
@@ -49,6 +53,7 @@ function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListR
     permissionMode: null,
     noWorktree: false,
     tags: [],
+    allowedActions: [],
     ...overrides,
   };
 }
@@ -75,7 +80,7 @@ describe("sessionStore", () => {
         id: "sess-1",
         status: "queued",
         backend: "codex",
-            title: "First session",
+        title: "First session",
         model: "gpt-5",
         createdAt: "2026-03-11T10:00:00.000Z",
         startedAt: null,
@@ -89,6 +94,7 @@ describe("sessionStore", () => {
         parentSessionId: null,
         permissionMode: null,
         tags: [],
+        allowedActions: [],
         nodeId: null,
       },
     ]);
@@ -106,30 +112,9 @@ describe("sessionStore", () => {
 
   test("handleSessionUpdated updates matching session", () => {
     const store = createSessionStore();
-    const session = makeSession();
+    const session = makeSession({ title: "First session", model: "gpt-5" });
     store.setState({
-      sessions: [
-        {
-          id: session.id,
-          status: session.status,
-          backend: session.backend,
-          title: "First session",
-          model: "gpt-5",
-          createdAt: session.createdAt,
-          startedAt: session.startedAt,
-          finishedAt: session.finishedAt,
-          exitCode: session.exitCode,
-          projectPath: session.projectPath,
-          kept: session.kept,
-          autoMerge: session.autoMerge,
-          noWorktree: session.noWorktree,
-          prompt: null,
-          parentSessionId: null,
-          permissionMode: null,
-          tags: [],
-          nodeId: null,
-        },
-      ],
+      sessions: [{ ...session, nodeId: null }],
     });
 
     const update: SessionUpdatedData = { sessionId: "sess-1", status: "running" };
@@ -140,30 +125,9 @@ describe("sessionStore", () => {
 
   test("handleSessionDeleted removes session", () => {
     const store = createSessionStore();
-    const session = makeSession();
+    const session = makeSession({ title: "First session", model: "gpt-5" });
     store.setState({
-      sessions: [
-        {
-          id: session.id,
-          status: session.status,
-          backend: session.backend,
-          title: "First session",
-          model: "gpt-5",
-          createdAt: session.createdAt,
-          startedAt: session.startedAt,
-          finishedAt: session.finishedAt,
-          exitCode: session.exitCode,
-          projectPath: session.projectPath,
-          kept: session.kept,
-          autoMerge: session.autoMerge,
-          noWorktree: session.noWorktree,
-          prompt: null,
-          parentSessionId: null,
-          permissionMode: null,
-          tags: [],
-          nodeId: null,
-        },
-      ],
+      sessions: [{ ...session, nodeId: null }],
       selectedId: session.id,
     });
 
@@ -202,15 +166,17 @@ describe("sessionStore", () => {
 
     const sessions = store.getState().sessions;
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].id).toBe("sess-2");
-    expect(sessions[0].status).toBe("queued");
-    expect(sessions[0].backend).toBe("codex");
-    expect(sessions[0].title).toBe("Ship dashboard store");
-    expect(sessions[0].model).toBe("gpt-5");
-    expect(sessions[0].projectPath).toBe("/tmp/project");
-    expect(sessions[0].autoMerge).toBe(true);
-    expect(sessions[0].noWorktree).toBe(true);
-    expect(sessions[0].nodeId).toBeNull();
+    const first = sessions[0];
+    if (!first) throw new Error("expected session");
+    expect(first.id).toBe("sess-2");
+    expect(first.status).toBe("queued");
+    expect(first.backend).toBe("codex");
+    expect(first.title).toBe("Ship dashboard store");
+    expect(first.model).toBe("gpt-5");
+    expect(first.projectPath).toBe("/tmp/project");
+    expect(first.autoMerge).toBe(true);
+    expect(first.noWorktree).toBe(true);
+    expect(first.nodeId).toBeNull();
     expect(store.getState().selectedId).toBe("sess-2");
   });
 });
