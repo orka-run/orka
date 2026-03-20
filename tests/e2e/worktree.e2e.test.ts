@@ -28,14 +28,14 @@ async function waitForTerminal(
   sessionId: string,
   timeoutMs = 10_000,
 ): Promise<SessionDetailResponse> {
+  let result: SessionDetailResponse | null = null;
   const terminal = new Set(["completed", "cancelled", "failed", "stopped"]);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  await waitFor(async () => {
     const s = await client.getSession(sessionId);
-    if (s && terminal.has(s.status)) return s;
-    await Bun.sleep(200);
-  }
-  throw new Error(`Session ${sessionId} did not reach terminal status within ${timeoutMs}ms`);
+    if (s && terminal.has(s.status)) { result = s; return true; }
+    return false;
+  }, { timeoutMs });
+  return result!;
 }
 
 describe("Worktree Management", () => {
@@ -64,7 +64,7 @@ describe("Worktree Management", () => {
       try { await client.stop(id); } catch { /* already stopped */ }
     }
     try { await $`git -C ${testRepo} worktree prune`.quiet(); } catch {}
-    await Bun.sleep(200);
+    await Bun.sleep(50);
     ctx?.db.close();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -196,7 +196,11 @@ describe("Worktree Management", () => {
     });
     sessionIds.push(result.id);
 
-    await Bun.sleep(200);
+    // Wait for session to be running
+    await waitFor(async () => {
+      const s = await client.getSession(result.id);
+      return s !== null && s.status === "running";
+    });
 
     // Keep to prevent auto-cleanup
     await client.setKept(result.id, true);

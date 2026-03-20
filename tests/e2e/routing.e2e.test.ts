@@ -80,7 +80,7 @@ describe("Relay Routing & Auth", () => {
     await $`git -C ${testRepo} commit --allow-empty -m "init"`.quiet();
 
     // 2. Start relay
-    relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
+    relay = await startRelay({ port: 0, hostname: "127.0.0.1", inMemoryDb: true });
     const assignedRelayPort = relay.server.port;
     if (assignedRelayPort === undefined) {
       throw new Error("Relay port was not assigned");
@@ -134,7 +134,7 @@ describe("Relay Routing & Auth", () => {
       }
     } catch {}
     try { daemonServer?.stop?.(true); } catch {}
-    await Bun.sleep(200);
+    await Bun.sleep(50);
     ctx?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });

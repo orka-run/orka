@@ -40,7 +40,7 @@ describe("Protocol Error Handling", () => {
 
   afterAll(async () => {
     await daemon?.stop();
-    await Bun.sleep(500);
+    await Bun.sleep(50);
     daemon?.closeDb();
     rmSync(testHome, { recursive: true, force: true });
   });
@@ -324,9 +324,6 @@ describe("Protocol Error Handling", () => {
 
     // Intentionally leave the handshake incomplete — just close the connection
     ws.close();
-
-    // Wait a moment for the server to process the close
-    await Bun.sleep(300);
 
     // Verify the daemon is still alive and functioning
     const ws2 = new WebSocket(daemon.wsUrl);

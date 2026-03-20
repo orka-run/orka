@@ -207,9 +207,18 @@ export async function performNoiseHandshake(
     throw new Error("Handshake did not reach SECURE state");
   }
 
-  // After handshake, wait a bit for the encrypted welcome push to arrive,
+  // Wait for the encrypted welcome push data frame to arrive in the queue,
   // then consume all queued data frames to keep the nonce in sync.
-  await Bun.sleep(300);
+  await waitForQueued(
+    messageQueue,
+    (m: any) => m?.t === "data" && typeof m?.ct === "string",
+    5000,
+  ).then((welcomeFrame) => {
+    // Put it back so the drain loop processes it
+    messageQueue.unshift(welcomeFrame);
+  }).catch(() => {
+    // No welcome push arrived — that's fine for some test scenarios
+  });
 
   // Drain any data frames from the queue (encrypted welcome push, etc.)
   for (const msg of messageQueue) {

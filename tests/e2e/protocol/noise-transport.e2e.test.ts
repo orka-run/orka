@@ -53,7 +53,7 @@ describe("Noise NK Transport", () => {
 
   afterAll(async () => {
     await daemon?.stop();
-    await Bun.sleep(500);
+    await Bun.sleep(50);
     daemon?.closeDb();
     rmSync(orkaHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });

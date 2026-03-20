@@ -17,6 +17,7 @@
  * Self-service: POST /v1/signup, /v1/keys, /v1/account, /v1/usage
  */
 
+import { Database } from "bun:sqlite";
 import type { ServerWebSocket, Server } from "bun";
 import { RelayState, type SocketData, type AnySocketData, type TransportBinding } from "./state";
 import { AuthManager, extractApiKey } from "./auth";
@@ -39,6 +40,8 @@ export interface RelayOptions {
   configPath?: string;
   /** Override data directory (default: ORKA_RELAY_DATA or ~/.orka-relay). */
   dataDir?: string;
+  /** Use an in-memory SQLite database (for tests). Migrations are still applied. */
+  inMemoryDb?: boolean;
 }
 
 export interface RelayHandle {
@@ -58,7 +61,15 @@ export async function startRelay(opts: RelayOptions): Promise<RelayHandle> {
     "orka.hostname": opts.hostname ?? config.server.hostname,
   }, async () => {
     // --- Composition root: create all dependencies ---
-    const db = openRelayDb(dataDir);
+    let db: Database;
+    if (opts.inMemoryDb) {
+      db = new Database(":memory:");
+      db.exec("PRAGMA journal_mode = WAL");
+      db.exec("PRAGMA busy_timeout = 5000");
+      db.exec("PRAGMA foreign_keys = ON");
+    } else {
+      db = openRelayDb(dataDir);
+    }
     await migrateRelayDb(db, dataDir);
     const state = new RelayState();
     const rateLimiter = new RateLimiter();

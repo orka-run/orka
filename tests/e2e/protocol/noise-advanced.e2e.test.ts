@@ -49,7 +49,7 @@ describe("Noise NK Transport — Advanced", () => {
 
   afterAll(async () => {
     await daemon?.stop();
-    await Bun.sleep(200);
+    await Bun.sleep(50);
     daemon?.closeDb();
     rmSync(orkaHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -163,7 +163,7 @@ describe("Noise NK Transport — Advanced", () => {
     ws.send(JSON.stringify(subFrame));
 
     // Give the subscription time to register
-    await Bun.sleep(200);
+    await Bun.sleep(50);
 
     // Set up a listener for push events. Push messages for Noise clients are
     // encrypted as data frames with kind: "push" in the transport payload.
@@ -306,9 +306,6 @@ describe("Noise NK Transport — Advanced", () => {
 
     // Wait for all connect-disconnect cycles to finish
     await Promise.allSettled(promises);
-
-    // Brief pause to let the daemon settle
-    await Bun.sleep(200);
 
     // Verify daemon is still responsive with a full Noise session
     const { ws: verifyWs, transport: verifyTransport } =

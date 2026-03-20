@@ -160,7 +160,7 @@ describe("Noise NK through Relay", () => {
 
   beforeAll(async () => {
     // 1. Start in-process relay (ephemeral port)
-    relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
+    relay = await startRelay({ port: 0, hostname: "127.0.0.1", inMemoryDb: true });
     relayPort = relay.server.port!;
 
     // 2. Sign up + create API keys on relay
@@ -244,7 +244,7 @@ describe("Noise NK through Relay", () => {
     try { daemonServerA?.stop?.(true); } catch {}
     try { daemonServerB?.stop?.(true); } catch {}
     // Let background event consumers finalize before closing DB
-    await Bun.sleep(200);
+    await Bun.sleep(50);
     ctxA?.db.close();
     ctxB?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}

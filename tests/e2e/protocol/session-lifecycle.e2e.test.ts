@@ -37,7 +37,7 @@ async function waitForSessionCompletion(
   conn: SecureConnection,
   sessionId: string,
   timeoutMs = 15_000,
-  intervalMs = 200,
+  intervalMs = 50,
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -71,7 +71,7 @@ describe("Session Lifecycle via Encrypted Channel", () => {
 
   afterAll(async () => {
     await daemon?.stop();
-    await Bun.sleep(200);
+    await Bun.sleep(50);
     daemon?.closeDb();
     rmSync(orkaHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -130,15 +130,8 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     });
     expect(stopResp["error"]).toBeUndefined();
 
-    // Wait briefly for status to update
-    await Bun.sleep(200);
-
-    // Verify status becomes completed or stopped
-    const afterStop = await encryptedRpc(conn.transport, conn.ws, "getSession", {
-      id: sessionId,
-    });
-    expect(afterStop["error"]).toBeUndefined();
-    const finalSession = afterStop["result"] as Record<string, unknown>;
+    // Poll until status reaches terminal state
+    const finalSession = await waitForSessionCompletion(conn, sessionId);
     expect(["completed", "stopped", "cancelled", "failed"]).toContain(
       finalSession["status"] as string,
     );
@@ -287,16 +280,9 @@ describe("Session Lifecycle via Encrypted Channel", () => {
       }
     }
 
-    // Wait briefly for status updates
-    await Bun.sleep(200);
-
-    // Verify all reached terminal status
+    // Poll until all sessions reach terminal status
     for (const id of sessionIds) {
-      const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
-        id,
-      });
-      expect(getResp["error"]).toBeUndefined();
-      const session = getResp["result"] as Record<string, unknown>;
+      const session = await waitForSessionCompletion(conn, id);
       expect(["completed", "stopped", "cancelled", "failed"]).toContain(
         session["status"] as string,
       );

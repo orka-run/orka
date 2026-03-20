@@ -22,18 +22,7 @@ import { createDaemonContext, createLocalClient } from "@orka/daemon";
 import type { OrkaService, SessionDetailResponse } from "@orka/core";
 import { registerTestAdapter } from "./helpers/test-adapter";
 
-/** Poll until predicate is true, or timeout. */
-async function waitFor(
-  predicate: () => Promise<boolean>,
-  { timeoutMs = 10_000, intervalMs = 200 } = {},
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await Bun.sleep(intervalMs);
-  }
-  throw new Error(`waitFor timed out after ${timeoutMs}ms`);
-}
+import { waitFor } from "./helpers/polling";
 
 /** Wait for a session to reach a terminal status. */
 async function waitForTerminal(
@@ -41,14 +30,14 @@ async function waitForTerminal(
   sessionId: string,
   timeoutMs = 10_000,
 ): Promise<SessionDetailResponse> {
+  let result: SessionDetailResponse | null = null;
   const terminal = new Set(["completed", "cancelled", "failed", "stopped"]);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  await waitFor(async () => {
     const s = await client.getSession(sessionId);
-    if (s && terminal.has(s.status)) return s;
-    await Bun.sleep(200);
-  }
-  throw new Error(`Session ${sessionId} did not reach terminal status within ${timeoutMs}ms`);
+    if (s && terminal.has(s.status)) { result = s; return true; }
+    return false;
+  }, { timeoutMs });
+  return result!;
 }
 
 describe("Daemon Session Lifecycle", () => {
@@ -75,7 +64,7 @@ describe("Daemon Session Lifecycle", () => {
     for (const id of sessionIds) {
       try { await client.stop(id); } catch { /* already stopped */ }
     }
-    await Bun.sleep(200);
+    await Bun.sleep(50);
     ctx?.db.close();
     rmSync(testHome, { recursive: true, force: true });
     rmSync(testRepo, { recursive: true, force: true });
@@ -250,8 +239,13 @@ describe("Daemon Session Lifecycle", () => {
     });
     sessionIds.push(session.id);
 
-    // Wait for output to be captured
-    await Bun.sleep(200);
+    // Wait for output to appear
+    await waitFor(async () => {
+      try {
+        const out = await client.captureOutput(session.id);
+        return out !== null && out.includes("capture-marker");
+      } catch { return false; }
+    });
 
     const output = await client.captureOutput(session.id);
     expect(output).toContain("capture-marker");
@@ -269,7 +263,10 @@ describe("Daemon Session Lifecycle", () => {
     });
     sessionIds.push(session.id);
 
-    await Bun.sleep(200);
+    // Wait for the session process to start and be ready for input
+    await waitFor(async () => {
+      return await client.isAlive(session.id);
+    });
     await client.sendTurn(session.id, "hello-from-test");
 
     await waitForTerminal(client, session.id);

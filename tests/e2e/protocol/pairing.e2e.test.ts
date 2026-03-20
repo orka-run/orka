@@ -178,7 +178,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     saveNoiseKeyPair(daemonHome, "node", noiseKeyInfo);
 
     // 1. Start relay
-    relay = await startRelay({ port: 0, hostname: "127.0.0.1" });
+    relay = await startRelay({ port: 0, hostname: "127.0.0.1", inMemoryDb: true });
     relayPort = relay.server.port!;
     relayOrigin = `ws://127.0.0.1:${relayPort}`;
 
@@ -239,7 +239,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
       );
     } catch {}
     try { daemonServer?.stop?.(true); } catch {}
-    await Bun.sleep(200);
+    await Bun.sleep(50);
     ctx?.db.close();
     try { await relay?.shutdown({ drainTimeoutMs: 1000 }); } catch {}
     rmSync(daemonHome, { recursive: true, force: true });
@@ -260,7 +260,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     const parsed = parsePairingCode(pairingResult.pairingCode);
 
     // Wait for daemon to connect to the relay pairing endpoint
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Run the client-side pairing
     const result = await runClientPairing({
@@ -307,7 +307,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     // Complete pairing first
     const pairingResult = await svc.startPairing({ ttlSec: 30 });
     const parsed = parsePairingCode(pairingResult.pairingCode);
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     const bootstrapResult = await runClientPairing({
       relayPort,
@@ -414,7 +414,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
   test("wrong pairing code fails", async () => {
     // Start pairing on daemon
     const pairingResult = await svc.startPairing({ ttlSec: 30 });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Use a completely different secret (random bytes)
     const wrongSecret = new Uint8Array(10);
@@ -513,7 +513,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
     // Complete pairing to simulate having bootstrap data
     const pairingResult = await svc.startPairing({ ttlSec: 30 });
     const parsed = parsePairingCode(pairingResult.pairingCode);
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     const bootstrapResult = await runClientPairing({
       relayPort,
