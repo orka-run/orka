@@ -35,19 +35,9 @@ interface AllowlistEntry {
 
 const ALLOWLIST: AllowlistEntry[] = [
   {
-    file: "packages/daemon/src/server.test.ts",
-    rule: "no-disk-sqlite",
-    reason: "needs disk DB for trace file testing",
-  },
-  {
     file: "tests/e2e/protocol/noise-relay.e2e.test.ts",
     rule: "no-long-sleep",
     reason: "1000ms idle persistence test requires real delay",
-  },
-  {
-    file: "packages/daemon/src/server.test.ts",
-    rule: "no-bare-env-mutation",
-    reason: "server test writes traces to ORKA_HOME/traces.jsonl for /v1/traces endpoint test",
   },
 ];
 

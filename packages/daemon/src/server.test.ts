@@ -1,5 +1,5 @@
 import type { Server } from "bun";
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOCOL_VERSION, type OrkaService } from "@orka/core";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,18 +7,12 @@ import { join } from "node:path";
 import { createDaemonContext, type DaemonContext } from "./daemon-context";
 import { startServer } from "./server";
 
-const originalOrkaHome = process.env["ORKA_HOME"];
-
 let testHome = "";
 let ctx: DaemonContext;
 let server: Server<unknown> | null = null;
 
-// server.test needs per-test home dirs because:
-// 1. /v1/traces test writes to ORKA_HOME/traces.jsonl (getTraceLogPath reads env)
-// 2. Config loaded from testHome affects welcome capabilities
 beforeEach(async () => {
   testHome = mkdtempSync(join(tmpdir(), "orka-server-test-"));
-  process.env["ORKA_HOME"] = testHome;
   ctx = await createDaemonContext(testHome, { inMemoryDb: true });
 });
 
@@ -27,11 +21,6 @@ afterEach(() => {
   server = null;
   ctx.db.close();
   rmSync(testHome, { recursive: true, force: true });
-});
-
-afterAll(() => {
-  if (originalOrkaHome === undefined) delete process.env["ORKA_HOME"];
-  else process.env["ORKA_HOME"] = originalOrkaHome;
 });
 
 describe("startServer", () => {
