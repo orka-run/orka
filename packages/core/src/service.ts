@@ -234,9 +234,14 @@ export interface OrkaService {
   getLogContent(sessionId: string): Promise<string | null>;
   isAlive(sessionId: string): Promise<boolean>;
   sendTurn(sessionId: string, text: string): Promise<void>;
+<<<<<<< HEAD
   /** Cancel the active turn for a running session. Uses turn/interrupt (Codex)
    *  or SIGINT (Claude Code). No-op if no turn is active. */
   cancelTurn(sessionId: string): Promise<void>;
+=======
+  /** Cancel a queued (not yet delivered) message by matching text. */
+  cancelQueuedMessage(sessionId: string, text: string): Promise<void>;
+>>>>>>> orka/sess-bc8c014c
   getCheckpoints(sessionId: string): Promise<Checkpoint[]>;
   getTurnDiff(sessionId: string, fromTurn: number, toTurn: number): Promise<{ diff: string }>;
   revertToCheckpoint(sessionId: string, turnSeq: number): Promise<void>;

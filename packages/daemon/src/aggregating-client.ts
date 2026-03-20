@@ -162,6 +162,8 @@ export function createAggregatingClient(
         return svc.stop(p["sessionId"]);
       case "sendTurn":
         return svc.sendTurn(p["sessionId"], p["text"]);
+      case "cancelQueuedMessage":
+        return svc.cancelQueuedMessage(p["sessionId"], p["text"]);
       case "getCheckpoints":
         return svc.getCheckpoints(p["sessionId"]);
       case "getTurnDiff":
@@ -408,6 +410,10 @@ export function createAggregatingClient(
 
     async sendTurn(sessionId: string, text: string): Promise<void> {
       return routeBySession(sessionId, "sendTurn", { sessionId, text });
+    },
+
+    async cancelQueuedMessage(sessionId: string, text: string): Promise<void> {
+      return routeBySession(sessionId, "cancelQueuedMessage", { sessionId, text });
     },
 
     async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {

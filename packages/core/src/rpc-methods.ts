@@ -66,7 +66,11 @@ export interface RpcMethodMap {
   getLogContent: { params: { sessionId: string }; result: string | null };
   isAlive: { params: { sessionId: string }; result: boolean };
   sendTurn: { params: { sessionId: string; text: string }; result: void };
+<<<<<<< HEAD
   cancelTurn: { params: { sessionId: string }; result: void };
+=======
+  cancelQueuedMessage: { params: { sessionId: string; text: string }; result: void };
+>>>>>>> orka/sess-bc8c014c
   getCheckpoints: { params: { sessionId: string }; result: Checkpoint[] };
   getTurnDiff: {
     params: { sessionId: string; fromTurn: number; toTurn: number };

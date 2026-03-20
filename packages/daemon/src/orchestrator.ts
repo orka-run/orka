@@ -797,6 +797,7 @@ export async function sendTurnToSession(
   });
 }
 
+<<<<<<< HEAD
 // --- Cancel Turn ---
 
 /** Cancel the active turn for a running session. No-op if no turn is active. */
@@ -813,6 +814,48 @@ export async function cancelTurnInSession(ctx: DaemonContext, sessionId: string)
     // Clear any queued messages — user explicitly cancelled, don't deliver pending input
     ctx.sessionRuntime.pendingMessages.delete(sessionId);
   });
+=======
+// --- Cancel queued message ---
+
+/** Remove a queued (not yet delivered) message from the pending queue by text match. */
+export function cancelQueuedMessageFromSession(
+  ctx: DaemonContext,
+  sessionId: string,
+  text: string,
+): void {
+  const pending = ctx.sessionRuntime.pendingMessages.get(sessionId);
+  if (!pending || pending.length === 0) {
+    throw new Error("No queued messages for this session");
+  }
+
+  const idx = pending.indexOf(text);
+  if (idx === -1) {
+    throw new Error("Queued message not found");
+  }
+
+  pending.splice(idx, 1);
+  if (pending.length === 0) {
+    ctx.sessionRuntime.pendingMessages.delete(sessionId);
+  }
+
+  const handle = ctx.providerService.getHandle(sessionId);
+  const provider = handle?.provider ?? "unknown";
+
+  const event = {
+    v: 1 as const,
+    type: "user.input_cancelled" as const,
+    sessionId,
+    text,
+    timestamp: new Date().toISOString(),
+  };
+
+  ctx.db.insertOrchestrationEvent({
+    ...event,
+    provider,
+    eventId: generateId("evt"),
+  });
+  ctx.pushHub.broadcast("orchestration.event", event);
+>>>>>>> orka/sess-bc8c014c
 }
 
 // --- Stop ---

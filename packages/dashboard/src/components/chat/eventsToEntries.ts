@@ -328,9 +328,14 @@ export function eventsToEntries(
   }
 
   const resolvedRequests = new Map<string, string>();
+  // Pre-scan: build a multiset of cancelled queued message texts
+  const cancelledTexts = new Map<string, number>();
   for (const event of events) {
     if (event.type === "request.resolved") {
       resolvedRequests.set(event.requestId, event.decision);
+    }
+    if (event.type === "user.input_cancelled") {
+      cancelledTexts.set(event.text, (cancelledTexts.get(event.text) ?? 0) + 1);
     }
   }
 
@@ -550,7 +555,9 @@ export function eventsToEntries(
       // tool.progress/task.started/task.completed are already shown in tool call groups — skip standalone entries
       event.type === "tool.progress" ||
       event.type === "task.started" ||
-      event.type === "task.completed"
+      event.type === "task.completed" ||
+      // user.input_cancelled is handled in pre-scan — skip rendering
+      event.type === "user.input_cancelled"
     ) {
       continue;
     }
@@ -619,6 +626,18 @@ export function eventsToEntries(
         });
         break;
       case "user.input": {
+        // Skip cancelled queued messages entirely
+        if (event.queued) {
+          const count = cancelledTexts.get(event.text);
+          if (count !== undefined && count > 0) {
+            if (count === 1) {
+              cancelledTexts.delete(event.text);
+            } else {
+              cancelledTexts.set(event.text, count - 1);
+            }
+            break;
+          }
+        }
         const entry: UserEntry = {
           id: `user-input-${event.sessionId}-${event.timestamp}`,
           type: "user",

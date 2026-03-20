@@ -41,7 +41,11 @@ import type {
 import { generatePairingCode } from "@orka/core/crypto/protocol";
 import { EnrollmentStore } from "./pairing/enrollment-store";
 import type { DaemonContext } from "./daemon-context";
+<<<<<<< HEAD
 import { spawnSession, closeSession, stopSession, reapSessions, cleanupOrphanedWorktrees, sendTurnToSession, cancelTurnInSession } from "./orchestrator";
+=======
+import { spawnSession, closeSession, stopSession, reapSessions, cleanupOrphanedWorktrees, sendTurnToSession, cancelQueuedMessageFromSession } from "./orchestrator";
+>>>>>>> orka/sess-bc8c014c
 import { TerminalManager } from "./terminal-manager";
 import { parseSessionResult } from "./result-parser";
 import {
@@ -285,8 +289,13 @@ class LocalClient implements OrkaService {
     await sendTurnToSession(this.ctx, sessionId, text);
   }
 
+<<<<<<< HEAD
   async cancelTurn(sessionId: string): Promise<void> {
     await cancelTurnInSession(this.ctx, sessionId);
+=======
+  async cancelQueuedMessage(sessionId: string, text: string): Promise<void> {
+    cancelQueuedMessageFromSession(this.ctx, sessionId, text);
+>>>>>>> orka/sess-bc8c014c
   }
 
   async getCheckpoints(sessionId: string): Promise<Checkpoint[]> {

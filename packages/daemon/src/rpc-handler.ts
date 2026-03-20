@@ -152,6 +152,9 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
           case "cancelTurn":
             await svc.cancelTurn(params.sessionId);
             return null;
+          case "cancelQueuedMessage":
+            await svc.cancelQueuedMessage(params.sessionId, params.text);
+            return null;
           case "getCheckpoints":
             return svc.getCheckpoints(params.sessionId);
           case "getTurnDiff":
