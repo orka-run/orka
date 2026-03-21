@@ -74,6 +74,17 @@ export interface ErrorEntry {
   body: string;
 }
 
+export interface BackgroundTaskEntry {
+  id: string;
+  type: "background-task";
+  timestamp: string;
+  taskId: string;
+  title: string;
+  detail?: string;
+  status: "running" | "completed";
+  progressUpdates: Array<{ summary: string; timestamp: string }>;
+}
+
 export type ChatEntry =
   | SystemEntry
   | AssistantEntry
@@ -82,9 +93,10 @@ export type ChatEntry =
   | RateLimitEntry
   | ApiRetryEntry
   | ErrorEntry
-  | ApprovalEntry;
+  | ApprovalEntry
+  | BackgroundTaskEntry;
 
-export type ThinkingState = "thinking" | "tools" | "writing" | "idle";
+export type ThinkingState = "thinking" | "tools" | "writing" | "idle" | "background";
 
 function itemIcon(itemType: string): ToolIcon {
   switch (itemType) {
@@ -218,11 +230,24 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
     }
   }
 
+  const completedTaskIds = new Set<string>();
+  for (const event of events) {
+    if (event.type === "task.completed" && event.taskId) {
+      completedTaskIds.add(event.taskId);
+    }
+  }
+
+  // Check for foreground tool blocking first
   for (const event of events) {
     if (event.type === "item.started" && !completedItemIds.has(event.itemId)) {
       return "tools";
     }
   }
+
+  // Check for background tasks still running
+  const hasRunningBackgroundTask = events.some(
+    (event) => event.type === "task.started" && event.taskId && !completedTaskIds.has(event.taskId),
+  );
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -238,13 +263,13 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
       case "tool.progress":
       case "task.started":
       case "task.completed":
-        return "tools";
+        return hasRunningBackgroundTask ? "background" : "tools";
       case "turn.completed":
       case "turn.aborted":
       case "session.completed":
       case "session.failed":
       case "session.cancelled":
-        return "idle";
+        return hasRunningBackgroundTask ? "background" : "idle";
       case "item.completed":
       case "item.updated":
         return "thinking";
@@ -272,6 +297,8 @@ export function eventsToEntries(
   );
   const completedItemIds = new Set<string>();
   const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
+  const completedTaskIds = new Map<string, { summary?: string; status?: string; timestamp: string }>();
+  const taskProgressByToolUseId = new Map<string, Array<{ summary: string; timestamp: string }>>();
 
   for (const event of events) {
     if (event.type === "item.completed") {
@@ -284,6 +311,21 @@ export function eventsToEntries(
         ...(event.detail !== undefined ? { detail: event.detail } : {}),
         ...(event.args !== undefined ? { args: event.args } : {}),
       });
+    }
+    if (event.type === "task.completed" && event.taskId) {
+      completedTaskIds.set(event.taskId, {
+        ...(event.summary !== undefined ? { summary: event.summary } : {}),
+        ...(event.status !== undefined ? { status: event.status } : {}),
+        timestamp: event.timestamp,
+      });
+    }
+    if (event.type === "tool.progress" && event.itemId && event.summary) {
+      const existing = taskProgressByToolUseId.get(event.itemId);
+      if (existing) {
+        existing.push({ summary: event.summary, timestamp: event.timestamp });
+      } else {
+        taskProgressByToolUseId.set(event.itemId, [{ summary: event.summary, timestamp: event.timestamp }]);
+      }
     }
   }
 
@@ -507,13 +549,33 @@ export function eventsToEntries(
       flushToolGroup();
     }
 
+    if (event.type === "task.started") {
+      flushAssistant();
+      flushToolGroup();
+      const taskId = event.taskId ?? event.toolUseId ?? `task-${event.timestamp}`;
+      const completed = event.taskId ? completedTaskIds.get(event.taskId) : undefined;
+      const progressUpdates = event.toolUseId ? (taskProgressByToolUseId.get(event.toolUseId) ?? []) : [];
+
+      entries.push({
+        id: `bg-task-${taskId}`,
+        type: "background-task",
+        timestamp: event.timestamp,
+        taskId,
+        title: event.title ?? event.taskKind ?? "Background task",
+        ...(event.detail ? { detail: event.detail } : {}),
+        status: completed ? "completed" : "running",
+        progressUpdates,
+      });
+      continue;
+    }
+
     if (
       event.type === "session.created" ||
       event.type === "session.started" ||
       event.type === "turn.started" ||
-      // tool.progress/task.started/task.completed are already shown in tool call groups — skip standalone entries
+      // tool.progress is collected into background task entries — skip standalone rendering
       event.type === "tool.progress" ||
-      event.type === "task.started" ||
+      // task.completed is merged into task.started entries — skip standalone rendering
       event.type === "task.completed" ||
       // user.input_cancelled is handled in pre-scan — skip rendering
       event.type === "user.input_cancelled"
@@ -757,7 +819,9 @@ export function eventsToEntries(
           tool.inProgress = false;
         }
       }
-      // Unqueue any remaining queued messages — session is done
+      if (entry.type === "background-task" && entry.status === "running") {
+        entry.status = "completed";
+      }
       if (entry.type === "user" && entry.queued) {
         entry.queued = false;
       }

@@ -107,7 +107,7 @@ describe("eventsToEntries", () => {
     });
   });
 
-  test("renders hook and compaction events as system entries, skips tool.progress/task.started", () => {
+  test("renders hook and compaction events as system entries, skips tool.progress standalone", () => {
     const entries = eventsToEntries([
       {
         type: "tool.progress",
@@ -148,12 +148,9 @@ describe("eventsToEntries", () => {
       },
     ]);
 
-    // tool.progress and task.started are now absorbed into tool call groups, not standalone entries
+    // tool.progress is collected into background task entries, not standalone
     expect(entries).not.toContainEqual(
       expect.objectContaining({ id: "tool-progress-2026-03-11T00:00:01Z-turn-1" }),
-    );
-    expect(entries).not.toContainEqual(
-      expect.objectContaining({ id: "task-started-2026-03-11T00:00:02Z-task-1" }),
     );
     expect(entries).toContainEqual({
       id: "hook-2026-03-11T00:00:02.5Z-PreToolUse:Bash",
@@ -172,5 +169,71 @@ describe("eventsToEntries", () => {
       body: "Trimmed context from 120000 to 64000 tokens.",
       tone: "info",
     });
+  });
+
+  test("renders task.started as background-task entry with status and progress", () => {
+    const entries = eventsToEntries([
+      {
+        type: "task.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-1",
+        toolUseId: "tool-use-1",
+        title: "Explore dashboard structure",
+        detail: "Inspect chat timeline rendering",
+        timestamp: "2026-03-11T00:00:02Z",
+      },
+      {
+        type: "tool.progress",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "tool-use-1",
+        summary: "Searching for files…",
+        timestamp: "2026-03-11T00:00:03Z",
+      },
+      {
+        type: "task.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-1",
+        toolUseId: "tool-use-1",
+        summary: "Found 12 files",
+        status: "completed",
+        timestamp: "2026-03-11T00:00:05Z",
+      },
+    ]);
+
+    expect(entries).toContainEqual({
+      id: "bg-task-task-1",
+      type: "background-task",
+      timestamp: "2026-03-11T00:00:02Z",
+      taskId: "task-1",
+      title: "Explore dashboard structure",
+      detail: "Inspect chat timeline rendering",
+      status: "completed",
+      progressUpdates: [{ summary: "Searching for files…", timestamp: "2026-03-11T00:00:03Z" }],
+    });
+  });
+
+  test("renders running background task when no task.completed exists", () => {
+    const entries = eventsToEntries([
+      {
+        type: "task.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-2",
+        title: "Running tests",
+        timestamp: "2026-03-11T00:00:02Z",
+      },
+    ]);
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        type: "background-task",
+        taskId: "task-2",
+        status: "running",
+        title: "Running tests",
+      }),
+    );
   });
 });
