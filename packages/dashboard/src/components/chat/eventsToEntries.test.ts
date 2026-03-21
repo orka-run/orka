@@ -127,6 +127,12 @@ describe("eventsToEntries", () => {
         timestamp: "2026-03-11T00:00:02Z",
       },
       {
+        type: "hook.started",
+        sessionId: "s1",
+        hookName: "PreToolUse:Bash",
+        timestamp: "2026-03-11T00:00:02.5Z",
+      },
+      {
         type: "hook.response",
         sessionId: "s1",
         hookName: "PreToolUse:Bash",
@@ -150,9 +156,9 @@ describe("eventsToEntries", () => {
       expect.objectContaining({ id: "task-started-2026-03-11T00:00:02Z-task-1" }),
     );
     expect(entries).toContainEqual({
-      id: "hook-hook.response-2026-03-11T00:00:03Z-PreToolUse:Bash",
+      id: "hook-2026-03-11T00:00:02.5Z-PreToolUse:Bash",
       type: "system",
-      timestamp: "2026-03-11T00:00:03Z",
+      timestamp: "2026-03-11T00:00:02.5Z",
       title: "Hook",
       body: "PreToolUse:Bash - allowed",
       tone: "info",

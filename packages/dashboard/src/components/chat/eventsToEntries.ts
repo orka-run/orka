@@ -290,12 +290,22 @@ export function eventsToEntries(
   const resolvedRequests = new Map<string, string>();
   // Pre-scan: build a multiset of cancelled queued message texts
   const cancelledTexts = new Map<string, number>();
+  // Pre-scan: pair hook.started with its hook.response by hookName+index
+  const hookResponses = new Map<string, Extract<OrchestrationEvent, { type: "hook.response" }>>();
+  const hookStartedCount = new Map<string, number>();
+  const hookResponseCount = new Map<string, number>();
   for (const event of events) {
     if (event.type === "request.resolved") {
       resolvedRequests.set(event.requestId, event.decision);
     }
     if (event.type === "user.input_cancelled") {
       cancelledTexts.set(event.text, (cancelledTexts.get(event.text) ?? 0) + 1);
+    }
+    if (event.type === "hook.response") {
+      const name = event.hookName ?? "";
+      const idx = hookResponseCount.get(name) ?? 0;
+      hookResponses.set(`${name}:${String(idx)}`, event);
+      hookResponseCount.set(name, idx + 1);
     }
   }
 
@@ -304,22 +314,16 @@ export function eventsToEntries(
   let accumTurnId: string | null = null;
   let accumStart: string | null = null;
   let pendingTools: ToolEntry[] = [];
-  let queuedMessagesReadyForDelivery = false;
-  const pendingQueuedEntryIds = new Set<string>();
+  // Queued messages are held back and inserted after turn.completed,
+  // so they appear where Claude Code actually sees them — not mid-response.
+  const deferredQueuedEntries: UserEntry[] = [];
 
-  function clearPendingQueuedEntries() {
-    if (!queuedMessagesReadyForDelivery || pendingQueuedEntryIds.size === 0) {
-      return;
+  function flushDeferredQueued() {
+    for (const entry of deferredQueuedEntries) {
+      entry.queued = false;
+      entries.push(entry);
     }
-
-    for (const entry of entries) {
-      if (entry.type === "user" && entry.queued && pendingQueuedEntryIds.has(entry.id)) {
-        entry.queued = false;
-      }
-    }
-
-    pendingQueuedEntryIds.clear();
-    queuedMessagesReadyForDelivery = false;
+    deferredQueuedEntries.length = 0;
   }
 
   function flushAssistant() {
@@ -368,21 +372,15 @@ export function eventsToEntries(
   }
 
   for (const event of events) {
+    // When a new turn starts after turn.completed, flush deferred queued messages
+    // so they appear right before the turn that processes them
     if (
-      queuedMessagesReadyForDelivery &&
-      (
-        event.type === "turn.started" ||
-        event.type === "content.delta" ||
-        event.type === "item.started" ||
-        event.type === "item.updated" ||
-        event.type === "item.completed" ||
-        event.type === "request.opened" ||
-        event.type === "tool.progress" ||
-        event.type === "task.started" ||
-        event.type === "task.completed"
-      )
+      deferredQueuedEntries.length > 0 &&
+      event.type === "turn.started"
     ) {
-      clearPendingQueuedEntries();
+      flushAssistant();
+      flushToolGroup();
+      flushDeferredQueued();
     }
 
     if (event.type === "content.delta") {
@@ -524,17 +522,28 @@ export function eventsToEntries(
     }
 
     switch (event.type) {
-      case "hook.started":
-      case "hook.response":
+      case "hook.started": {
+        const name = event.hookName;
+        const idx = hookStartedCount.get(name) ?? 0;
+        hookStartedCount.set(name, idx + 1);
+        const response = hookResponses.get(`${name}:${String(idx)}`);
+        const label = event.matcher ? `${name} (${event.matcher})` : name;
+        const body = response
+          ? formatHookBody(response)
+          : `${label} running…`;
         entries.push({
-          id: `hook-${event.type}-${event.timestamp}-${event.hookName ?? "unknown"}`,
+          id: `hook-${event.timestamp}-${name}`,
           type: "system",
           timestamp: event.timestamp,
           title: "Hook",
-          body: formatHookBody(event),
+          body,
           tone: "info",
           defaultCollapsed: true,
         });
+        break;
+      }
+      case "hook.response":
+        // Merged into hook.started entry above
         break;
       case "session.status":
         entries.push({
@@ -556,12 +565,9 @@ export function eventsToEntries(
           tone: "info",
         });
         break;
-      case "turn.completed": {
-        if (pendingQueuedEntryIds.size > 0) {
-          queuedMessagesReadyForDelivery = true;
-        }
+      case "turn.completed":
+        // Queued messages will be flushed when the next turn.started arrives
         break;
-      }
       case "turn.aborted":
         entries.push({
           id: `turn-aborted-${event.turnId}`,
@@ -596,9 +602,12 @@ export function eventsToEntries(
           body: event.text,
           ...(event.queued ? { queued: true } : {}),
         };
-        entries.push(entry);
         if (event.queued) {
-          pendingQueuedEntryIds.add(entry.id);
+          // Don't push to timeline yet — hold until turn.completed so the
+          // message appears where Claude Code actually processes it
+          deferredQueuedEntries.push(entry);
+        } else {
+          entries.push(entry);
         }
         break;
       }
@@ -729,6 +738,13 @@ export function eventsToEntries(
 
   flushAssistant();
   flushToolGroup();
+  // Append remaining deferred queued messages at the end.
+  // If session has a terminal event, flush them as delivered (queued=false).
+  // Otherwise keep them queued so the QueuedMessageBar shows them.
+  for (const entry of deferredQueuedEntries) {
+    entries.push(entry);
+  }
+  deferredQueuedEntries.length = 0;
 
   const hasTerminalEvent = events.some((event) =>
     event.type === "session.completed" || event.type === "session.failed" || event.type === "session.cancelled",
@@ -741,6 +757,7 @@ export function eventsToEntries(
           tool.inProgress = false;
         }
       }
+      // Unqueue any remaining queued messages — session is done
       if (entry.type === "user" && entry.queued) {
         entry.queued = false;
       }
