@@ -163,11 +163,11 @@ describe("eventsToEntries", () => {
     });
     expect(entries).toContainEqual({
       id: "session-compacted-2026-03-11T00:00:04Z",
-      type: "system",
+      type: "compaction",
       timestamp: "2026-03-11T00:00:04Z",
-      title: "Context compacted",
+      tokensBefore: 120000,
+      tokensAfter: 64000,
       body: "Trimmed context from 120000 to 64000 tokens.",
-      tone: "info",
     });
   });
 
