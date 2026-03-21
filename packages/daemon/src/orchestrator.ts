@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { resolveProject } from "./projects";
-import { mkdirSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, existsSync, readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import {
   generateId,
   type BackendKind,
@@ -1035,11 +1035,42 @@ export function recoverStaleSessions(ctx: DaemonContext): number {
     }
   }
 
+  // Kill orphan provider processes from the previous daemon
   if (recovered > 0) {
-    console.log(`recovered ${recovered} stale session(s) from previous daemon`);
+    const killed = killOrphanProviderProcesses(ctx.orkaHome);
+    console.log(`recovered ${recovered} stale session(s), killed ${killed} orphan process(es)`);
   }
 
   return recovered;
+}
+
+/**
+ * Kill orphan provider processes from the previous daemon.
+ * Reads saved PIDs from ~/.orka/pids/ and sends SIGTERM.
+ */
+function killOrphanProviderProcesses(orkaHome: string): number {
+  const pidsDir = join(orkaHome, "pids");
+  try {
+    if (!existsSync(pidsDir)) return 0;
+    const files = readdirSync(pidsDir);
+    let killed = 0;
+    for (const file of files) {
+      if (!file.endsWith(".pid")) continue;
+      try {
+        const pid = parseInt(readFileSync(join(pidsDir, file), "utf-8").trim(), 10);
+        if (!isNaN(pid) && pid !== process.pid) {
+          process.kill(pid, "SIGTERM");
+          killed++;
+        }
+      } catch {
+        // Process already dead or file unreadable
+      }
+      try { unlinkSync(join(pidsDir, file)); } catch {}
+    }
+    return killed;
+  } catch {
+    return 0;
+  }
 }
 
 /** Stop a session and all its running children (cascading stop). */

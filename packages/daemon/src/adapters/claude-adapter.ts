@@ -10,7 +10,7 @@ import type {
   ProviderSessionStartInput,
 } from "@orka/core";
 import type { Span } from "@opentelemetry/api";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createEvent, generateId } from "@orka/core";
 import { withSpan } from "../tracing";
@@ -39,6 +39,7 @@ interface ClaudeHandleMeta {
   turnId: string;
   stdinWriter: ClaudeStdinWriter;
   supervised: boolean;
+  pidFilePath?: string;
 }
 
 function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
@@ -152,6 +153,15 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           env: spawnEnv,
         });
         span.addEvent("process.spawned", { "orka.command": command.join(" ") });
+
+        // Save PID for orphan cleanup on daemon restart
+        const orkaHome = spawnEnv["ORKA_HOME"] ?? join(spawnEnv["HOME"] ?? "/tmp", ".orka");
+        const pidsDir = join(orkaHome, "pids");
+        const pidFilePath = join(pidsDir, `${input.threadId}.pid`);
+        if (process.pid != null) {
+          mkdirSync(pidsDir, { recursive: true });
+          writeFileSync(pidFilePath, String(process.pid));
+        }
         const stdout = process.stdout;
         const stdin = process.stdin;
 
@@ -164,6 +174,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           turnId,
           stdinWriter: stdin as unknown as ClaudeStdinWriter,
           supervised,
+          pidFilePath,
         };
 
         const handle: ProviderSessionHandle = {
@@ -811,6 +822,11 @@ async function consumeClaudeOutput(
 
       const exitCode = await process.exited;
       span.addEvent("process.exited", { "orka.exit_code": exitCode });
+
+      // Clean up PID file
+      if (meta.pidFilePath) {
+        try { unlinkSync(meta.pidFilePath); } catch {}
+      }
 
       if (!meta.exitEmitted) {
         emitSessionExited(

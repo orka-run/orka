@@ -2341,6 +2341,17 @@ const serveCmd = command({
         console.log(`  relay: ${args.relay}`);
       }
 
+      // On shutdown, kill entire process group (daemon + all provider children).
+      // Daemon runs via setsid → it's the session leader → process.kill(0) hits the whole group.
+      const shutdown = (signal: string) => {
+        console.log(`daemon shutting down (${signal})`);
+        server.stop(true);
+        try { process.kill(0, "SIGTERM"); } catch {}
+        process.exit(0);
+      };
+      process.on("SIGTERM", () => shutdown("SIGTERM"));
+      process.on("SIGINT", () => shutdown("SIGINT"));
+
       await new Promise(() => {});
     });
   },
