@@ -3,7 +3,6 @@ import {
   ArrowUp,
   LoaderCircle,
   ChevronUp,
-  Ellipsis,
   AlertTriangle,
   Terminal,
   Bot,
@@ -20,8 +19,6 @@ interface ComposerToolbarProps {
   onModelChange: (v: string) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (v: PermissionMode) => void;
-  isAdvancedOpen: boolean;
-  onToggleAdvanced: () => void;
   onSend: () => void;
   canSend: boolean;
   isSending: boolean;
@@ -159,8 +156,6 @@ export function ComposerToolbar({
   onModelChange,
   permissionMode,
   onPermissionModeChange,
-  isAdvancedOpen,
-  onToggleAdvanced,
   onSend,
   canSend,
   isSending,
@@ -169,7 +164,7 @@ export function ComposerToolbar({
   const permConfig = PERMISSION_MODES.find((p) => p.value === permissionMode) ?? PERMISSION_MODES[0]!;
 
   return (
-    <div className="flex items-center gap-1 border-t border-border/50 px-2 py-1">
+    <div className="flex items-center gap-1 border-t border-border/50 px-2 py-1.5">
       <PillDropdown
         value={backend}
         onChange={onBackendChange}
@@ -220,33 +215,19 @@ export function ComposerToolbar({
 
       <button
         type="button"
-        onClick={onToggleAdvanced}
-        className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition ${
-          isAdvancedOpen
-            ? "bg-surface-hover text-ink"
-            : "text-ink-muted hover:bg-surface-hover hover:text-ink-secondary"
-        }`}
-        aria-label="Toggle advanced options"
-        title="Advanced options"
-      >
-        <Ellipsis className="h-4 w-4" />
-      </button>
-
-      <button
-        type="button"
         onClick={onSend}
         disabled={!canSend}
         aria-label="Send message"
-        className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-white transition ${
+        className={`inline-flex h-8 min-w-[36px] items-center justify-center rounded-lg text-white transition ${
           canSend
             ? "bg-accent-strong hover:bg-accent"
             : "cursor-not-allowed bg-surface-hover text-ink-muted"
         }`}
       >
         {isSending ? (
-          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          <LoaderCircle className="h-4 w-4 animate-spin" />
         ) : (
-          <ArrowUp className="h-3.5 w-3.5" />
+          <ArrowUp className="h-4 w-4" />
         )}
       </button>
     </div>

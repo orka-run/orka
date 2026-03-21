@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Bot, LoaderCircle, MessageSquarePlus, User } from "lucide-react";
+import { Bot, ChevronDown, LoaderCircle, User } from "lucide-react";
 import type { BackendKind, NodeInfo, OrchestrationEvent, PermissionMode, SpawnRequest, WorkspaceInfo } from "@orka/core";
 import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
 import { ComposerToolbar } from "./ComposerToolbar";
@@ -140,11 +140,11 @@ export function SpawnComposer({ defaultProjectPath, nodes, activeWorkspace, onSp
   }, []);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Main area: empty state or pending message */}
-      <div className="flex flex-1 items-center justify-center overflow-y-auto px-4">
-        {pendingMessage ? (
-          <div className="w-full max-w-2xl space-y-2 self-start pt-6">
+    <div className="flex h-full items-center justify-center px-4">
+      <div className="w-full max-w-2xl">
+        {/* Pending message (spawning state) */}
+        {pendingMessage && (
+          <div className="mb-4 space-y-2">
             <div className="flex justify-end">
               <div className="flex max-w-2xl items-start gap-2">
                 <div className="min-w-0 rounded-xl rounded-tr-sm border border-accent/20 bg-accent/5 px-3 py-2 [overflow-wrap:anywhere]">
@@ -165,28 +165,16 @@ export function SpawnComposer({ defaultProjectPath, nodes, activeWorkspace, onSp
               </div>
             </div>
           </div>
-        ) : (
-          <div className="text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-alt">
-              <MessageSquarePlus className="h-6 w-6 text-ink-muted" />
-            </div>
-            <p className="text-[13px] font-medium text-ink-secondary">New session</p>
-            <p className="mt-1 text-[11px] text-ink-muted">
-              Send a message to start
-            </p>
+        )}
+
+        {/* Error banner above composer */}
+        {spawnError && (
+          <div className="mb-2 rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-1.5 text-[11px] text-status-error">
+            {spawnError}
           </div>
         )}
-      </div>
 
-      {/* Error banner above composer */}
-      {spawnError && (
-        <div className="mx-4 mb-2 rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-1.5 text-[11px] text-status-error">
-          {spawnError}
-        </div>
-      )}
-
-      {/* Composer box */}
-      <div className="px-4 pb-3">
+        {/* Composer box */}
         <div className="rounded-2xl border border-border bg-surface shadow-sm transition-colors focus-within:border-accent/40">
           {/* Editor */}
           <div style={{ maxHeight: "200px", overflowY: "auto" }}>
@@ -202,25 +190,6 @@ export function SpawnComposer({ defaultProjectPath, nodes, activeWorkspace, onSp
             />
           </div>
 
-          {/* Advanced fields (collapsible) */}
-          {showAdvanced && (
-            <AdvancedFields
-              title={title}
-              onTitleChange={setTitle}
-              tags={tags}
-              onTagsChange={setTags}
-              systemPrompt={systemPrompt}
-              onSystemPromptChange={setSystemPrompt}
-              autoMerge={autoMerge}
-              onAutoMergeChange={setAutoMerge}
-              noWorktree={noWorktree}
-              onNoWorktreeChange={setNoWorktree}
-              nodeId={nodeId}
-              onNodeIdChange={setNodeId}
-              nodes={nodes}
-            />
-          )}
-
           {/* Toolbar */}
           <ComposerToolbar
             backend={backend}
@@ -229,12 +198,41 @@ export function SpawnComposer({ defaultProjectPath, nodes, activeWorkspace, onSp
             onModelChange={setModel}
             permissionMode={permissionMode}
             onPermissionModeChange={setPermissionMode}
-            isAdvancedOpen={showAdvanced}
-            onToggleAdvanced={() => setShowAdvanced((v) => !v)}
             onSend={handleSubmit}
             canSend={canSend}
             isSending={isSpawning}
           />
+        </div>
+
+        {/* Advanced fields — below composer, collapsible */}
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-muted transition hover:text-ink-secondary"
+          >
+            <span>Title, tags, system prompt…</span>
+            <ChevronDown className={`h-3 w-3 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+          </button>
+          {showAdvanced && (
+            <div className="mt-1 rounded-xl border border-border/60 bg-surface p-3">
+              <AdvancedFields
+                title={title}
+                onTitleChange={setTitle}
+                tags={tags}
+                onTagsChange={setTags}
+                systemPrompt={systemPrompt}
+                onSystemPromptChange={setSystemPrompt}
+                autoMerge={autoMerge}
+                onAutoMergeChange={setAutoMerge}
+                noWorktree={noWorktree}
+                onNoWorktreeChange={setNoWorktree}
+                nodeId={nodeId}
+                onNodeIdChange={setNodeId}
+                nodes={nodes}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
