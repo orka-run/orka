@@ -265,7 +265,7 @@ export function Sidebar({
                         className={`absolute right-1 top-1 rounded-sm p-0.5 transition ${
                           isPinned(session.id)
                             ? "text-accent hover:bg-surface-alt hover:text-accent-strong"
-                            : "text-ink-muted opacity-0 hover:bg-surface-alt hover:text-ink group-hover/row:opacity-100"
+                            : "text-ink-muted/40 hover:bg-surface-alt hover:text-ink"
                         }`}
                       >
                         <Pin className="h-3 w-3" />
