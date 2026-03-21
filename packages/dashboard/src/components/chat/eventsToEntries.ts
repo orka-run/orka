@@ -741,6 +741,9 @@ export function eventsToEntries(
           tool.inProgress = false;
         }
       }
+      if (entry.type === "user" && entry.queued) {
+        entry.queued = false;
+      }
     }
   }
 
