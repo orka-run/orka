@@ -13,6 +13,8 @@ import type {
   RuntimeTurnState,
 } from "@orka/core";
 import type { Span } from "@opentelemetry/api";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createEvent } from "@orka/core";
 import { prependSystemPrompt } from "../backends";
 import { withSpan } from "../tracing";
@@ -56,6 +58,7 @@ interface CodexHandleMeta {
   providerThreadId?: string;
   activeTurnId?: string;
   sawSessionExit: boolean;
+  pidFilePath?: string;
 }
 
 interface JsonRpcRequest {
@@ -204,14 +207,27 @@ export class CodexAdapter implements ProviderAdapter {
         }
         command.push("--dangerously-bypass-approvals-and-sandbox", "app-server");
 
+        const spawnEnv = buildAgentEnv(input.env);
+        spawnEnv["ORKA_SESSION_ID"] = input.threadId;
+        spawnEnv["ORKA_DAEMON_URL"] = "http://127.0.0.1:7394";
+
         const process = this.spawnProcess(command, {
           ...(input.cwd ? { cwd: input.cwd } : {}),
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
-          env: buildAgentEnv(input.env),
+          env: spawnEnv,
         });
         span.addEvent("process.spawned", { "orka.command": command.join(" ") });
+
+        // Save PID for orphan cleanup on daemon restart
+        const orkaHome = spawnEnv["ORKA_HOME"] ?? join(spawnEnv["HOME"] ?? "/tmp", ".orka");
+        const pidsDir = join(orkaHome, "pids");
+        const pidFilePath = join(pidsDir, `${input.threadId}.pid`);
+        if (process.pid != null) {
+          mkdirSync(pidsDir, { recursive: true });
+          writeFileSync(pidFilePath, String(process.pid));
+        }
 
         const events = new AsyncEventQueue<ProviderRuntimeEvent>();
         const rawEventsQueue = new AsyncEventQueue<RawProviderLine>();
@@ -242,6 +258,7 @@ export class CodexAdapter implements ProviderAdapter {
         }
 
         const meta = this.createHandleMeta(input.threadId, process, rawEventsQueue);
+        meta.pidFilePath = pidFilePath;
         const handle: ProviderSessionHandle = {
           threadId: input.threadId,
           provider: this.kind,
@@ -849,6 +866,11 @@ async function consumeCodexOutput(
 
       const exitCode = await process.exited;
       span.addEvent("process.exited", { "orka.exit_code": exitCode });
+
+      // Clean up PID file
+      if (meta.pidFilePath) {
+        try { unlinkSync(meta.pidFilePath); } catch {}
+      }
 
       for (const [requestId, pending] of meta.pendingRequests) {
         pending.reject(new Error(`Codex app-server exited before replying to ${pending.method} (${requestId})`));
