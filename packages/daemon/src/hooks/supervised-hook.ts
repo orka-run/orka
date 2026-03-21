@@ -131,7 +131,14 @@ function respond(decision: "allow" | "deny", reason: string): void {
 async function main(): Promise<void> {
   const daemonUrl = process.env["ORKA_DAEMON_URL"] ?? "http://127.0.0.1:7394";
   const sessionId = process.env["ORKA_SESSION_ID"] ?? "";
+  const permissionMode = process.env["ORKA_PERMISSION_MODE"] ?? "";
   const rulesJson = process.env["ORKA_PERMISSION_RULES"];
+
+  // Bypass mode: auto-approve everything — hooks should not block
+  if (permissionMode === "bypass") {
+    respond("allow", "Bypass mode — auto-approved");
+    return;
+  }
 
   let request: HookInput;
   try {

@@ -135,6 +135,11 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
         const supervised = input.permissionMode === "supervised";
 
+        // Always inject session ID and permission mode so hooks can make decisions
+        spawnEnv["ORKA_SESSION_ID"] = input.threadId;
+        spawnEnv["ORKA_DAEMON_URL"] = "http://127.0.0.1:7394";
+        spawnEnv["ORKA_PERMISSION_MODE"] = input.permissionMode ?? "bypass";
+
         // For supervised mode, write hook settings and inject env vars BEFORE spawning
         if (supervised && input.cwd) {
           setupSupervisedHookSettings(input.cwd, input.threadId, spawnEnv, input.permissionRules);
