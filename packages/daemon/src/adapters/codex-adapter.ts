@@ -8,6 +8,7 @@ import type {
   ProviderSendTurnInput,
   ProviderSessionHandle,
   ProviderSessionStartInput,
+  ReasoningEffort,
   RuntimeItemStatus,
   RuntimeSessionState,
   RuntimeTurnState,
@@ -19,6 +20,22 @@ import { createEvent } from "@orka/core";
 import { prependSystemPrompt } from "../backends";
 import { withSpan } from "../tracing";
 import { buildAgentEnv } from "./env-filter";
+
+function mapCodexReasoningEffort(effort: ReasoningEffort): string | null {
+  switch (effort) {
+    case "none":
+    case "minimal":
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+    case "xhigh":
+      return "high";
+    default:
+      return null;
+  }
+}
 
 type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/steer" | "turn/interrupt" | "thread/unsubscribe";
 type CodexClientNotificationMethod = "initialized";
@@ -204,6 +221,12 @@ export class CodexAdapter implements ProviderAdapter {
         const command = ["codex"];
         if (input.model) {
           command.push("--model", input.model);
+        }
+        if (input.reasoningEffort) {
+          const codexEffort = mapCodexReasoningEffort(input.reasoningEffort);
+          if (codexEffort) {
+            command.push("-c", `reasoning_effort=${codexEffort}`);
+          }
         }
         command.push("--dangerously-bypass-approvals-and-sandbox", "app-server");
 
