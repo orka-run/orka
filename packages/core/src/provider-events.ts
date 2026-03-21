@@ -222,6 +222,34 @@ export interface ApiRetryPayload {
   delayMs: number;
 }
 
+export interface SubagentSpawnedPayload {
+  agentId: string;
+  prompt: string;
+  description?: string;
+  model?: string;
+}
+
+export interface SubagentToolUsePayload {
+  agentId: string;
+  toolName: string;
+  summary?: string;
+  elapsedSeconds?: number;
+}
+
+export interface SubagentOutputPayload {
+  agentId: string;
+  delta: string;
+  streamKind: string;
+}
+
+export interface SubagentCompletedPayload {
+  agentId: string;
+  status: string;
+  summary?: string;
+  cost?: number;
+  tokens?: { input: number; output: number };
+}
+
 interface ProviderRuntimeEventEnvelope<TType extends string, TPayload> extends ProviderRuntimeEventBase {
   type: TType;
   payload: TPayload;
@@ -250,6 +278,10 @@ export type RuntimeErrorEvent = ProviderRuntimeEventEnvelope<"runtime.error", Ru
 export type RuntimeWarningEvent = ProviderRuntimeEventEnvelope<"runtime.warning", RuntimeWarningPayload>;
 export type RateLimitEvent = ProviderRuntimeEventEnvelope<"rate.limit", RateLimitPayload>;
 export type ApiRetryEvent = ProviderRuntimeEventEnvelope<"api.retry", ApiRetryPayload>;
+export type SubagentSpawnedEvent = ProviderRuntimeEventEnvelope<"subagent.spawned", SubagentSpawnedPayload>;
+export type SubagentToolUseEvent = ProviderRuntimeEventEnvelope<"subagent.tool_use", SubagentToolUsePayload>;
+export type SubagentOutputEvent = ProviderRuntimeEventEnvelope<"subagent.output", SubagentOutputPayload>;
+export type SubagentCompletedEvent = ProviderRuntimeEventEnvelope<"subagent.completed", SubagentCompletedPayload>;
 
 export type ProviderRuntimeEvent =
   | SessionStartedEvent
@@ -274,7 +306,11 @@ export type ProviderRuntimeEvent =
   | RuntimeErrorEvent
   | RuntimeWarningEvent
   | RateLimitEvent
-  | ApiRetryEvent;
+  | ApiRetryEvent
+  | SubagentSpawnedEvent
+  | SubagentToolUseEvent
+  | SubagentOutputEvent
+  | SubagentCompletedEvent;
 
 export interface ProviderRuntimeEventPayloads {
   "session.started": SessionStartedPayload;
@@ -300,6 +336,10 @@ export interface ProviderRuntimeEventPayloads {
   "runtime.warning": RuntimeWarningPayload;
   "rate.limit": RateLimitPayload;
   "api.retry": ApiRetryPayload;
+  "subagent.spawned": SubagentSpawnedPayload;
+  "subagent.tool_use": SubagentToolUsePayload;
+  "subagent.output": SubagentOutputPayload;
+  "subagent.completed": SubagentCompletedPayload;
 }
 
 export type ProviderRuntimeEventType = keyof ProviderRuntimeEventPayloads;

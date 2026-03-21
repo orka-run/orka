@@ -4,13 +4,13 @@ import { ClaudeCodeAdapter, mapClaudeEvent } from "./claude-adapter";
 
 describe("mapClaudeEvent", () => {
   test("maps system init to session.started", () => {
-    const event = mapClaudeEvent("thread-1", {
+    const [event] = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "init",
       message: "Claude Code started",
     });
 
-    expect(event).not.toBeNull();
+    expect(event).toBeDefined();
     expect(event?.type).toBe("session.started");
     expect(event?.provider).toBe("claude-code");
     expect(event?.threadId).toBe("thread-1");
@@ -18,7 +18,7 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps rate_limit_event to rate.limit", () => {
-    const event = mapClaudeEvent("thread-1", {
+    const [event] = mapClaudeEvent("thread-1", {
       type: "rate_limit_event",
       rate_limit_info: {
         status: "allowed_warning",
@@ -30,7 +30,7 @@ describe("mapClaudeEvent", () => {
       },
     });
 
-    expect(event).not.toBeNull();
+    expect(event).toBeDefined();
     expect(event?.type).toBe("rate.limit");
     expect(event?.payload).toEqual({
       rateLimitInfo: {
@@ -45,7 +45,7 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps system api_retry to api.retry", () => {
-    const event = mapClaudeEvent("thread-1", {
+    const [event] = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "api_retry",
       api_retry_info: {
@@ -56,7 +56,7 @@ describe("mapClaudeEvent", () => {
       },
     });
 
-    expect(event).not.toBeNull();
+    expect(event).toBeDefined();
     expect(event?.type).toBe("api.retry");
     expect(event?.payload).toEqual({
       attempt: 1,
@@ -67,7 +67,7 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps system task_progress to tool.progress", () => {
-    const event = mapClaudeEvent("thread-1", {
+    const [event] = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "task_progress",
       tool_use_id: "tool-1",
@@ -76,7 +76,7 @@ describe("mapClaudeEvent", () => {
       elapsed_seconds: 2,
     }, { turnId: "turn-1" });
 
-    expect(event).not.toBeNull();
+    expect(event).toBeDefined();
     expect(event?.type).toBe("tool.progress");
     expect(event?.turnId).toBe("turn-1");
     expect(event?.itemId).toBe("tool-1");
@@ -88,7 +88,7 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps system task lifecycle events", () => {
-    const started = mapClaudeEvent("thread-1", {
+    const startedEvents = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "task_started",
       task_id: "task-1",
@@ -98,7 +98,7 @@ describe("mapClaudeEvent", () => {
       subagent_type: "research",
     }, { turnId: "turn-1" });
 
-    const completed = mapClaudeEvent("thread-1", {
+    const completedEvents = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "task_notification",
       task_id: "task-1",
@@ -106,6 +106,9 @@ describe("mapClaudeEvent", () => {
       status: "completed",
       summary: "Found the timeline renderer and summarized the missing cases.",
     }, { turnId: "turn-1" });
+
+    const started = startedEvents[0];
+    const completed = completedEvents[0];
 
     expect(started?.type).toBe("task.started");
     expect(started?.turnId).toBe("turn-1");
@@ -130,26 +133,26 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps hook, status, and compaction system events", () => {
-    const hookStarted = mapClaudeEvent("thread-1", {
+    const [hookStarted] = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "hook_started",
       hook_name: "SessionStart:startup",
       matcher: "startup",
     });
-    const hookResponse = mapClaudeEvent("thread-1", {
+    const [hookResponse] = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "hook_response",
       hook_name: "SessionStart:startup",
       approved: true,
       reason: "Hook completed",
     });
-    const status = mapClaudeEvent("thread-1", {
+    const [status] = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "status",
       status: "compacting",
       message: "Preparing to trim context",
     });
-    const compacted = mapClaudeEvent("thread-1", {
+    const [compacted] = mapClaudeEvent("thread-1", {
       type: "system",
       subtype: "compact_boundary",
       pre_compaction_token_count: 120000,
@@ -183,7 +186,7 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps assistant text to content.delta", () => {
-    const event = mapClaudeEvent("thread-1", {
+    const [event] = mapClaudeEvent("thread-1", {
       type: "assistant",
       message: {
         role: "assistant",
@@ -191,7 +194,7 @@ describe("mapClaudeEvent", () => {
       },
     }, { turnId: "turn-1" });
 
-    expect(event).not.toBeNull();
+    expect(event).toBeDefined();
     expect(event?.type).toBe("content.delta");
     expect(event?.turnId).toBe("turn-1");
     expect(event?.payload).toEqual({
@@ -201,14 +204,14 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps assistant tool_use to item.started with the correct item type", () => {
-    const commandEvent = mapClaudeEvent("thread-1", {
+    const [commandEvent] = mapClaudeEvent("thread-1", {
       type: "assistant",
       message: {
         role: "assistant",
         content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "ls -la" } }],
       },
     }, { turnId: "turn-1" });
-    const fileEvent = mapClaudeEvent("thread-1", {
+    const [fileEvent] = mapClaudeEvent("thread-1", {
       type: "assistant",
       message: {
         role: "assistant",
@@ -240,7 +243,7 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps result to turn.completed with cost and tokens", () => {
-    const event = mapClaudeEvent("thread-1", {
+    const [event] = mapClaudeEvent("thread-1", {
       type: "result",
       subtype: "success",
       result: "Final answer",
@@ -257,7 +260,7 @@ describe("mapClaudeEvent", () => {
       },
     }, { turnId: "turn-1" });
 
-    expect(event).not.toBeNull();
+    expect(event).toBeDefined();
     expect(event?.type).toBe("turn.completed");
     expect(event?.turnId).toBe("turn-1");
     expect(event?.payload).toEqual({
@@ -272,7 +275,7 @@ describe("mapClaudeEvent", () => {
   });
 
   test("maps result to session.exited in exit mode", () => {
-    const event = mapClaudeEvent(
+    const [event] = mapClaudeEvent(
       "thread-1",
       {
         type: "result",
@@ -282,7 +285,7 @@ describe("mapClaudeEvent", () => {
       "exit",
     );
 
-    expect(event).not.toBeNull();
+    expect(event).toBeDefined();
     expect(event?.type).toBe("session.exited");
     expect(event?.payload).toEqual({
       reason: "Claude Code result: success",
@@ -290,8 +293,83 @@ describe("mapClaudeEvent", () => {
     });
   });
 
-  test("returns null for unknown event types", () => {
-    expect(mapClaudeEvent("thread-1", { type: "unknown.event" })).toBeNull();
+  test("returns empty array for unknown event types", () => {
+    expect(mapClaudeEvent("thread-1", { type: "unknown.event" })).toEqual([]);
+  });
+
+  test("emits subagent.spawned alongside task.started", () => {
+    const events = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "task_started",
+      task_id: "agent-abc",
+      tool_use_id: "tool-1",
+      description: "Explore codebase",
+      prompt: "Find all routes",
+      subagent_type: "research",
+    }, { turnId: "turn-1" });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]?.type).toBe("task.started");
+    expect(events[1]?.type).toBe("subagent.spawned");
+    expect(events[1]?.payload).toEqual({
+      agentId: "agent-abc",
+      prompt: "Find all routes",
+      description: "Explore codebase",
+    });
+  });
+
+  test("emits subagent.tool_use alongside tool.progress when agentId is present", () => {
+    const events = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "task_progress",
+      tool_use_id: "tool-1",
+      task_id: "agent-abc",
+      last_tool_name: "Read",
+      progress_text: "Reading db.ts",
+      elapsed_seconds: 3,
+    }, { turnId: "turn-1" });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]?.type).toBe("tool.progress");
+    expect(events[1]?.type).toBe("subagent.tool_use");
+    expect(events[1]?.payload).toEqual({
+      agentId: "agent-abc",
+      toolName: "Read",
+      summary: "Reading db.ts",
+      elapsedSeconds: 3,
+    });
+  });
+
+  test("emits subagent.completed alongside task.completed", () => {
+    const events = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "task_notification",
+      task_id: "agent-abc",
+      tool_use_id: "tool-1",
+      status: "completed",
+      summary: "Found 5 routes.",
+    }, { turnId: "turn-1" });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]?.type).toBe("task.completed");
+    expect(events[1]?.type).toBe("subagent.completed");
+    expect(events[1]?.payload).toEqual({
+      agentId: "agent-abc",
+      status: "completed",
+      summary: "Found 5 routes.",
+    });
+  });
+
+  test("does not emit subagent events when taskId is missing", () => {
+    const events = mapClaudeEvent("thread-1", {
+      type: "system",
+      subtype: "task_started",
+      tool_use_id: "tool-1",
+      description: "Some task",
+    }, { turnId: "turn-1" });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("task.started");
   });
 });
 

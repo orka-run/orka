@@ -236,4 +236,106 @@ describe("eventsToEntries", () => {
       }),
     );
   });
+
+  test("renders subagent.spawned as background-task entry", () => {
+    const entries = eventsToEntries([
+      {
+        type: "subagent.spawned",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "tool-use-1",
+        agentId: "agent-abc",
+        prompt: "Find all API routes",
+        description: "Explore codebase",
+        timestamp: "2026-03-11T00:00:02Z",
+      },
+      {
+        type: "subagent.tool_use",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "tool-use-1",
+        agentId: "agent-abc",
+        toolName: "Grep",
+        summary: "Searching for route handlers",
+        timestamp: "2026-03-11T00:00:03Z",
+      },
+      {
+        type: "subagent.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "tool-use-1",
+        agentId: "agent-abc",
+        status: "completed",
+        summary: "Found 8 routes.",
+        timestamp: "2026-03-11T00:00:05Z",
+      },
+    ]);
+
+    expect(entries).toContainEqual({
+      id: "bg-task-agent-abc",
+      type: "background-task",
+      timestamp: "2026-03-11T00:00:02Z",
+      taskId: "agent-abc",
+      title: "Explore codebase",
+      detail: "Find all API routes",
+      status: "completed",
+      toolCalls: [{ summary: "Searching for route handlers", timestamp: "2026-03-11T00:00:03Z", toolName: "Grep" }],
+    });
+  });
+
+  test("renders running subagent when no subagent.completed exists", () => {
+    const entries = eventsToEntries([
+      {
+        type: "subagent.spawned",
+        sessionId: "s1",
+        turnId: "turn-1",
+        agentId: "agent-xyz",
+        prompt: "Analyze code",
+        description: "Code analysis",
+        timestamp: "2026-03-11T00:00:02Z",
+      },
+    ]);
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        type: "background-task",
+        taskId: "agent-xyz",
+        status: "running",
+        title: "Code analysis",
+      }),
+    );
+  });
+
+  test("skips subagent.tool_use, subagent.completed, and subagent.output as standalone entries", () => {
+    const entries = eventsToEntries([
+      {
+        type: "subagent.tool_use",
+        sessionId: "s1",
+        turnId: "turn-1",
+        agentId: "agent-abc",
+        toolName: "Read",
+        timestamp: "2026-03-11T00:00:03Z",
+      },
+      {
+        type: "subagent.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        agentId: "agent-abc",
+        status: "completed",
+        timestamp: "2026-03-11T00:00:05Z",
+      },
+      {
+        type: "subagent.output",
+        sessionId: "s1",
+        turnId: "turn-1",
+        agentId: "agent-abc",
+        delta: "some output",
+        streamKind: "assistant_text",
+        timestamp: "2026-03-11T00:00:04Z",
+      },
+    ]);
+
+    // None of these should produce standalone entries
+    expect(entries).toHaveLength(0);
+  });
 });

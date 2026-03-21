@@ -183,6 +183,37 @@ export type OrchestrationEvent =
       turnSeq: number;
       mode: "files" | "files_and_conversation";
     }>
+  | OrchestrationEventEnvelope<"subagent.spawned", {
+      turnId: string;
+      itemId?: string;
+      agentId: string;
+      prompt: string;
+      description?: string;
+      model?: string;
+    }>
+  | OrchestrationEventEnvelope<"subagent.tool_use", {
+      turnId: string;
+      itemId?: string;
+      agentId: string;
+      toolName: string;
+      summary?: string;
+      elapsedSeconds?: number;
+    }>
+  | OrchestrationEventEnvelope<"subagent.output", {
+      turnId: string;
+      agentId: string;
+      delta: string;
+      streamKind: string;
+    }>
+  | OrchestrationEventEnvelope<"subagent.completed", {
+      turnId: string;
+      itemId?: string;
+      agentId: string;
+      status: string;
+      summary?: string;
+      cost?: number;
+      tokens?: { input: number; output: number };
+    }>
   | OrchestrationEventEnvelope<"event.passthrough", {
       turnId?: string;
       originalType: string;
@@ -229,6 +260,10 @@ export const KnownOrchestrationEventTypeSchema = z.enum([
   "session.rate_limited",
   "session.api_retry",
   "session.reverted",
+  "subagent.spawned",
+  "subagent.tool_use",
+  "subagent.output",
+  "subagent.completed",
   "event.passthrough",
 ]);
 
@@ -463,6 +498,45 @@ const WireEventVariants: Record<string, z.ZodType> = {
     type: z.literal("session.reverted"),
     turnSeq: z.number(),
     mode: z.enum(["files", "files_and_conversation"]),
+  }).passthrough(),
+
+  "subagent.spawned": WireEventBaseSchema.extend({
+    type: z.literal("subagent.spawned"),
+    turnId: z.string(),
+    itemId: z.string().optional(),
+    agentId: z.string(),
+    prompt: z.string(),
+    description: z.string().optional(),
+    model: z.string().optional(),
+  }).passthrough(),
+
+  "subagent.tool_use": WireEventBaseSchema.extend({
+    type: z.literal("subagent.tool_use"),
+    turnId: z.string(),
+    itemId: z.string().optional(),
+    agentId: z.string(),
+    toolName: z.string(),
+    summary: z.string().optional(),
+    elapsedSeconds: z.number().optional(),
+  }).passthrough(),
+
+  "subagent.output": WireEventBaseSchema.extend({
+    type: z.literal("subagent.output"),
+    turnId: z.string(),
+    agentId: z.string(),
+    delta: z.string(),
+    streamKind: z.string(),
+  }).passthrough(),
+
+  "subagent.completed": WireEventBaseSchema.extend({
+    type: z.literal("subagent.completed"),
+    turnId: z.string(),
+    itemId: z.string().optional(),
+    agentId: z.string(),
+    status: z.string(),
+    summary: z.string().optional(),
+    cost: z.number().optional(),
+    tokens: z.object({ input: z.number(), output: z.number() }).optional(),
   }).passthrough(),
 
   "event.passthrough": WireEventBaseSchema.extend({

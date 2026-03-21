@@ -260,6 +260,9 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
     if (event.type === "task.completed" && event.taskId) {
       completedTaskIds.add(event.taskId);
     }
+    if (event.type === "subagent.completed") {
+      completedTaskIds.add(event.agentId);
+    }
   }
 
   // Check for foreground tool blocking first
@@ -271,7 +274,9 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
 
   // Check for background tasks still running
   const hasRunningBackgroundTask = events.some(
-    (event) => event.type === "task.started" && event.taskId && !completedTaskIds.has(event.taskId),
+    (event) =>
+      (event.type === "task.started" && event.taskId && !completedTaskIds.has(event.taskId)) ||
+      (event.type === "subagent.spawned" && !completedTaskIds.has(event.agentId)),
   );
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -288,6 +293,9 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
       case "tool.progress":
       case "task.started":
       case "task.completed":
+      case "subagent.spawned":
+      case "subagent.tool_use":
+      case "subagent.completed":
         return hasRunningBackgroundTask ? "background" : "tools";
       case "turn.completed":
       case "turn.aborted":
@@ -344,11 +352,33 @@ export function eventsToEntries(
         timestamp: event.timestamp,
       });
     }
+    if (event.type === "subagent.completed") {
+      completedTaskIds.set(event.agentId, {
+        ...(event.summary !== undefined ? { summary: event.summary } : {}),
+        status: event.status,
+        timestamp: event.timestamp,
+      });
+    }
     if (event.type === "tool.progress" && event.itemId && event.summary) {
       const item: ToolProgressItem = {
         summary: event.summary,
         timestamp: event.timestamp,
         ...(event.toolName ? { toolName: event.toolName } : {}),
+        ...(event.elapsedSeconds !== undefined ? { elapsedSeconds: event.elapsedSeconds } : {}),
+      };
+      const existing = taskProgressByToolUseId.get(event.itemId);
+      if (existing) {
+        existing.push(item);
+      } else {
+        taskProgressByToolUseId.set(event.itemId, [item]);
+      }
+    }
+    // Also collect subagent.tool_use events into the same progress map
+    if (event.type === "subagent.tool_use" && event.itemId && event.toolName) {
+      const item: ToolProgressItem = {
+        summary: event.summary ?? event.toolName,
+        timestamp: event.timestamp,
+        toolName: event.toolName,
         ...(event.elapsedSeconds !== undefined ? { elapsedSeconds: event.elapsedSeconds } : {}),
       };
       const existing = taskProgressByToolUseId.get(event.itemId);
@@ -600,6 +630,25 @@ export function eventsToEntries(
       continue;
     }
 
+    if (event.type === "subagent.spawned") {
+      flushAssistant();
+      flushToolGroup();
+      const completed = completedTaskIds.get(event.agentId);
+      const toolCalls = event.itemId ? (taskProgressByToolUseId.get(event.itemId) ?? []) : [];
+
+      entries.push({
+        id: `bg-task-${event.agentId}`,
+        type: "background-task",
+        timestamp: event.timestamp,
+        taskId: event.agentId,
+        title: event.description ?? "Subagent",
+        ...(event.prompt ? { detail: event.prompt } : {}),
+        status: completed ? "completed" : "running",
+        toolCalls,
+      });
+      continue;
+    }
+
     if (
       event.type === "session.created" ||
       event.type === "session.started" ||
@@ -608,6 +657,12 @@ export function eventsToEntries(
       event.type === "tool.progress" ||
       // task.completed is merged into task.started entries — skip standalone rendering
       event.type === "task.completed" ||
+      // subagent.tool_use is collected into background task entries — skip standalone rendering
+      event.type === "subagent.tool_use" ||
+      // subagent.completed is merged into subagent.spawned entries — skip standalone rendering
+      event.type === "subagent.completed" ||
+      // subagent.output is streaming content within a subagent — skip standalone rendering
+      event.type === "subagent.output" ||
       // user.input_cancelled is handled in pre-scan — skip rendering
       event.type === "user.input_cancelled"
     ) {

@@ -291,6 +291,61 @@ export function mapProviderEvent(sessionId: string, event: ProviderRuntimeEvent)
         delayMs: event.payload.delayMs,
         timestamp: event.createdAt,
       };
+    case "subagent.spawned":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "subagent.spawned",
+        sessionId,
+        turnId: getTurnId(event),
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        agentId: event.payload.agentId,
+        prompt: event.payload.prompt,
+        ...(event.payload.description ? { description: event.payload.description } : {}),
+        ...(event.payload.model ? { model: event.payload.model } : {}),
+        timestamp: event.createdAt,
+      };
+    case "subagent.tool_use":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "subagent.tool_use",
+        sessionId,
+        turnId: getTurnId(event),
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        agentId: event.payload.agentId,
+        toolName: event.payload.toolName,
+        ...(event.payload.summary ? { summary: event.payload.summary } : {}),
+        ...(event.payload.elapsedSeconds !== undefined ? { elapsedSeconds: event.payload.elapsedSeconds } : {}),
+        timestamp: event.createdAt,
+      };
+    case "subagent.output":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "subagent.output",
+        sessionId,
+        turnId: getTurnId(event),
+        agentId: event.payload.agentId,
+        delta: event.payload.delta,
+        streamKind: event.payload.streamKind,
+        timestamp: event.createdAt,
+      };
+    case "subagent.completed":
+      return {
+        v: 1,
+        eventId: event.eventId,
+        type: "subagent.completed",
+        sessionId,
+        turnId: getTurnId(event),
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        agentId: event.payload.agentId,
+        status: event.payload.status,
+        ...(event.payload.summary ? { summary: event.payload.summary } : {}),
+        ...(event.payload.cost !== undefined ? { cost: event.payload.cost } : {}),
+        ...(event.payload.tokens ? { tokens: event.payload.tokens } : {}),
+        timestamp: event.createdAt,
+      };
     default: {
       const passthroughEvent = event as ProviderRuntimeEvent & {
         type: string;

@@ -321,7 +321,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         continue;
       }
 
-      const primary = mapClaudeEvent(threadId, raw, { turnId });
+      const mapped = mapClaudeEvent(threadId, raw, { turnId });
+      const primary = mapped[0];
       if (!primary) continue;
 
       // Close previous open item when a new item starts
@@ -342,7 +343,9 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         }
       }
 
-      yield primary;
+      for (const event of mapped) {
+        yield event;
+      }
 
       if (primary.type === "item.started") {
         openItemId = primary.itemId ?? null;
@@ -390,9 +393,11 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       if (line.direction !== "out") continue;
       try {
         const raw = JSON.parse(line.data);
-        const exitEvent = mapClaudeEvent(threadId, raw, "exit");
-        if (exitEvent) {
-          yield exitEvent;
+        const exitEvents = mapClaudeEvent(threadId, raw, "exit");
+        if (exitEvents.length > 0) {
+          for (const event of exitEvents) {
+            yield event;
+          }
           break;
         }
       } catch {
@@ -406,20 +411,20 @@ export function mapClaudeEvent(
   threadId: string,
   raw: unknown,
   modeOrOptions: ClaudeMapMode | ClaudeMapOptions = "primary",
-): ProviderRuntimeEvent | null {
+): ProviderRuntimeEvent[] {
   const { mode, turnId } = normalizeClaudeMapOptions(modeOrOptions);
 
   if (!isRecord(raw) || typeof raw["type"] !== "string") {
-    return null;
+    return [];
   }
 
   if (mode === "exit" && raw["type"] !== "result") {
-    return null;
+    return [];
   }
 
   if (raw["type"] === "result") {
     if (mode === "exit") {
-      return createEvent(
+      return [createEvent(
         "session.exited",
         threadId,
         {
@@ -427,11 +432,11 @@ export function mapClaudeEvent(
           exitKind: raw["is_error"] === true ? "error" : "graceful",
         },
         { provider: "claude-code" },
-      );
+      )];
     }
 
     const usage = normalizeClaudeUsage(raw);
-    return createEvent(
+    return [createEvent(
       "turn.completed",
       threadId,
       {
@@ -441,28 +446,28 @@ export function mapClaudeEvent(
         ...(usage ? { usage } : {}),
       },
       { provider: "claude-code", ...(turnId ? { turnId } : {}) },
-    );
+    )];
   }
 
   switch (raw["type"]) {
     case "system": {
       const subtype = raw["subtype"];
       if (subtype === "init") {
-        return createEvent(
+        return [createEvent(
           "session.started",
           threadId,
           { ...(typeof raw["message"] === "string" ? { message: raw["message"] } : {}) },
           { provider: "claude-code" },
-        );
+        )];
       }
 
       if (subtype === "api_retry") {
         const retry = normalizeClaudeApiRetryInfo(raw);
         if (!retry) {
-          return null;
+          return [];
         }
 
-        return createEvent(
+        return [createEvent(
           "api.retry",
           threadId,
           {
@@ -472,85 +477,147 @@ export function mapClaudeEvent(
             delayMs: retry.delayMs,
           },
           { provider: "claude-code" },
-        );
+        )];
       }
 
       if (subtype === "task_progress") {
         const progress = normalizeClaudeTaskProgress(raw);
         if (!progress) {
-          return null;
+          return [];
         }
 
-        return createEvent(
-          "tool.progress",
-          threadId,
-          {
-            ...(progress.toolName ? { toolName: progress.toolName } : {}),
-            ...(progress.summary ? { summary: progress.summary } : {}),
-            ...(progress.elapsedSeconds !== undefined ? { elapsedSeconds: progress.elapsedSeconds } : {}),
-          },
-          {
-            provider: "claude-code",
-            ...(turnId ? { turnId } : {}),
-            ...(progress.toolUseId ? { itemId: progress.toolUseId } : {}),
-          },
-        );
+        const opts = {
+          provider: "claude-code" as const,
+          ...(turnId ? { turnId } : {}),
+          ...(progress.toolUseId ? { itemId: progress.toolUseId } : {}),
+        };
+
+        const events: ProviderRuntimeEvent[] = [
+          createEvent(
+            "tool.progress",
+            threadId,
+            {
+              ...(progress.toolName ? { toolName: progress.toolName } : {}),
+              ...(progress.summary ? { summary: progress.summary } : {}),
+              ...(progress.elapsedSeconds !== undefined ? { elapsedSeconds: progress.elapsedSeconds } : {}),
+            },
+            opts,
+          ),
+        ];
+
+        // Also emit subagent.tool_use for first-class subagent tracking
+        const agentId = readClaudeString(getClaudeNestedRecords(raw, "task", "task_progress"), "task_id", "taskId", "subagent_id", "subagentId");
+        if (agentId && progress.toolName) {
+          events.push(createEvent(
+            "subagent.tool_use",
+            threadId,
+            {
+              agentId,
+              toolName: progress.toolName,
+              ...(progress.summary ? { summary: progress.summary } : {}),
+              ...(progress.elapsedSeconds !== undefined ? { elapsedSeconds: progress.elapsedSeconds } : {}),
+            },
+            opts,
+          ));
+        }
+
+        return events;
       }
 
       if (subtype === "task_started") {
         const task = normalizeClaudeTaskStarted(raw);
         if (!task) {
-          return null;
+          return [];
         }
 
-        return createEvent(
-          "task.started",
-          threadId,
-          {
-            ...(task.taskId ? { taskId: task.taskId } : {}),
-            ...(task.toolUseId ? { toolUseId: task.toolUseId } : {}),
-            ...(task.title ? { title: task.title } : {}),
-            ...(task.detail ? { detail: task.detail } : {}),
-            ...(task.taskKind ? { taskKind: task.taskKind } : {}),
-          },
-          {
-            provider: "claude-code",
-            ...(turnId ? { turnId } : {}),
-            ...(task.toolUseId ? { itemId: task.toolUseId } : {}),
-          },
-        );
+        const opts = {
+          provider: "claude-code" as const,
+          ...(turnId ? { turnId } : {}),
+          ...(task.toolUseId ? { itemId: task.toolUseId } : {}),
+        };
+
+        const events: ProviderRuntimeEvent[] = [
+          createEvent(
+            "task.started",
+            threadId,
+            {
+              ...(task.taskId ? { taskId: task.taskId } : {}),
+              ...(task.toolUseId ? { toolUseId: task.toolUseId } : {}),
+              ...(task.title ? { title: task.title } : {}),
+              ...(task.detail ? { detail: task.detail } : {}),
+              ...(task.taskKind ? { taskKind: task.taskKind } : {}),
+            },
+            opts,
+          ),
+        ];
+
+        // Also emit subagent.spawned for first-class subagent tracking
+        if (task.taskId) {
+          events.push(createEvent(
+            "subagent.spawned",
+            threadId,
+            {
+              agentId: task.taskId,
+              prompt: task.detail ?? "",
+              ...(task.title ? { description: task.title } : {}),
+            },
+            opts,
+          ));
+        }
+
+        return events;
       }
 
       if (subtype === "task_notification") {
         const task = normalizeClaudeTaskCompleted(raw);
         if (!task) {
-          return null;
+          return [];
         }
 
-        return createEvent(
-          "task.completed",
-          threadId,
-          {
-            ...(task.taskId ? { taskId: task.taskId } : {}),
-            ...(task.toolUseId ? { toolUseId: task.toolUseId } : {}),
-            ...(task.summary ? { summary: task.summary } : {}),
-            ...(task.status ? { status: task.status } : {}),
-          },
-          {
-            provider: "claude-code",
-            ...(turnId ? { turnId } : {}),
-            ...(task.toolUseId ? { itemId: task.toolUseId } : {}),
-          },
-        );
+        const opts = {
+          provider: "claude-code" as const,
+          ...(turnId ? { turnId } : {}),
+          ...(task.toolUseId ? { itemId: task.toolUseId } : {}),
+        };
+
+        const events: ProviderRuntimeEvent[] = [
+          createEvent(
+            "task.completed",
+            threadId,
+            {
+              ...(task.taskId ? { taskId: task.taskId } : {}),
+              ...(task.toolUseId ? { toolUseId: task.toolUseId } : {}),
+              ...(task.summary ? { summary: task.summary } : {}),
+              ...(task.status ? { status: task.status } : {}),
+            },
+            opts,
+          ),
+        ];
+
+        // Also emit subagent.completed for first-class subagent tracking
+        if (task.taskId) {
+          events.push(createEvent(
+            "subagent.completed",
+            threadId,
+            {
+              agentId: task.taskId,
+              status: task.status ?? "completed",
+              ...(task.summary ? { summary: task.summary } : {}),
+            },
+            opts,
+          ));
+        }
+
+        return events;
       }
 
       if (subtype === "hook_started") {
         const hook = normalizeClaudeHookStarted(raw);
         if (!hook) {
-          return null;
+          return [];
         }
 
-        return createEvent(
+        return [createEvent(
           "hook.started",
           threadId,
           {
@@ -558,16 +625,16 @@ export function mapClaudeEvent(
             ...(hook.matcher ? { matcher: hook.matcher } : {}),
           },
           { provider: "claude-code", ...(turnId ? { turnId } : {}) },
-        );
+        )];
       }
 
       if (subtype === "hook_response") {
         const hook = normalizeClaudeHookResponse(raw);
         if (!hook) {
-          return null;
+          return [];
         }
 
-        return createEvent(
+        return [createEvent(
           "hook.response",
           threadId,
           {
@@ -576,16 +643,16 @@ export function mapClaudeEvent(
             ...(hook.reason ? { reason: hook.reason } : {}),
           },
           { provider: "claude-code", ...(turnId ? { turnId } : {}) },
-        );
+        )];
       }
 
       if (subtype === "status") {
         const status = normalizeClaudeSystemStatus(raw);
         if (!status) {
-          return null;
+          return [];
         }
 
-        return createEvent(
+        return [createEvent(
           "session.status",
           threadId,
           {
@@ -593,12 +660,12 @@ export function mapClaudeEvent(
             ...(status.detail ? { detail: status.detail } : {}),
           },
           { provider: "claude-code", ...(turnId ? { turnId } : {}) },
-        );
+        )];
       }
 
       if (subtype === "compact_boundary") {
         const compact = normalizeClaudeCompactBoundary(raw);
-        return createEvent(
+        return [createEvent(
           "session.compacted",
           threadId,
           {
@@ -608,24 +675,24 @@ export function mapClaudeEvent(
             ...(compact.tokenCountAfter !== undefined ? { tokenCountAfter: compact.tokenCountAfter } : {}),
           },
           { provider: "claude-code", ...(turnId ? { turnId } : {}) },
-        );
+        )];
       }
 
-      return null;
+      return [];
     }
 
     case "rate_limit_event": {
       const rateLimitInfo = normalizeClaudeRateLimitInfo(raw["rate_limit_info"]);
       if (!rateLimitInfo) {
-        return null;
+        return [];
       }
 
-      return createEvent(
+      return [createEvent(
         "rate.limit",
         threadId,
         { rateLimitInfo },
         { provider: "claude-code" },
-      );
+      )];
     }
 
     case "assistant": {
@@ -633,7 +700,7 @@ export function mapClaudeEvent(
       const content = Array.isArray(message?.["content"]) ? message["content"] : [];
       const toolUse = findClaudeToolUse(content);
       if (toolUse) {
-        return createEvent(
+        return [createEvent(
           "item.started",
           threadId,
           {
@@ -644,26 +711,26 @@ export function mapClaudeEvent(
             args: toolUse.input,
           },
           { provider: "claude-code", ...(turnId ? { turnId } : {}), itemId: toolUse.id },
-        );
+        )];
       }
 
       const text = extractClaudeAssistantText(content);
       if (!text) {
-        return null;
+        return [];
       }
 
-      return createEvent(
+      return [createEvent(
         "content.delta",
         threadId,
         { streamKind: "assistant_text", delta: text },
         { provider: "claude-code", ...(turnId ? { turnId } : {}) },
-      );
+      )];
     }
 
     case "tool": {
       const detail = extractClaudeText(raw["content"]);
       const itemId = typeof raw["tool_use_id"] === "string" ? raw["tool_use_id"] : undefined;
-      return createEvent(
+      return [createEvent(
         "item.completed",
         threadId,
         {
@@ -672,11 +739,11 @@ export function mapClaudeEvent(
           ...(detail ? { detail } : {}),
         },
         { provider: "claude-code", ...(turnId ? { turnId } : {}), ...(itemId ? { itemId } : {}) },
-      );
+      )];
     }
 
     default:
-      return null;
+      return [];
   }
 }
 
@@ -743,7 +810,8 @@ async function consumeClaudeOutput(
             closeOpenItem();
           }
 
-          const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
+          const mapped = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
+          const primary = mapped[0];
           if (primary) {
             // Close the previous open item when we see a different event.
             // Skip if the incoming event is already item.completed for the same item (from "tool" events).
@@ -757,7 +825,9 @@ async function consumeClaudeOutput(
               }
             }
 
-            emitClaudeEvent(meta.events, primary, span);
+            for (const event of mapped) {
+              emitClaudeEvent(meta.events, event, span);
+            }
 
             // Track new open item
             if (primary.type === "item.started") {
