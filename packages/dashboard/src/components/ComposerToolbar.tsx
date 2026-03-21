@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Terminal,
   Bot,
+  GitBranch,
   Shield,
   ShieldCheck,
   ShieldOff,
@@ -19,6 +20,8 @@ interface ComposerToolbarProps {
   onModelChange: (v: string) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (v: PermissionMode) => void;
+  noWorktree?: boolean;
+  onNoWorktreeChange?: (v: boolean) => void;
   onSend: () => void;
   canSend: boolean;
   isSending: boolean;
@@ -156,6 +159,8 @@ export function ComposerToolbar({
   onModelChange,
   permissionMode,
   onPermissionModeChange,
+  noWorktree,
+  onNoWorktreeChange,
   onSend,
   canSend,
   isSending,
@@ -210,6 +215,22 @@ export function ComposerToolbar({
           </>
         )}
       />
+
+      {onNoWorktreeChange && (
+        <button
+          type="button"
+          onClick={() => onNoWorktreeChange(!noWorktree)}
+          className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+            noWorktree
+              ? "text-amber-500 hover:bg-surface-hover"
+              : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
+          }`}
+          title={noWorktree ? "Running in-place (no worktree)" : "Running in isolated worktree"}
+        >
+          <GitBranch className="h-3.5 w-3.5" />
+          <span>{noWorktree ? "in-place" : "worktree"}</span>
+        </button>
+      )}
 
       <div className="flex-1" />
 

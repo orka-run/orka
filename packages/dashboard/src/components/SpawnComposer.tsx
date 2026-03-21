@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Bot, ChevronDown, LoaderCircle, User } from "lucide-react";
+import { ChevronDown, LoaderCircle } from "lucide-react";
 import type { BackendKind, NodeInfo, OrchestrationEvent, PermissionMode, SpawnRequest, WorkspaceInfo } from "@orka/core";
 import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
 import { ComposerToolbar } from "./ComposerToolbar";
@@ -140,48 +140,44 @@ export function SpawnComposer({ defaultProjectPath, nodes, activeWorkspace, onSp
   }, []);
 
   return (
-    <div className="flex h-full items-center justify-center px-4">
-      <div className="w-full max-w-2xl">
-        {/* Pending message (spawning state) */}
-        {pendingMessage && (
-          <div className="mb-4 space-y-2">
-            <div className="flex justify-end">
-              <div className="flex max-w-2xl items-start gap-2">
-                <div className="min-w-0 rounded-xl rounded-tr-sm border border-accent/20 bg-accent/5 px-3 py-2 [overflow-wrap:anywhere]">
-                  <p className="text-[12px] text-ink">{pendingMessage}</p>
-                </div>
-                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent-strong">
-                  <User className="h-3.5 w-3.5" />
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 px-1 py-1">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/15 text-accent-strong">
-                <Bot className="h-3.5 w-3.5" />
-              </div>
-              <div className="flex items-center gap-1 text-[12px] text-ink-muted">
-                <LoaderCircle className="h-3 w-3 animate-spin" />
-                Starting session…
+    <div className="flex h-full flex-col">
+      {/* Pending message (spawning state) */}
+      {pendingMessage && (
+        <div className="mx-auto w-full max-w-2xl space-y-2 px-3 pt-4">
+          <div className="flex justify-end">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 bg-accent/5 px-3 py-2 text-[12px] text-ink [overflow-wrap:anywhere]">
+                {pendingMessage}
               </div>
             </div>
           </div>
-        )}
+          <div className="flex items-center gap-2 py-1 text-[12px] text-ink-muted">
+            <LoaderCircle className="h-3 w-3 animate-spin" />
+            Starting session…
+          </div>
+        </div>
+      )}
 
-        {/* Error banner above composer */}
-        {spawnError && (
-          <div className="mb-2 rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-1.5 text-[11px] text-status-error">
+      {/* Spacer pushes composer to vertical center when no pending message */}
+      <div className="flex-1" />
+
+      {/* Error */}
+      {spawnError && (
+        <div className="mx-auto w-full max-w-2xl px-3">
+          <div className="mb-2 bg-status-error/10 px-3 py-1.5 text-[11px] text-status-error">
             {spawnError}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Composer box */}
-        <div className="rounded-2xl border border-border bg-surface shadow-sm transition-colors focus-within:border-accent/40">
-          {/* Editor */}
-          <div style={{ maxHeight: "200px", overflowY: "auto" }}>
+      {/* Composer — full width on mobile, max-w-2xl centered on desktop */}
+      <div className="mx-auto w-full max-w-2xl px-3 sm:px-0">
+        <div className="border-t border-border bg-surface transition-colors focus-within:border-accent/40 sm:border sm:shadow-sm">
+          <div style={{ maxHeight: "40vh", overflowY: "auto" }}>
             <ComposerEditor
               ref={editorRef}
               disabled={isSpawning}
-              placeholder="Describe the work you want the agent to do…"
+              placeholder="Describe the task…"
               autoFocus
               initialText={text}
               onChange={handleChange}
@@ -190,7 +186,6 @@ export function SpawnComposer({ defaultProjectPath, nodes, activeWorkspace, onSp
             />
           </div>
 
-          {/* Toolbar */}
           <ComposerToolbar
             backend={backend}
             onBackendChange={setBackend}
@@ -198,43 +193,46 @@ export function SpawnComposer({ defaultProjectPath, nodes, activeWorkspace, onSp
             onModelChange={setModel}
             permissionMode={permissionMode}
             onPermissionModeChange={setPermissionMode}
+            noWorktree={noWorktree}
+            onNoWorktreeChange={setNoWorktree}
             onSend={handleSubmit}
             canSend={canSend}
             isSending={isSpawning}
           />
         </div>
 
-        {/* Advanced fields — below composer, collapsible */}
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setShowAdvanced((v) => !v)}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-muted transition hover:text-ink-secondary"
-          >
-            <span>Title, tags, system prompt…</span>
-            <ChevronDown className={`h-3 w-3 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
-          </button>
-          {showAdvanced && (
-            <div className="mt-1 rounded-xl border border-border/60 bg-surface p-3">
-              <AdvancedFields
-                title={title}
-                onTitleChange={setTitle}
-                tags={tags}
-                onTagsChange={setTags}
-                systemPrompt={systemPrompt}
-                onSystemPromptChange={setSystemPrompt}
-                autoMerge={autoMerge}
-                onAutoMergeChange={setAutoMerge}
-                noWorktree={noWorktree}
-                onNoWorktreeChange={setNoWorktree}
-                nodeId={nodeId}
-                onNodeIdChange={setNodeId}
-                nodes={nodes}
-              />
-            </div>
-          )}
-        </div>
+        {/* Advanced — below composer */}
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="mt-1 inline-flex items-center gap-1 px-1 py-1 text-[11px] text-ink-muted transition hover:text-ink-secondary"
+        >
+          <span>Title, tags, system prompt…</span>
+          <ChevronDown className={`h-3 w-3 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+        </button>
+        {showAdvanced && (
+          <div className="border border-border/60 bg-surface p-3">
+            <AdvancedFields
+              title={title}
+              onTitleChange={setTitle}
+              tags={tags}
+              onTagsChange={setTags}
+              systemPrompt={systemPrompt}
+              onSystemPromptChange={setSystemPrompt}
+              autoMerge={autoMerge}
+              onAutoMergeChange={setAutoMerge}
+              noWorktree={noWorktree}
+              onNoWorktreeChange={setNoWorktree}
+              nodeId={nodeId}
+              onNodeIdChange={setNodeId}
+              nodes={nodes}
+            />
+          </div>
+        )}
       </div>
+
+      {/* Bottom spacer — keeps composer centered */}
+      <div className="flex-1" />
     </div>
   );
 }
