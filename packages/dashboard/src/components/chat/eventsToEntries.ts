@@ -74,6 +74,13 @@ export interface ErrorEntry {
   body: string;
 }
 
+export interface ToolProgressItem {
+  toolName?: string;
+  summary: string;
+  timestamp: string;
+  elapsedSeconds?: number;
+}
+
 export interface BackgroundTaskEntry {
   id: string;
   type: "background-task";
@@ -82,7 +89,7 @@ export interface BackgroundTaskEntry {
   title: string;
   detail?: string;
   status: "running" | "completed";
-  progressUpdates: Array<{ summary: string; timestamp: string }>;
+  toolCalls: ToolProgressItem[];
 }
 
 export interface CompactionEntry {
@@ -316,7 +323,7 @@ export function eventsToEntries(
   const completedItemIds = new Set<string>();
   const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
   const completedTaskIds = new Map<string, { summary?: string; status?: string; timestamp: string }>();
-  const taskProgressByToolUseId = new Map<string, Array<{ summary: string; timestamp: string }>>();
+  const taskProgressByToolUseId = new Map<string, ToolProgressItem[]>();
 
   for (const event of events) {
     if (event.type === "item.completed") {
@@ -338,11 +345,17 @@ export function eventsToEntries(
       });
     }
     if (event.type === "tool.progress" && event.itemId && event.summary) {
+      const item: ToolProgressItem = {
+        summary: event.summary,
+        timestamp: event.timestamp,
+        ...(event.toolName ? { toolName: event.toolName } : {}),
+        ...(event.elapsedSeconds !== undefined ? { elapsedSeconds: event.elapsedSeconds } : {}),
+      };
       const existing = taskProgressByToolUseId.get(event.itemId);
       if (existing) {
-        existing.push({ summary: event.summary, timestamp: event.timestamp });
+        existing.push(item);
       } else {
-        taskProgressByToolUseId.set(event.itemId, [{ summary: event.summary, timestamp: event.timestamp }]);
+        taskProgressByToolUseId.set(event.itemId, [item]);
       }
     }
   }
@@ -572,7 +585,7 @@ export function eventsToEntries(
       flushToolGroup();
       const taskId = event.taskId ?? event.toolUseId ?? `task-${event.timestamp}`;
       const completed = event.taskId ? completedTaskIds.get(event.taskId) : undefined;
-      const progressUpdates = event.toolUseId ? (taskProgressByToolUseId.get(event.toolUseId) ?? []) : [];
+      const toolCalls = event.toolUseId ? (taskProgressByToolUseId.get(event.toolUseId) ?? []) : [];
 
       entries.push({
         id: `bg-task-${taskId}`,
@@ -582,7 +595,7 @@ export function eventsToEntries(
         title: event.title ?? event.taskKind ?? "Background task",
         ...(event.detail ? { detail: event.detail } : {}),
         status: completed ? "completed" : "running",
-        progressUpdates,
+        toolCalls,
       });
       continue;
     }

@@ -211,7 +211,7 @@ describe("eventsToEntries", () => {
       title: "Explore dashboard structure",
       detail: "Inspect chat timeline rendering",
       status: "completed",
-      progressUpdates: [{ summary: "Searching for files…", timestamp: "2026-03-11T00:00:03Z" }],
+      toolCalls: [{ summary: "Searching for files…", timestamp: "2026-03-11T00:00:03Z" }],
     });
   });
 
