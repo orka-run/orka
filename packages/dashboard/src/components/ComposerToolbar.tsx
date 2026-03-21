@@ -169,88 +169,90 @@ export function ComposerToolbar({
   const permConfig = PERMISSION_MODES.find((p) => p.value === permissionMode) ?? PERMISSION_MODES[0]!;
 
   return (
-    <div className="flex items-center gap-1 border-t border-border/50 px-2 py-1.5">
-      <PillDropdown
-        value={backend}
-        onChange={onBackendChange}
-        options={BACKENDS}
-        renderTrigger={(label) => {
-          const cfg = BACKENDS.find((b) => b.value === backend);
-          const Icon = cfg?.icon ?? Terminal;
-          return (
-            <>
-              <Icon className="h-3.5 w-3.5" />
-              <span>{label}</span>
-            </>
-          );
-        }}
-      />
+    <div className="border-t border-border/50 px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-1">
+        <PillDropdown
+          value={backend}
+          onChange={onBackendChange}
+          options={BACKENDS}
+          renderTrigger={(label) => {
+            const cfg = BACKENDS.find((b) => b.value === backend);
+            const Icon = cfg?.icon ?? Terminal;
+            return (
+              <>
+                <Icon className="h-3.5 w-3.5" />
+                <span>{label}</span>
+              </>
+            );
+          }}
+        />
 
-      <PillDropdown
-        value={model}
-        onChange={onModelChange}
-        options={models}
-        renderTrigger={(label) => <span>{label}</span>}
-      />
+        <PillDropdown
+          value={model}
+          onChange={onModelChange}
+          options={models}
+          renderTrigger={(label) => <span>{label}</span>}
+        />
 
-      <PillDropdown
-        value={permissionMode}
-        onChange={(v) => {
-          if (v === "bypass") {
-            const consented = localStorage.getItem("orka-bypass-consent");
-            if (!consented) {
-              localStorage.setItem("orka-bypass-consent", "accepted");
+        <PillDropdown
+          value={permissionMode}
+          onChange={(v) => {
+            if (v === "bypass") {
+              const consented = localStorage.getItem("orka-bypass-consent");
+              if (!consented) {
+                localStorage.setItem("orka-bypass-consent", "accepted");
+              }
             }
-          }
-          onPermissionModeChange(v);
-        }}
-        options={PERMISSION_MODES}
-        renderTrigger={() => (
-          <>
-            <span className={`h-2 w-2 rounded-full ${permConfig.dot}`} />
-            <span>{permConfig.label}</span>
-            {permissionMode === "bypass" && (
-              <AlertTriangle className="h-3 w-3 text-red-400" />
-            )}
-          </>
-        )}
-      />
+            onPermissionModeChange(v);
+          }}
+          options={PERMISSION_MODES}
+          renderTrigger={() => (
+            <>
+              <span className={`h-2 w-2 rounded-full ${permConfig.dot}`} />
+              <span>{permConfig.label}</span>
+              {permissionMode === "bypass" && (
+                <AlertTriangle className="h-3 w-3 text-red-400" />
+              )}
+            </>
+          )}
+        />
 
-      {onNoWorktreeChange && (
+        {onNoWorktreeChange && (
+          <button
+            type="button"
+            onClick={() => onNoWorktreeChange(!noWorktree)}
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+              noWorktree
+                ? "text-amber-500 hover:bg-surface-hover"
+                : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
+            }`}
+            title={noWorktree ? "Running in-place (no worktree)" : "Running in isolated worktree"}
+          >
+            <GitBranch className="h-3.5 w-3.5" />
+            <span>{noWorktree ? "in-place" : "worktree"}</span>
+          </button>
+        )}
+
+        <div className="flex-1" />
+
         <button
           type="button"
-          onClick={() => onNoWorktreeChange(!noWorktree)}
-          className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition ${
-            noWorktree
-              ? "text-amber-500 hover:bg-surface-hover"
-              : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
+          onClick={onSend}
+          disabled={!canSend}
+          aria-label="Send message"
+          className={`inline-flex h-8 min-w-[36px] items-center justify-center rounded-lg text-white transition ${
+            canSend
+              ? "bg-accent-strong hover:bg-accent"
+              : "cursor-not-allowed bg-surface-hover text-ink-muted"
           }`}
-          title={noWorktree ? "Running in-place (no worktree)" : "Running in isolated worktree"}
         >
-          <GitBranch className="h-3.5 w-3.5" />
-          <span>{noWorktree ? "in-place" : "worktree"}</span>
+          {isSending ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : (
+            <ArrowUp className="h-4 w-4" />
+          )}
         </button>
-      )}
-
-      <div className="flex-1" />
-
-      <button
-        type="button"
-        onClick={onSend}
-        disabled={!canSend}
-        aria-label="Send message"
-        className={`inline-flex h-8 min-w-[36px] items-center justify-center rounded-lg text-white transition ${
-          canSend
-            ? "bg-accent-strong hover:bg-accent"
-            : "cursor-not-allowed bg-surface-hover text-ink-muted"
-        }`}
-      >
-        {isSending ? (
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-        ) : (
-          <ArrowUp className="h-4 w-4" />
-        )}
-      </button>
+      </div>
     </div>
   );
 }
