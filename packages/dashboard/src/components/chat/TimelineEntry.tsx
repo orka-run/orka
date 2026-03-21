@@ -1,11 +1,11 @@
 import { memo } from "react";
-import { Bot, LoaderCircle } from "lucide-react";
+import { Bot, LoaderCircle, Scissors } from "lucide-react";
 import { ApprovalCard } from "../ApprovalCard";
 import { BackgroundTaskCard } from "./BackgroundTaskCard";
 import { AssistantMessage, SystemMessage, UserMessage, type QuotedText } from "./MessageEntry";
 import { ApiRetryEntry, ErrorEntry, RateLimitEntry } from "./StatusEntries";
 import { ToolCallGroup } from "./ToolCallEntry";
-import type { ChatEntry, ThinkingState } from "./eventsToEntries";
+import type { ChatEntry, CompactionEntry, ThinkingState } from "./eventsToEntries";
 
 export const ChatTimelineEntry = memo(function ChatTimelineEntry({
   entry,
@@ -43,6 +43,9 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
   }
   if (entry.type === "background-task") {
     return <BackgroundTaskCard entry={entry} />;
+  }
+  if (entry.type === "compaction") {
+    return <CompactionDivider entry={entry} />;
   }
   if (entry.type === "rate-limit") {
     return <RateLimitEntry entry={entry} />;
@@ -97,4 +100,21 @@ export const ThinkingIndicator = memo(function ThinkingIndicator({ state }: { st
   }
 
   return null;
+});
+
+const CompactionDivider = memo(function CompactionDivider({ entry }: { entry: CompactionEntry }) {
+  const label = entry.tokensBefore !== undefined && entry.tokensAfter !== undefined
+    ? `Context trimmed · ${String(Math.round(entry.tokensBefore / 1000))}k → ${String(Math.round(entry.tokensAfter / 1000))}k tokens`
+    : "Context trimmed";
+
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <div className="h-px flex-1 bg-status-warning/30" />
+      <div className="flex items-center gap-1 text-[10px] text-status-warning/70">
+        <Scissors className="h-3 w-3" />
+        {label}
+      </div>
+      <div className="h-px flex-1 bg-status-warning/30" />
+    </div>
+  );
 });

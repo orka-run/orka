@@ -85,6 +85,15 @@ export interface BackgroundTaskEntry {
   progressUpdates: Array<{ summary: string; timestamp: string }>;
 }
 
+export interface CompactionEntry {
+  id: string;
+  type: "compaction";
+  timestamp: string;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  body: string;
+}
+
 export type ChatEntry =
   | SystemEntry
   | AssistantEntry
@@ -94,7 +103,8 @@ export type ChatEntry =
   | ApiRetryEntry
   | ErrorEntry
   | ApprovalEntry
-  | BackgroundTaskEntry;
+  | BackgroundTaskEntry
+  | CompactionEntry;
 
 export type ThinkingState = "thinking" | "tools" | "writing" | "idle" | "background";
 
@@ -620,11 +630,11 @@ export function eventsToEntries(
       case "session.compacted":
         entries.push({
           id: `session-compacted-${event.timestamp}`,
-          type: "system",
+          type: "compaction",
           timestamp: event.timestamp,
-          title: "Context compacted",
+          ...(event.tokenCountBefore !== undefined ? { tokensBefore: event.tokenCountBefore } : {}),
+          ...(event.tokenCountAfter !== undefined ? { tokensAfter: event.tokenCountAfter } : {}),
           body: formatCompactionBody(event),
-          tone: "info",
         });
         break;
       case "turn.completed":
