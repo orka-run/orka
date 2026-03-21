@@ -63,27 +63,38 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
   const [inflight, setInflight] = useState<"approve" | "deny" | null>(null);
   const isPending = entry.status === "pending";
 
+  const [stale, setStale] = useState(false);
+
   async function handleClick(decision: "approve" | "deny") {
-    if (!isPending || inflight) return;
+    if (!isPending || inflight || stale) return;
     setInflight(decision);
     try {
       await onResolve(entry.requestId, decision);
+    } catch {
+      // Request no longer exists (daemon restarted, session died) — mark as stale
+      setStale(true);
     } finally {
       setInflight(null);
     }
   }
 
-  const borderColor = isPending
-    ? "border-status-warning/50"
-    : entry.status === "approved"
-      ? "border-emerald-600/30"
-      : "border-status-error/30";
+  const isActive = isPending && !stale;
 
-  const bgColor = isPending
-    ? "bg-status-warning/5"
-    : entry.status === "approved"
-      ? "bg-emerald-600/5"
-      : "bg-status-error/5";
+  const borderColor = stale
+    ? "border-border/50"
+    : isPending
+      ? "border-status-warning/50"
+      : entry.status === "approved"
+        ? "border-emerald-600/30"
+        : "border-status-error/30";
+
+  const bgColor = stale
+    ? "bg-surface-alt/50"
+    : isPending
+      ? "bg-status-warning/5"
+      : entry.status === "approved"
+        ? "bg-emerald-600/5"
+        : "bg-status-error/5";
 
   const Icon = REQUEST_TYPE_ICONS[entry.requestType] ?? ShieldAlert;
 
@@ -92,8 +103,11 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
       <div className="flex items-center gap-2">
         <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${isPending ? "text-status-warning" : "text-ink-muted"}`} />
         <p className="text-[12px] font-medium text-ink">{humanRequestType(entry.requestType)}</p>
-        {isPending && <ElapsedTime since={entry.timestamp} />}
-        {!isPending && (
+        {isActive && <ElapsedTime since={entry.timestamp} />}
+        {stale && (
+          <span className="ml-auto text-[10px] text-ink-muted">Expired</span>
+        )}
+        {!isPending && !stale && (
           <span
             className={`ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${
               entry.status === "approved"
@@ -113,7 +127,7 @@ export function ApprovalCard({ entry, onResolve }: ApprovalCardProps) {
         </pre>
       )}
 
-      {isPending && (
+      {isActive && (
         <div className="mt-2 flex items-center gap-2">
           <button
             type="button"
