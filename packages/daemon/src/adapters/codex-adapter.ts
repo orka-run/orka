@@ -37,7 +37,7 @@ function mapCodexReasoningEffort(effort: ReasoningEffort): string | null {
   }
 }
 
-type CodexClientRequestMethod = "initialize" | "thread/start" | "turn/start" | "turn/steer" | "turn/interrupt" | "thread/unsubscribe";
+type CodexClientRequestMethod = "initialize" | "thread/start" | "thread/resume" | "turn/start" | "turn/steer" | "turn/interrupt" | "thread/unsubscribe";
 type CodexClientNotificationMethod = "initialized";
 type CodexProcess = ReturnType<typeof Bun.spawn>;
 type CodexSpawn = typeof Bun.spawn;
@@ -315,22 +315,39 @@ export class CodexAdapter implements ProviderAdapter {
           });
           await meta.sendNotification("initialized");
 
-          const thread = await meta.sendRequest<{ thread?: { id?: string } }>("thread/start", {
-            cwd: input.cwd,
-            model: input.model,
-            approvalPolicy: "never",
-            sandbox: "danger-full-access",
-            experimentalRawEvents: false,
-            persistExtendedHistory: false,
-            ephemeral: true,
-          });
+          const isResume = typeof input.resumeSessionId === "string" && input.resumeSessionId.length > 0;
 
-          const providerThreadId = thread.thread?.id;
+          let providerThreadId: string | undefined;
+
+          if (isResume) {
+            // Resume existing thread — Codex loads history from its persisted rollout file
+            const resumed = await meta.sendRequest<{ thread?: { id?: string } }>("thread/resume", {
+              threadId: input.resumeSessionId,
+              cwd: input.cwd,
+              model: input.model,
+              approvalPolicy: "never",
+              sandbox: "danger-full-access",
+            });
+            providerThreadId = resumed.thread?.id;
+          } else {
+            // Start a new thread — persist to disk so it can be resumed later
+            const thread = await meta.sendRequest<{ thread?: { id?: string } }>("thread/start", {
+              cwd: input.cwd,
+              model: input.model,
+              approvalPolicy: "never",
+              sandbox: "danger-full-access",
+              experimentalRawEvents: false,
+              persistExtendedHistory: true,
+            });
+            providerThreadId = thread.thread?.id;
+          }
+
           if (typeof providerThreadId !== "string" || providerThreadId.length === 0) {
             throw new Error("Codex app-server did not return a provider thread id");
           }
 
           meta.providerThreadId = providerThreadId;
+          handle.providerSessionId = providerThreadId;
 
           if (input.prompt) {
             await this.startTurn(handle, {
@@ -634,7 +651,8 @@ export function mapCodexEvent(
   }
 
   switch (raw.method) {
-    case "thread/started": {
+    case "thread/started":
+    case "thread/resumed": {
       const providerThreadId = getString(raw.params, "thread", "id");
       if (providerThreadId && meta) {
         meta.providerThreadId = providerThreadId;

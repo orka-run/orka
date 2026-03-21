@@ -530,6 +530,11 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     const rawLogPath = join(logsDir, `${sessionId}.raw.jsonl`);
     ctx.db.updateSessionRawLogFile(sessionId, rawLogPath);
 
+    // Persist provider-assigned session ID (e.g. Codex thread ID) for future resume
+    if (handle.providerSessionId && handle.providerSessionId !== providerSessionId) {
+      ctx.db.updateSessionProviderSessionId(sessionId, handle.providerSessionId);
+    }
+
     ctx.db.updateSessionStatus(sessionId, "running", { startedAt });
     ctx.sessionRuntime.turnCounts.set(sessionId, 0);
     queueCheckpointCapture(ctx, sessionId, 0, workingDir);
@@ -654,6 +659,11 @@ export async function resumeSession(
     });
 
     span.addEvent("session.resumed");
+
+    // Persist provider-assigned session ID if it changed (e.g. Codex thread/resume returns same ID)
+    if (handle.providerSessionId && handle.providerSessionId !== session.providerSessionId) {
+      ctx.db.updateSessionProviderSessionId(sessionId, handle.providerSessionId);
+    }
 
     // Emit user.input event
     if (emitUserInput) {

@@ -42,6 +42,9 @@ export interface ProviderSessionHandle {
   events: AsyncIterable<ProviderRuntimeEvent>;
   rawEvents?: AsyncIterable<RawProviderLine>;
   meta: Record<string, unknown>;
+  /** Provider-specific session/thread ID — set by the adapter after session start.
+   *  Used to persist the ID for future resume (e.g. Codex thread ID). */
+  providerSessionId?: string;
 }
 
 export interface ProviderAdapter {
