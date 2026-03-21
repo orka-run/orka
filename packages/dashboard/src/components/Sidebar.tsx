@@ -1,11 +1,14 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertTriangle, Layers, Link2, MessageSquarePlus, Pin, Plus, Search, Server, Settings2 } from "lucide-react";
 import type { NodeInfo, WorkspaceInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
+import { useSessionStore } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
 import { usePinnedSessions } from "../hooks/usePinnedSessions";
+import { useRpcClient } from "../lib/transportContext";
+import { SessionContextMenu, type ContextMenuPosition } from "./SessionContextMenu";
 
 const ITEM_HEIGHT = 48;
 const GAP = 4;
@@ -57,6 +60,61 @@ export function Sidebar({
   const showWorkspaceSwitcher = workspaces.length > 0;
   const scrollRef = useRef<HTMLDivElement>(null);
   const { pinnedIds, toggle: togglePin, isPinned } = usePinnedSessions();
+  const rpcClient = useRpcClient();
+  const { stopSession, deleteSession } = useSessionStore();
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ session: SessionSummary; position: ContextMenuPosition } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  const openContextMenu = useCallback((session: SessionSummary, position: ContextMenuPosition) => {
+    setContextMenu({ session, position });
+  }, []);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, session: SessionSummary) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openContextMenu(session, { x: e.clientX, y: e.clientY });
+    },
+    [openContextMenu],
+  );
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent, session: SessionSummary) => {
+      longPressTriggeredRef.current = false;
+      const touch = e.touches[0];
+      if (!touch) return;
+      const pos = { x: touch.clientX, y: touch.clientY };
+      longPressTimerRef.current = setTimeout(() => {
+        longPressTriggeredRef.current = true;
+        openContextMenu(session, pos);
+      }, 500);
+    },
+    [openContextMenu],
+  );
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    if (longPressTriggeredRef.current) {
+      e.preventDefault();
+    }
+  }, []);
+
+  const handleTouchMove = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
 
   // Filter by selected node
   const nodeFilteredSessions = selectedNodeId
@@ -220,6 +278,10 @@ export function Sidebar({
                             ? "border-border bg-surface-alt"
                             : "border-transparent bg-surface hover:border-border hover:bg-surface-alt"
                       }`}
+                      onContextMenu={(e) => handleContextMenu(e, session)}
+                      onTouchStart={(e) => handleTouchStart(e, session)}
+                      onTouchEnd={handleTouchEnd}
+                      onTouchMove={handleTouchMove}
                     >
                       <button
                         type="button"
@@ -235,25 +297,8 @@ export function Sidebar({
                               ) : null}
                               {session.title || session.id}
                             </p>
-                            <span className="flex shrink-0 items-center gap-0.5">
-                              <span className="text-[10px] text-ink-muted">
-                                {formatRelativeTime(session.createdAt, now)}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  togglePin(session.id);
-                                }}
-                                title={isPinned(session.id) ? "Unpin session" : "Pin session"}
-                                className={`rounded-sm p-0.5 transition ${
-                                  isPinned(session.id)
-                                    ? "text-accent hover:text-accent-strong"
-                                    : "text-ink-muted/40 hover:text-ink"
-                                }`}
-                              >
-                                <Pin className="h-2.5 w-2.5" />
-                              </button>
+                            <span className="shrink-0 text-[10px] text-ink-muted">
+                              {formatRelativeTime(session.createdAt, now)}
                             </span>
                           </div>
                           <div className="mt-1 flex items-center gap-1">
@@ -280,6 +325,19 @@ export function Sidebar({
           </div>
         )}
       </div>
+      {contextMenu ? (
+        <SessionContextMenu
+          session={contextMenu.session}
+          position={contextMenu.position}
+          isPinned={isPinned(contextMenu.session.id)}
+          onClose={closeContextMenu}
+          onTogglePin={() => togglePin(contextMenu.session.id)}
+          onStop={() => void stopSession(rpcClient, contextMenu.session.id)}
+          onToggleKept={() => void rpcClient.setKept(contextMenu.session.id, !contextMenu.session.kept)}
+          onDelete={() => void deleteSession(rpcClient, contextMenu.session.id)}
+          onCopyId={() => void navigator.clipboard.writeText(contextMenu.session.id)}
+        />
+      ) : null}
     </aside>
   );
 }
