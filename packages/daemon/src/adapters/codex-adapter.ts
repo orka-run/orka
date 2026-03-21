@@ -228,7 +228,13 @@ export class CodexAdapter implements ProviderAdapter {
             command.push("-c", `reasoning_effort=${codexEffort}`);
           }
         }
-        command.push("--dangerously-bypass-approvals-and-sandbox", "app-server");
+        if (input.permissionMode === "bypass" || !input.permissionMode) {
+          command.push("--dangerously-bypass-approvals-and-sandbox");
+        } else if (input.permissionMode === "auto") {
+          command.push("-a", "untrusted");
+        }
+        // supervised: no flag — codex will ask via JSON-RPC (request.opened events)
+        command.push("app-server");
 
         const spawnEnv = buildAgentEnv(input.env);
         spawnEnv["ORKA_SESSION_ID"] = input.threadId;
