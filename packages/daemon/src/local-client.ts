@@ -791,6 +791,10 @@ class LocalClient implements OrkaService {
   }
 
   async createWorkspace(opts: { name: string; paths?: Array<{ nodeId?: string; path: string }>; settings?: WorkspaceSettings; metadata?: WorkspaceMetadata }): Promise<WorkspaceInfo> {
+    // Return existing workspace if one with the same name already exists
+    const existing = this.ctx.db.listWorkspaces(false).find((w) => w.name === opts.name);
+    if (existing) return existing;
+
     const id = generateId("ws");
     const now = new Date().toISOString();
     this.ctx.db.insertWorkspace({
