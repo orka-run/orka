@@ -135,6 +135,10 @@ async function handleProviderEvent(
       persistUsageRecord(sessionId, handle, event, callbacks);
       await handleTurnCompleted(sessionId, callbacks);
       return;
+    case "turn.aborted":
+      // Deliver any queued messages so the agent processes the user's follow-up
+      await handleTurnCompleted(sessionId, callbacks);
+      return;
     case "rate.limit":
       callbacks.rememberRateLimitEvent?.(sessionId, event.payload.rateLimitInfo);
       return;

@@ -903,8 +903,8 @@ export async function cancelTurnInSession(ctx: DaemonContext, sessionId: string)
 
     await ctx.providerService.cancelTurn(sessionId);
 
-    // Clear any queued messages — user explicitly cancelled, don't deliver pending input
-    ctx.sessionRuntime.pendingMessages.delete(sessionId);
+    // Keep queued messages — they will be delivered when turn.aborted is
+    // processed by the consumer, so the agent picks up the user's follow-up.
   });
 }
 
