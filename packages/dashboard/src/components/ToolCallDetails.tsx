@@ -52,8 +52,19 @@ const COMMON_COMMAND_RE =
   /^(?:\$ |>|bun\b|npm\b|pnpm\b|yarn\b|node\b|python(?:3)?\b|bash\b|sh\b|git\b|rg\b|grep\b|find\b|ls\b|cat\b|sed\b|awk\b|make\b|cargo\b|go\b|uv\b|pytest\b|docker\b|kubectl\b|terraform\b)/i;
 
 export function ToolCallDetails({ title, details, args, projectPath }: ToolCallDetailsProps) {
-  const hasArgs = args != null && typeof args === "object" && Object.keys(args as Record<string, unknown>).length > 0;
-  if (details.length === 0 && !hasArgs) {
+  const argsRecord = (args != null && typeof args === "object" ? args : null) as Record<string, unknown> | null;
+  const hasArgs = argsRecord != null && Object.keys(argsRecord).length > 0;
+
+  // Synthesize a diff from Edit args (old_string + new_string) so the user
+  // sees a visual diff instead of raw key-value pairs.
+  const editDiff = synthesizeEditDiff(argsRecord);
+  // Filter old_string/new_string out of ArgsDetail when we have a synthetic diff
+  const filteredArgs = editDiff && argsRecord
+    ? Object.fromEntries(Object.entries(argsRecord).filter(([k]) => k !== "old_string" && k !== "new_string"))
+    : argsRecord;
+  const hasFilteredArgs = filteredArgs != null && Object.keys(filteredArgs).length > 0;
+
+  if (details.length === 0 && !hasArgs && !editDiff) {
     return (
       <div className="rounded-sm border border-border bg-surface-alt px-2 py-1.5 font-mono text-[11px] text-ink-muted">
         No tool details recorded.
@@ -65,16 +76,30 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
   const absolutePath = getPathFromArgs(args);
   const resolved = absolutePath ? resolvePath(absolutePath, projectPath ?? null) : null;
 
-  const parsedDetails = details.map((detail, index) => parseDetail(title, detail, index));
+  // When we have a synthetic diff, filter out details that are just the file path
+  // (adapter sets detail = file path for Edit tools, which is redundant)
+  const filteredDetails = editDiff
+    ? details.filter((d) => {
+        const trimmed = d.trim();
+        const diffPath = "path" in editDiff ? editDiff.path : undefined;
+        return trimmed !== diffPath && !isLikelyFilePath(trimmed);
+      })
+    : details;
+  const parsedDetails = filteredDetails.map((detail, index) => parseDetail(title, detail, index));
+
+  // Inject synthetic edit diff as the primary detail
+  if (editDiff) {
+    parsedDetails.unshift(editDiff);
+  }
 
   return (
     <div className="space-y-2">
-      {hasArgs ? <ArgsDetail args={args as Record<string, unknown>} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
+      {hasFilteredArgs ? <ArgsDetail args={filteredArgs} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
       {parsedDetails.map((detail, index) => (
         <ExpandableDetail
           key={`${detail.kind}-${detail.label}-${String(index)}`}
           detail={detail}
-          defaultOpen={index === 0 && !hasArgs}
+          defaultOpen={index === 0}
           resolved={resolved}
           {...(projectPath !== undefined ? { projectPath } : {})}
         />
@@ -777,4 +802,29 @@ function summarizeText(value: string, maxLength = 72): string {
   }
 
   return `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+/** Synthesize a unified-diff-like ParsedDetail from Edit tool args (old_string → new_string). */
+function synthesizeEditDiff(args: Record<string, unknown> | null): ParsedDetail | null {
+  if (!args) return null;
+  const oldStr = typeof args["old_string"] === "string" ? args["old_string"] : null;
+  const newStr = typeof args["new_string"] === "string" ? args["new_string"] : null;
+  if (oldStr == null || newStr == null) return null;
+
+  const path = typeof args["file_path"] === "string" ? args["file_path"] : undefined;
+  const oldLines = oldStr.split("\n");
+  const newLines = newStr.split("\n");
+  const diffLines: string[] = [];
+  diffLines.push(`--- ${path ?? "a"}`);
+  diffLines.push(`+++ ${path ?? "b"}`);
+  diffLines.push(`@@ -1,${String(oldLines.length)} +1,${String(newLines.length)} @@`);
+  for (const line of oldLines) diffLines.push(`-${line}`);
+  for (const line of newLines) diffLines.push(`+${line}`);
+
+  return {
+    kind: "edit",
+    label: path ?? "Edit diff",
+    ...(path ? { path } : {}),
+    content: diffLines.join("\n"),
+  };
 }
