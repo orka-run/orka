@@ -1,5 +1,8 @@
+import { useState } from "react";
+import { Maximize2 } from "lucide-react";
 import { resolvePath, getPathFromArgs, type ResolvedPath } from "../lib/pathUtils";
 import { highlightCode } from "../lib/syntaxHighlight";
+import { FileContentModal } from "./FileContentModal";
 
 interface ToolCallDetailsProps {
   title: string;
@@ -68,27 +71,83 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
     <div className="space-y-2">
       {hasArgs ? <ArgsDetail args={args as Record<string, unknown>} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
       {parsedDetails.map((detail, index) => (
-        <details
+        <ExpandableDetail
           key={`${detail.kind}-${detail.label}-${String(index)}`}
-          open={index === 0 && !hasArgs}
-          className="overflow-hidden rounded-sm border border-border bg-surface"
-        >
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1.5 [&::-webkit-details-marker]:hidden">
-            <span className="truncate font-mono text-[11px] text-ink-secondary">{detail.label}</span>
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
-              {detail.kind === "default" ? "output" : detail.kind}
-            </span>
-          </summary>
-          <div className="border-t border-border">
-            {detail.kind === "read" ? <ReadDetail detail={detail} resolved={resolved} /> : null}
-            {detail.kind === "edit" ? <EditDetail detail={detail} resolved={resolved} /> : null}
-            {detail.kind === "command" ? <CommandDetail detail={detail} /> : null}
-            {detail.kind === "search" ? <SearchDetail detail={detail} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
-            {detail.kind === "default" ? <DefaultDetail detail={detail} /> : null}
-          </div>
-        </details>
+          detail={detail}
+          defaultOpen={index === 0 && !hasArgs}
+          resolved={resolved}
+          {...(projectPath !== undefined ? { projectPath } : {})}
+        />
       ))}
     </div>
+  );
+}
+
+/** Wraps a single parsed detail with an expand-to-modal button. */
+function ExpandableDetail({
+  detail,
+  defaultOpen,
+  resolved,
+  projectPath,
+}: {
+  detail: ParsedDetail;
+  defaultOpen: boolean;
+  resolved?: ResolvedPath | null;
+  projectPath?: string | null;
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const modalTitle = detail.kind === "command"
+    ? (detail as Extract<ParsedDetail, { kind: "command" }>).command
+    : ("path" in detail && detail.path) || detail.label;
+
+  const modalContent = detail.kind === "command"
+    ? (detail as Extract<ParsedDetail, { kind: "command" }>).output
+    : detail.kind === "search"
+      ? (detail as Extract<ParsedDetail, { kind: "search" }>).results.join("\n")
+      : detail.content;
+
+  return (
+    <>
+      <details
+        open={defaultOpen}
+        className="overflow-hidden rounded-sm border border-border bg-surface"
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1.5 [&::-webkit-details-marker]:hidden">
+          <span className="truncate font-mono text-[11px] text-ink-secondary">{detail.label}</span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setModalOpen(true);
+              }}
+              className="rounded-sm p-0.5 text-ink-muted transition hover:text-ink"
+              title="Expand in modal"
+            >
+              <Maximize2 className="h-3 w-3" />
+            </button>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
+              {detail.kind === "default" ? "output" : detail.kind}
+            </span>
+          </span>
+        </summary>
+        <div className="border-t border-border">
+          {detail.kind === "read" ? <ReadDetail detail={detail} {...(resolved !== undefined ? { resolved } : {})} /> : null}
+          {detail.kind === "edit" ? <EditDetail detail={detail} {...(resolved !== undefined ? { resolved } : {})} /> : null}
+          {detail.kind === "command" ? <CommandDetail detail={detail} /> : null}
+          {detail.kind === "search" ? <SearchDetail detail={detail} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
+          {detail.kind === "default" ? <DefaultDetail detail={detail} /> : null}
+        </div>
+      </details>
+      <FileContentModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={modalTitle}
+        content={modalContent}
+      />
+    </>
   );
 }
 
