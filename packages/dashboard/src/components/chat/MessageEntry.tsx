@@ -1,5 +1,5 @@
-import { memo } from "react";
-import { AlertTriangle, Bot, Clock3, User } from "lucide-react";
+import { memo, useState } from "react";
+import { AlertTriangle, Bot, ChevronRight, Clock3, User } from "lucide-react";
 import { formatDateTime } from "../../lib/sessionUi";
 import { MarkdownContent } from "../MarkdownContent";
 import type { AssistantEntry, SystemEntry, UserEntry } from "./eventsToEntries";
@@ -35,6 +35,7 @@ export const UserMessage = memo(function UserMessage({ entry }: { entry: UserEnt
 });
 
 export const SystemMessage = memo(function SystemMessage({ entry }: { entry: SystemEntry }) {
+  const [collapsed, setCollapsed] = useState(entry.defaultCollapsed ?? false);
   const toneClasses =
     entry.tone === "warning"
       ? {
@@ -57,10 +58,28 @@ export const SystemMessage = memo(function SystemMessage({ entry }: { entry: Sys
             body: "text-ink-muted",
           };
 
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setCollapsed(false); }}
+        className={`flex w-full items-center gap-1.5 rounded-sm border px-2 py-1 text-left ${toneClasses.container}`}
+      >
+        <ChevronRight className={`h-3 w-3 shrink-0 ${toneClasses.icon}`} />
+        <span className={`text-[11px] ${toneClasses.title}`}>{entry.title}</span>
+        <span className={`text-[11px] opacity-60 ${toneClasses.body}`}>{entry.body}</span>
+      </button>
+    );
+  }
+
   return (
     <div className={`flex items-start gap-2 rounded-sm border px-2 py-1.5 ${toneClasses.container}`}>
       {entry.tone === "warning" || entry.tone === "error" ? (
         <AlertTriangle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${toneClasses.icon}`} />
+      ) : entry.defaultCollapsed ? (
+        <button type="button" onClick={() => { setCollapsed(true); }} className="mt-0.5 shrink-0">
+          <ChevronRight className={`h-3.5 w-3.5 rotate-90 ${toneClasses.icon}`} />
+        </button>
       ) : (
         <Clock3 className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${toneClasses.icon}`} />
       )}

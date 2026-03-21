@@ -156,6 +156,7 @@ describe("eventsToEntries", () => {
       title: "Hook",
       body: "PreToolUse:Bash - allowed",
       tone: "info",
+      defaultCollapsed: true,
     });
     expect(entries).toContainEqual({
       id: "session-compacted-2026-03-11T00:00:04Z",

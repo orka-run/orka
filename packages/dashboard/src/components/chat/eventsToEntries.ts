@@ -23,6 +23,7 @@ export interface SystemEntry {
   title: string;
   body: string;
   tone?: "default" | "warning" | "error" | "info";
+  defaultCollapsed?: boolean;
 }
 
 export interface AssistantEntry {
@@ -532,6 +533,7 @@ export function eventsToEntries(
           title: "Hook",
           body: formatHookBody(event),
           tone: "info",
+          defaultCollapsed: true,
         });
         break;
       case "session.status":
@@ -557,22 +559,6 @@ export function eventsToEntries(
       case "turn.completed": {
         if (pendingQueuedEntryIds.size > 0) {
           queuedMessagesReadyForDelivery = true;
-        }
-        const parts: string[] = [];
-        if (event.cost != null) {
-          parts.push(`$${event.cost.toFixed(4)}`);
-        }
-        if (event.tokens) {
-          parts.push(`${String(event.tokens.input)} in / ${String(event.tokens.output)} out`);
-        }
-        if (parts.length > 0) {
-          entries.push({
-            id: `turn-completed-${event.turnId}`,
-            type: "system",
-            timestamp: event.timestamp,
-            title: "Turn completed",
-            body: parts.join(" · "),
-          });
         }
         break;
       }
