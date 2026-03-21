@@ -158,6 +158,15 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
         if (toolApprovalMatch && req.method === "POST") {
           const sessionId = toolApprovalMatch[1] ?? "";
           try {
+            // Check permission mode — bypass auto-approves, no human in the loop
+            const session = ctx.db.getSession(sessionId);
+            if (session?.permissionMode === "bypass") {
+              return new Response(JSON.stringify({ decision: "allow", reason: "Bypass mode" }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              });
+            }
+
             const body = (await req.json()) as {
               toolName: string;
               toolInput: unknown;
