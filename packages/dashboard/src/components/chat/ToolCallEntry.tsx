@@ -101,11 +101,14 @@ function ToolCallDetails({
 export const ToolCallGroup = memo(function ToolCallGroup({
   entry,
   isExpanded,
+  isCollapsed,
   onToggleExpand,
   projectPath,
 }: {
   entry: ToolCallGroupEntry;
   isExpanded?: boolean;
+  /** User explicitly collapsed this group — overrides auto-expand from inProgress. */
+  isCollapsed?: boolean;
   onToggleExpand?: (groupId: string, isOpen: boolean) => void;
   projectPath?: string;
 }) {
@@ -117,7 +120,7 @@ export const ToolCallGroup = memo(function ToolCallGroup({
       return null;
     }
 
-    const isOpen = isExpanded ?? false;
+    const isOpen = isCollapsed ? false : (isExpanded ?? false);
 
     return (
       <details
@@ -155,7 +158,8 @@ export const ToolCallGroup = memo(function ToolCallGroup({
   }
 
   if (entry.tools.length >= 3) {
-    const isOpen = hasInProgress || (isExpanded ?? false);
+    // Auto-expand when tools are in progress, UNLESS user explicitly collapsed
+    const isOpen = isCollapsed ? false : (hasInProgress || (isExpanded ?? false));
     const summary = buildToolGroupSummary(entry.tools);
 
     return (
@@ -188,9 +192,19 @@ export const ToolCallGroup = memo(function ToolCallGroup({
     );
   }
 
+  const isOpen = isCollapsed ? false : true;
   const label = hasInProgress ? `Using ${String(entry.tools.length)} tools…` : `Used ${String(entry.tools.length)} tools`;
   return (
-    <details open className="overflow-hidden rounded-sm border border-border bg-surface-alt">
+    <details
+      open={isOpen}
+      onToggle={(event) => {
+        const nextState = event.currentTarget.open;
+        if (nextState !== isOpen) {
+          onToggleExpand?.(entry.id, nextState);
+        }
+      }}
+      className="overflow-hidden rounded-sm border border-border bg-surface-alt"
+    >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1">
         <div className="flex items-center gap-1.5">
           <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-surface-hover text-ink-muted">

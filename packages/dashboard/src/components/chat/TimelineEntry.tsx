@@ -10,6 +10,7 @@ import type { ChatEntry, CompactionEntry, ThinkingState } from "./eventsToEntrie
 export const ChatTimelineEntry = memo(function ChatTimelineEntry({
   entry,
   isExpanded,
+  isCollapsed,
   onToggleExpand,
   onApprovalResolve,
   projectPath,
@@ -17,6 +18,7 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
 }: {
   entry: ChatEntry;
   isExpanded?: boolean;
+  isCollapsed?: boolean;
   onToggleExpand?: (groupId: string, isOpen: boolean) => void;
   onApprovalResolve?: (requestId: string, decision: "approve" | "deny") => Promise<void>;
   projectPath?: string;
@@ -36,6 +38,7 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
       <ToolCallGroup
         entry={entry}
         {...(isExpanded !== undefined ? { isExpanded } : {})}
+        {...(isCollapsed !== undefined ? { isCollapsed } : {})}
         {...(onToggleExpand ? { onToggleExpand } : {})}
         {...(projectPath ? { projectPath } : {})}
       />

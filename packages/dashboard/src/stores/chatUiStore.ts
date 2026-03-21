@@ -4,6 +4,8 @@ export interface PerSessionChatState {
   scrollTop: number;
   autoScroll: boolean;
   expandedGroups: Set<string>;
+  /** Groups the user explicitly collapsed — overrides auto-expand from inProgress tools. */
+  collapsedGroups: Set<string>;
   draftText: string;
 }
 
@@ -12,7 +14,7 @@ const MAX_SESSIONS = 50;
 const DEBOUNCE_MS = 500;
 
 function defaults(): PerSessionChatState {
-  return { scrollTop: Infinity, autoScroll: true, expandedGroups: new Set(), draftText: "" };
+  return { scrollTop: Infinity, autoScroll: true, expandedGroups: new Set(), collapsedGroups: new Set(), draftText: "" };
 }
 
 /** Serializable form for sessionStorage (expandedGroups omitted). */
@@ -38,6 +40,7 @@ function restoreSession(entry: PersistedEntry): PerSessionChatState {
     scrollTop: entry.scrollTop,
     autoScroll: entry.autoScroll,
     expandedGroups: new Set(),
+    collapsedGroups: new Set(),
     draftText: entry.draftText,
   };
 }

@@ -719,6 +719,14 @@ async function consumeClaudeOutput(
             continue;
           }
 
+          // Detect "[Request interrupted by user]" — Claude Code emits this as a "user"
+          // type event when the model's response is interrupted by new user input.
+          // We must close any open item immediately so the dashboard doesn't show
+          // a stale "tools" state while Claude Code processes the interrupt.
+          if (isRecord(raw) && raw["type"] === "user" && isUserInterruptMessage(raw)) {
+            closeOpenItem();
+          }
+
           const primary = mapClaudeEvent(threadId, raw, { turnId: meta.turnId });
           if (primary) {
             // Close the previous open item when we see a different event.
@@ -1405,6 +1413,23 @@ function getClaudeHandleMeta(handle: ProviderSessionHandle): ClaudeHandleMeta {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/** Detect "[Request interrupted by user]" in a Claude Code "user" type event. */
+function isUserInterruptMessage(raw: Record<string, unknown>): boolean {
+  const message = isRecord(raw["message"]) ? raw["message"] : undefined;
+  if (!message) return false;
+  const content = Array.isArray(message["content"]) ? message["content"] : [];
+  for (const part of content) {
+    if (isRecord(part) && part["type"] === "text" && typeof part["text"] === "string") {
+      if (part["text"].startsWith("[Request interrupted by user]")) return true;
+    }
+  }
+  // Also handle content as plain string
+  if (typeof message["content"] === "string" && message["content"].startsWith("[Request interrupted by user]")) {
+    return true;
+  }
+  return false;
 }
 
 function normalizeClaudeMapOptions(

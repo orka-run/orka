@@ -12,17 +12,25 @@ export function useChatScroll({ sessionId, entriesLength, eventsLength }: UseCha
   const entriesAtPauseRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Guard: skip handleScroll during programmatic scrolls so content growth
+  // doesn't falsely disable autoScroll.
+  const programmaticScrollRef = useRef(false);
 
   useEffect(() => {
     if (autoScroll) {
       const el = scrollRef.current;
       if (el) {
+        programmaticScrollRef.current = true;
         el.scrollTop = el.scrollHeight;
+        // Reset after a microtask so the resulting scroll event is suppressed.
+        queueMicrotask(() => { programmaticScrollRef.current = false; });
       }
     }
   }, [autoScroll, entriesLength, eventsLength]);
 
   const handleScroll = useCallback(() => {
+    if (programmaticScrollRef.current) return;
+
     const element = scrollRef.current;
     if (!element) {
       return;
@@ -43,7 +51,10 @@ export function useChatScroll({ sessionId, entriesLength, eventsLength }: UseCha
     useChatUiStore.getState().update(sessionId, { autoScroll: true });
     const el = scrollRef.current;
     if (el) {
+      programmaticScrollRef.current = true;
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      // smooth scroll takes time — reset guard after animation frame
+      requestAnimationFrame(() => { programmaticScrollRef.current = false; });
     }
   }, [sessionId]);
 

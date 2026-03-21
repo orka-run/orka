@@ -36,6 +36,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const client = useRpcClient();
   const expandedGroups = useChatUiStore((state) => state.sessions[sessionId]?.expandedGroups ?? EMPTY_SET);
+  const collapsedGroups = useChatUiStore((state) => state.sessions[sessionId]?.collapsedGroups ?? EMPTY_SET);
   const { events, entries, setEntries, isLoading, error, handleApprovalResolve } = useChatTimeline({
     sessionId,
     ...(initialPrompt !== undefined ? { initialPrompt } : {}),
@@ -73,13 +74,16 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
 
   const handleToggleGroup = useCallback((groupId: string, isOpen: boolean) => {
     const current = useChatUiStore.getState().get(sessionId);
-    const next = new Set(current.expandedGroups);
+    const nextExpanded = new Set(current.expandedGroups);
+    const nextCollapsed = new Set(current.collapsedGroups);
     if (isOpen) {
-      next.add(groupId);
+      nextExpanded.add(groupId);
+      nextCollapsed.delete(groupId);
     } else {
-      next.delete(groupId);
+      nextExpanded.delete(groupId);
+      nextCollapsed.add(groupId);
     }
-    useChatUiStore.getState().update(sessionId, { expandedGroups: next });
+    useChatUiStore.getState().update(sessionId, { expandedGroups: nextExpanded, collapsedGroups: nextCollapsed });
   }, [sessionId]);
 
   const handleQuote = useCallback((quote: QuotedText) => {
@@ -93,16 +97,18 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   async function handleSend(text: string) {
     setSendError(null);
 
-    const isBusy = inputState === "busy";
+    // Mark as queued if agent is mid-turn (inputState=busy) OR session is still running.
+    // inputState can race (events arrive async) so session.status is the safer signal.
+    const shouldQueue = inputState === "busy" || (session != null && isRunning(session.status) && inputState !== "waiting");
     const optimisticEntry: UserEntry = {
       id: `user-optimistic-${String(Date.now())}`,
       type: "user",
       timestamp: new Date().toISOString(),
       body: text,
-      ...(isBusy ? { queued: true } : {}),
+      ...(shouldQueue ? { queued: true } : {}),
     };
     setEntries((prev) => [...prev, optimisticEntry]);
-    if (!isBusy) {
+    if (!shouldQueue) {
       useChatUiStore.getState().update(sessionId, { autoScroll: true });
     }
 
@@ -188,6 +194,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
                   key={entry.id}
                   entry={entry}
                   isExpanded={expandedGroups.has(entry.id)}
+                  isCollapsed={collapsedGroups.has(entry.id)}
                   onToggleExpand={handleToggleGroup}
                   onApprovalResolve={handleApprovalResolve}
                   onQuote={handleQuote}

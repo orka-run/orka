@@ -192,6 +192,13 @@ function humanizeInlineLabel(value: string): string {
 }
 
 
+function truncateReason(reason: string, maxLen = 120): string {
+  // Strip multi-line hook output (e.g. beads context injected via SessionStart hooks)
+  const firstLine = reason.split("\n")[0] ?? reason;
+  if (firstLine.length <= maxLen) return firstLine;
+  return `${firstLine.slice(0, maxLen)}…`;
+}
+
 function formatHookBody(
   event: Extract<OrchestrationEvent, { type: "hook.started" | "hook.response" }>,
 ): string {
@@ -201,14 +208,15 @@ function formatHookBody(
 
   const name = event.hookName ?? "Hook";
   const decision = event.decision ? humanizeInlineLabel(event.decision) : "";
-  if (decision && event.reason) {
-    return `${name} - ${decision}: ${event.reason}`;
+  const reason = event.reason ? truncateReason(event.reason) : "";
+  if (decision && reason) {
+    return `${name} - ${decision}: ${reason}`;
   }
   if (decision) {
     return `${name} - ${decision}`;
   }
-  if (event.reason) {
-    return `${name} - ${event.reason}`;
+  if (reason) {
+    return `${name} - ${reason}`;
   }
 
   return name;
