@@ -821,12 +821,12 @@ const spawnCmd = command({
     const allowedTools = parseAllowedTools(args.allowedTools);
     const env = parseEnvAssignments(args.env);
 
-    // Permission mode resolution: CLI flag > config > undefined (falls through to adapter default)
-    let effectivePermissionMode: PermissionMode | undefined =
+    // Permission mode resolution: CLI flag > config > bypass (default)
+    let effectivePermissionMode: PermissionMode =
       args.bypass ? "bypass" :
       args.supervised ? "supervised" :
       args.auto ? "auto" :
-      (cfg.permissionMode as PermissionMode) || undefined;
+      (cfg.permissionMode as PermissionMode) || "bypass";
 
     // Determine if this spawn will result in bypass mode
     const willBypass = effectivePermissionMode === "bypass";

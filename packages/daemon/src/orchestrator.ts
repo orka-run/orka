@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { resolveProject } from "./projects";
 import { mkdirSync, existsSync, readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import {
+  createEvent,
   generateId,
   type BackendKind,
   type PermissionMode,
@@ -498,7 +499,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(resolvedEnv ? { env: resolvedEnv } : {}),
       ...(providerSessionId ? { providerSessionId } : {}),
-      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      permissionMode: req.permissionMode ?? "bypass",
       ...(inPlace ? { noWorktree: true } : {}),
     };
     ctx.db.insertSession(session);
@@ -517,7 +518,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
       backend: req.backend,
       cwd: workingDir,
       prompt: req.prompt,
-      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      permissionMode: req.permissionMode ?? "bypass",
       ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
       ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
       ...(req.model ? { model: req.model } : {}),
@@ -967,6 +968,8 @@ export async function stopSession(ctx: DaemonContext, sessionId: string): Promis
 
     // Deny all pending hook-based approvals so the hook scripts unblock
     ctx.hookApprovalBridge.denyAllForSession(sessionId);
+    // Persist resolved events so dashboard removes approval cards
+    resolvePendingRequests(ctx, sessionId, new Date().toISOString());
 
     const providerHandle = ctx.providerService.getHandle(sessionId);
     if (providerHandle) {
@@ -1031,6 +1034,9 @@ export function recoverStaleSessions(ctx: DaemonContext): number {
         provider: session.backend,
         payload: { reason: "daemon_restart", exitKind: "error" },
       });
+
+      // Resolve any pending approval requests — session is dead, can't approve
+      resolvePendingRequests(ctx, session.id, now);
       recovered++;
     }
   }
@@ -1070,6 +1076,28 @@ function killOrphanProviderProcesses(orkaHome: string): number {
     return killed;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Auto-resolve any pending approval requests for a dead session.
+ * Emits request.resolved events so the dashboard removes stale approval cards.
+ */
+function resolvePendingRequests(ctx: DaemonContext, sessionId: string, now: string): void {
+  const events = ctx.db.getOrchestrationEvents(sessionId);
+  const resolvedIds = new Set(
+    events.filter((e) => e.type === "request.resolved").map((e) => "requestId" in e ? e.requestId : null).filter(Boolean),
+  );
+  const pending = events.filter((e) => e.type === "request.opened" && "requestId" in e && !resolvedIds.has(e.requestId));
+
+  for (const req of pending) {
+    if (!("requestId" in req)) continue;
+    ctx.orchestrationEngine.ingest(sessionId, createEvent(
+      "request.resolved",
+      sessionId,
+      { requestType: "tool_use", decision: "deny" },
+      { provider: "claude-code", requestId: req.requestId, createdAt: now },
+    ));
   }
 }
 

@@ -159,8 +159,10 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
           const sessionId = toolApprovalMatch[1] ?? "";
           try {
             // Check permission mode — bypass auto-approves, no human in the loop
+            // null/undefined = old session without permissionMode → default bypass
             const session = ctx.db.getSession(sessionId);
-            if (session?.permissionMode === "bypass") {
+            const perm = session?.permissionMode ?? "bypass";
+            if (perm === "bypass") {
               return new Response(JSON.stringify({ decision: "allow", reason: "Bypass mode" }), {
                 status: 200,
                 headers: { "content-type": "application/json" },
