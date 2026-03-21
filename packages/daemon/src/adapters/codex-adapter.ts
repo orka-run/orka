@@ -555,8 +555,8 @@ export class CodexAdapter implements ProviderAdapter {
       if (isJsonRpcResponse(raw)) continue;
 
       const mapped = mapCodexEvent(threadId, raw, { meta });
-      if (mapped) {
-        yield mapped;
+      for (const event of mapped) {
+        yield event;
       }
     }
   }
@@ -566,22 +566,22 @@ export function mapCodexEvent(
   threadId: string,
   raw: unknown,
   context: MapCodexEventContext = {},
-): ProviderRuntimeEvent | null {
+): ProviderRuntimeEvent[] {
   const meta = context.meta;
 
   if (isJsonRpcResponse(raw)) {
-    return null;
+    return [];
   }
 
   if (isJsonRpcServerRequest(raw)) {
     const pending = mapServerRequest(raw);
     if (!pending) {
-      return null;
+      return [];
     }
 
     meta?.pendingServerRequests.set(String(raw.id), pending);
 
-    return createEvent(
+    return [createEvent(
       "request.opened",
       threadId,
       {
@@ -593,15 +593,15 @@ export function mapCodexEvent(
         provider: "codex",
         requestId: String(raw.id),
       },
-    );
+    )];
   }
 
   if (!isJsonRpcNotification(raw)) {
-    return null;
+    return [];
   }
 
   if (raw.method.startsWith("codex/event/")) {
-    return null;
+    return mapCodexInternalEvent(threadId, raw, context);
   }
 
   switch (raw.method) {
@@ -610,38 +610,38 @@ export function mapCodexEvent(
       if (providerThreadId && meta) {
         meta.providerThreadId = providerThreadId;
       }
-      return createEvent("session.started", threadId, {}, { provider: "codex" });
+      return [createEvent("session.started", threadId, {}, { provider: "codex" })];
     }
 
     case "thread/status/changed": {
       const params = getRecord(raw.params);
       const state = mapThreadState(params?.["status"]);
       if (!state) {
-        return null;
+        return [];
       }
-      return createEvent("session.state.changed", threadId, { state }, { provider: "codex" });
+      return [createEvent("session.state.changed", threadId, { state }, { provider: "codex" })];
     }
 
     case "turn/started": {
       const turnId = getString(raw.params, "turn", "id");
       if (!turnId) {
-        return null;
+        return [];
       }
 
       if (meta) { meta.activeTurnId = turnId; }
-      return createEvent("turn.started", threadId, {}, { provider: "codex", turnId });
+      return [createEvent("turn.started", threadId, {}, { provider: "codex", turnId })];
     }
 
     case "turn/completed": {
       const turnRecord = getRecord(getRecord(raw.params)?.["turn"]);
       if (!turnRecord || typeof turnRecord["id"] !== "string") {
-        return null;
+        return [];
       }
 
       const turnId = turnRecord["id"];
       const state = mapTurnState(turnRecord["status"]);
       if (!state) {
-        return null;
+        return [];
       }
 
       if (meta?.activeTurnId === turnId) {
@@ -649,7 +649,7 @@ export function mapCodexEvent(
       }
 
       const usage = meta?.turnUsage.get(turnId);
-      return createEvent(
+      return [createEvent(
         "turn.completed",
         threadId,
         {
@@ -657,7 +657,7 @@ export function mapCodexEvent(
           ...(usage ? { usage } : {}),
         },
         { provider: "codex", turnId },
-      );
+      )];
     }
 
     case "item/started":
@@ -666,7 +666,7 @@ export function mapCodexEvent(
       const item = getRecord(params?.["item"]);
       const turnId = typeof params?.["turnId"] === "string" ? params["turnId"] : undefined;
       if (!isRecord(item) || !turnId) {
-        return null;
+        return [];
       }
 
       const itemId = typeof item["id"] === "string" ? item["id"] : undefined;
@@ -679,37 +679,37 @@ export function mapCodexEvent(
         ...(detail ? { detail } : {}),
       };
 
-      return createEvent(raw.method === "item/started" ? "item.started" : "item.completed", threadId, payload, {
+      return [createEvent(raw.method === "item/started" ? "item.started" : "item.completed", threadId, payload, {
         provider: "codex",
         turnId,
         ...(itemId ? { itemId } : {}),
-      });
+      })];
     }
 
     case "item/agentMessage/delta":
-      return createContentDeltaEvent(threadId, raw.params, "assistant_text");
+      return wrapSingle(createContentDeltaEvent(threadId, raw.params, "assistant_text"));
 
     case "item/commandExecution/outputDelta":
-      return createContentDeltaEvent(threadId, raw.params, "command_output");
+      return wrapSingle(createContentDeltaEvent(threadId, raw.params, "command_output"));
 
     case "item/fileChange/outputDelta":
-      return createContentDeltaEvent(threadId, raw.params, "file_change_output");
+      return wrapSingle(createContentDeltaEvent(threadId, raw.params, "file_change_output"));
 
     case "item/reasoning/textDelta":
     case "item/reasoning/summaryTextDelta":
-      return createContentDeltaEvent(threadId, raw.params, "reasoning_text");
+      return wrapSingle(createContentDeltaEvent(threadId, raw.params, "reasoning_text"));
 
     case "thread/tokenUsage/updated": {
       const params = getRecord(raw.params);
       if (!params || typeof params["turnId"] !== "string") {
-        return null;
+        return [];
       }
 
       const usage = normalizeUsage(params["tokenUsage"]);
       if (usage) {
         meta?.turnUsage.set(params["turnId"], usage);
       }
-      return null;
+      return [];
     }
 
     case "error": {
@@ -717,7 +717,7 @@ export function mapCodexEvent(
       const error = getRecord(params?.["error"]);
       const message = typeof error?.["message"] === "string" ? error["message"] : "Codex reported an error";
       const turnId = typeof params?.["turnId"] === "string" ? params["turnId"] : undefined;
-      return createEvent(
+      return [createEvent(
         "runtime.error",
         threadId,
         { message, class: "provider_error" },
@@ -725,13 +725,13 @@ export function mapCodexEvent(
           provider: "codex",
           ...(turnId ? { turnId } : {}),
         },
-      );
+      )];
     }
 
     case "serverRequest/resolved": {
       const params = getRecord(raw.params);
       if (!params || (typeof params["requestId"] !== "string" && typeof params["requestId"] !== "number")) {
-        return null;
+        return [];
       }
 
       const requestId = String(params["requestId"]);
@@ -739,7 +739,7 @@ export function mapCodexEvent(
       meta?.pendingServerRequests.delete(requestId);
       const turnId = getString(pending?.args, "turnId");
 
-      return createEvent(
+      return [createEvent(
         "request.resolved",
         threadId,
         {
@@ -751,20 +751,23 @@ export function mapCodexEvent(
           requestId,
           ...(turnId ? { turnId } : {}),
         },
-      );
+      )];
     }
 
     case "thread/closed":
       if (meta) { meta.sawSessionExit = true; }
-      return createEvent(
+      return [createEvent(
         "session.exited",
         threadId,
         { reason: "Codex thread closed", exitKind: "graceful" },
         { provider: "codex" },
-      );
+      )];
+
+    case "account/rateLimits/updated":
+      return mapCodexRateLimits(threadId, raw.params);
 
     default:
-      return null;
+      return [];
   }
 }
 
@@ -814,9 +817,9 @@ async function consumeCodexOutput(
           }
 
           const mapped = mapCodexEvent(threadId, raw, { meta });
-          if (mapped) {
-            emitCodexEvent(events, mapped, span);
-            projection.apply(mapped);
+          for (const event of mapped) {
+            emitCodexEvent(events, event, span);
+            projection.apply(event);
           }
 
           // In app-server mode, codex stays alive after completing work.
@@ -1034,6 +1037,158 @@ function normalizeUsage(raw: unknown): CodexUsage | undefined {
     inputTokens: total["inputTokens"],
     outputTokens: total["outputTokens"],
   };
+}
+
+function wrapSingle(event: ProviderRuntimeEvent | null): ProviderRuntimeEvent[] {
+  return event ? [event] : [];
+}
+
+function mapCodexInternalEvent(
+  threadId: string,
+  raw: JsonRpcNotification,
+  _context: MapCodexEventContext,
+): ProviderRuntimeEvent[] {
+  const params = getRecord(raw.params);
+  if (!params) return [];
+
+  switch (raw.method) {
+    case "codex/event/task_started": {
+      const agentId = typeof params["id"] === "string" ? params["id"] : undefined;
+      const msg = getRecord(params["msg"]);
+      const turnId = typeof msg?.["turn_id"] === "string" ? msg["turn_id"] : undefined;
+      const collaborationMode = typeof msg?.["collaboration_mode_kind"] === "string" ? msg["collaboration_mode_kind"] : undefined;
+      if (!agentId) return [];
+
+      const opts = {
+        provider: "codex" as const,
+        ...(turnId ? { turnId } : {}),
+      };
+
+      const events: ProviderRuntimeEvent[] = [
+        createEvent(
+          "task.started",
+          threadId,
+          {
+            taskId: agentId,
+            ...(collaborationMode ? { taskKind: collaborationMode } : {}),
+          },
+          opts,
+        ),
+        createEvent(
+          "subagent.spawned",
+          threadId,
+          {
+            agentId,
+            prompt: "",
+          },
+          opts,
+        ),
+      ];
+      return events;
+    }
+
+    case "codex/event/task_complete": {
+      const agentId = typeof params["id"] === "string" ? params["id"] : undefined;
+      const msg = getRecord(params["msg"]);
+      const turnId = typeof msg?.["turn_id"] === "string" ? msg["turn_id"] : undefined;
+      const lastMessage = typeof msg?.["last_agent_message"] === "string" ? msg["last_agent_message"] : undefined;
+      if (!agentId) return [];
+
+      const opts = {
+        provider: "codex" as const,
+        ...(turnId ? { turnId } : {}),
+      };
+
+      const events: ProviderRuntimeEvent[] = [
+        createEvent(
+          "task.completed",
+          threadId,
+          {
+            taskId: agentId,
+            ...(lastMessage ? { summary: lastMessage } : {}),
+          },
+          opts,
+        ),
+        createEvent(
+          "subagent.completed",
+          threadId,
+          {
+            agentId,
+            status: "completed",
+            ...(lastMessage ? { summary: lastMessage } : {}),
+          },
+          opts,
+        ),
+      ];
+      return events;
+    }
+
+    default:
+      return [];
+  }
+}
+
+function mapCodexRateLimits(threadId: string, rawParams: unknown): ProviderRuntimeEvent[] {
+  const params = getRecord(rawParams);
+  const rateLimits = getRecord(params?.["rateLimits"]);
+  if (!rateLimits) return [];
+
+  const primary = getRecord(rateLimits["primary"]);
+  const secondary = getRecord(rateLimits["secondary"]);
+  const credits = getRecord(rateLimits["credits"]);
+
+  // Emit one rate.limit event per window that has data
+  const events: ProviderRuntimeEvent[] = [];
+
+  if (primary) {
+    const usedPercent = typeof primary["usedPercent"] === "number" ? primary["usedPercent"] : undefined;
+    const windowMins = typeof primary["windowDurationMins"] === "number" ? primary["windowDurationMins"] : undefined;
+    const resetsAt = typeof primary["resetsAt"] === "number" ? primary["resetsAt"] : undefined;
+
+    if (usedPercent !== undefined && resetsAt !== undefined) {
+      const rateLimitType = windowMins === 300 ? "five_hour" : windowMins === 10080 ? "seven_day" : `${windowMins}m`;
+      events.push(createEvent(
+        "rate.limit",
+        threadId,
+        {
+          rateLimitInfo: {
+            rateLimitType,
+            utilization: usedPercent / 100,
+            resetsAt,
+            status: usedPercent >= 100 ? "rejected" : "allowed_warning",
+            isUsingOverage: credits ? credits["hasCredits"] === true : false,
+          },
+        },
+        { provider: "codex" },
+      ));
+    }
+  }
+
+  if (secondary) {
+    const usedPercent = typeof secondary["usedPercent"] === "number" ? secondary["usedPercent"] : undefined;
+    const windowMins = typeof secondary["windowDurationMins"] === "number" ? secondary["windowDurationMins"] : undefined;
+    const resetsAt = typeof secondary["resetsAt"] === "number" ? secondary["resetsAt"] : undefined;
+
+    if (usedPercent !== undefined && resetsAt !== undefined) {
+      const rateLimitType = windowMins === 300 ? "five_hour" : windowMins === 10080 ? "seven_day" : `${windowMins}m`;
+      events.push(createEvent(
+        "rate.limit",
+        threadId,
+        {
+          rateLimitInfo: {
+            rateLimitType,
+            utilization: usedPercent / 100,
+            resetsAt,
+            status: usedPercent >= 100 ? "rejected" : "allowed_warning",
+            isUsingOverage: credits ? credits["hasCredits"] === true : false,
+          },
+        },
+        { provider: "codex" },
+      ));
+    }
+  }
+
+  return events;
 }
 
 function mapThreadState(raw: unknown): RuntimeSessionState | null {

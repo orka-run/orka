@@ -30,21 +30,21 @@ function createMeta(): CodexMeta {
 
 describe("mapCodexEvent", () => {
   test("maps thread/started to session.started", () => {
-    const event = mapCodexEvent("thread-1", {
+    const events = mapCodexEvent("thread-1", {
       method: "thread/started",
       params: {
         thread: { id: "provider-thread-1" },
       },
     });
 
-    expect(event).not.toBeNull();
-    expect(event?.type).toBe("session.started");
-    expect(event?.provider).toBe("codex");
-    expect(event?.threadId).toBe("thread-1");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("session.started");
+    expect(events[0]?.provider).toBe("codex");
+    expect(events[0]?.threadId).toBe("thread-1");
   });
 
   test("maps thread/status/changed to canonical session state", () => {
-    const event = mapCodexEvent("thread-1", {
+    const events = mapCodexEvent("thread-1", {
       method: "thread/status/changed",
       params: {
         threadId: "provider-thread-1",
@@ -52,13 +52,13 @@ describe("mapCodexEvent", () => {
       },
     });
 
-    expect(event).not.toBeNull();
-    expect(event?.type).toBe("session.state.changed");
-    expect(event?.payload).toEqual({ state: "running" });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("session.state.changed");
+    expect(events[0]?.payload).toEqual({ state: "running" });
   });
 
-  test("ignores duplicate codex/event legacy notifications", () => {
-    const event = mapCodexEvent("thread-1", {
+  test("ignores unhandled codex/event notifications", () => {
+    const events = mapCodexEvent("thread-1", {
       method: "codex/event/agent_message_delta",
       params: {
         id: "turn-1",
@@ -66,11 +66,11 @@ describe("mapCodexEvent", () => {
       },
     });
 
-    expect(event).toBeNull();
+    expect(events).toEqual([]);
   });
 
   test("maps item/agentMessage/delta to assistant content delta", () => {
-    const event = mapCodexEvent("thread-1", {
+    const events = mapCodexEvent("thread-1", {
       method: "item/agentMessage/delta",
       params: {
         threadId: "provider-thread-1",
@@ -80,11 +80,11 @@ describe("mapCodexEvent", () => {
       },
     });
 
-    expect(event).not.toBeNull();
-    expect(event?.type).toBe("content.delta");
-    expect(event?.turnId).toBe("turn-1");
-    expect(event?.itemId).toBe("msg-1");
-    expect(event?.payload).toEqual({
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("content.delta");
+    expect(events[0]?.turnId).toBe("turn-1");
+    expect(events[0]?.itemId).toBe("msg-1");
+    expect(events[0]?.payload).toEqual({
       streamKind: "assistant_text",
       delta: "OK",
     });
@@ -111,9 +111,9 @@ describe("mapCodexEvent", () => {
         },
         { meta },
       ),
-    ).toBeNull();
+    ).toEqual([]);
 
-    const event = mapCodexEvent(
+    const events = mapCodexEvent(
       "thread-1",
       {
         method: "turn/completed",
@@ -130,9 +130,9 @@ describe("mapCodexEvent", () => {
       { meta },
     );
 
-    expect(event).not.toBeNull();
-    expect(event?.type).toBe("turn.completed");
-    expect(event?.payload).toEqual({
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("turn.completed");
+    expect(events[0]?.payload).toEqual({
       state: "completed",
       usage: {
         inputTokens: 12,
@@ -144,7 +144,7 @@ describe("mapCodexEvent", () => {
   test("maps approval server requests to request.opened and resolved", () => {
     const meta = createMeta();
 
-    const opened = mapCodexEvent(
+    const openedEvents = mapCodexEvent(
       "thread-1",
       {
         id: "req-1",
@@ -160,10 +160,10 @@ describe("mapCodexEvent", () => {
       { meta },
     );
 
-    expect(opened).not.toBeNull();
-    expect(opened?.type).toBe("request.opened");
-    expect(opened?.requestId).toBe("req-1");
-    expect(opened?.payload).toEqual({
+    expect(openedEvents).toHaveLength(1);
+    expect(openedEvents[0]?.type).toBe("request.opened");
+    expect(openedEvents[0]?.requestId).toBe("req-1");
+    expect(openedEvents[0]?.payload).toEqual({
       requestType: "command_execution_approval",
       detail: "rm -rf .",
       args: {
@@ -180,7 +180,7 @@ describe("mapCodexEvent", () => {
     if (!pending) throw new Error("expected pending request");
     pending.decision = "approve";
 
-    const resolved = mapCodexEvent(
+    const resolvedEvents = mapCodexEvent(
       "thread-1",
       {
         method: "serverRequest/resolved",
@@ -192,17 +192,17 @@ describe("mapCodexEvent", () => {
       { meta },
     );
 
-    expect(resolved).not.toBeNull();
-    expect(resolved?.type).toBe("request.resolved");
-    expect(resolved?.requestId).toBe("req-1");
-    expect(resolved?.payload).toEqual({
+    expect(resolvedEvents).toHaveLength(1);
+    expect(resolvedEvents[0]?.type).toBe("request.resolved");
+    expect(resolvedEvents[0]?.requestId).toBe("req-1");
+    expect(resolvedEvents[0]?.payload).toEqual({
       requestType: "command_execution_approval",
       decision: "approve",
     });
   });
 
   test("maps error notifications to runtime.error", () => {
-    const event = mapCodexEvent("thread-1", {
+    const events = mapCodexEvent("thread-1", {
       method: "error",
       params: {
         threadId: "provider-thread-1",
@@ -214,12 +214,116 @@ describe("mapCodexEvent", () => {
       },
     });
 
-    expect(event).not.toBeNull();
-    expect(event?.type).toBe("runtime.error");
-    expect(event?.turnId).toBe("turn-1");
-    expect(event?.payload).toEqual({
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("runtime.error");
+    expect(events[0]?.turnId).toBe("turn-1");
+    expect(events[0]?.payload).toEqual({
       message: "Model failed",
       class: "provider_error",
+    });
+  });
+
+  test("maps codex/event/task_started to task.started + subagent.spawned", () => {
+    const events = mapCodexEvent("thread-1", {
+      method: "codex/event/task_started",
+      params: {
+        id: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+        msg: {
+          type: "task_started",
+          turn_id: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+          model_context_window: 258400,
+          collaboration_mode_kind: "default",
+        },
+        conversationId: "019d0551-594e-7431-9049-2b75fd8a9d26",
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]?.type).toBe("task.started");
+    expect(events[0]?.payload).toEqual({
+      taskId: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+      taskKind: "default",
+    });
+    expect(events[1]?.type).toBe("subagent.spawned");
+    expect(events[1]?.payload).toEqual({
+      agentId: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+      prompt: "",
+    });
+  });
+
+  test("maps codex/event/task_complete to task.completed + subagent.completed", () => {
+    const events = mapCodexEvent("thread-1", {
+      method: "codex/event/task_complete",
+      params: {
+        id: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+        msg: {
+          type: "task_complete",
+          turn_id: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+          last_agent_message: "Done with the audit.",
+        },
+        conversationId: "019d0551-594e-7431-9049-2b75fd8a9d26",
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]?.type).toBe("task.completed");
+    expect(events[0]?.payload).toEqual({
+      taskId: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+      summary: "Done with the audit.",
+    });
+    expect(events[1]?.type).toBe("subagent.completed");
+    expect(events[1]?.payload).toEqual({
+      agentId: "019d0551-5954-7f20-bb57-16e1a5da14c0",
+      status: "completed",
+      summary: "Done with the audit.",
+    });
+  });
+
+  test("maps account/rateLimits/updated to rate.limit events", () => {
+    const events = mapCodexEvent("thread-1", {
+      method: "account/rateLimits/updated",
+      params: {
+        rateLimits: {
+          limitId: "codex",
+          limitName: null,
+          primary: {
+            usedPercent: 100,
+            windowDurationMins: 300,
+            resetsAt: 1773917977,
+          },
+          secondary: {
+            usedPercent: 46,
+            windowDurationMins: 10080,
+            resetsAt: 1774462423,
+          },
+          credits: { hasCredits: false, unlimited: false, balance: "0" },
+          planType: "plus",
+        },
+      },
+    });
+
+    expect(events).toHaveLength(2);
+
+    expect(events[0]?.type).toBe("rate.limit");
+    expect(events[0]?.payload).toEqual({
+      rateLimitInfo: {
+        rateLimitType: "five_hour",
+        utilization: 1,
+        resetsAt: 1773917977,
+        status: "rejected",
+        isUsingOverage: false,
+      },
+    });
+
+    expect(events[1]?.type).toBe("rate.limit");
+    expect(events[1]?.payload).toEqual({
+      rateLimitInfo: {
+        rateLimitType: "seven_day",
+        utilization: 0.46,
+        resetsAt: 1774462423,
+        status: "allowed_warning",
+        isUsingOverage: false,
+      },
     });
   });
 });
