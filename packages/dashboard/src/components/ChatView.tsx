@@ -71,6 +71,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   const { autoScroll, bottomRef, scrollRef, handleScroll, scrollToBottom, newMessagesCount } = useChatScroll({
     sessionId,
     entriesLength: timelineEntries.length,
+    eventsLength: events.length,
   });
 
   const handleToggleGroup = useCallback((groupId: string, isOpen: boolean) => {

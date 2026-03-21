@@ -4,19 +4,23 @@ import { useChatUiStore } from "../stores/chatUiStore";
 interface UseChatScrollOptions {
   sessionId: string;
   entriesLength: number;
+  eventsLength: number;
 }
 
-export function useChatScroll({ sessionId, entriesLength }: UseChatScrollOptions) {
+export function useChatScroll({ sessionId, entriesLength, eventsLength }: UseChatScrollOptions) {
   const autoScroll = useChatUiStore((state) => state.sessions[sessionId]?.autoScroll ?? true);
   const entriesAtPauseRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (autoScroll && entriesLength > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    if (autoScroll) {
+      const el = scrollRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
     }
-  }, [autoScroll, entriesLength]);
+  }, [autoScroll, entriesLength, eventsLength]);
 
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -37,7 +41,10 @@ export function useChatScroll({ sessionId, entriesLength }: UseChatScrollOptions
 
   const scrollToBottom = useCallback(() => {
     useChatUiStore.getState().update(sessionId, { autoScroll: true });
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   }, [sessionId]);
 
   const newMessagesCount = autoScroll ? 0 : Math.max(0, entriesLength - entriesAtPauseRef.current);

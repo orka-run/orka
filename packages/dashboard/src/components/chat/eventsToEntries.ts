@@ -355,6 +355,7 @@ export function eventsToEntries(
     pendingTools = [];
   }
 
+  let initialPromptConsumed = false;
   if (initialPrompt) {
     const timestamp = events[0]?.timestamp ?? new Date().toISOString();
     entries.push({
@@ -585,6 +586,11 @@ export function eventsToEntries(
         });
         break;
       case "user.input": {
+        // Skip the first user.input that matches the initial prompt (already rendered above)
+        if (initialPrompt && !initialPromptConsumed && event.text === initialPrompt) {
+          initialPromptConsumed = true;
+          break;
+        }
         // Skip cancelled queued messages entirely
         if (event.queued) {
           const count = cancelledTexts.get(event.text);

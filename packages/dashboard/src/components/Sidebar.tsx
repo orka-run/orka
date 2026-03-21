@@ -235,8 +235,25 @@ export function Sidebar({
                               ) : null}
                               {session.title || session.id}
                             </p>
-                            <span className="shrink-0 text-[10px] text-ink-muted">
-                              {formatRelativeTime(session.createdAt, now)}
+                            <span className="flex shrink-0 items-center gap-0.5">
+                              <span className="text-[10px] text-ink-muted">
+                                {formatRelativeTime(session.createdAt, now)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  togglePin(session.id);
+                                }}
+                                title={isPinned(session.id) ? "Unpin session" : "Pin session"}
+                                className={`rounded-sm p-0.5 transition ${
+                                  isPinned(session.id)
+                                    ? "text-accent hover:text-accent-strong"
+                                    : "text-ink-muted/40 hover:text-ink"
+                                }`}
+                              >
+                                <Pin className="h-2.5 w-2.5" />
+                              </button>
                             </span>
                           </div>
                           <div className="mt-1 flex items-center gap-1">
@@ -254,21 +271,6 @@ export function Sidebar({
                             ) : null}
                           </div>
                         </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePin(session.id);
-                        }}
-                        title={isPinned(session.id) ? "Unpin session" : "Pin session"}
-                        className={`absolute right-1 top-1 rounded-sm p-0.5 transition ${
-                          isPinned(session.id)
-                            ? "text-accent hover:bg-surface-alt hover:text-accent-strong"
-                            : "text-ink-muted/40 hover:bg-surface-alt hover:text-ink"
-                        }`}
-                      >
-                        <Pin className="h-3 w-3" />
                       </button>
                     </div>
                   </div>
