@@ -13,6 +13,7 @@ import { useChatUiStore } from "../stores/chatUiStore";
 import { ChatTimelineEntry, ThinkingIndicator } from "./chat/TimelineEntry";
 import { QueuedMessageBar } from "./chat/QueuedMessageBar";
 import { deriveThinkingState, type ChatEntry, type UserEntry } from "./chat/eventsToEntries";
+import type { QuotedText } from "./chat/MessageEntry";
 
 const EMPTY_SET = new Set<string>();
 
@@ -49,6 +50,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   );
   const [cancellingTurn, setCancellingTurn] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [quotedText, setQuotedText] = useState<QuotedText | null>(null);
   // Split entries: queued messages go to the queue bar, rest to timeline
   const { timelineEntries, queuedMessages } = useMemo(() => {
     const timeline: ChatEntry[] = [];
@@ -79,6 +81,14 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     }
     useChatUiStore.getState().update(sessionId, { expandedGroups: next });
   }, [sessionId]);
+
+  const handleQuote = useCallback((quote: QuotedText) => {
+    setQuotedText(quote);
+  }, []);
+
+  const handleClearQuote = useCallback(() => {
+    setQuotedText(null);
+  }, []);
 
   async function handleSend(text: string) {
     setSendError(null);
@@ -180,6 +190,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
                   isExpanded={expandedGroups.has(entry.id)}
                   onToggleExpand={handleToggleGroup}
                   onApprovalResolve={handleApprovalResolve}
+                  onQuote={handleQuote}
                   {...(session.projectPath ? { projectPath: session.projectPath } : {})}
                 />
               ))}
@@ -213,6 +224,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onClearError={() => { setSendError(null); }}
           {...(canCancelTurn(session.allowedActions) && inputState === "busy" ? { onCancelTurn: () => { void handleCancelTurn(); } } : {})}
           isCancellingTurn={cancellingTurn}
+          quotedText={quotedText}
+          onClearQuote={handleClearQuote}
         />
       </div>
     </div>

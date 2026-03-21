@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Bot, LoaderCircle } from "lucide-react";
 import { ApprovalCard } from "../ApprovalCard";
 import { BackgroundTaskCard } from "./BackgroundTaskCard";
-import { AssistantMessage, SystemMessage, UserMessage } from "./MessageEntry";
+import { AssistantMessage, SystemMessage, UserMessage, type QuotedText } from "./MessageEntry";
 import { ApiRetryEntry, ErrorEntry, RateLimitEntry } from "./StatusEntries";
 import { ToolCallGroup } from "./ToolCallEntry";
 import type { ChatEntry, ThinkingState } from "./eventsToEntries";
@@ -13,18 +13,20 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
   onToggleExpand,
   onApprovalResolve,
   projectPath,
+  onQuote,
 }: {
   entry: ChatEntry;
   isExpanded?: boolean;
   onToggleExpand?: (groupId: string, isOpen: boolean) => void;
   onApprovalResolve?: (requestId: string, decision: "approve" | "deny") => Promise<void>;
   projectPath?: string;
+  onQuote?: (quote: QuotedText) => void;
 }) {
   if (entry.type === "approval" && onApprovalResolve) {
     return <ApprovalCard entry={entry} onResolve={onApprovalResolve} />;
   }
   if (entry.type === "assistant") {
-    return <AssistantMessage entry={entry} />;
+    return <AssistantMessage entry={entry} {...(onQuote ? { onQuote } : {})} />;
   }
   if (entry.type === "user") {
     return <UserMessage entry={entry} />;

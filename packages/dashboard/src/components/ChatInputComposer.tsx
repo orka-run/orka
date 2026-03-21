@@ -1,8 +1,9 @@
-import { LoaderCircle, ArrowUp, RotateCcw, Square } from "lucide-react";
+import { LoaderCircle, ArrowUp, RotateCcw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InputState } from "../hooks/useInputState";
 import { useChatUiStore } from "../stores/chatUiStore";
 import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
+import type { QuotedText } from "./chat/MessageEntry";
 
 interface ChatInputComposerProps {
   sessionId: string;
@@ -16,6 +17,8 @@ interface ChatInputComposerProps {
   onCancelTurn?: () => void;
   isRetrying?: boolean;
   isCancellingTurn?: boolean;
+  quotedText?: QuotedText | null;
+  onClearQuote?: () => void;
 }
 
 const STATE_PLACEHOLDERS: Record<InputState, string> = {
@@ -25,7 +28,7 @@ const STATE_PLACEHOLDERS: Record<InputState, string> = {
   not_started: "Session is starting...",
 };
 
-export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onCancelTurn, isRetrying, isCancellingTurn }: ChatInputComposerProps) {
+export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onCancelTurn, isRetrying, isCancellingTurn, quotedText, onClearQuote }: ChatInputComposerProps) {
   const text = useChatUiStore((s) => s.sessions[sessionId]?.draftText ?? "");
   const [isSending, setIsSending] = useState(false);
   const editorRef = useRef<ComposerEditorHandle>(null);
@@ -46,10 +49,15 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
   const submitRef = useRef<(() => void) | undefined>(undefined);
 
   async function submit() {
-    const nextText = (editorRef.current?.getText() ?? text).trim();
-    if (!isEditable || nextText.length === 0) {
+    const rawText = (editorRef.current?.getText() ?? text).trim();
+    if (!isEditable || rawText.length === 0) {
       return;
     }
+
+    // Prepend quoted text as markdown blockquote
+    const nextText = quotedText
+      ? `> ${quotedText.text.split("\n").join("\n> ")}\n\n${rawText}`
+      : rawText;
 
     setIsSending(true);
 
@@ -57,6 +65,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
       await onSend(nextText);
       useChatUiStore.getState().update(sessionId, { draftText: "" });
       editorRef.current?.clear();
+      onClearQuote?.();
     } catch {
       // Error display handled by parent via sendError prop
     } finally {
@@ -80,6 +89,26 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
 
   return (
     <div className="border-t border-border bg-surface px-2 py-2">
+      {quotedText ? (
+        <div className="mb-1.5 flex items-start gap-1.5 rounded-sm border-l-2 border-accent bg-surface-alt px-2 py-1">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-medium text-ink-muted">
+              Replying to {quotedText.source}
+            </p>
+            <p className="line-clamp-2 text-[11px] text-ink-secondary">
+              {quotedText.text}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClearQuote}
+            aria-label="Clear quote"
+            className="mt-0.5 shrink-0 rounded-sm p-0.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink-secondary"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <div
           className={`flex min-h-[34px] min-w-0 flex-1 rounded-sm border bg-surface-alt transition focus-within:ring-1 ${

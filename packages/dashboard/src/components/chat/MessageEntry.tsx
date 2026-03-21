@@ -1,12 +1,32 @@
-import { memo, useState } from "react";
-import { AlertTriangle, Bot, ChevronRight, Clock3, User } from "lucide-react";
+import { memo, useCallback, useState } from "react";
+import { AlertTriangle, Bot, ChevronRight, Clock3, Reply, User } from "lucide-react";
 import { formatDateTime } from "../../lib/sessionUi";
 import { MarkdownContent } from "../MarkdownContent";
 import type { AssistantEntry, SystemEntry, UserEntry } from "./eventsToEntries";
 
-export const AssistantMessage = memo(function AssistantMessage({ entry }: { entry: AssistantEntry }) {
+export interface QuotedText {
+  text: string;
+  source: "assistant" | "user";
+}
+
+export const AssistantMessage = memo(function AssistantMessage({
+  entry,
+  onQuote,
+}: {
+  entry: AssistantEntry;
+  onQuote?: (quote: QuotedText) => void;
+}) {
+  const handleQuote = useCallback(() => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim();
+    onQuote?.({
+      text: selectedText && selectedText.length > 0 ? selectedText : entry.body,
+      source: "assistant",
+    });
+  }, [entry.body, onQuote]);
+
   return (
-    <div className="flex items-start gap-2">
+    <div className="group/msg flex items-start gap-2">
       <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-sm bg-accent/15 text-accent-strong">
         <Bot className="h-3.5 w-3.5" />
       </div>
@@ -14,6 +34,17 @@ export const AssistantMessage = memo(function AssistantMessage({ entry }: { entr
         <MarkdownContent content={entry.body} />
         <p className="mt-1 text-[10px] text-ink-muted">{formatDateTime(entry.timestamp)}</p>
       </div>
+      {onQuote ? (
+        <button
+          type="button"
+          onClick={handleQuote}
+          aria-label="Quote reply"
+          title="Quote reply"
+          className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-ink-muted opacity-0 transition hover:bg-surface-hover hover:text-ink-secondary group-hover/msg:opacity-100"
+        >
+          <Reply className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
     </div>
   );
 });
