@@ -1,4 +1,4 @@
-import { LoaderCircle, ArrowUp, Square, RotateCcw } from "lucide-react";
+import { LoaderCircle, ArrowUp, RotateCcw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InputState } from "../hooks/useInputState";
 import { useChatUiStore } from "../stores/chatUiStore";
@@ -13,9 +13,9 @@ interface ChatInputComposerProps {
   placeholder?: string;
   autoFocus?: boolean;
   onRetry?: () => void;
-  onStop?: () => void;
+  onCancelTurn?: () => void;
   isRetrying?: boolean;
-  isStopping?: boolean;
+  isCancellingTurn?: boolean;
 }
 
 const STATE_PLACEHOLDERS: Record<InputState, string> = {
@@ -25,7 +25,7 @@ const STATE_PLACEHOLDERS: Record<InputState, string> = {
   not_started: "Session is starting...",
 };
 
-export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onStop, isRetrying, isStopping }: ChatInputComposerProps) {
+export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onCancelTurn, isRetrying, isCancellingTurn }: ChatInputComposerProps) {
   const text = useChatUiStore((s) => s.sessions[sessionId]?.draftText ?? "");
   const [isSending, setIsSending] = useState(false);
   const editorRef = useRef<ComposerEditorHandle>(null);
@@ -102,16 +102,16 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
             className="px-2.5 py-1.5"
           />
         </div>
-        {onStop && (
+        {onCancelTurn && (
           <button
             type="button"
-            onClick={onStop}
-            disabled={isStopping}
-            aria-label="Stop session"
-            title="Stop session"
+            onClick={onCancelTurn}
+            disabled={isCancellingTurn}
+            aria-label="Cancel turn"
+            title="Interrupt current response"
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-status-error/30 bg-status-error/10 text-status-error transition hover:bg-status-error/20 disabled:opacity-50"
           >
-            {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+            {isCancellingTurn ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
           </button>
         )}
         {onRetry && (

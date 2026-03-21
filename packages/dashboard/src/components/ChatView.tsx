@@ -27,8 +27,8 @@ function isRunning(status: SessionSummary["status"]): boolean {
   return status === "queued" || status === "preparing" || status === "running";
 }
 
-function canStop(allowedActions: SessionSummary["allowedActions"]): boolean {
-  return allowedActions.includes("stop");
+function canCancelTurn(allowedActions: SessionSummary["allowedActions"]): boolean {
+  return allowedActions.includes("cancelTurn");
 }
 
 export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
@@ -47,7 +47,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     events,
     session?.allowedActions ?? [],
   );
-  const [stopping, setStopping] = useState(false);
+  const [cancellingTurn, setCancellingTurn] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   // Split entries: queued messages go to the queue bar, rest to timeline
   const { timelineEntries, queuedMessages } = useMemo(() => {
@@ -124,12 +124,12 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     }
   }
 
-  async function handleStop() {
-    setStopping(true);
+  async function handleCancelTurn() {
+    setCancellingTurn(true);
     try {
-      await client.stop(sessionId);
+      await client.cancelTurn(sessionId);
     } finally {
-      setStopping(false);
+      setCancellingTurn(false);
     }
   }
 
@@ -211,8 +211,8 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onSend={handleSend}
           sendError={sendError}
           onClearError={() => { setSendError(null); }}
-          {...(canStop(session.allowedActions) ? { onStop: () => { void handleStop(); } } : {})}
-          isStopping={stopping}
+          {...(canCancelTurn(session.allowedActions) && inputState === "busy" ? { onCancelTurn: () => { void handleCancelTurn(); } } : {})}
+          isCancellingTurn={cancellingTurn}
         />
       </div>
     </div>
