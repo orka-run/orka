@@ -180,14 +180,14 @@ function EditorInner({
       <PlainTextPlugin
         contentEditable={
           <ContentEditable
-            className={`block w-full bg-transparent py-1.5 px-2 text-sm text-ink outline-none ${className ?? ""}`}
+            className={`block w-full bg-transparent text-sm text-ink outline-none ${className ?? ""}`}
             aria-label="Chat message"
             aria-placeholder={placeholder ?? ""}
             placeholder={<span />}
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 px-2 py-1.5 text-sm text-ink-muted">
+          <div className={`pointer-events-none absolute inset-0 text-sm text-ink-muted ${className ?? ""}`}>
             {placeholder}
           </div>
         }
