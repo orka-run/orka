@@ -1,10 +1,11 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useId, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertTriangle, Layers, Link2, MessageSquarePlus, Plus, Search, Server, Settings2 } from "lucide-react";
+import { AlertTriangle, Layers, Link2, MessageSquarePlus, Pin, Plus, Search, Server, Settings2 } from "lucide-react";
 import type { NodeInfo, WorkspaceInfo } from "@orka/core";
 import type { SessionSummary } from "../stores/sessionStore";
 import { formatRelativeTime } from "../lib/sessionUi";
+import { usePinnedSessions } from "../hooks/usePinnedSessions";
 
 const ITEM_HEIGHT = 48;
 const GAP = 4;
@@ -55,6 +56,7 @@ export function Sidebar({
   const showNodeSelector = nodes.length > 1;
   const showWorkspaceSwitcher = workspaces.length > 0;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { pinnedIds, toggle: togglePin, isPinned } = usePinnedSessions();
 
   // Filter by selected node
   const nodeFilteredSessions = selectedNodeId
@@ -75,7 +77,12 @@ export function Sidebar({
     : nodeFilteredSessions;
 
   const runningCount = workspaceFilteredSessions.filter((session) => isActive(session.status)).length;
-  const filteredSessions = workspaceFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
+  const matchedSessions = workspaceFilteredSessions.filter((session) => matchesQuery(session, normalizedQuery));
+
+  // Split into pinned (top) and unpinned, preserving sort order within each group
+  const pinnedSessions = matchedSessions.filter((s) => pinnedIds.has(s.id));
+  const unpinnedSessions = matchedSessions.filter((s) => !pinnedIds.has(s.id));
+  const filteredSessions = [...pinnedSessions, ...unpinnedSessions];
 
   const virtualizer = useVirtualizer({
     count: filteredSessions.length,
@@ -203,41 +210,67 @@ export function Sidebar({
                   }}
                 >
                   <div style={{ height: ITEM_HEIGHT, marginBottom: GAP }}>
-                    <button
-                      type="button"
-                      onClick={() => onSelect(session.id)}
-                      onMouseEnter={() => onHover?.(session.id)}
-                      className={`h-full w-full overflow-hidden rounded-sm border px-2 py-1 text-left transition ${
-                        isSelected
-                          ? "border-border bg-surface-alt"
-                          : "border-transparent bg-surface hover:border-border hover:bg-surface-alt"
+                    <div
+                      className={`group/row relative h-full overflow-hidden rounded-sm border text-left transition ${
+                        isPinned(session.id)
+                          ? isSelected
+                            ? "border-l-accent border-border bg-surface-alt border-l-2"
+                            : "border-l-accent border-transparent bg-surface border-l-2 hover:border-border hover:bg-surface-alt"
+                          : isSelected
+                            ? "border-border bg-surface-alt"
+                            : "border-transparent bg-surface hover:border-border hover:bg-surface-alt"
                       }`}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="truncate text-[11px] font-medium text-ink">
-                            {session.title || session.id}
-                          </p>
-                          <span className="shrink-0 text-[10px] text-ink-muted">
-                            {formatRelativeTime(session.createdAt, now)}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-1">
-                          <span className="rounded-sm border border-border bg-surface-alt px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-secondary">
-                            {session.backend}
-                          </span>
-                          <StatusPill status={session.status} />
-                          {session.permissionMode === "bypass" ? (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] text-red-400" title="Bypass permissions">
-                              <AlertTriangle className="h-2.5 w-2.5" />
+                      <button
+                        type="button"
+                        onClick={() => onSelect(session.id)}
+                        onMouseEnter={() => onHover?.(session.id)}
+                        className="h-full w-full px-2 py-1 text-left"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="truncate text-[11px] font-medium text-ink">
+                              {isPinned(session.id) ? (
+                                <Pin className="mr-1 inline h-2.5 w-2.5 text-accent" />
+                              ) : null}
+                              {session.title || session.id}
+                            </p>
+                            <span className="shrink-0 text-[10px] text-ink-muted">
+                              {formatRelativeTime(session.createdAt, now)}
                             </span>
-                          ) : null}
-                          {session.nodeId && showNodeSelector ? (
-                            <NodeBadge nodeId={session.nodeId} />
-                          ) : null}
+                          </div>
+                          <div className="mt-1 flex items-center gap-1">
+                            <span className="rounded-sm border border-border bg-surface-alt px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-secondary">
+                              {session.backend}
+                            </span>
+                            <StatusPill status={session.status} />
+                            {session.permissionMode === "bypass" ? (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] text-red-400" title="Bypass permissions">
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                              </span>
+                            ) : null}
+                            {session.nodeId && showNodeSelector ? (
+                              <NodeBadge nodeId={session.nodeId} />
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(session.id);
+                        }}
+                        title={isPinned(session.id) ? "Unpin session" : "Pin session"}
+                        className={`absolute right-1 top-1 rounded-sm p-0.5 transition ${
+                          isPinned(session.id)
+                            ? "text-accent hover:bg-surface-alt hover:text-accent-strong"
+                            : "text-ink-muted opacity-0 hover:bg-surface-alt hover:text-ink group-hover/row:opacity-100"
+                        }`}
+                      >
+                        <Pin className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
