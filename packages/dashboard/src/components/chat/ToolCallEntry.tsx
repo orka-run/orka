@@ -117,13 +117,40 @@ export const ToolCallGroup = memo(function ToolCallGroup({
       return null;
     }
 
+    const isOpen = isExpanded ?? false;
+
     return (
-      <div className="flex min-w-0 items-center gap-2 rounded-sm border border-border bg-surface-alt px-2 py-1">
-        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-ink-muted">
-          {tool.inProgress ? <LoaderCircle className="h-3 w-3 animate-spin" /> : toolIconEl(tool.icon, "h-3 w-3")}
-        </div>
-        <span className="min-w-0 truncate text-[11px] text-ink-secondary">{tool.title}</span>
-      </div>
+      <details
+        open={isOpen}
+        onToggle={(event) => {
+          const nextState = event.currentTarget.open;
+          if (nextState !== isOpen) {
+            onToggleExpand?.(entry.id, nextState);
+          }
+        }}
+        className="overflow-hidden rounded-sm border border-border bg-surface-alt"
+      >
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1">
+          <ChevronRight className={`h-3 w-3 shrink-0 text-ink-muted transition-transform ${isOpen ? "rotate-90" : ""}`} />
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-ink-muted">
+            {tool.inProgress ? <LoaderCircle className="h-3 w-3 animate-spin" /> : toolIconEl(tool.icon, "h-3 w-3")}
+          </div>
+          <span className="min-w-0 truncate text-[11px] text-ink-secondary">{tool.title}</span>
+          {tool.summary !== tool.title ? (
+            <span className="ml-auto max-w-[40%] shrink-0 truncate text-[10px] text-ink-muted">{tool.summary}</span>
+          ) : null}
+        </summary>
+        {tool.details.length > 0 || tool.args ? (
+          <div className="border-t border-border/30 px-2 py-1">
+            <ToolCallDetailsBody
+              title={tool.title}
+              details={tool.details}
+              args={tool.args}
+              {...(projectPath ? { projectPath } : {})}
+            />
+          </div>
+        ) : null}
+      </details>
     );
   }
 
