@@ -35,14 +35,18 @@ export function useChatTimeline({
   const onSelectionLoadSettledRef = useRef(onSelectionLoadSettled);
   onSelectionLoadSettledRef.current = onSelectionLoadSettled;
 
+  const seenIdsRef = useRef(new Set<string>());
+
   useEffect(() => {
     let cancelled = false;
     eventsRef.current = [];
+    seenIdsRef.current = new Set();
 
     const cached = getCachedTimeline(sessionId);
     if (cached) {
       const filtered = cached.filter((event) => event.sessionId === sessionId);
       eventsRef.current = filtered;
+      for (const e of filtered) if (e.eventId) seenIdsRef.current.add(e.eventId);
       setEvents(filtered);
       setEntries(eventsToEntries(filtered, initialPromptRef.current, projectPathRef.current));
       setIsLoading(false);
@@ -63,9 +67,19 @@ export function useChatTimeline({
 
         const timeline = response.events;
         const filtered = timeline.filter((event: OrchestrationEvent) => event.sessionId === sessionId);
-        eventsRef.current = filtered;
-        setEvents(filtered);
-        setEntries(eventsToEntries(filtered, initialPromptRef.current, projectPathRef.current));
+
+        // Merge: fetched events + any WS events that arrived during fetch
+        const fetchedIds = new Set<string>();
+        for (const e of filtered) if (e.eventId) fetchedIds.add(e.eventId);
+        const wsOnly = eventsRef.current.filter((e) => e.eventId && !fetchedIds.has(e.eventId));
+        const merged = [...filtered, ...wsOnly];
+
+        seenIdsRef.current = new Set<string>();
+        for (const e of merged) if (e.eventId) seenIdsRef.current.add(e.eventId);
+
+        eventsRef.current = merged;
+        setEvents(merged);
+        setEntries(eventsToEntries(merged, initialPromptRef.current, projectPathRef.current));
         setCachedTimeline(sessionId, timeline);
         onSelectionLoadSettledRef.current?.("ok");
       } catch (cause) {
@@ -95,6 +109,10 @@ export function useChatTimeline({
       if (event.sessionId !== sessionId) {
         return;
       }
+      if (event.eventId && seenIdsRef.current.has(event.eventId)) {
+        return;
+      }
+      if (event.eventId) seenIdsRef.current.add(event.eventId);
 
       eventsRef.current = [...eventsRef.current, event];
       setEvents(eventsRef.current);
