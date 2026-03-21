@@ -1,4 +1,5 @@
 import { resolvePath, getPathFromArgs, type ResolvedPath } from "../lib/pathUtils";
+import { highlightCode } from "../lib/syntaxHighlight";
 
 interface ToolCallDetailsProps {
   title: string;
@@ -96,7 +97,7 @@ function ReadDetail({ detail, resolved }: { detail: Extract<ParsedDetail, { kind
     <div>
       {detail.path ? <PathHeader path={detail.path} {...(resolved !== undefined ? { resolved } : {})} /> : null}
       {detail.content.trim() ? (
-        <CodeBlock content={detail.content} />
+        <CodeBlock content={detail.content} {...(detail.path ? { filePath: detail.path } : {})} />
       ) : (
         <EmptyState message="No file content captured." />
       )}
@@ -111,7 +112,11 @@ function EditDetail({ detail, resolved }: { detail: Extract<ParsedDetail, { kind
     <div>
       {detail.path ? <PathHeader path={detail.path} {...(resolved !== undefined ? { resolved } : {})} /> : null}
       {content ? (
-        looksLikeDiff(content) ? <DiffBlock content={detail.content} /> : <CodeBlock content={detail.content} />
+        looksLikeDiff(content) ? (
+          <DiffBlock content={detail.content} {...(detail.path ? { filePath: detail.path } : {})} />
+        ) : (
+          <CodeBlock content={detail.content} {...(detail.path ? { filePath: detail.path } : {})} />
+        )
       ) : (
         <EmptyState message="No edited content captured." />
       )}
@@ -266,7 +271,7 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-function CodeBlock({ content }: { content: string }) {
+function CodeBlock({ content, filePath }: { content: string; filePath?: string }) {
   const lines = content.replace(/\n$/, "").split("\n");
   const parsedLines = lines.map((line) => {
     const match = line.match(NUMBERED_LINE_RE);
@@ -279,6 +284,15 @@ function CodeBlock({ content }: { content: string }) {
   const hasLineNumbers = parsedLines.some((line) => line.number !== null);
 
   if (!hasLineNumbers) {
+    if (filePath) {
+      const highlighted = highlightCode(content, filePath);
+      return (
+        <pre className="hljs overflow-x-auto px-2 py-2 font-mono text-[11px] leading-6 text-ink-secondary">
+          <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+        </pre>
+      );
+    }
+
     return (
       <pre className="overflow-x-auto px-2 py-2 font-mono text-[11px] leading-6 text-ink-secondary">
         <code>{content}</code>
@@ -287,34 +301,54 @@ function CodeBlock({ content }: { content: string }) {
   }
 
   return (
-    <div className="overflow-x-auto font-mono text-[11px] leading-6">
-      {parsedLines.map((line, index) => (
-        <div key={`${line.number ?? "plain"}-${String(index)}`} className="grid grid-cols-[3.5rem_minmax(0,1fr)]">
-          <span className="border-r border-border px-2 py-0.5 text-right text-ink-muted">
-            {line.number ?? ""}
-          </span>
-          <span className="whitespace-pre-wrap break-all px-2 py-0.5 text-ink-secondary">
-            {line.content || " "}
-          </span>
-        </div>
-      ))}
+    <div className="hljs overflow-x-auto font-mono text-[11px] leading-6">
+      {parsedLines.map((line, index) => {
+        const highlighted = filePath ? highlightCode(line.content || " ", filePath) : null;
+
+        return (
+          <div key={`${line.number ?? "plain"}-${String(index)}`} className="grid grid-cols-[3.5rem_minmax(0,1fr)]">
+            <span className="border-r border-border px-2 py-0.5 text-right text-ink-muted">
+              {line.number ?? ""}
+            </span>
+            {highlighted ? (
+              <span className="whitespace-pre-wrap break-all px-2 py-0.5" dangerouslySetInnerHTML={{ __html: highlighted }} />
+            ) : (
+              <span className="whitespace-pre-wrap break-all px-2 py-0.5 text-ink-secondary">
+                {line.content || " "}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function DiffBlock({ content }: { content: string }) {
+function DiffBlock({ content, filePath }: { content: string; filePath?: string }) {
   const lines = content.replace(/\n$/, "").split("\n");
 
   return (
-    <div className="overflow-x-auto font-mono text-[11px] leading-6">
-      {lines.map((line, index) => (
-        <div key={`${line}-${String(index)}`} className="grid grid-cols-[3rem_minmax(0,1fr)]">
-          <span className="border-r border-border px-2 py-0.5 text-right text-ink-muted">{index + 1}</span>
-          <span className={`whitespace-pre-wrap break-all px-2 py-0.5 ${diffLineClassName(line)}`}>
-            {line || " "}
-          </span>
-        </div>
-      ))}
+    <div className="hljs overflow-x-auto font-mono text-[11px] leading-6">
+      {lines.map((line, index) => {
+        const marker = getDiffMarker(line);
+        const codeContent = marker ? line.slice(1) : line;
+        const highlighted = filePath && !isDiffMeta(line) ? highlightCode(codeContent, filePath) : null;
+
+        return (
+          <div key={`diff-${String(index)}`} className={`grid grid-cols-[1.25rem_minmax(0,1fr)] ${diffLineBgClassName(line)}`}>
+            <span className="border-r border-border px-0.5 py-0.5 text-center text-ink-muted select-none">
+              {marker ?? " "}
+            </span>
+            {highlighted ? (
+              <span className={`whitespace-pre-wrap break-all px-2 py-0.5 ${diffLineTextClassName(line)}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
+            ) : (
+              <span className={`whitespace-pre-wrap break-all px-2 py-0.5 ${diffLineClassName(line)}`}>
+                {line || " "}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -604,19 +638,33 @@ function looksLikeDiff(content: string): boolean {
     );
 }
 
+function getDiffMarker(line: string): string | null {
+  if (/^[+](?![+])/.test(line)) return "+";
+  if (/^-(?!-)/.test(line)) return "\u2212";
+  return null;
+}
+
+function isDiffMeta(line: string): boolean {
+  return /^diff --git /.test(line) || /^@@/.test(line) || /^\+\+\+ /.test(line) || /^--- /.test(line);
+}
+
+function diffLineBgClassName(line: string): string {
+  if (isDiffMeta(line)) return "bg-accent/10";
+  if (/^[+](?![+])/.test(line)) return "bg-emerald-600/5";
+  if (/^-(?!-)/.test(line)) return "bg-status-error/5";
+  return "";
+}
+
+function diffLineTextClassName(line: string): string {
+  if (/^[+](?![+])/.test(line)) return "text-emerald-800";
+  if (/^-(?!-)/.test(line)) return "text-status-error";
+  return "";
+}
+
 function diffLineClassName(line: string): string {
-  if (/^\+\+\+ /.test(line) || /^--- /.test(line) || /^@@/.test(line)) {
-    return "bg-accent/10 text-accent-strong";
-  }
-
-  if (/^[+](?![+])/.test(line)) {
-    return "bg-emerald-600/5 text-emerald-800";
-  }
-
-  if (/^-(?!-)/.test(line)) {
-    return "bg-status-error/5 text-status-error";
-  }
-
+  if (isDiffMeta(line)) return "bg-accent/10 text-accent-strong";
+  if (/^[+](?![+])/.test(line)) return "bg-emerald-600/5 text-emerald-800";
+  if (/^-(?!-)/.test(line)) return "bg-status-error/5 text-status-error";
   return "text-ink-secondary";
 }
 

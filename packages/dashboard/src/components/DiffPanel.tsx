@@ -1,13 +1,13 @@
 // Attribution: Diff panel concept inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import hljs from "highlight.js/lib/common";
 import { FileDiff, LoaderCircle, RefreshCw, RotateCcw } from "lucide-react";
 import type { Checkpoint } from "@orka/core";
 import { parseDiff, type DiffFile, type DiffLine } from "../lib/parseDiff";
 import { formatRelativeTime } from "../lib/sessionUi";
 import { useRpcClient } from "../lib/transportContext";
 import { useSessionStore } from "../stores/sessionStore";
+import { highlightCode } from "../lib/syntaxHighlight";
 
 interface DiffPanelProps {
   sessionId: string;
@@ -44,36 +44,6 @@ const VIEW_MODES: Array<{ id: DiffViewMode; label: string }> = [
   { id: "full", label: "Full Session" },
   { id: "turn", label: "Per Turn" },
 ];
-
-const HIGHLIGHT_LANGUAGE_BY_EXTENSION: Record<string, string> = {
-  bash: "bash",
-  c: "c",
-  cc: "cpp",
-  cpp: "cpp",
-  css: "css",
-  go: "go",
-  h: "c",
-  htm: "xml",
-  html: "xml",
-  java: "java",
-  js: "javascript",
-  json: "json",
-  jsx: "javascript",
-  md: "markdown",
-  mjs: "javascript",
-  py: "python",
-  rb: "ruby",
-  rs: "rust",
-  sh: "bash",
-  sql: "sql",
-  toml: "ini",
-  ts: "typescript",
-  tsx: "typescript",
-  xml: "xml",
-  yaml: "yaml",
-  yml: "yaml",
-  zsh: "bash",
-};
 
 export function DiffPanel({ sessionId, onSelectionLoadSettled }: DiffPanelProps) {
   const client = useRpcClient();
@@ -938,36 +908,5 @@ function getLineClassName(type: DiffLine["type"]): string {
 }
 
 function highlightDiffLineContent(content: string, filePath: string): string {
-  const language = getHighlightLanguage(filePath);
-
-  if (!language) {
-    return escapeHtml(content);
-  }
-
-  try {
-    return hljs.highlight(content, { language, ignoreIllegals: true }).value;
-  } catch {
-    return escapeHtml(content);
-  }
-}
-
-function getHighlightLanguage(filePath: string): string | null {
-  const fileName = filePath.split("/").at(-1) ?? filePath;
-  const extension = fileName.includes(".") ? fileName.split(".").at(-1)?.toLowerCase() : null;
-  const language = extension ? HIGHLIGHT_LANGUAGE_BY_EXTENSION[extension] : null;
-
-  if (!language) {
-    return null;
-  }
-
-  return hljs.getLanguage(language) ? language : null;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  return highlightCode(content, filePath);
 }
