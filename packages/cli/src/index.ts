@@ -142,14 +142,15 @@ function deriveTraceCollectorEndpoint(url: string): string | undefined {
 
 const topLevelCommand = process.argv.slice(2).find((arg) => !arg.startsWith("-"));
 const traceCollectorEndpoint = remoteUrl ? deriveTraceCollectorEndpoint(remoteUrl) : DEFAULT_DAEMON_TRACES;
-initTracing(
-  topLevelCommand === "serve"
-    ? {}
-    : {
-        ...(traceCollectorEndpoint ? { otlpHttpEndpoint: traceCollectorEndpoint } : {}),
-        otlpFallbackToFile: true,
-      },
-);
+// CLI sends traces to daemon via OTLP, not disk — disable file exporter.
+// For `serve`, skip: createDaemonContext will init tracing with dataDir.
+if (topLevelCommand !== "serve") {
+  initTracing({
+    ...(traceCollectorEndpoint ? { otlpHttpEndpoint: traceCollectorEndpoint } : {}),
+    otlpFallbackToFile: true,
+    disableFileExporter: true,
+  });
+}
 
 async function isDaemonRunning(): Promise<boolean> {
   try {
