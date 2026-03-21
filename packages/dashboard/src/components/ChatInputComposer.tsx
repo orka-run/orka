@@ -101,6 +101,7 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
             initialText={text}
             onChange={handleChange}
             onSubmit={handleSubmit}
+            className="px-2.5 py-1.5"
           />
         </div>
         {onCancelTurn && (
