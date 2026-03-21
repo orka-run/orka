@@ -1,4 +1,4 @@
-import { LoaderCircle, ArrowUp, Square, RotateCcw, Pause } from "lucide-react";
+import { LoaderCircle, ArrowUp, Square, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InputState } from "../hooks/useInputState";
 import { useChatUiStore } from "../stores/chatUiStore";
@@ -14,10 +14,8 @@ interface ChatInputComposerProps {
   autoFocus?: boolean;
   onRetry?: () => void;
   onStop?: () => void;
-  onCancelTurn?: () => void;
   isRetrying?: boolean;
   isStopping?: boolean;
-  isCancellingTurn?: boolean;
 }
 
 const STATE_PLACEHOLDERS: Record<InputState, string> = {
@@ -27,7 +25,7 @@ const STATE_PLACEHOLDERS: Record<InputState, string> = {
   not_started: "Session is starting...",
 };
 
-export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onStop, onCancelTurn, isRetrying, isStopping, isCancellingTurn }: ChatInputComposerProps) {
+export function ChatInputComposer({ sessionId, inputState, onSend, sendError, onClearError, placeholder, autoFocus, onRetry, onStop, isRetrying, isStopping }: ChatInputComposerProps) {
   const text = useChatUiStore((s) => s.sessions[sessionId]?.draftText ?? "");
   const [isSending, setIsSending] = useState(false);
   const editorRef = useRef<ComposerEditorHandle>(null);
@@ -104,18 +102,6 @@ export function ChatInputComposer({ sessionId, inputState, onSend, sendError, on
             className="px-2.5 py-1.5"
           />
         </div>
-        {onCancelTurn && (
-          <button
-            type="button"
-            onClick={onCancelTurn}
-            disabled={isCancellingTurn}
-            aria-label="Cancel turn"
-            title="Cancel current turn (keep session alive)"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-status-warning/30 bg-status-warning/10 text-status-warning transition hover:bg-status-warning/20 disabled:opacity-50"
-          >
-            {isCancellingTurn ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
-          </button>
-        )}
         {onStop && (
           <button
             type="button"

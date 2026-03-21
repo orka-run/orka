@@ -31,10 +31,6 @@ function canStop(allowedActions: SessionSummary["allowedActions"]): boolean {
   return allowedActions.includes("stop");
 }
 
-function canCancelTurn(allowedActions: SessionSummary["allowedActions"]): boolean {
-  return allowedActions.includes("cancelTurn");
-}
-
 export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const client = useRpcClient();
@@ -52,7 +48,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     session?.allowedActions ?? [],
   );
   const [stopping, setStopping] = useState(false);
-  const [cancellingTurn, setCancellingTurn] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   // Split entries: queued messages go to the queue bar, rest to timeline
   const { timelineEntries, queuedMessages } = useMemo(() => {
@@ -138,15 +133,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
     }
   }
 
-  async function handleCancelTurn() {
-    setCancellingTurn(true);
-    try {
-      await client.cancelTurn(sessionId);
-    } finally {
-      setCancellingTurn(false);
-    }
-  }
-
   if (!session) {
     return (
       <div className="rounded-sm border border-border bg-surface p-2 text-[12px] text-ink-muted">
@@ -225,8 +211,6 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onSend={handleSend}
           sendError={sendError}
           onClearError={() => { setSendError(null); }}
-          {...(canCancelTurn(session.allowedActions) && inputState === "busy" ? { onCancelTurn: () => { void handleCancelTurn(); } } : {})}
-          isCancellingTurn={cancellingTurn}
           {...(canStop(session.allowedActions) ? { onStop: () => { void handleStop(); } } : {})}
           isStopping={stopping}
         />
