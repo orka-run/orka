@@ -117,28 +117,10 @@ function getWorkspaceProjectPath(
   return noNode?.projectPath ?? workspace.paths[0]?.projectPath;
 }
 
-function BypassBanner({ sessions }: { sessions: Array<{ status: string; permissionMode: string | null }> }) {
-  const [dismissed, setDismissed] = useState(false);
-  const bypassCount = sessions.filter(
-    (s) => s.permissionMode === "bypass" && (s.status === "running" || s.status === "queued" || s.status === "preparing"),
-  ).length;
-
-  if (bypassCount === 0 || dismissed) return null;
-
-  return (
-    <div className="flex items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
-      <p className="text-[11px] font-medium text-amber-400">
-        ⚠ {bypassCount} session{bypassCount !== 1 ? "s" : ""} running with bypass permissions — agents have unrestricted system access
-      </p>
-      <button
-        type="button"
-        onClick={() => setDismissed(true)}
-        className="shrink-0 text-[10px] text-amber-400/60 transition hover:text-amber-400"
-      >
-        Dismiss
-      </button>
-    </div>
-  );
+// Bypass banner removed — user explicitly chooses bypass mode, no need to nag.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function BypassBanner(_props: { sessions: Array<{ status: string; permissionMode: string | null }> }) {
+  return null;
 }
 
 function AppShell({ transport, client }: AppShellProps) {
