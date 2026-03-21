@@ -4,7 +4,9 @@ import {
   SimpleSpanProcessor,
   ConsoleSpanExporter,
 } from "@opentelemetry/sdk-trace-base";
+import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-base";
 import { ExportResultCode } from "@opentelemetry/core";
+import type { ExportResult } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -140,13 +142,13 @@ class FileSpanExporter {
     this._logFile = logFile ?? join(dir, "traces.jsonl");
   }
 
-  export(spans: any[], resultCallback: (result: any) => void): void {
+  export(spans: ReadonlyArray<ReadableSpan>, resultCallback: (result: ExportResult) => void): void {
     rotateTraceFileIfNeeded(this._logFile);
     for (const span of spans) {
       const entry = {
         traceId: span.spanContext().traceId,
         spanId: span.spanContext().spanId,
-        parentSpanId: span.parentSpanId || undefined,
+        parentSpanId: (span as unknown as Record<string, unknown>)["parentSpanId"] || undefined,
         name: span.name,
         kind: span.kind,
         startTime: hrTimeToMs(span.startTime),
@@ -154,7 +156,7 @@ class FileSpanExporter {
         durationMs: hrTimeToMs(span.endTime) - hrTimeToMs(span.startTime),
         status: span.status,
         attributes: span.attributes,
-        events: span.events.map((e: any) => ({
+        events: span.events.map((e) => ({
           name: e.name,
           time: hrTimeToMs(e.time),
           attributes: e.attributes,
@@ -188,10 +190,10 @@ export function initRelayTracing(opts?: { traceFile?: string }): void {
     [ATTR_SERVICE_VERSION]: "0.1.0",
   });
 
-  const processors: any[] = [];
+  const processors: SimpleSpanProcessor[] = [];
 
   // Always write to file
-  processors.push(new SimpleSpanProcessor(new FileSpanExporter(opts?.traceFile) as any));
+  processors.push(new SimpleSpanProcessor(new FileSpanExporter(opts?.traceFile) as SpanExporter));
 
   // Console exporter when ORKA_TRACE=console
   if (process.env["ORKA_TRACE"] === "console") {
@@ -227,9 +229,10 @@ export async function withSpan<T>(
       const result = await fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
-    } catch (err: any) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-      span.recordException(err);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      span.recordException(error);
       throw err;
     } finally {
       span.end();
@@ -248,9 +251,10 @@ export function withSpanSync<T>(
       const result = fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
-    } catch (err: any) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-      span.recordException(err);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      span.recordException(error);
       throw err;
     } finally {
       span.end();

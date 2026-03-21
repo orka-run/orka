@@ -43,7 +43,8 @@ describe("valid transitions succeed without warning", () => {
         try {
           db.updateSessionStatus(sessionId, to as SessionStatus);
           const updated = db.getSession(sessionId);
-          expect(updated!.status).toBe(to);
+          if (!updated) throw new Error("expected session");
+          expect(updated.status).toBe(to);
           expect(warnings).toHaveLength(0);
         } finally {
           console.warn = origWarn;
@@ -84,7 +85,8 @@ describe("invalid transitions log warning", () => {
         db.updateSessionStatus(sessionId, to);
         // The update still applies (it's a warning, not a rejection)
         const updated = db.getSession(sessionId);
-        expect(updated!.status).toBe(to);
+        if (!updated) throw new Error("expected session");
+        expect(updated.status).toBe(to);
         // But a warning was logged
         expect(warnings).toHaveLength(1);
         expect(warnings[0]).toContain("[state-machine]");
@@ -101,25 +103,33 @@ describe("resume paths (terminal → running)", () => {
   test("completed → running (resume)", () => {
     seedSession("sess-resume-comp", "completed");
     db.updateSessionStatus("sess-resume-comp", "running");
-    expect(db.getSession("sess-resume-comp")!.status).toBe("running");
+    const s = db.getSession("sess-resume-comp");
+    if (!s) throw new Error("expected session");
+    expect(s.status).toBe("running");
   });
 
   test("failed → running (resume after failure)", () => {
     seedSession("sess-resume-fail", "failed");
     db.updateSessionStatus("sess-resume-fail", "running");
-    expect(db.getSession("sess-resume-fail")!.status).toBe("running");
+    const s = db.getSession("sess-resume-fail");
+    if (!s) throw new Error("expected session");
+    expect(s.status).toBe("running");
   });
 
   test("cancelled → running (resume after cancellation)", () => {
     seedSession("sess-resume-cancel", "cancelled");
     db.updateSessionStatus("sess-resume-cancel", "running");
-    expect(db.getSession("sess-resume-cancel")!.status).toBe("running");
+    const s = db.getSession("sess-resume-cancel");
+    if (!s) throw new Error("expected session");
+    expect(s.status).toBe("running");
   });
 
   test("interrupted → running (resume after interrupt)", () => {
     seedSession("sess-resume-int", "interrupted");
     db.updateSessionStatus("sess-resume-int", "running");
-    expect(db.getSession("sess-resume-int")!.status).toBe("running");
+    const s = db.getSession("sess-resume-int");
+    if (!s) throw new Error("expected session");
+    expect(s.status).toBe("running");
   });
 });
 
@@ -127,13 +137,17 @@ describe("early cancellation paths", () => {
   test("queued → cancelled", () => {
     seedSession("sess-q-cancel", "queued");
     db.updateSessionStatus("sess-q-cancel", "cancelled");
-    expect(db.getSession("sess-q-cancel")!.status).toBe("cancelled");
+    const s = db.getSession("sess-q-cancel");
+    if (!s) throw new Error("expected session");
+    expect(s.status).toBe("cancelled");
   });
 
   test("preparing → cancelled", () => {
     seedSession("sess-p-cancel", "preparing");
     db.updateSessionStatus("sess-p-cancel", "cancelled");
-    expect(db.getSession("sess-p-cancel")!.status).toBe("cancelled");
+    const s = db.getSession("sess-p-cancel");
+    if (!s) throw new Error("expected session");
+    expect(s.status).toBe("cancelled");
   });
 });
 
@@ -146,8 +160,9 @@ describe("updateSessionStatus with extra fields", () => {
     });
 
     const session = db.getSession("sess-extra");
-    expect(session!.status).toBe("completed");
-    expect(session!.finishedAt).toBe("2026-01-01T00:05:00.000Z");
-    expect(session!.exitCode).toBe(0);
+    if (!session) throw new Error("expected session");
+    expect(session.status).toBe("completed");
+    expect(session.finishedAt).toBe("2026-01-01T00:05:00.000Z");
+    expect(session.exitCode).toBe(0);
   });
 });

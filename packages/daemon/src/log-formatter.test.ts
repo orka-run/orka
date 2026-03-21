@@ -186,10 +186,11 @@ describe("parseLine", () => {
           exit_code: 0,
         },
       }));
-      expect(event).not.toBeNull();
-      expect(event!.kind).toBe("tool_result");
-      expect((event as any).tool).toBe("ls -la");
-      expect((event as any).exitCode).toBe(0);
+      if (!event) throw new Error("expected event");
+      expect(event.kind).toBe("tool_result");
+      const toolResult = event as Extract<LogEvent, { kind: "tool_result" }>;
+      expect(toolResult.tool).toBe("ls -la");
+      expect(toolResult.exitCode).toBe(0);
     });
 
     test("parses item.completed with unknown item type returns null", () => {
@@ -236,10 +237,11 @@ describe("parseLine", () => {
           content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }],
         },
       }));
-      expect(event).not.toBeNull();
-      expect(event!.kind).toBe("tool_call");
-      expect((event as any).tool).toBe("Bash");
-      expect((event as any).input).toBe("ls");
+      if (!event) throw new Error("expected event");
+      expect(event.kind).toBe("tool_call");
+      const toolCall = event as Extract<LogEvent, { kind: "tool_call" }>;
+      expect(toolCall.tool).toBe("Bash");
+      expect(toolCall.input).toBe("ls");
     });
 
     test("formats tool_use for Write tool with file_path", () => {
@@ -249,8 +251,9 @@ describe("parseLine", () => {
           content: [{ type: "tool_use", name: "Write", input: { file_path: "/tmp/foo.ts" } }],
         },
       }));
-      expect(event).not.toBeNull();
-      expect((event as any).input).toBe("/tmp/foo.ts");
+      if (!event) throw new Error("expected event");
+      const toolCall = event as Extract<LogEvent, { kind: "tool_call" }>;
+      expect(toolCall.input).toBe("/tmp/foo.ts");
     });
 
     test("formats tool_use for Read tool with filePath", () => {
@@ -260,8 +263,9 @@ describe("parseLine", () => {
           content: [{ type: "tool_use", name: "Read", input: { filePath: "/tmp/bar.ts" } }],
         },
       }));
-      expect(event).not.toBeNull();
-      expect((event as any).input).toBe("/tmp/bar.ts");
+      if (!event) throw new Error("expected event");
+      const toolCall = event as Extract<LogEvent, { kind: "tool_call" }>;
+      expect(toolCall.input).toBe("/tmp/bar.ts");
     });
 
     test("returns null for assistant with empty content", () => {
@@ -283,8 +287,8 @@ describe("parseLine", () => {
       type: "tool_result",
       content: "result text",
     }));
-    expect(event).not.toBeNull();
-    expect(event!.kind).toBe("tool_result");
+    if (!event) throw new Error("expected event");
+    expect(event.kind).toBe("tool_result");
   });
 
   test("parses tool type", () => {
@@ -292,8 +296,8 @@ describe("parseLine", () => {
       type: "tool",
       content: "tool output",
     }));
-    expect(event).not.toBeNull();
-    expect(event!.kind).toBe("tool_result");
+    if (!event) throw new Error("expected event");
+    expect(event.kind).toBe("tool_result");
   });
 });
 

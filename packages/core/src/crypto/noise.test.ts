@@ -124,16 +124,23 @@ describe("Noise_NK_25519_ChaChaPoly_SHA256", () => {
     // All ciphertexts should be different (different nonces)
     for (let i = 0; i < ciphertexts.length; i++) {
       for (let j = i + 1; j < ciphertexts.length; j++) {
-        const iHex = Buffer.from(ciphertexts[i]!).toString("hex");
-        const jHex = Buffer.from(ciphertexts[j]!).toString("hex");
+        const ci = ciphertexts[i];
+        const cj = ciphertexts[j];
+        if (!ci || !cj) throw new Error("expected ciphertext");
+        const iHex = Buffer.from(ci).toString("hex");
+        const jHex = Buffer.from(cj).toString("hex");
         expect(iHex).not.toBe(jHex);
       }
     }
 
     // Decrypt in order
     for (let i = 0; i < messages.length; i++) {
-      const decrypted = serverResult.recvCipher.decrypt(ciphertexts[i]!);
-      expect(dec.decode(decrypted)).toBe(messages[i]!);
+      const ct = ciphertexts[i];
+      if (!ct) throw new Error("expected ciphertext");
+      const decrypted = serverResult.recvCipher.decrypt(ct);
+      const expected = messages[i];
+      if (!expected) throw new Error("expected message");
+      expect(dec.decode(decrypted)).toBe(expected);
     }
   });
 
@@ -342,7 +349,7 @@ describe("Noise_NK_25519_ChaChaPoly_SHA256", () => {
 
     // Tamper with the ephemeral key portion
     const tampered = new Uint8Array(msg1);
-    tampered[0]! ^= 0xff;
+    tampered[0] = (tampered[0] ?? 0) ^ 0xff;
 
     // Responder should fail to process tampered message
     expect(() => responder.readMessage1(tampered)).toThrow();
@@ -361,7 +368,7 @@ describe("Noise_NK_25519_ChaChaPoly_SHA256", () => {
 
     // Tamper with the message
     const tampered = new Uint8Array(msg2);
-    tampered[tampered.length - 1]! ^= 0xff;
+    tampered[tampered.length - 1] = (tampered[tampered.length - 1] ?? 0) ^ 0xff;
 
     expect(() => initiator.readMessage2(tampered)).toThrow();
   });

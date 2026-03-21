@@ -28,6 +28,7 @@ import { canonicalTransportOrigin } from "@orka/core";
 import type { NoiseKeyInfo } from "../../../packages/core/src/crypto";
 import { NoiseClientTransport } from "../../../packages/core/src/transport/noise-transport";
 import { createDaemonContext, createLocalClient, startServer } from "@orka/daemon";
+import type { DaemonContext } from "@orka/daemon";
 import { startRelay, type RelayHandle } from "../../../packages/relay/src/index";
 
 // ---------------------------------------------------------------------------
@@ -143,8 +144,8 @@ describe("Noise NK through Relay", () => {
   let relay: RelayHandle;
   let relayPort: number;
 
-  let ctxA: import("@orka/daemon").DaemonContext;
-  let ctxB: import("@orka/daemon").DaemonContext;
+  let ctxA: DaemonContext;
+  let ctxB: DaemonContext;
   let daemonServerA: Awaited<ReturnType<typeof startServer>>["server"];
   let daemonServerB: Awaited<ReturnType<typeof startServer>>["server"];
   let noiseKeyA: NoiseKeyInfo;
@@ -159,7 +160,9 @@ describe("Noise NK through Relay", () => {
   beforeAll(async () => {
     // 1. Start in-process relay (ephemeral port)
     relay = await startRelay({ port: 0, hostname: "127.0.0.1", inMemoryDb: true });
-    relayPort = relay.server.port!;
+    const assignedRelayPort = relay.server.port;
+    if (assignedRelayPort === undefined) throw new Error("Relay port was not assigned");
+    relayPort = assignedRelayPort;
 
     // 2. Sign up + create API keys on relay
     const signupRes = await fetch(`http://127.0.0.1:${relayPort}/v1/signup`, {
@@ -196,7 +199,9 @@ describe("Noise NK through Relay", () => {
       relayUrl: `ws://127.0.0.1:${relayPort}`,
       relayToken: nodeApiKeyA,
     }));
-    daemonPortA = daemonServerA.port!;
+    const portA = daemonServerA.port;
+    if (portA === undefined) throw new Error("Daemon A port was not assigned");
+    daemonPortA = portA;
     noiseKeyA = await fetchNoiseKeyInfo(daemonPortA);
 
     // 4. Start daemon B with encryption + relay registration
@@ -210,7 +215,9 @@ describe("Noise NK through Relay", () => {
       relayUrl: `ws://127.0.0.1:${relayPort}`,
       relayToken: nodeApiKeyB,
     }));
-    daemonPortB = daemonServerB.port!;
+    const portB = daemonServerB.port;
+    if (portB === undefined) throw new Error("Daemon B port was not assigned");
+    daemonPortB = portB;
     noiseKeyB = await fetchNoiseKeyInfo(daemonPortB);
 
     // Wait for nodes to register with relay

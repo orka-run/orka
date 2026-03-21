@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
+import type { IPty, spawn as PtySpawn } from "node-pty";
 import { TerminalManager } from "./terminal-manager";
 
 /** Minimal mock IPty for testing manager logic without real PTY */
@@ -21,10 +22,10 @@ function createMockPty() {
 
 function createMockSpawn() {
   const lastPty = { current: null as ReturnType<typeof createMockPty> | null };
-  const spawn = (_shell: string, _args: string[], _opts: any) => {
+  const spawn = (_shell: string, _args: string[], _opts: Record<string, unknown>) => {
     const pty = createMockPty();
     lastPty.current = pty;
-    return pty as any;
+    return pty as unknown as IPty;
   };
   return { spawn, lastPty };
 }
@@ -35,7 +36,7 @@ describe("TerminalManager", () => {
 
   beforeEach(() => {
     mockSpawn = createMockSpawn();
-    manager = new TerminalManager(mockSpawn.spawn as any);
+    manager = new TerminalManager(mockSpawn.spawn as unknown as typeof PtySpawn);
   });
 
   test("open creates a terminal with correct defaults", () => {
@@ -122,7 +123,8 @@ describe("TerminalManager", () => {
 
   test("history captures PTY output", () => {
     const term = manager.open("sess-abc");
-    const pty = mockSpawn.lastPty.current!;
+    const pty = mockSpawn.lastPty.current;
+    if (!pty) throw new Error("expected pty");
 
     pty._emit("hello ");
     pty._emit("world");
@@ -132,7 +134,8 @@ describe("TerminalManager", () => {
 
   test("history buffer is capped at 100KB", () => {
     const term = manager.open("sess-abc");
-    const pty = mockSpawn.lastPty.current!;
+    const pty = mockSpawn.lastPty.current;
+    if (!pty) throw new Error("expected pty");
 
     // Emit 120KB of data
     const chunk = "x".repeat(1024);
@@ -145,7 +148,8 @@ describe("TerminalManager", () => {
 
   test("onData registers handler and receives data", () => {
     const term = manager.open("sess-abc");
-    const pty = mockSpawn.lastPty.current!;
+    const pty = mockSpawn.lastPty.current;
+    if (!pty) throw new Error("expected pty");
 
     const received: string[] = [];
     manager.onData(term.id, (data) => received.push(data));
@@ -162,7 +166,8 @@ describe("TerminalManager", () => {
 
   test("onData unsubscribe stops receiving data", () => {
     const term = manager.open("sess-abc");
-    const pty = mockSpawn.lastPty.current!;
+    const pty = mockSpawn.lastPty.current;
+    if (!pty) throw new Error("expected pty");
 
     const received: string[] = [];
     const unsub = manager.onData(term.id, (data) => received.push(data));
@@ -176,7 +181,8 @@ describe("TerminalManager", () => {
 
   test("multiple onData handlers all receive data", () => {
     const term = manager.open("sess-abc");
-    const pty = mockSpawn.lastPty.current!;
+    const pty = mockSpawn.lastPty.current;
+    if (!pty) throw new Error("expected pty");
 
     const r1: string[] = [];
     const r2: string[] = [];

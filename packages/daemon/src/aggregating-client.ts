@@ -106,9 +106,9 @@ export function createAggregatingClient(
   }
 
   function throwUnreachable(nodeId: string): never {
-    const err = new Error(`Remote node ${nodeId} is unreachable`);
-    (err as any).code = "NODE_UNREACHABLE";
-    (err as any).nodeId = nodeId;
+    const err = new Error(`Remote node ${nodeId} is unreachable`) as Error & { code: string; nodeId: string };
+    err.code = "NODE_UNREACHABLE";
+    err.nodeId = nodeId;
     throw err;
   }
 
@@ -134,78 +134,115 @@ export function createAggregatingClient(
   }
 
   /** Call a method on localClient by name. */
-  async function callLocal<M extends RpcMethodName>(
+  function callLocal<M extends RpcMethodName>(
     method: M,
     params: RpcParams<M>,
   ): Promise<RpcResult<M>> {
     // Map RPC method names to localClient method calls.
-    // params is cast to any because TypeScript cannot narrow M inside the switch.
-    const svc = localClient as any;
-    const p = params as any;
+    // TypeScript cannot narrow M inside the switch, so we use a dispatch helper.
+    // The return type is safe because each branch calls the matching method.
+    const p = params as unknown as Record<string, unknown>;
+    const call = (name: string, ...args: unknown[]): Promise<unknown> => {
+      const fn = (localClient as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[name];
+      if (!fn) throw new Error(`Unknown method: ${name}`);
+      return fn.apply(localClient, args);
+    };
+    let result: Promise<unknown>;
     switch (method) {
       case "getSession":
-        return svc.getSession(p["id"]);
+        result = call("getSession", p["id"]);
+        break;
       case "getSessionTimeline":
-        return svc.getSessionTimeline(p);
+        result = call("getSessionTimeline", p);
+        break;
       case "getChatMessages":
-        return svc.getChatMessages(p["sessionId"]);
+        result = call("getChatMessages", p["sessionId"]);
+        break;
       case "getResult":
-        return svc.getResult(p["sessionId"]);
+        result = call("getResult", p["sessionId"]);
+        break;
       case "captureOutput":
-        return svc.captureOutput(p["sessionId"]);
+        result = call("captureOutput", p["sessionId"]);
+        break;
       case "getLogContent":
-        return svc.getLogContent(p["sessionId"]);
+        result = call("getLogContent", p["sessionId"]);
+        break;
       case "getDiff":
-        return svc.getDiff(p["sessionId"]);
+        result = call("getDiff", p["sessionId"]);
+        break;
       case "getTags":
-        return svc.getTags(p["sessionId"]);
+        result = call("getTags", p["sessionId"]);
+        break;
       case "stop":
-        return svc.stop(p["sessionId"]);
+        result = call("stop", p["sessionId"]);
+        break;
       case "sendTurn":
-        return svc.sendTurn(p["sessionId"], p["text"]);
+        result = call("sendTurn", p["sessionId"], p["text"]);
+        break;
       case "cancelQueuedMessage":
-        return svc.cancelQueuedMessage(p["sessionId"], p["text"]);
+        result = call("cancelQueuedMessage", p["sessionId"], p["text"]);
+        break;
       case "getCheckpoints":
-        return svc.getCheckpoints(p["sessionId"]);
+        result = call("getCheckpoints", p["sessionId"]);
+        break;
       case "getTurnDiff":
-        return svc.getTurnDiff(p["sessionId"], p["fromTurn"], p["toTurn"]);
+        result = call("getTurnDiff", p["sessionId"], p["fromTurn"], p["toTurn"]);
+        break;
       case "revertToCheckpoint":
-        return svc.revertToCheckpoint(p["sessionId"], p["turnSeq"]);
+        result = call("revertToCheckpoint", p["sessionId"], p["turnSeq"]);
+        break;
       case "setKept":
-        return svc.setKept(p["sessionId"], p["kept"]);
+        result = call("setKept", p["sessionId"], p["kept"]);
+        break;
       case "merge":
-        return svc.merge(p["sessionId"], p["cleanup"]);
+        result = call("merge", p["sessionId"], p["cleanup"]);
+        break;
       case "isAlive":
-        return svc.isAlive(p["sessionId"]);
+        result = call("isAlive", p["sessionId"]);
+        break;
       case "archiveSession":
-        return svc.archiveSession(p["sessionId"]);
+        result = call("archiveSession", p["sessionId"]);
+        break;
       case "unarchiveSession":
-        return svc.unarchiveSession(p["sessionId"]);
+        result = call("unarchiveSession", p["sessionId"]);
+        break;
       case "backfillSession":
-        return svc.backfillSession(p["sessionId"]);
+        result = call("backfillSession", p["sessionId"]);
+        break;
       case "deleteSessions":
-        return svc.deleteSessions(p["ids"]);
+        result = call("deleteSessions", p["ids"]);
+        break;
       case "getChildSessions":
-        return svc.getChildSessions(p["sessionId"]);
+        result = call("getChildSessions", p["sessionId"]);
+        break;
       case "getTask":
-        return svc.getTask(p["id"]);
+        result = call("getTask", p["id"]);
+        break;
       case "getPendingApprovals":
-        return svc.getPendingApprovals(p["sessionId"]);
+        result = call("getPendingApprovals", p["sessionId"]);
+        break;
       case "resolveApproval":
-        return svc.resolveApproval(p["requestId"], p["decision"]);
+        result = call("resolveApproval", p["requestId"], p["decision"]);
+        break;
       case "terminalOpen":
-        return svc.terminalOpen(p["sessionId"], p["opts"]);
+        result = call("terminalOpen", p["sessionId"], p["opts"]);
+        break;
       case "terminalWrite":
-        return svc.terminalWrite(p["termId"], p["data"]);
+        result = call("terminalWrite", p["termId"], p["data"]);
+        break;
       case "terminalResize":
-        return svc.terminalResize(p["termId"], p["cols"], p["rows"]);
+        result = call("terminalResize", p["termId"], p["cols"], p["rows"]);
+        break;
       case "terminalClose":
-        return svc.terminalClose(p["termId"]);
+        result = call("terminalClose", p["termId"]);
+        break;
       case "terminalList":
-        return svc.terminalList(p["sessionId"]);
+        result = call("terminalList", p["sessionId"]);
+        break;
       default:
-        return svc[method](p);
+        result = call(method, p);
     }
+    return result as Promise<RpcResult<M>>;
   }
 
   /** Convert a SessionListResponse to a SessionSummary for cache storage. */

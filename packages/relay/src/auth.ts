@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { generateId } from "@orka/core";
 import {
   type ApiKeyRecord,
@@ -166,7 +166,7 @@ export class AuthManager {
     // Periodic cache pruning
     this.pruneTimer = setInterval(() => this.cache.prune(), 60_000);
     if (typeof this.pruneTimer === "object" && "unref" in this.pruneTimer) {
-      (this.pruneTimer as any).unref();
+      (this.pruneTimer as unknown as { unref(): void }).unref();
     }
   }
 
@@ -271,8 +271,8 @@ export class AuthManager {
     this.lastUsedQueue.add(keyHash);
     if (!this.lastUsedFlushTimer) {
       this.lastUsedFlushTimer = setTimeout(() => this.flushLastUsed(), 10_000);
-      if (typeof this.lastUsedFlushTimer === "object" && "unref" in (this.lastUsedFlushTimer as any)) {
-        (this.lastUsedFlushTimer as any).unref();
+      if (this.lastUsedFlushTimer !== null && typeof this.lastUsedFlushTimer === "object" && "unref" in this.lastUsedFlushTimer) {
+        (this.lastUsedFlushTimer as unknown as { unref(): void }).unref();
       }
     }
   }

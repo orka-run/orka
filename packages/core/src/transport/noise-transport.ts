@@ -258,8 +258,11 @@ export class NoiseClientTransport {
     this._state = "HELLO_CONFIRMED";
 
     // Compute prologue
+    if (!this.clientHello) {
+      throw new Error("NoiseClientTransport: clientHello not set");
+    }
     const prologue = computeTransportPrologue(
-      this.clientHello!,
+      this.clientHello,
       serverHello,
       this.opts.relayOrigin,
     );
@@ -509,9 +512,12 @@ export class NoiseServerTransport {
     const msg1Bytes = fromBase64url(noise1.msg);
 
     // Compute prologue
+    if (!this.clientHello || !this.serverHello) {
+      throw new Error("NoiseServerTransport: hello messages not set");
+    }
     const prologue = computeTransportPrologue(
-      this.clientHello!,
-      this.serverHello!,
+      this.clientHello,
+      this.serverHello,
       this.opts.relayOrigin,
     );
 

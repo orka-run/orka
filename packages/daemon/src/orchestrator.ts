@@ -5,12 +5,15 @@ import {
   generateId,
   type BackendKind,
   type PermissionMode,
+  type ProviderApprovalDecision,
   type ProviderSessionHandle,
   type RateLimitInfo,
   type ReasoningEffort,
   type Session,
+  type SessionStatus,
   type Task,
   type SpawnRequest,
+  type UsageRecord,
 } from "@orka/core";
 import { captureCheckpoint, revertToCheckpoint, deleteCheckpointRefsAfter } from "./checkpointing";
 import { consumeProviderEvents } from "./orchestration";
@@ -260,9 +263,9 @@ function buildConsumerCallbacks(
       : undefined;
 
   return {
-    updateSessionStatus: (id: string, status: any, extra?: any) => ctx.db.updateSessionStatus(id, status, extra),
-    saveSessionDiff: (id: string, diff: string, status: string, extra?: any) => ctx.db.saveSessionDiff(id, diff, status, extra),
-    insertUsageRecord: (record: any) => ctx.db.insertUsageRecord(record),
+    updateSessionStatus: (id: string, status: SessionStatus, extra?: { startedAt?: string; finishedAt?: string; exitCode?: number }) => ctx.db.updateSessionStatus(id, status, extra),
+    saveSessionDiff: (id: string, diff: string, status: string, extra?: { commitLog?: string; commitDiff?: string }) => ctx.db.saveSessionDiff(id, diff, status, extra),
+    insertUsageRecord: (record: UsageRecord) => ctx.db.insertUsageRecord(record),
     approvalManager: ctx.approvalManager,
     logFile: opts.logFile,
     rawLogPath: opts.rawLogPath,
@@ -274,7 +277,7 @@ function buildConsumerCallbacks(
     orkaHome: ctx.orkaHome,
     getSession: (id: string) => ctx.db.getSession(id),
     ...(permissionRules ? { permissionRules } : {}),
-    respondToRequest: (threadId: string, requestId: string, decision: any) =>
+    respondToRequest: (threadId: string, requestId: string, decision: ProviderApprovalDecision) =>
       ctx.providerService.respondToRequest(threadId, requestId, decision),
     denyHookApprovals: (id: string) => ctx.hookApprovalBridge.denyAllForSession(id),
     cleanupWorktree: async () => {
@@ -317,7 +320,7 @@ function buildConsumerCallbacks(
     ...(opts.afterCompleteHook ? {
       onAfterComplete: async () => {
         // Fire-and-forget: run after_complete hook in the session's workingDir
-        Bun.spawn(["sh", "-c", opts.afterCompleteHook!], {
+        Bun.spawn(["sh", "-c", opts.afterCompleteHook ?? ""], {
           cwd: opts.workingDir,
           stdout: "ignore",
           stderr: "ignore",
@@ -457,7 +460,7 @@ export async function spawnSession(ctx: DaemonContext, req: SpawnRequest): Promi
     // 2d. Run before_spawn hook if defined
     if (spawnConfig.hooks.beforeSpawn) {
       await withSpan("orka.hooks.before_spawn", { "orka.session.id": sessionId }, async () => {
-        const proc = Bun.spawn(["sh", "-c", spawnConfig.hooks.beforeSpawn!], {
+        const proc = Bun.spawn(["sh", "-c", spawnConfig.hooks.beforeSpawn ?? ""], {
           cwd: workingDir,
           stdout: "ignore",
           stderr: "ignore",

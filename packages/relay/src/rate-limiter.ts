@@ -27,7 +27,7 @@ export class RateLimiter {
     // Periodic cleanup of stale counters
     this.pruneTimer = setInterval(() => this.prune(), 60_000);
     if (typeof this.pruneTimer === "object" && "unref" in this.pruneTimer) {
-      (this.pruneTimer as any).unref();
+      (this.pruneTimer as unknown as { unref(): void }).unref();
     }
   }
 

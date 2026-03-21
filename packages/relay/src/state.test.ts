@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { RelayState } from "./state";
 import type { SocketData } from "./state";
+import type { ServerWebSocket } from "bun";
 
 // Minimal mock for ServerWebSocket — only needs to be distinguishable by identity
-function mockWs(overrides?: Partial<SocketData>): any {
+function mockWs(overrides?: Partial<SocketData>): ServerWebSocket<SocketData> {
   return {
     data: {
       role: "client" as const,
@@ -18,7 +19,7 @@ function mockWs(overrides?: Partial<SocketData>): any {
     },
     send: () => {},
     close: () => {},
-  };
+  } as unknown as ServerWebSocket<SocketData>;
 }
 
 describe("RelayState", () => {
@@ -36,8 +37,9 @@ describe("RelayState", () => {
       state.registerNode("acc-1", "node-1", ws);
       const node = state.getNode("acc-1", "node-1");
       expect(node).not.toBeNull();
-      expect(node!.id).toBe("node-1");
-      expect(node!.accountId).toBe("acc-1");
+      if (!node) throw new Error("expected node");
+      expect(node.id).toBe("node-1");
+      expect(node.accountId).toBe("acc-1");
     });
 
     test("removeNode", () => {
@@ -105,9 +107,10 @@ describe("RelayState", () => {
 
       const binding = state.getTransportBinding(ws);
       expect(binding).not.toBeNull();
-      expect(binding!.nodeId).toBe("node-1");
-      expect(binding!.relayCid).toBe(relayCid);
-      expect(binding!.accountId).toBe("acc-1");
+      if (!binding) throw new Error("expected binding");
+      expect(binding.nodeId).toBe("node-1");
+      expect(binding.relayCid).toBe(relayCid);
+      expect(binding.accountId).toBe("acc-1");
     });
 
     test("getTransportClientWs reverse lookup", () => {

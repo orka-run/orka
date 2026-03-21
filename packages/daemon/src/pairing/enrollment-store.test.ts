@@ -36,15 +36,15 @@ describe("EnrollmentStore", () => {
     const enrollId = store.create(opts);
 
     const enrollment = store.get(enrollId);
-    expect(enrollment).not.toBeNull();
-    expect(enrollment!.enrollId).toBe(enrollId);
-    expect(enrollment!.nodeId).toBe("node-1");
-    expect(enrollment!.nodeName).toBe("test-node");
-    expect(enrollment!.nodeTransportStaticPubkey).toEqual(new Uint8Array(32).fill(0xaa));
-    expect(enrollment!.relayPaths).toEqual(["wss://relay.example.com/v1/node/node-1"]);
-    expect(enrollment!.attemptsLeft).toBe(8);
-    expect(enrollment!.used).toBe(false);
-    expect(enrollment!.expiresAt).toBeGreaterThan(Date.now());
+    if (!enrollment) throw new Error("expected enrollment");
+    expect(enrollment.enrollId).toBe(enrollId);
+    expect(enrollment.nodeId).toBe("node-1");
+    expect(enrollment.nodeName).toBe("test-node");
+    expect(enrollment.nodeTransportStaticPubkey).toEqual(new Uint8Array(32).fill(0xaa));
+    expect(enrollment.relayPaths).toEqual(["wss://relay.example.com/v1/node/node-1"]);
+    expect(enrollment.attemptsLeft).toBe(8);
+    expect(enrollment.used).toBe(false);
+    expect(enrollment.expiresAt).toBeGreaterThan(Date.now());
 
     // Verify enrollId derivation matches expected computation
     const expectedInput = concatBytes(
@@ -90,11 +90,15 @@ describe("EnrollmentStore", () => {
     store = new EnrollmentStore();
     const enrollId = store.create(makeOpts());
 
-    expect(store.get(enrollId)!.used).toBe(false);
+    const beforeMark = store.get(enrollId);
+    if (!beforeMark) throw new Error("expected enrollment");
+    expect(beforeMark.used).toBe(false);
 
     store.markUsed(enrollId);
 
-    expect(store.get(enrollId)!.used).toBe(true);
+    const afterMark = store.get(enrollId);
+    if (!afterMark) throw new Error("expected enrollment");
+    expect(afterMark.used).toBe(true);
   });
 
   test("multiple concurrent enrollments: all accessible", () => {
@@ -175,10 +179,10 @@ describe("EnrollmentStore", () => {
     const enrollId = store.create(makeOpts({ secret }));
 
     const enrollment = store.get(enrollId);
-    expect(enrollment).not.toBeNull();
+    if (!enrollment) throw new Error("expected enrollment");
 
     const expectedHash = blake3(secret);
-    expect(enrollment!.secretHash).toEqual(expectedHash);
+    expect(enrollment.secretHash).toEqual(expectedHash);
   });
 
   test("shutdown: clears all enrollments", () => {
@@ -210,7 +214,9 @@ describe("EnrollmentStore", () => {
     store = new EnrollmentStore();
     const enrollId = store.create(makeOpts({ maxAttempts: 3 }));
 
-    expect(store.get(enrollId)!.attemptsLeft).toBe(3);
+    const e = store.get(enrollId);
+    if (!e) throw new Error("expected enrollment");
+    expect(e.attemptsLeft).toBe(3);
 
     expect(store.recordFailedAttempt(enrollId)).toBe(2);
     expect(store.recordFailedAttempt(enrollId)).toBe(1);
@@ -224,9 +230,9 @@ describe("EnrollmentStore", () => {
     const enrollId = store.create(makeOpts({ secret }));
 
     const enrollment = store.get(enrollId);
-    expect(enrollment).not.toBeNull();
+    if (!enrollment) throw new Error("expected enrollment");
     // The stored secret should match the original value
-    expect(enrollment!.secret).toEqual(secret);
+    expect(enrollment.secret).toEqual(secret);
   });
 
   test("raw secret: defensive copy (not same reference as input)", () => {
@@ -235,11 +241,11 @@ describe("EnrollmentStore", () => {
     const enrollId = store.create(makeOpts({ secret }));
 
     const enrollment = store.get(enrollId);
-    expect(enrollment).not.toBeNull();
+    if (!enrollment) throw new Error("expected enrollment");
     // Mutating the original should not affect the stored copy
     const originalValue = secret[0];
     secret[0] = 0xff;
-    expect(enrollment!.secret[0]).toBe(originalValue);
+    expect(enrollment.secret[0]).toBe(originalValue);
   });
 
   test("raw secret: zeroed on markUsed", () => {
@@ -247,7 +253,8 @@ describe("EnrollmentStore", () => {
     const secret = makeSecret(7);
     const enrollId = store.create(makeOpts({ secret }));
 
-    const enrollment = store.get(enrollId)!;
+    const enrollment = store.get(enrollId);
+    if (!enrollment) throw new Error("expected enrollment");
     // Secret should be non-zero before markUsed
     expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
 
@@ -262,7 +269,8 @@ describe("EnrollmentStore", () => {
     const secret = makeSecret(9);
     const enrollId = store.create(makeOpts({ secret }));
 
-    const enrollment = store.get(enrollId)!;
+    const enrollment = store.get(enrollId);
+    if (!enrollment) throw new Error("expected enrollment");
     expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
 
     store.remove(enrollId);
@@ -275,7 +283,8 @@ describe("EnrollmentStore", () => {
     const secret = makeSecret(11);
     const enrollId = store.create(makeOpts({ secret, maxAttempts: 1 }));
 
-    const enrollment = store.get(enrollId)!;
+    const enrollment = store.get(enrollId);
+    if (!enrollment) throw new Error("expected enrollment");
     expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
 
     store.recordFailedAttempt(enrollId);
@@ -288,7 +297,8 @@ describe("EnrollmentStore", () => {
     const secret = makeSecret(13);
     const enrollId = store.create(makeOpts({ secret, ttlMs: 50 }));
 
-    const enrollment = store.get(enrollId)!;
+    const enrollment = store.get(enrollId);
+    if (!enrollment) throw new Error("expected enrollment");
     expect(enrollment.secret.some((b) => b !== 0)).toBe(true);
 
     await new Promise((resolve) => setTimeout(resolve, 60));

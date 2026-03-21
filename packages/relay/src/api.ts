@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { z } from "zod/v4";
 import {
   getAccount,
@@ -69,7 +69,7 @@ export class SignupRateLimiter {
       }
     }, 60_000);
     if (typeof this.cleanupTimer === "object" && "unref" in this.cleanupTimer) {
-      (this.cleanupTimer as any).unref();
+      (this.cleanupTimer as unknown as { unref(): void }).unref();
     }
   }
 
@@ -92,7 +92,7 @@ export class SignupRateLimiter {
 
 // --- Helper ---
 
-function json(data: any, status: number = 200): Response {
+function json(data: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json" },
@@ -138,7 +138,7 @@ export async function handleApiRequest(
         return error("Too many signup attempts. Try again later.", 429);
       }
 
-      let body: any;
+      let body: unknown;
       try {
         body = await req.json();
       } catch {
@@ -188,7 +188,7 @@ export async function handleApiRequest(
         if (!accountId) {
           return error("Invalid account id", 400);
         }
-        let body: any;
+        let body: unknown;
         try { body = await req.json(); } catch { return error("Invalid JSON body", 400); }
 
         const parsed = UpdateAccountSchema.safeParse(body);
@@ -282,7 +282,7 @@ export async function handleApiRequest(
         return error(`Maximum ${config.abuse.maxKeysPerAccount} API keys per account`, 400);
       }
 
-      let body: any = {};
+      let body: unknown = {};
       try { body = await req.json(); } catch { /* empty body is OK */ }
 
       const parsed = CreateKeySchema.safeParse(body);

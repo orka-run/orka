@@ -382,7 +382,9 @@ describe("ClaudeCodeAdapter", () => {
         : undefined,
     ).toBeUndefined();
     expect(stdin.writes).toHaveLength(1);
-    const sentMsg = JSON.parse(stdin.writes[0]!);
+    const firstWrite = stdin.writes[0];
+    if (!firstWrite) throw new Error("expected first write");
+    const sentMsg = JSON.parse(firstWrite);
     expect(sentMsg).toEqual({
       type: "user",
       message: { role: "user", content: "Inspect the project" },
@@ -486,13 +488,18 @@ describe("ClaudeCodeAdapter", () => {
     // Turn 1 and Turn 2 should have different turnIds
     const turnStartedEvents = events.filter((e) => e.type === "turn.started");
     expect(turnStartedEvents).toHaveLength(2);
-    expect(turnStartedEvents[0]!.turnId).toMatch(/^turn-/);
-    expect(turnStartedEvents[1]!.turnId).toMatch(/^turn-/);
-    expect(turnStartedEvents[0]!.turnId).not.toBe(turnStartedEvents[1]!.turnId);
+    const turn0 = turnStartedEvents[0];
+    const turn1 = turnStartedEvents[1];
+    if (!turn0 || !turn1) throw new Error("expected two turn started events");
+    expect(turn0.turnId).toMatch(/^turn-/);
+    expect(turn1.turnId).toMatch(/^turn-/);
+    expect(turn0.turnId).not.toBe(turn1.turnId);
 
     // sendTurn should have written a JSON message
     expect(stdin.writes).toHaveLength(2);
-    const secondMsg = JSON.parse(stdin.writes[1]!);
+    const secondWrite = stdin.writes[1];
+    if (!secondWrite) throw new Error("expected second write");
+    const secondMsg = JSON.parse(secondWrite);
     expect(secondMsg).toEqual({
       type: "user",
       message: { role: "user", content: "Second task" },

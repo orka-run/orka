@@ -1,5 +1,6 @@
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import type { StoredNode } from "@orka/core";
+import type { WsTransport } from "@orka/client";
 import type { NodeRegistry } from "./node-registry";
 import type { PushHub } from "./push-hub";
 import { createRemoteNodeManager, type TransportFactory } from "./remote-nodes";
@@ -9,12 +10,12 @@ const mockDisconnect = mock(() => {});
 const mockRequest = mock(async (): Promise<unknown> => "result");
 const mockSubscribe = mock(() => () => {});
 let capturedStateListener: ((snapshot: { state: string; reconnectAttempts: number }) => void) | null = null;
-const mockOnStateChange = mock((listener: any) => {
+const mockOnStateChange = mock((listener: (snapshot: { state: string; reconnectAttempts: number }) => void) => {
   capturedStateListener = listener;
   return () => { capturedStateListener = null; };
 });
 
-let transportConstructions: Array<{ url: string; opts: any }> = [];
+let transportConstructions: Array<{ url: string; opts: unknown }> = [];
 
 const mockTransportFactory: TransportFactory = (url, opts) => {
   transportConstructions.push({ url, opts });
@@ -28,7 +29,7 @@ const mockTransportFactory: TransportFactory = (url, opts) => {
     onProtocolMismatch: mock(() => () => {}),
     getServerCapabilities: mock(() => null),
     get connectionState() { return "disconnected" as const; },
-  } as any;
+  } as unknown as WsTransport;
 };
 
 function makeNode(overrides: Partial<StoredNode> = {}): StoredNode {
@@ -85,15 +86,15 @@ describe("RemoteNodeManager", () => {
     await mgr.connect(node);
 
     const handle = mgr.getHandle("node-test");
-    expect(handle).not.toBeNull();
-    expect(handle!.nodeId).toBe("node-test");
-    expect(handle!.status).toBe("connecting");
+    if (!handle) throw new Error("expected handle");
+    expect(handle.nodeId).toBe("node-test");
+    expect(handle.status).toBe("connecting");
     expect(mockConnect).toHaveBeenCalledTimes(1);
 
     // Simulate connected state
     capturedStateListener?.({ state: "connected", reconnectAttempts: 0 });
-    expect(handle!.status).toBe("connected");
-    expect(handle!.lastConnected).toBeGreaterThan(0);
+    expect(handle.status).toBe("connected");
+    expect(handle.lastConnected).toBeGreaterThan(0);
 
     mgr.shutdown();
   });
@@ -105,7 +106,8 @@ describe("RemoteNodeManager", () => {
     await mgr.connect(node);
 
     expect(transportConstructions).toHaveLength(1);
-    expect(transportConstructions[0]!.url).toContain("?token=secret123");
+    if (!transportConstructions[0]) throw new Error("expected transport construction");
+    expect(transportConstructions[0].url).toContain("?token=secret123");
 
     mgr.shutdown();
   });
@@ -218,7 +220,8 @@ describe("RemoteNodeManager", () => {
     const mgr = createRemoteNodeManager(makeRegistry(), makePushHub(), mockTransportFactory);
     await mgr.connect(makeNode());
 
-    const handle = mgr.getHandle("node-test")!;
+    const handle = mgr.getHandle("node-test");
+    if (!handle) throw new Error("expected handle");
     capturedStateListener?.({ state: "connected", reconnectAttempts: 0 });
     expect(handle.status).toBe("connected");
 
@@ -254,7 +257,7 @@ describe("RemoteNodeManager", () => {
 
     // 3 forwarded channels + the explicit subscribePush calls if any
     const subscribedChannels = (
-      mockSubscribe.mock.calls as unknown as Array<[string, (...args: any[]) => void]>
+      mockSubscribe.mock.calls as unknown as Array<[string, (...args: unknown[]) => void]>
     ).map((c) => c[0]);
     expect(subscribedChannels).toContain("orchestration.event");
     expect(subscribedChannels).toContain("orchestration.sessionUpdated");
@@ -273,8 +276,8 @@ describe("RemoteNodeManager", () => {
     ).find(
       (c) => c[0] === "orchestration.event",
     );
-    expect(eventCall).toBeTruthy();
-    const handler = eventCall![1];
+    if (!eventCall) throw new Error("expected event call");
+    const handler = eventCall[1];
 
     // Simulate a push event from remote node
     handler({ sessionId: "sess-123", type: "started" });
@@ -297,7 +300,8 @@ describe("RemoteNodeManager", () => {
     ).find(
       (c) => c[0] === "orchestration.event",
     );
-    const handler = eventCall![1];
+    if (!eventCall) throw new Error("expected event call");
+    const handler = eventCall[1];
 
     handler("plain-string");
 

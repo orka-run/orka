@@ -1,4 +1,5 @@
 import { describe, test, beforeEach, mock } from "bun:test";
+import type { Database } from "bun:sqlite";
 import { UsageMeter } from "./metering";
 
 describe("UsageMeter", () => {
@@ -11,7 +12,7 @@ describe("UsageMeter", () => {
 
   beforeEach(() => {
     // Use a long interval so flush doesn't fire during tests
-    meter = new UsageMeter(null as any, 600_000, noopDeps);
+    meter = new UsageMeter(null as unknown as Database, 600_000, noopDeps);
   });
 
   test("record buffers events", () => {

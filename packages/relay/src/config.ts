@@ -155,7 +155,10 @@ function parseSimpleToml(raw: string): Record<string, Record<string, string>> {
       if (!key || value === undefined) {
         continue;
       }
-      result[section]![key] = value;
+      const sectionObj = result[section];
+      if (sectionObj) {
+        sectionObj[key] = value;
+      }
     }
   }
 

@@ -11,6 +11,18 @@ import type { RemoteNodeManager, RemoteNodeHandle } from "./remote-nodes";
 import type { SessionCache } from "./session-cache";
 import { createAggregatingClient } from "./aggregating-client";
 
+// --- Helper to access mock calls without `as any` ---
+
+/** Extract the mock calls array from a mock function. */
+function mockCalls(fn: unknown): unknown[][] {
+  return (fn as { mock: { calls: unknown[][] } }).mock.calls;
+}
+
+/** Replace the implementation of a mock function. */
+function mockImpl(fn: unknown, impl: (...args: unknown[]) => unknown): void {
+  (fn as { mockImplementation: (impl: (...args: unknown[]) => unknown) => void }).mockImplementation(impl);
+}
+
 // --- Mock Factories ---
 
 function mockDetailResponse(overrides: Partial<SessionDetailResponse> = {}): SessionDetailResponse {
@@ -166,8 +178,8 @@ function createMockLocalClient(): OrkaService {
     connectNode: mock(async () => {}),
     disconnectNode: mock(async () => {}),
     listWorkspaces: mock(async () => []),
-    getWorkspace: mock(async () => ({ id: "ws-1" } as any)),
-    createWorkspace: mock(async () => ({ id: "ws-1" } as any)),
+    getWorkspace: mock(async () => ({ id: "ws-1" } as unknown as ReturnType<OrkaService["getWorkspace"]> extends Promise<infer R> ? R : never)),
+    createWorkspace: mock(async () => ({ id: "ws-1" } as unknown as ReturnType<OrkaService["createWorkspace"]> extends Promise<infer R> ? R : never)),
     updateWorkspace: mock(async () => {}),
     deleteWorkspace: mock(async () => {}),
     addWorkspacePath: mock(async () => {}),
@@ -192,7 +204,7 @@ function createMockRemoteNodes(): RemoteNodeManager & {
       if (nodeId === "node-1") {
         return {
           nodeId: "node-1",
-          transport: null as any,
+          transport: null as unknown as RemoteNodeHandle["transport"],
           status: "connected",
           lastConnected: Date.now(),
           lastError: null,
@@ -201,7 +213,7 @@ function createMockRemoteNodes(): RemoteNodeManager & {
       if (nodeId === "node-offline") {
         return {
           nodeId: "node-offline",
-          transport: null as any,
+          transport: null as unknown as RemoteNodeHandle["transport"],
           status: "disconnected",
           lastConnected: null,
           lastError: "connection lost",
@@ -212,13 +224,13 @@ function createMockRemoteNodes(): RemoteNodeManager & {
     listHandles: mock((): RemoteNodeHandle[] => [
       {
         nodeId: "node-1",
-        transport: null as any,
+        transport: null as unknown as RemoteNodeHandle["transport"],
         status: "connected",
         lastConnected: Date.now(),
         lastError: null,
       },
     ]),
-    request: requestMock as any,
+    request: requestMock as unknown as RemoteNodeManager["request"],
     subscribePush: mock(
       (nodeId: string, channel: string, handler: (data: unknown) => void) => {
         let nodeHandlers = pushHandlers.get(nodeId);
@@ -233,8 +245,9 @@ function createMockRemoteNodes(): RemoteNodeManager & {
         }
         handlers.push(handler);
         return () => {
-          const idx = handlers!.indexOf(handler);
-          if (idx >= 0) handlers!.splice(idx, 1);
+          if (!handlers) return;
+          const idx = handlers.indexOf(handler);
+          if (idx >= 0) handlers.splice(idx, 1);
         };
       },
     ),
@@ -336,7 +349,10 @@ describe("AggregatingClient", () => {
     it("sorts by createdAt desc", async () => {
       const sessions = await svc.listSessions();
       for (let i = 1; i < sessions.length; i++) {
-        expect(sessions[i - 1]!.createdAt >= sessions[i]!.createdAt).toBe(true);
+        const prev = sessions[i - 1];
+        const curr = sessions[i];
+        if (!prev || !curr) throw new Error("expected session");
+        expect(prev.createdAt >= curr.createdAt).toBe(true);
       }
     });
 
@@ -354,25 +370,24 @@ describe("AggregatingClient", () => {
 
   describe("getSession", () => {
     it("routes to local for local sessions", async () => {
-      // Session not in cache → falls through to local
+      // Session not in cache -> falls through to local
       const result = await svc.getSession("sess-local-1");
       expect(result).not.toBeNull();
-      expect((local.getSession as any).mock.calls.length).toBeGreaterThan(0);
+      expect(mockCalls(local.getSession).length).toBeGreaterThan(0);
     });
 
     it("routes to remote for remote sessions", async () => {
       const remoteSession = mockDetailResponse({ id: "sess-remote-1" });
-      (remote.request as any).mockImplementation(
-        async (_nodeId: string, method: string) => {
-          if (method === "getSession") return remoteSession;
-          return null;
-        },
-      );
+      mockImpl(remote.request, async (_nodeId: unknown, method: unknown) => {
+        if (method === "getSession") return remoteSession;
+        return null;
+      });
 
       const result = await svc.getSession("sess-remote-1");
       expect(result).toEqual(remoteSession);
-      expect((remote.request as any).mock.calls.length).toBeGreaterThan(0);
-      const lastCall = (remote.request as any).mock.calls.at(-1);
+      expect(mockCalls(remote.request).length).toBeGreaterThan(0);
+      const lastCall = mockCalls(remote.request).at(-1);
+      if (!lastCall) throw new Error("expected call");
       expect(lastCall[0]).toBe("node-1");
       expect(lastCall[1]).toBe("getSession");
     });
@@ -381,19 +396,21 @@ describe("AggregatingClient", () => {
   describe("spawn", () => {
     it("routes to remote node when nodeId specified", async () => {
       const remoteResult = mockSpawnResult({ id: "sess-spawned-remote" });
-      (remote.request as any).mockImplementation(async () => remoteResult);
+      mockImpl(remote.request, async () => remoteResult);
 
       const result = await svc.spawn({
         prompt: "test",
         projectPath: "/proj",
         backend: "claude-code",
-    
+
         nodeId: "node-1",
       });
 
       expect(result.id).toBe("sess-spawned-remote");
-      expect((remote.request as any).mock.calls.at(-1)[0]).toBe("node-1");
-      expect((remote.request as any).mock.calls.at(-1)[1]).toBe("spawn");
+      const lastCall = mockCalls(remote.request).at(-1);
+      if (!lastCall) throw new Error("expected call");
+      expect(lastCall[0]).toBe("node-1");
+      expect(lastCall[1]).toBe("spawn");
     });
 
     it("goes to local without nodeId", async () => {
@@ -401,11 +418,11 @@ describe("AggregatingClient", () => {
         prompt: "test",
         projectPath: "/proj",
         backend: "claude-code",
-    
+
       });
 
       expect(result.id).toBe("sess-new-local");
-      expect((local.spawn as any).mock.calls.length).toBe(1);
+      expect(mockCalls(local.spawn).length).toBe(1);
     });
 
     it("goes to local when nodeId is 'local'", async () => {
@@ -413,29 +430,30 @@ describe("AggregatingClient", () => {
         prompt: "test",
         projectPath: "/proj",
         backend: "claude-code",
-    
+
         nodeId: "local",
       });
 
       expect(result.id).toBe("sess-new-local");
-      expect((local.spawn as any).mock.calls.length).toBe(1);
+      expect(mockCalls(local.spawn).length).toBe(1);
     });
   });
 
   describe("stop", () => {
     it("routes to owning node", async () => {
-      (remote.request as any).mockImplementation(async () => null);
+      mockImpl(remote.request, async () => null);
 
       await svc.stop("sess-remote-1");
 
-      const lastCall = (remote.request as any).mock.calls.at(-1);
+      const lastCall = mockCalls(remote.request).at(-1);
+      if (!lastCall) throw new Error("expected call");
       expect(lastCall[0]).toBe("node-1");
       expect(lastCall[1]).toBe("stop");
     });
 
     it("routes to local when session not in cache", async () => {
       await svc.stop("sess-local-1");
-      expect((local.stop as any).mock.calls.length).toBe(1);
+      expect(mockCalls(local.stop).length).toBe(1);
     });
   });
 
@@ -446,9 +464,10 @@ describe("AggregatingClient", () => {
       try {
         await svc.getSession("sess-offline-1");
         expect(true).toBe(false); // should not reach
-      } catch (err: any) {
-        expect(err.code).toBe("NODE_UNREACHABLE");
-        expect(err.nodeId).toBe("node-offline");
+      } catch (err: unknown) {
+        const e = err as { code: string; nodeId: string };
+        expect(e.code).toBe("NODE_UNREACHABLE");
+        expect(e.nodeId).toBe("node-offline");
       }
     });
   });
@@ -470,13 +489,15 @@ describe("AggregatingClient", () => {
           },
         },
       };
-      (remote.request as any).mockImplementation(async () => remoteUsage);
+      mockImpl(remote.request, async () => remoteUsage);
 
       const result = await svc.getUsage();
       expect(result.totalCostUsd).toBe(3.0);
       expect(result.totalInputTokens).toBe(300);
       expect(result.sessionCount).toBe(5);
-      expect(result.byBackend["claude"]!.sessions).toBe(5);
+      const claudeBucket = result.byBackend["claude"];
+      if (!claudeBucket) throw new Error("expected claude bucket");
+      expect(claudeBucket.sessions).toBe(5);
     });
 
     it("routes to owning node when sessionId specified", async () => {
@@ -488,7 +509,7 @@ describe("AggregatingClient", () => {
         sessionCount: 1,
         byBackend: {},
       };
-      (remote.request as any).mockImplementation(async () => remoteUsage);
+      mockImpl(remote.request, async () => remoteUsage);
 
       const result = await svc.getUsage({ sessionId: "sess-remote-1" });
       expect(result.totalCostUsd).toBe(0.5);
@@ -507,7 +528,7 @@ describe("AggregatingClient", () => {
   describe("local-only methods", () => {
     it("reap delegates to local", async () => {
       await svc.reap();
-      expect((local.reap as any).mock.calls.length).toBe(1);
+      expect(mockCalls(local.reap).length).toBe(1);
     });
 
     it("pruneSessions delegates to local", async () => {
@@ -515,60 +536,65 @@ describe("AggregatingClient", () => {
         maxAgeMs: 86400000,
         confirm: false,
       });
-      expect((local.pruneSessions as any).mock.calls.length).toBe(1);
+      expect(mockCalls(local.pruneSessions).length).toBe(1);
     });
 
     it("getMetrics delegates to local", async () => {
       await svc.getMetrics();
-      expect((local.getMetrics as any).mock.calls.length).toBe(1);
+      expect(mockCalls(local.getMetrics).length).toBe(1);
     });
 
     it("startPairing delegates to local", async () => {
       await svc.startPairing({});
-      expect((local.startPairing as any).mock.calls.length).toBe(1);
+      expect(mockCalls(local.startPairing).length).toBe(1);
     });
   });
 
   describe("deleteSessions", () => {
     it("routes each ID to owning node", async () => {
-      (remote.request as any).mockImplementation(async () => null);
+      mockImpl(remote.request, async () => null);
 
       await svc.deleteSessions(["sess-local-1", "sess-remote-1"]);
 
       // Local should get sess-local-1
-      const localCalls = (local.deleteSessions as any).mock.calls;
+      const localCalls = mockCalls(local.deleteSessions);
       expect(localCalls.length).toBe(1);
-      expect(localCalls[0][0]).toEqual(["sess-local-1"]);
+      const firstLocalCall = localCalls[0];
+      if (!firstLocalCall) throw new Error("expected call");
+      expect(firstLocalCall[0]).toEqual(["sess-local-1"]);
 
       // Remote should get sess-remote-1
-      const remoteCalls = (remote.request as any).mock.calls;
+      const remoteCalls = mockCalls(remote.request);
       const deleteCall = remoteCalls.find(
-        (c: any[]) => c[1] === "deleteSessions",
+        (c: unknown[]) => c[1] === "deleteSessions",
       );
       expect(deleteCall).toBeTruthy();
-      expect(deleteCall[2].ids).toEqual(["sess-remote-1"]);
+      if (!deleteCall) throw new Error("expected deleteCall");
+      expect((deleteCall[2] as Record<string, unknown>)["ids"]).toEqual(["sess-remote-1"]);
     });
   });
 
   describe("terminal routing", () => {
     it("tracks terminal node ownership", async () => {
       // Open a terminal on a remote session
-      (remote.request as any).mockImplementation(async () => ({
+      mockImpl(remote.request, async () => ({
         termId: "term-remote-1",
       }));
 
       const { termId } = await svc.terminalOpen("sess-remote-1");
       expect(termId).toBe("term-remote-1");
 
-      // Write to it — should route to the same remote node
-      (remote.request as any).mockImplementation(async () => null);
+      // Write to it -- should route to the same remote node
+      mockImpl(remote.request, async () => null);
       await svc.terminalWrite("term-remote-1", "hello");
 
-      const writeCalls = (remote.request as any).mock.calls.filter(
-        (c: any[]) => c[1] === "terminalWrite",
+      const writeCalls = mockCalls(remote.request).filter(
+        (c: unknown[]) => c[1] === "terminalWrite",
       );
       expect(writeCalls.length).toBe(1);
-      expect(writeCalls[0][0]).toBe("node-1");
+      const firstWriteCall = writeCalls[0];
+      if (!firstWriteCall) throw new Error("expected call");
+      expect(firstWriteCall[0]).toBe("node-1");
     });
   });
 
@@ -576,15 +602,15 @@ describe("AggregatingClient", () => {
     it("subscribes to sessionUpdated on init", () => {
       const handlers =
         remote._pushHandlers.get("node-1")?.get("orchestration.sessionUpdated");
-      expect(handlers).toBeTruthy();
-      expect(handlers!.length).toBeGreaterThan(0);
+      if (!handlers) throw new Error("expected handlers");
+      expect(handlers.length).toBeGreaterThan(0);
     });
 
     it("subscribes to sessionDeleted on init", () => {
       const handlers =
         remote._pushHandlers.get("node-1")?.get("orchestration.sessionDeleted");
-      expect(handlers).toBeTruthy();
-      expect(handlers!.length).toBeGreaterThan(0);
+      if (!handlers) throw new Error("expected handlers");
+      expect(handlers.length).toBeGreaterThan(0);
     });
 
     it("updates cache on sessionUpdated push", async () => {
@@ -593,8 +619,9 @@ describe("AggregatingClient", () => {
           .get("node-1")
           ?.get("orchestration.sessionUpdated");
 
+      if (!handlers || !handlers[0]) throw new Error("expected handler");
       // Simulate push event for a new session
-      handlers![0]!({
+      handlers[0]({
         sessionId: "sess-remote-new",
         status: "running",
         backend: "claude",
@@ -613,7 +640,8 @@ describe("AggregatingClient", () => {
           .get("node-1")
           ?.get("orchestration.sessionDeleted");
 
-      handlers![0]!({ sessionId: "sess-remote-1" });
+      if (!handlers || !handlers[0]) throw new Error("expected handler");
+      handlers[0]({ sessionId: "sess-remote-1" });
 
       expect(cache.getOwningNode("sess-remote-1")).toBeNull();
     });

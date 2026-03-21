@@ -430,7 +430,7 @@ export function initTracing(options: TracingInitOptions = {}): void {
   });
 
   const processors: SimpleSpanProcessor[] = [];
-  const fileExporter = new FileSpanExporter(options.dataDir!);
+  const fileExporter = new FileSpanExporter(options.dataDir ?? "");
 
   if (traceEndpoint) {
     processors.push(
@@ -591,9 +591,10 @@ export async function withSpan<T>(
       const result = await fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
-    } catch (err: any) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-      span.recordException(err);
+    } catch (err: unknown) {
+      const errMessage = err instanceof Error ? err.message : String(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: errMessage });
+      if (err instanceof Error) span.recordException(err);
       throw err;
     } finally {
       span.end();
@@ -615,9 +616,10 @@ export function withSpanSync<T>(
       const result = fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
-    } catch (err: any) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-      span.recordException(err);
+    } catch (err: unknown) {
+      const errMessage = err instanceof Error ? err.message : String(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: errMessage });
+      if (err instanceof Error) span.recordException(err);
       throw err;
     } finally {
       span.end();

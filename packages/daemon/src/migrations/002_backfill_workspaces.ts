@@ -4,9 +4,10 @@
  * Idempotent: skips if workspaces table already has data.
  */
 import type { Kysely } from "@orka/core/migrate";
+import type { basename as basenameFn } from "node:path";
 import { sql } from "@orka/core/migrate";
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up(db: Kysely<unknown>): Promise<void> {
   // Check if there are already workspace rows — if so, skip backfill
   const countResult = await sql<{ cnt: number }>`
     SELECT COUNT(*) AS cnt FROM workspaces
@@ -21,7 +22,7 @@ export async function up(db: Kysely<any>): Promise<void> {
   `.execute(db);
   if (pathRows.rows.length === 0) return;
 
-  const { basename } = require("node:path") as typeof import("node:path");
+  const { basename } = require("node:path") as { basename: typeof basenameFn };
   const now = new Date().toISOString();
 
   for (const { project_path } of pathRows.rows) {

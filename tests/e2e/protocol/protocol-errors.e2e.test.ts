@@ -67,13 +67,13 @@ describe("Protocol Error Handling", () => {
     ws.send(JSON.stringify(clientHello));
 
     // The daemon should respond with a transport_error (key_id_mismatch)
-    const response = (await waitForMessage(
+    const response = await waitForMessage(
       ws,
-      (m: any) => m?.t === "transport_error",
-    )) as any;
+      (m) => (m as Record<string, unknown>)?.["t"] === "transport_error",
+    ) as Record<string, unknown>;
 
-    expect(response.t).toBe("transport_error");
-    expect(response.code).toBe("key_id_mismatch");
+    expect(response["t"]).toBe("transport_error");
+    expect(response["code"]).toBe("key_id_mismatch");
 
     ws.close();
   });
@@ -100,13 +100,13 @@ describe("Protocol Error Handling", () => {
 
     ws.send(JSON.stringify(clientHello));
 
-    const response = (await waitForMessage(
+    const response = await waitForMessage(
       ws,
-      (m: any) => m?.t === "transport_error",
-    )) as any;
+      (m) => (m as Record<string, unknown>)?.["t"] === "transport_error",
+    ) as Record<string, unknown>;
 
-    expect(response.t).toBe("transport_error");
-    expect(response.code).toBe("key_id_mismatch");
+    expect(response["t"]).toBe("transport_error");
+    expect(response["code"]).toBe("key_id_mismatch");
 
     ws.close();
   });
@@ -132,13 +132,13 @@ describe("Protocol Error Handling", () => {
 
     ws.send(JSON.stringify(clientHello));
 
-    const response = (await waitForMessage(
+    const response = await waitForMessage(
       ws,
-      (m: any) => m?.t === "transport_error",
-    )) as any;
+      (m) => (m as Record<string, unknown>)?.["t"] === "transport_error",
+    ) as Record<string, unknown>;
 
-    expect(response.t).toBe("transport_error");
-    expect(response.code).toBe("no_such_node");
+    expect(response["t"]).toBe("transport_error");
+    expect(response["code"]).toBe("no_such_node");
 
     ws.close();
   });
@@ -162,19 +162,19 @@ describe("Protocol Error Handling", () => {
 
     // Corrupt the base64url ciphertext by flipping bits
     const ctBytes = Buffer.from(frame.ct, "base64url");
-    ctBytes[0]! ^= 0xff; // flip first byte
-    ctBytes[ctBytes.length - 1]! ^= 0xff; // flip last byte
+    ctBytes[0] = (ctBytes[0] ?? 0) ^ 0xff; // flip first byte
+    ctBytes[ctBytes.length - 1] = (ctBytes[ctBytes.length - 1] ?? 0) ^ 0xff; // flip last byte
     const corruptedFrame = { t: "data", ct: ctBytes.toString("base64url") };
 
     ws.send(JSON.stringify(corruptedFrame));
 
-    const response = (await waitForMessage(
+    const response = await waitForMessage(
       ws,
-      (m: any) => m?.t === "transport_error",
-    )) as any;
+      (m) => (m as Record<string, unknown>)?.["t"] === "transport_error",
+    ) as Record<string, unknown>;
 
-    expect(response.t).toBe("transport_error");
-    expect(response.code).toBe("decrypt_error");
+    expect(response["t"]).toBe("transport_error");
+    expect(response["code"]).toBe("decrypt_error");
 
     ws.close();
   }, 15_000);
@@ -244,13 +244,13 @@ describe("Protocol Error Handling", () => {
 
     ws.send(JSON.stringify(clientHello));
 
-    const response = (await waitForMessage(
+    const response = await waitForMessage(
       ws,
-      (m: any) => m?.t === "transport_error",
-    )) as any;
+      (m) => (m as Record<string, unknown>)?.["t"] === "transport_error",
+    ) as Record<string, unknown>;
 
-    expect(response.t).toBe("transport_error");
-    expect(response.code).toBe("unsupported_suite");
+    expect(response["t"]).toBe("transport_error");
+    expect(response["code"]).toBe("unsupported_suite");
 
     ws.close();
   });
@@ -313,7 +313,7 @@ describe("Protocol Error Handling", () => {
     ws.send(JSON.stringify(clientHello));
 
     // Wait for server_hello
-    const serverHello = await waitForMessage(ws, (m: any) => m?.t === "server_hello");
+    const serverHello = await waitForMessage(ws, (m) => (m as Record<string, unknown>)?.["t"] === "server_hello");
     expect(serverHello).toBeTruthy();
 
     // Process server_hello to get noise_1 — but DO NOT send it

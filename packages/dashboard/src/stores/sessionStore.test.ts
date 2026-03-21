@@ -207,7 +207,8 @@ describe("sessionStore", () => {
 
     const sessions = store.getState().sessions;
     expect(sessions).toHaveLength(1);
-    const first = sessions[0]!;
+    const first = sessions[0];
+    if (!first) throw new Error("expected session");
     expect(first.id).toBe("sess-2");
     expect(first.status).toBe("queued");
     expect(first.backend).toBe("codex");

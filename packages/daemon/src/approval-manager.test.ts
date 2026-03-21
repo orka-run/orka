@@ -32,9 +32,10 @@ describe("ApprovalManager", () => {
     mgr.addRequest(makeRequest());
     const resolved = mgr.resolve("req-1", "approve");
     expect(resolved).not.toBeNull();
-    expect(resolved!.status).toBe("resolved");
-    expect(resolved!.decision).toBe("approve");
-    expect(resolved!.resolvedAt).toBeDefined();
+    if (!resolved) throw new Error("expected resolved request");
+    expect(resolved.status).toBe("resolved");
+    expect(resolved.decision).toBe("approve");
+    expect(resolved.resolvedAt).toBeDefined();
   });
 
   test("resolve returns null for unknown requestId", () => {
@@ -78,7 +79,8 @@ describe("ApprovalManager", () => {
 
     // Resolve req-1 with an old timestamp
     mgr.resolve("req-1", "approve");
-    const resolved = mgr.getRequest("req-1")!;
+    const resolved = mgr.getRequest("req-1");
+    if (!resolved) throw new Error("expected resolved request");
     resolved.resolvedAt = oldDate;
 
     // Cleanup with 30s threshold — should remove req-1

@@ -254,16 +254,21 @@ export class PairingServer {
 
     const pABytes = fromBase64Url(parsed.data.pA);
 
+    // State machine guarantees clientHello/serverHello are set after AWAIT_CLIENT_HELLO
+    if (!this.clientHello || !this.serverHello) {
+      return this.protocolError();
+    }
+
     // Compute pair_context and pair_aad for SPAKE2
     const pairContext = computePairContext(
-      this.clientHello!,
-      this.serverHello!,
+      this.clientHello,
+      this.serverHello,
     );
     const pairAad = computePairAad(this.relayOrigin, pairContext);
 
     // Run SPAKE2 B-side
     // idA = raw bytes of client_instance_id (decoded from base64url wire format)
-    const idA = fromBase64Url(this.clientHello!.client_instance_id);
+    const idA = fromBase64Url(this.clientHello.client_instance_id);
     const idB = textEncoder.encode(this.enrollment.enrollId);
 
     const spake2B = createSpake2B({
@@ -299,8 +304,13 @@ export class PairingServer {
 
     const clientMac = fromBase64Url(parsed.data.mac);
 
+    // State machine guarantees spake2Result is set after AWAIT_PAIR_INIT
+    if (!this.spake2Result) {
+      return this.protocolError();
+    }
+
     // Verify client MAC
-    if (!this.spake2Result!.verifyConfirmA(clientMac)) {
+    if (!this.spake2Result.verifyConfirmA(clientMac)) {
       // Bad MAC - record failed attempt
       const remaining = this.enrollmentStore.recordFailedAttempt(
         this.enrollment.enrollId,
@@ -316,7 +326,7 @@ export class PairingServer {
     }
 
     // MAC verified - derive bootstrap keys
-    const Ke = this.spake2Result!.Ke;
+    const Ke = this.spake2Result.Ke;
     const bootS2c = deriveBootstrapKey(Ke, BOOT_S2C_INFO);
     deriveBootstrapKey(Ke, BOOT_C2S_INFO); // derive but server doesn't use it directly
     this._bootExport = deriveBootstrapKey(Ke, BOOT_EXPORT_INFO);
@@ -336,10 +346,15 @@ export class PairingServer {
 
     const plaintext = textEncoder.encode(JSON.stringify(bootstrapPayload));
 
+    // State machine guarantees clientHello/serverHello are set
+    if (!this.clientHello || !this.serverHello) {
+      return this.protocolError();
+    }
+
     // AAD = SHA256(pair_context)
     const pairContext = computePairContext(
-      this.clientHello!,
-      this.serverHello!,
+      this.clientHello,
+      this.serverHello,
     );
     const aad = sha256(pairContext);
 
@@ -350,7 +365,7 @@ export class PairingServer {
     return [
       {
         t: "pair_confirm2",
-        mac: toBase64Url(this.spake2Result!.confirmB),
+        mac: toBase64Url(this.spake2Result.confirmB),
       },
       {
         t: "pair_bootstrap",

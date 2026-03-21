@@ -36,9 +36,9 @@ function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
 /** Wait for a specific message matching a predicate. */
 function waitForMessage(
   ws: WebSocket,
-  predicate: (data: any) => boolean,
+  predicate: (data: unknown) => boolean,
   timeoutMs = 5000,
-): Promise<any> {
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       ws.removeEventListener("message", handler);
@@ -61,7 +61,7 @@ function waitForMessage(
 describe("Relay Routing & Auth", () => {
   let relay: RelayHandle;
   let ctx: DaemonContext;
-  let daemonServer: any;
+  let daemonServer: { port: number | undefined; stop(closeActiveConnections?: boolean): void };
   let svc: OrkaService;
   let testRepo: string;
 
@@ -91,7 +91,7 @@ describe("Relay Routing & Auth", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "routing-test@orka.dev", name: "Routing Test" }),
     });
-    const signup = await signupRes.json() as any;
+    const signup = await signupRes.json() as { apiKey: string };
     clientApiKey = signup.apiKey;
 
     // Create a node key
@@ -103,7 +103,7 @@ describe("Relay Routing & Auth", () => {
       },
       body: JSON.stringify({ label: "node", permissions: "node" }),
     });
-    const nodeKeyData = await nodeKeyRes.json() as any;
+    const nodeKeyData = await nodeKeyRes.json() as { apiKey: string };
     nodeApiKey = nodeKeyData.apiKey;
 
     // 4. Start daemon and register with relay
@@ -145,14 +145,14 @@ describe("Relay Routing & Auth", () => {
   test("relay health returns ok", async () => {
     const res = await fetch(`http://127.0.0.1:${relayPort}/health`);
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = await res.json() as { status: string };
     expect(body.status).toBe("ok");
   });
 
   test("daemon health returns ok", async () => {
     const res = await fetch(`http://127.0.0.1:${daemonServer.port}/health`);
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = await res.json() as { status: string };
     expect(body.status).toBe("ok");
   });
 
@@ -165,9 +165,9 @@ describe("Relay Routing & Auth", () => {
     // Send a plain JSON-RPC message (not transport)
     ws.send(JSON.stringify({ jsonrpc: "2.0", id: "test-1", method: "listSessions", params: {} }));
 
-    const resp = await waitForMessage(ws, (m: any) => m?.t === "transport_error");
-    expect(resp.t).toBe("transport_error");
-    expect(resp.code).toBe("transport_required");
+    const resp = await waitForMessage(ws, (m) => (m as Record<string, unknown>)?.["t"] === "transport_error") as Record<string, unknown>;
+    expect(resp["t"]).toBe("transport_error");
+    expect(resp["code"]).toBe("transport_required");
 
     ws.close();
   });
@@ -178,9 +178,9 @@ describe("Relay Routing & Auth", () => {
 
     ws.send("not valid json {{{");
 
-    const resp = await waitForMessage(ws, (m: any) => m?.t === "transport_error");
-    expect(resp.t).toBe("transport_error");
-    expect(resp.code).toBe("parse_error");
+    const resp = await waitForMessage(ws, (m) => (m as Record<string, unknown>)?.["t"] === "transport_error") as Record<string, unknown>;
+    expect(resp["t"]).toBe("transport_error");
+    expect(resp["code"]).toBe("parse_error");
 
     ws.close();
   });
@@ -193,7 +193,7 @@ describe("Relay Routing & Auth", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: `iso-${Date.now()}@orka.dev`, name: "Isolated" }),
     });
-    const { apiKey: key2 } = await signup2.json() as any;
+    const { apiKey: key2 } = await signup2.json() as { apiKey: string };
 
     const ws2 = new WebSocket(`ws://127.0.0.1:${relayPort}?token=${key2}&role=client`);
     await waitForOpen(ws2);
@@ -209,8 +209,8 @@ describe("Relay Routing & Auth", () => {
       features: [],
     }));
 
-    const resp = await waitForMessage(ws2, (m: any) => m?.t === "transport_error");
-    expect(resp.code).toBe("node_not_found");
+    const resp = await waitForMessage(ws2, (m) => (m as Record<string, unknown>)?.["t"] === "transport_error") as Record<string, unknown>;
+    expect(resp["code"]).toBe("node_not_found");
 
     ws2.close();
   });
@@ -236,7 +236,7 @@ describe("Relay Routing & Auth", () => {
       headers: { Authorization: `Bearer ${clientApiKey}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = await res.json() as { email: string };
     expect(body.email).toBe("routing-test@orka.dev");
   });
 
@@ -277,7 +277,7 @@ describe("Relay Routing & Auth", () => {
       body: JSON.stringify({ label: "to-revoke" }),
     });
     expect(createRes.status).toBe(201);
-    const { keyId } = await createRes.json() as any;
+    const { keyId } = await createRes.json() as { keyId: string };
 
     // Revoke it
     const revokeRes = await fetch(`http://127.0.0.1:${relayPort}/v1/keys/${keyId}`, {
@@ -294,7 +294,7 @@ describe("Relay Routing & Auth", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: `maxkeys-${Date.now()}@test.com`, name: "Max Keys" }),
     });
-    const { apiKey } = await signupRes.json() as any;
+    const { apiKey } = await signupRes.json() as { apiKey: string };
     const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
 
     // Create keys up to the limit (default 10, already have 1)
@@ -318,7 +318,7 @@ describe("Relay Routing & Auth", () => {
       headers: { Authorization: `Bearer ${clientApiKey}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = await res.json() as { buckets: unknown[] };
     expect(Array.isArray(body.buckets)).toBe(true);
   });
 

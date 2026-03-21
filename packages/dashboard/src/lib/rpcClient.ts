@@ -7,6 +7,9 @@ export class RpcClient extends OrkaClient {
   }
 
   retrySession(sessionId: string, options?: RequestOptions): Promise<void> {
-    return this.request("spawn" as any, { sessionId }, options);
+    // "spawn" is not a typed RPC method on OrkaClient, so cast through unknown
+    return (this.request as (method: string, params: unknown, options?: RequestOptions) => Promise<void>)(
+      "spawn", { sessionId }, options,
+    );
   }
 }

@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { PairingRouter } from "./pairing";
+import type { ServerWebSocket } from "bun";
+import type { AnySocketData } from "./state";
 // --- Mock WebSocket ---
 
 interface MockWsOpts {
@@ -8,7 +10,14 @@ interface MockWsOpts {
   accountId?: string;
 }
 
-function mockPairingWs(opts?: MockWsOpts): any {
+interface MockPairingWs extends ServerWebSocket<AnySocketData> {
+  readonly _sent: (string | Buffer)[];
+  readonly _closed: boolean;
+  readonly _closeCode: number | undefined;
+  readonly _closeReason: string | undefined;
+}
+
+function mockPairingWs(opts?: MockWsOpts): MockPairingWs {
   const sent: (string | Buffer)[] = [];
   let closed = false;
   let closeCode: number | undefined;
@@ -35,7 +44,7 @@ function mockPairingWs(opts?: MockWsOpts): any {
     get _closed() { return closed; },
     get _closeCode() { return closeCode; },
     get _closeReason() { return closeReason; },
-  };
+  } as unknown as MockPairingWs;
 }
 
 // --- Tests ---

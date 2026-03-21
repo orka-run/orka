@@ -34,7 +34,7 @@ describe("SessionCache", () => {
 
     const all = cache.getAllSessions();
     expect(all).toHaveLength(1);
-    expect(all[0]!.status).toBe("completed");
+    expect(all[0]?.status).toBe("completed");
   });
 
   it("upsertSession adds new session", () => {
@@ -54,7 +54,7 @@ describe("SessionCache", () => {
     cache.removeSession("sess-001");
 
     expect(cache.getAllSessions()).toHaveLength(1);
-    expect(cache.getAllSessions()[0]!.id).toBe("sess-002");
+    expect(cache.getAllSessions()[0]?.id).toBe("sess-002");
     expect(cache.getOwningNode("sess-001")).toBeNull();
   });
 
@@ -80,7 +80,7 @@ describe("SessionCache", () => {
     cache.clearNode("node-a");
 
     expect(cache.getAllSessions()).toHaveLength(1);
-    expect(cache.getAllSessions()[0]!.id).toBe("sess-003");
+    expect(cache.getAllSessions()[0]?.id).toBe("sess-003");
     expect(cache.getOwningNode("sess-001")).toBeNull();
     expect(cache.getOwningNode("sess-002")).toBeNull();
     expect(cache.getOwningNode("sess-003")).toBe("node-b");
@@ -117,7 +117,7 @@ describe("SessionCache", () => {
     cache.setNodeSessions("node-a", [makeSummary("sess-003")]);
 
     expect(cache.getAllSessions()).toHaveLength(1);
-    expect(cache.getAllSessions()[0]!.id).toBe("sess-003");
+    expect(cache.getAllSessions()[0]?.id).toBe("sess-003");
     expect(cache.getOwningNode("sess-001")).toBeNull();
     expect(cache.getOwningNode("sess-002")).toBeNull();
     expect(cache.getOwningNode("sess-003")).toBe("node-a");

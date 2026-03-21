@@ -250,7 +250,7 @@ export class WsTransport {
       jsonrpc: "2.0",
       id,
       method,
-      ...(params !== undefined ? { params } : {}),
+      ...(params !== undefined ? { params: params as Record<string, unknown> } : {}),
       ...(options?.node ? { node: options.node } : {}),
       ...(traceCarrier.traceparent ? { traceparent: traceCarrier.traceparent } : {}),
     };
@@ -375,7 +375,8 @@ export class WsTransport {
 
   private performNoiseHandshake(ws: WebSocket): void {
     this.noiseHandshaking = true;
-    const config = this.options!.noiseConfig!;
+    const config = this.options?.noiseConfig;
+    if (!config) throw new Error("noiseConfig is required for Noise handshake");
     this.connectionSpan?.addEvent("noise.handshake_start");
 
     driveNoiseHandshake(ws, {

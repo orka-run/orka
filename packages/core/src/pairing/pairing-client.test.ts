@@ -33,6 +33,31 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Wire message type used to type-check protocol messages in tests. */
+interface WireMsg {
+  t: string;
+  v?: number;
+  pair_suites?: string[];
+  features?: string[];
+  client_instance_id?: string;
+  pA?: string;
+  mac?: string;
+}
+
+/** Helper to get a message from the array with a null guard. */
+function wireMsg(messages: object[], idx: number): WireMsg {
+  const m = messages[idx];
+  if (!m) throw new Error(`expected message at index ${idx}`);
+  return m as WireMsg;
+}
+
+/** Helper to assert client.error is not null, returning the narrowed value. */
+function assertError(client: PairingClient): PairingError {
+  const err = client.error;
+  if (!err) throw new Error("expected client.error to be set");
+  return err;
+}
+
 const enc = new TextEncoder();
 
 function toBase64url(data: Uint8Array): string {
@@ -120,11 +145,14 @@ class MockPairingServer {
 
   /** Process pair_init, return pair_resp JSON string. */
   handlePairInit(msg: { t: string; pA: string }): string {
-    const pairContext = computePairContext(this._clientHello!, this._serverHello!);
+    if (!this._clientHello || !this._serverHello) {
+      throw new Error("Must call handleClientHello first");
+    }
+    const pairContext = computePairContext(this._clientHello, this._serverHello);
     const pairAad = computePairAad(this._relayOrigin, pairContext);
 
     // idA = client_instance_id raw bytes (decoded from base64url)
-    const idA = fromBase64url(this._clientHello!.client_instance_id);
+    const idA = fromBase64url(this._clientHello.client_instance_id);
     // idB = UTF-8 encoding of the enroll_id string (matches client)
     const idB = enc.encode(this.enrollId);
 
@@ -249,30 +277,30 @@ async function runFullExchange(
   const client = new PairingClient({
     secret,
     relayOrigin,
-    onSend: (msg) => messages.push(msg),
+    onSend: (m) => messages.push(m),
   });
 
   // Step 1: Client sends pair_client_hello
   client.start();
   expect(messages.length).toBe(1);
-  expect((messages[0] as any).t).toBe("pair_client_hello");
+  expect(wireMsg(messages, 0).t).toBe("pair_client_hello");
 
   // Step 2: Server responds with pair_server_hello → client sends pair_init
-  const serverHelloJson = server.handleClientHello(messages[0]!);
+  const serverHelloJson = server.handleClientHello(wireMsg(messages, 0));
   const r1 = await client.handleMessage(serverHelloJson);
   expect(r1).toBeNull();
   expect(messages.length).toBe(2);
-  expect((messages[1] as any).t).toBe("pair_init");
+  expect(wireMsg(messages, 1).t).toBe("pair_init");
 
   // Step 3: Server processes pair_init → client sends pair_confirm1
-  const pairRespJson = server.handlePairInit(messages[1]! as any);
+  const pairRespJson = server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string });
   const r2 = await client.handleMessage(pairRespJson);
   expect(r2).toBeNull();
   expect(messages.length).toBe(3);
-  expect((messages[2] as any).t).toBe("pair_confirm1");
+  expect(wireMsg(messages, 2).t).toBe("pair_confirm1");
 
   // Step 4: Server processes pair_confirm1 → client derives bootstrap keys
-  const confirm2Json = server.handlePairConfirm1(messages[2] as any);
+  const confirm2Json = server.handlePairConfirm1(wireMsg(messages, 2) as WireMsg & { mac: string });
   const r3 = await client.handleMessage(confirm2Json);
   expect(r3).toBeNull();
 
@@ -286,7 +314,8 @@ async function runFullExchange(
   client.confirmNoiseVerified();
   expect(client.state).toBe("COMPLETE");
 
-  return { result: result!, server, client, messages };
+  if (!result) throw new Error("expected pairing result");
+  return { result, server, client, messages };
 }
 
 // ---------------------------------------------------------------------------
@@ -347,13 +376,13 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
 
       expect(messages.length).toBe(1);
-      const hello = messages[0] as any;
+      const hello = wireMsg(messages, 0);
       expect(hello.t).toBe("pair_client_hello");
       expect(hello.v).toBe(1);
       expect(hello.pair_suites).toEqual([PAIR_SUITE]);
@@ -366,12 +395,12 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
       client.start();
 
-      const hello = messages[0] as any;
-      const decoded = fromBase64url(hello.client_instance_id);
+      const hello = wireMsg(messages, 0);
+      const decoded = fromBase64url(hello.client_instance_id as string);
       expect(decoded.length).toBe(16);
     });
 
@@ -383,8 +412,8 @@ describe("PairingClient", () => {
       c1.start();
       c2.start();
 
-      const h1 = m1[0] as any;
-      const h2 = m2[0] as any;
+      const h1 = wireMsg(m1, 0);
+      const h2 = wireMsg(m2, 0);
       expect(h1.client_instance_id).not.toBe(h2.client_instance_id);
     });
 
@@ -453,27 +482,27 @@ describe("PairingClient", () => {
       const { messages } = await runFullExchange(secret, relayOrigin);
 
       expect(messages.length).toBe(4);
-      expect((messages[0] as any).t).toBe("pair_client_hello");
-      expect((messages[1] as any).t).toBe("pair_init");
-      expect((messages[2] as any).t).toBe("pair_confirm1");
-      expect((messages[3] as any).t).toBe("pair_done");
+      expect(wireMsg(messages, 0).t).toBe("pair_client_hello");
+      expect(wireMsg(messages, 1).t).toBe("pair_init");
+      expect(wireMsg(messages, 2).t).toBe("pair_confirm1");
+      expect(wireMsg(messages, 3).t).toBe("pair_done");
     });
 
     test("pair_init contains valid base64url pA (32-byte ed25519 point)", async () => {
       const { messages } = await runFullExchange(secret, relayOrigin);
 
-      const pairInit = messages[1] as any;
+      const pairInit = wireMsg(messages, 1);
       expect(typeof pairInit.pA).toBe("string");
-      const pABytes = fromBase64url(pairInit.pA);
+      const pABytes = fromBase64url(pairInit.pA as string);
       expect(pABytes.length).toBe(32);
     });
 
     test("pair_confirm1 contains valid base64url MAC (32-byte HMAC-SHA256)", async () => {
       const { messages } = await runFullExchange(secret, relayOrigin);
 
-      const confirm1 = messages[2] as any;
+      const confirm1 = wireMsg(messages, 2);
       expect(typeof confirm1.mac).toBe("string");
-      const macBytes = fromBase64url(confirm1.mac);
+      const macBytes = fromBase64url(confirm1.mac as string);
       expect(macBytes.length).toBe(32);
     });
 
@@ -493,7 +522,7 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       expect(client.state).toBe("INIT");
@@ -501,15 +530,15 @@ describe("PairingClient", () => {
       client.start();
       expect(client.state).toBe("AWAIT_SERVER_HELLO");
 
-      const serverHelloJson = server.handleClientHello(messages[0]!);
+      const serverHelloJson = server.handleClientHello(wireMsg(messages, 0));
       await client.handleMessage(serverHelloJson);
       expect(client.state).toBe("AWAIT_PAIR_RESP");
 
-      const pairRespJson = server.handlePairInit(messages[1]! as any);
+      const pairRespJson = server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string });
       await client.handleMessage(pairRespJson);
       expect(client.state).toBe("AWAIT_PAIR_CONFIRM2");
 
-      const confirm2Json = server.handlePairConfirm1(messages[2] as any);
+      const confirm2Json = server.handlePairConfirm1(wireMsg(messages, 2) as WireMsg & { mac: string });
       await client.handleMessage(confirm2Json);
       expect(client.state).toBe("AWAIT_PAIR_BOOTSTRAP");
 
@@ -546,14 +575,14 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret: clientSecret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      const serverHelloJson = server.handleClientHello(messages[0]!);
+      const serverHelloJson = server.handleClientHello(wireMsg(messages, 0));
       await client.handleMessage(serverHelloJson);
 
-      const pairRespJson = server.handlePairInit(messages[1]! as any);
+      const pairRespJson = server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string });
       await client.handleMessage(pairRespJson);
 
       // The server's SPAKE2 result has a different Ke than the client's,
@@ -569,7 +598,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("confirmation failed");
+      expect(assertError(client).message).toContain("confirmation failed");
     });
   });
 
@@ -594,7 +623,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("Unsupported pairing suite");
+      expect(assertError(client).message).toContain("Unsupported pairing suite");
     });
 
     test("rejects unsupported protocol version (schema rejects v!=1)", async () => {
@@ -616,7 +645,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("Invalid pair_server_hello");
+      expect(assertError(client).message).toContain("Invalid pair_server_hello");
     });
   });
 
@@ -635,7 +664,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("Invalid pair_server_hello");
+      expect(assertError(client).message).toContain("Invalid pair_server_hello");
     });
 
     test("pair_resp missing pB", async () => {
@@ -644,18 +673,18 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
 
       await expect(
         client.handleMessage(JSON.stringify({ t: "pair_resp" })),
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("Invalid pair_resp");
+      expect(assertError(client).message).toContain("Invalid pair_resp");
     });
 
     test("pair_confirm2 missing mac", async () => {
@@ -664,19 +693,19 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
-      await client.handleMessage(server.handlePairInit(messages[1]! as any));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
+      await client.handleMessage(server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string }));
 
       await expect(
         client.handleMessage(JSON.stringify({ t: "pair_confirm2" })),
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("Invalid pair_confirm2");
+      expect(assertError(client).message).toContain("Invalid pair_confirm2");
     });
   });
 
@@ -689,18 +718,18 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
-      await client.handleMessage(server.handlePairInit(messages[1]! as any));
-      await client.handleMessage(server.handlePairConfirm1(messages[2]! as any));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
+      await client.handleMessage(server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string }));
+      await client.handleMessage(server.handlePairConfirm1(wireMsg(messages, 2) as WireMsg & { mac: string }));
 
       // Generate valid bootstrap then tamper with ciphertext
       const bootstrap = JSON.parse(server.generateBootstrap());
       const ctBytes = fromBase64url(bootstrap.ct);
-      ctBytes[0]! ^= 0xff; // flip a byte
+      ctBytes[0] = (ctBytes[0] ?? 0) ^ 0xff; // flip a byte
       const tamperedBootstrap = {
         t: "pair_bootstrap",
         ct: toBase64url(ctBytes),
@@ -711,7 +740,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("Bootstrap decryption failed");
+      expect(assertError(client).message).toContain("Bootstrap decryption failed");
     });
 
     test("completely random ciphertext causes decryption error", async () => {
@@ -720,13 +749,13 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
-      await client.handleMessage(server.handlePairInit(messages[1]! as any));
-      await client.handleMessage(server.handlePairConfirm1(messages[2]! as any));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
+      await client.handleMessage(server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string }));
+      await client.handleMessage(server.handlePairConfirm1(wireMsg(messages, 2) as WireMsg & { mac: string }));
 
       await expect(
         client.handleMessage(JSON.stringify({
@@ -744,13 +773,13 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
-      await client.handleMessage(server.handlePairInit(messages[1] as any));
-      await client.handleMessage(server.handlePairConfirm1(messages[2] as any));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
+      await client.handleMessage(server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string }));
+      await client.handleMessage(server.handlePairConfirm1(wireMsg(messages, 2) as WireMsg & { mac: string }));
 
       // Encrypt a payload missing required fields
       const badBootstrap = server.generateBootstrapWithRawPayload({
@@ -763,7 +792,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.message).toContain("Bootstrap payload has invalid structure");
+      expect(assertError(client).message).toContain("Bootstrap payload has invalid structure");
     });
   });
 
@@ -829,8 +858,8 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.code).toBe("expired");
-      expect(client.error!.message).toContain("expired");
+      expect(assertError(client).code).toBe("expired");
+      expect(assertError(client).message).toContain("expired");
     });
 
     test("pair_error during AWAIT_PAIR_RESP transitions to FAILED", async () => {
@@ -839,11 +868,11 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
       expect(client.state).toBe("AWAIT_PAIR_RESP");
 
       await expect(
@@ -851,7 +880,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.code).toBe("attempts_exhausted");
+      expect(assertError(client).code).toBe("attempts_exhausted");
     });
 
     test("pair_error during AWAIT_PAIR_CONFIRM2", async () => {
@@ -860,12 +889,12 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
-      await client.handleMessage(server.handlePairInit(messages[1]! as any));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
+      await client.handleMessage(server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string }));
       expect(client.state).toBe("AWAIT_PAIR_CONFIRM2");
 
       await expect(
@@ -873,7 +902,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.code).toBe("bad_suite");
+      expect(assertError(client).code).toBe("bad_suite");
     });
 
     test("pair_error during AWAIT_PAIR_BOOTSTRAP", async () => {
@@ -882,13 +911,13 @@ describe("PairingClient", () => {
       const client = new PairingClient({
         secret,
         relayOrigin,
-        onSend: (msg) => messages.push(msg),
+        onSend: (m) => messages.push(m),
       });
 
       client.start();
-      await client.handleMessage(server.handleClientHello(messages[0]!));
-      await client.handleMessage(server.handlePairInit(messages[1]! as any));
-      await client.handleMessage(server.handlePairConfirm1(messages[2]! as any));
+      await client.handleMessage(server.handleClientHello(wireMsg(messages, 0)));
+      await client.handleMessage(server.handlePairInit(wireMsg(messages, 1) as WireMsg & { pA: string }));
+      await client.handleMessage(server.handlePairConfirm1(wireMsg(messages, 2) as WireMsg & { mac: string }));
       expect(client.state).toBe("AWAIT_PAIR_BOOTSTRAP");
 
       await expect(
@@ -896,7 +925,7 @@ describe("PairingClient", () => {
       ).rejects.toThrow(PairingError);
 
       expect(client.state).toBe("FAILED");
-      expect(client.error!.code).toBe("expired");
+      expect(assertError(client).code).toBe("expired");
     });
 
     test("all known error codes are handled", async () => {
@@ -917,7 +946,7 @@ describe("PairingClient", () => {
           client.handleMessage(JSON.stringify({ t: "pair_error", code })),
         ).rejects.toThrow(PairingError);
 
-        expect(client.error!.code).toBe(code);
+        expect(assertError(client).code).toBe(code);
       }
     });
   });
@@ -932,7 +961,7 @@ describe("PairingClient", () => {
       client.handleClose();
       expect(client.state).toBe("FAILED");
       expect(client.error).toBeInstanceOf(PairingError);
-      expect(client.error!.message).toContain("Connection closed");
+      expect(assertError(client).message).toContain("Connection closed");
     });
 
     test("does not change state if already complete", async () => {

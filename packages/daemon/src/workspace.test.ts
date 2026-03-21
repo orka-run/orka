@@ -33,16 +33,16 @@ describe("workspace CRUD", () => {
     });
 
     const ws = db.getWorkspace("ws-1");
-    expect(ws).not.toBeNull();
-    expect(ws!.id).toBe("ws-1");
-    expect(ws!.name).toBe("My Workspace");
-    expect(ws!.createdAt).toBe("2026-01-01T00:00:00.000Z");
-    expect(ws!.archivedAt).toBeNull();
-    expect(ws!.settings).toEqual({ defaults: { backend: "codex" } });
-    expect(ws!.metadata).toEqual({ color: "blue", pinned: true });
-    expect(ws!.paths).toEqual([]);
-    expect(ws!.sessionCount).toBe(0);
-    expect(ws!.activeCount).toBe(0);
+    if (!ws) throw new Error("expected workspace");
+    expect(ws.id).toBe("ws-1");
+    expect(ws.name).toBe("My Workspace");
+    expect(ws.createdAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(ws.archivedAt).toBeNull();
+    expect(ws.settings).toEqual({ defaults: { backend: "codex" } });
+    expect(ws.metadata).toEqual({ color: "blue", pinned: true });
+    expect(ws.paths).toEqual([]);
+    expect(ws.sessionCount).toBe(0);
+    expect(ws.activeCount).toBe(0);
   });
 
   test("getWorkspace returns null for unknown id", () => {
@@ -57,8 +57,9 @@ describe("workspace CRUD", () => {
     });
 
     const ws = db.getWorkspace("ws-bare");
-    expect(ws!.settings).toBeNull();
-    expect(ws!.metadata).toBeNull();
+    if (!ws) throw new Error("expected workspace");
+    expect(ws.settings).toBeNull();
+    expect(ws.metadata).toBeNull();
   });
 });
 
@@ -122,7 +123,8 @@ describe("workspace paths", () => {
 
     const paths = db.getWorkspacePaths("ws-rm");
     expect(paths).toHaveLength(1);
-    expect(paths[0]!.projectPath).toBe("/b");
+    if (!paths[0]) throw new Error("expected path entry");
+    expect(paths[0].projectPath).toBe("/b");
   });
 });
 
@@ -191,7 +193,8 @@ describe("listWorkspaces with session counts", () => {
     const workspaces = db.listWorkspaces();
     expect(workspaces).toHaveLength(1);
 
-    const ws = workspaces[0]!;
+    if (!workspaces[0]) throw new Error("expected workspace");
+    const ws = workspaces[0];
     expect(ws.sessionCount).toBe(4);
     expect(ws.activeCount).toBe(2); // running + idle
   });
@@ -210,7 +213,9 @@ describe("listWorkspaces with session counts", () => {
     db.updateWorkspace("ws-archived", { archivedAt: "2026-01-15T00:00:00.000Z" });
 
     expect(db.listWorkspaces()).toHaveLength(1);
-    expect(db.listWorkspaces()[0]!.id).toBe("ws-active");
+    const first = db.listWorkspaces()[0];
+    if (!first) throw new Error("expected workspace");
+    expect(first.id).toBe("ws-active");
 
     // With includeArchived
     expect(db.listWorkspaces(true)).toHaveLength(2);
@@ -224,8 +229,9 @@ describe("listWorkspaces with session counts", () => {
     });
 
     const ws = db.getWorkspace("ws-empty");
-    expect(ws!.sessionCount).toBe(0);
-    expect(ws!.activeCount).toBe(0);
+    if (!ws) throw new Error("expected workspace");
+    expect(ws.sessionCount).toBe(0);
+    expect(ws.activeCount).toBe(0);
   });
 
   test("deleteWorkspace unlinks sessions", () => {
@@ -240,6 +246,7 @@ describe("listWorkspaces with session counts", () => {
 
     expect(db.getWorkspace("ws-del")).toBeNull();
     const session = db.getSession("sess-linked");
-    expect(session!.workspaceId).toBe("");
+    if (!session) throw new Error("expected session");
+    expect(session.workspaceId).toBe("");
   });
 });

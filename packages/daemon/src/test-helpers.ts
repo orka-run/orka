@@ -70,7 +70,7 @@ export function seedSession(
     id: sessionId,
     taskId,
     workspaceId: opts?.workspaceId ?? "",
-    status: (opts?.status ?? "completed") as any,
+    status: (opts?.status ?? "completed") as SessionStatus,
     backend: "claude-code",
     projectPath: opts?.projectPath ?? "/tmp/project",
     workingDir: opts?.workingDir ?? "/tmp/project",

@@ -66,19 +66,20 @@ export async function handleRpcRequest(
 
       try {
         const result = await dispatch(ctx, svc, req.method, req.params ?? {}, trace.setSpan(parentContext, span), slowThresholdMs);
-        const response: any = { jsonrpc: "2.0", id, result };
+        const response: RpcResponse = { jsonrpc: "2.0", id, result };
 
         span.setStatus({ code: SpanStatusCode.OK });
         return serializeRpcResponse(span, response);
-      } catch (error: any) {
+      } catch (error: unknown) {
         isError = true;
-        const code = error.rpcCode ?? RPC_INTERNAL_ERROR;
-        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-        span.recordException(error);
+        const errMessage = error instanceof Error ? error.message : String(error);
+        const code = ((error as { rpcCode?: number }).rpcCode) ?? RPC_INTERNAL_ERROR;
+        span.setStatus({ code: SpanStatusCode.ERROR, message: errMessage });
+        if (error instanceof Error) span.recordException(error);
         return serializeRpcResponse(span, {
           jsonrpc: "2.0",
           id,
-          error: { code, message: error.message },
+          error: { code, message: errMessage },
         } as RpcResponse);
       } finally {
         const durationMs = performance.now() - requestStartedAt;
@@ -97,7 +98,10 @@ export async function handleRpcRequest(
  * OrkaService + RpcMethodMap without a dispatch case results in a runtime
  * METHOD_NOT_FOUND error (caught by E2E tests).
  */
-async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, params: any, parentContext = ROOT_CONTEXT, slowThresholdMs = SLOW_RPC_THRESHOLD_MS): Promise<any> {
+// RPC dispatch uses dynamic property access across 40+ method cases;
+// each case delegates to a strongly-typed OrkaService method that validates at runtime.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- unavoidable for generic RPC dispatch
+async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, params: any, parentContext = ROOT_CONTEXT, slowThresholdMs = SLOW_RPC_THRESHOLD_MS): Promise<unknown> {
   return withSpan("orka.rpc.dispatch", { "orka.method": method }, async (span) => {
     const { pushHub } = ctx;
     const startedAt = performance.now();
@@ -312,7 +316,7 @@ async function dispatch(ctx: DaemonContext, svc: OrkaService, method: string, pa
             }, ctx.orkaHome);
           default: {
             const err = new Error(`Method not found: ${method}`);
-            (err as any).rpcCode = RPC_METHOD_NOT_FOUND;
+            (err as unknown as { rpcCode: number }).rpcCode = RPC_METHOD_NOT_FOUND;
             throw err;
           }
         }

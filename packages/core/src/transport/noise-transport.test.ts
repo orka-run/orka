@@ -140,14 +140,17 @@ describe("NoiseTransport", () => {
 
       expect(client.sessionId).not.toBeNull();
       expect(server.sessionId).not.toBeNull();
-      expect(Buffer.from(client.sessionId!).toString("hex")).toBe(
-        Buffer.from(server.sessionId!).toString("hex"),
+      if (!client.sessionId) throw new Error("expected client sessionId");
+      if (!server.sessionId) throw new Error("expected server sessionId");
+      expect(Buffer.from(client.sessionId).toString("hex")).toBe(
+        Buffer.from(server.sessionId).toString("hex"),
       );
     });
 
     it("session_id is 32 bytes (SHA-256 handshake hash)", () => {
       const { client } = performHandshake();
-      expect(client.sessionId!.length).toBe(32);
+      if (!client.sessionId) throw new Error("expected sessionId");
+      expect(client.sessionId.length).toBe(32);
     });
   });
 
@@ -652,8 +655,10 @@ describe("NoiseTransport", () => {
       const { client: c1 } = performHandshake();
       const { client: c2 } = performHandshake();
 
-      expect(Buffer.from(c1.sessionId!).toString("hex")).not.toBe(
-        Buffer.from(c2.sessionId!).toString("hex"),
+      if (!c1.sessionId) throw new Error("expected c1 sessionId");
+      if (!c2.sessionId) throw new Error("expected c2 sessionId");
+      expect(Buffer.from(c1.sessionId).toString("hex")).not.toBe(
+        Buffer.from(c2.sessionId).toString("hex"),
       );
     });
   });

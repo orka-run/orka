@@ -145,7 +145,7 @@ describe("WsTransport", () => {
     socket.open();
 
     // Transport-level test: params and result shapes intentionally don't match RPC types
-    const resultPromise = transport.request("listSessions", { filter: "all" } as any) as Promise<unknown>;
+    const resultPromise = transport.request("listSessions", { filter: "all" } as unknown as Record<string, unknown>) as Promise<unknown>;
     advanceTime(12);
 
     expect(socket.sent).toHaveLength(1);

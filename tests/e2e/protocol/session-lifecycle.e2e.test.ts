@@ -109,8 +109,8 @@ describe("Session Lifecycle via Encrypted Channel", () => {
     expect(listResp["error"]).toBeUndefined();
     const sessions = (listResp["result"] as { sessions: Record<string, unknown>[] }).sessions;
     const found = sessions.find((s) => s["id"] === sessionId);
-    expect(found).toBeDefined();
-    expect(found!["backend"]).toBe("claude-code");
+    if (!found) throw new Error("expected session in list");
+    expect(found["backend"]).toBe("claude-code");
 
     // Get session details
     const getResp = await encryptedRpc(conn.transport, conn.ws, "getSession", {
@@ -263,8 +263,8 @@ describe("Session Lifecycle via Encrypted Channel", () => {
 
     for (const id of sessionIds) {
       const found = allSessions.find((s) => s["id"] === id);
-      expect(found).toBeDefined();
-      expect(found!["backend"]).toBe("claude-code");
+      if (!found) throw new Error("expected session in list");
+      expect(found["backend"]).toBe("claude-code");
     }
 
     // Stop any that are still running

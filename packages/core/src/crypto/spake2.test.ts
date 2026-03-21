@@ -187,7 +187,7 @@ describe("SPAKE2", () => {
 
     // Tamper with a byte
     const tampered = new Uint8Array(resultA.confirmA);
-    tampered[0]! ^= 0xff;
+    tampered[0] = (tampered[0] ?? 0) ^ 0xff;
 
     expect(resultB.verifyConfirmA(tampered)).toBe(false);
   });
@@ -201,7 +201,7 @@ describe("SPAKE2", () => {
     const resultB = sideB.finish(sideA.pA);
 
     const tampered = new Uint8Array(resultB.confirmB);
-    tampered[15]! ^= 0x01;
+    tampered[15] = (tampered[15] ?? 0) ^ 0x01;
 
     expect(resultA.verifyConfirmB(tampered)).toBe(false);
   });

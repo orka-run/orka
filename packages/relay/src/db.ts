@@ -183,14 +183,14 @@ export function createAccount(db: Database, email: string, name: string): Accoun
 
 export function getAccount(db: Database, id: string): Account | null {
   return withSpanSync("orka.relay.db.getAccount", { "orka.account.id": id }, () => {
-    const row = db.prepare("SELECT * FROM accounts WHERE id = ?").get(id) as any;
+    const row = db.prepare("SELECT * FROM accounts WHERE id = ?").get(id) as unknown;
     return row ? rowToAccount(row) : null;
   });
 }
 
 export function getAccountByEmail(db: Database, email: string): Account | null {
   return withSpanSync("orka.relay.db.getAccountByEmail", { "orka.account.email": email }, () => {
-    const row = db.prepare("SELECT * FROM accounts WHERE email = ?").get(email) as any;
+    const row = db.prepare("SELECT * FROM accounts WHERE email = ?").get(email) as unknown;
     return row ? rowToAccount(row) : null;
   });
 }
@@ -213,7 +213,7 @@ export function updateAccountTier(db: Database, id: string, tier: Tier): void {
 }
 
 export function listAccounts(db: Database): Account[] {
-  const rows = db.prepare("SELECT * FROM accounts ORDER BY created_at DESC").all() as any[];
+  const rows = db.prepare("SELECT * FROM accounts ORDER BY created_at DESC").all() as unknown[];
   return rows.map(rowToAccount);
 }
 
@@ -241,7 +241,7 @@ export function insertApiKey(db: Database, record: ApiKeyRecord): void {
 
 export function getApiKeyByHash(db: Database, keyHash: string): ApiKeyRecord | null {
   return withSpanSync("orka.relay.db.getApiKey", {}, () => {
-    const row = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(keyHash) as any;
+    const row = db.prepare("SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'").get(keyHash) as unknown;
     return row ? rowToApiKey(row) : null;
   });
 }
@@ -250,7 +250,7 @@ export function listApiKeys(db: Database, accountId: string): ApiKeyRecord[] {
   return withSpanSync("orka.relay.db.listApiKeys", { "orka.account.id": accountId }, () => {
     const rows = db
       .prepare("SELECT * FROM api_keys WHERE account_id = ? ORDER BY created_at DESC")
-      .all(accountId) as any[];
+      .all(accountId) as unknown[];
     return rows.map(rowToApiKey);
   });
 }
@@ -273,13 +273,13 @@ export function updateApiKeyLastUsed(db: Database, keyHash: string): void {
 // --- Rate Limits ---
 
 export function getRateLimits(db: Database, accountId: string): RateLimitConfig | null {
-  const row = db.prepare("SELECT * FROM rate_limit_config WHERE account_id = ?").get(accountId) as any;
+  const row = db.prepare("SELECT * FROM rate_limit_config WHERE account_id = ?").get(accountId) as unknown;
   return row ? rowToRateLimits(row) : null;
 }
 
 export function updateRateLimits(db: Database, accountId: string, limits: Partial<Omit<RateLimitConfig, "accountId">>): void {
   const sets: string[] = ["updated_at = ?"];
-  const params: any[] = [new Date().toISOString()];
+  const params: (string | number)[] = [new Date().toISOString()];
 
   if (limits.requestsPerMinute !== undefined) { sets.push("requests_per_minute = ?"); params.push(limits.requestsPerMinute); }
   if (limits.requestsPerHour !== undefined) { sets.push("requests_per_hour = ?"); params.push(limits.requestsPerHour); }
@@ -332,13 +332,13 @@ export function getAccountUsage(db: Database, accountId: string, from: string, t
          GROUP BY period
          ORDER BY period`,
       )
-      .all(accountId, from, to) as any[];
+      .all(accountId, from, to) as Record<string, unknown>[];
 
     return rows.map((r) => ({
-      period: r.period,
-      requests: r.requests,
-      bytesIn: r.bytes_in ?? 0,
-      bytesOut: r.bytes_out ?? 0,
+      period: r["period"] as string,
+      requests: r["requests"] as number,
+      bytesIn: (r["bytes_in"] as number) ?? 0,
+      bytesOut: (r["bytes_out"] as number) ?? 0,
     }));
   });
 }
@@ -355,8 +355,8 @@ export function deleteOldUsageEvents(db: Database, olderThan: string): number {
 }
 
 export function getAccountCount(db: Database): number {
-  const row = db.prepare("SELECT COUNT(*) as count FROM accounts WHERE status = 'active'").get() as any;
-  return row?.count ?? 0;
+  const row = db.prepare("SELECT COUNT(*) as count FROM accounts WHERE status = 'active'").get() as Record<string, unknown> | null;
+  return (row?.["count"] as number) ?? 0;
 }
 
 // --- Row Mappers ---

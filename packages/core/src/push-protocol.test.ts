@@ -175,7 +175,8 @@ describe("PushControlRequestSchema", () => {
       channels: ["server.welcome"],
     });
     expect(result.success).toBe(true);
-    expect(result.data!.type).toBe("subscribe");
+    if (!result.success) throw new Error("expected success");
+    expect(result.data.type).toBe("subscribe");
   });
 
   test("discriminated union resolves unsubscribe", () => {
@@ -184,7 +185,8 @@ describe("PushControlRequestSchema", () => {
       channels: [],
     });
     expect(result.success).toBe(true);
-    expect(result.data!.type).toBe("unsubscribe");
+    if (!result.success) throw new Error("expected success");
+    expect(result.data.type).toBe("unsubscribe");
   });
 
   test("rejects unknown type", () => {

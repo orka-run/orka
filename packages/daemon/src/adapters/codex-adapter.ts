@@ -590,8 +590,8 @@ export function mapCodexEvent(
   switch (raw.method) {
     case "thread/started": {
       const providerThreadId = getString(raw.params, "thread", "id");
-      if (providerThreadId) {
-        meta && (meta.providerThreadId = providerThreadId);
+      if (providerThreadId && meta) {
+        meta.providerThreadId = providerThreadId;
       }
       return createEvent("session.started", threadId, {}, { provider: "codex" });
     }
@@ -611,7 +611,7 @@ export function mapCodexEvent(
         return null;
       }
 
-      meta && (meta.activeTurnId = turnId);
+      if (meta) { meta.activeTurnId = turnId; }
       return createEvent("turn.started", threadId, {}, { provider: "codex", turnId });
     }
 
@@ -738,7 +738,7 @@ export function mapCodexEvent(
     }
 
     case "thread/closed":
-      meta && (meta.sawSessionExit = true);
+      if (meta) { meta.sawSessionExit = true; }
       return createEvent(
         "session.exited",
         threadId,

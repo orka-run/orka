@@ -25,7 +25,7 @@ import { handleApiRequest, SignupRateLimiter } from "./api";
 import { RateLimiter, GlobalRateLimiter } from "./rate-limiter";
 import { UsageMeter } from "./metering";
 import { AbuseDetector } from "./abuse";
-import { loadRelayConfig } from "./config";
+import { loadRelayConfig, type RelayConfig } from "./config";
 import { openRelayDb, migrateRelayDb, getRelayHome } from "./db";
 import { SingleInstanceCluster } from "./cluster";
 import { metrics, initRelayTracing, shutdownRelayTracing, withSpan, withSpanSync } from "./tracing";
@@ -132,7 +132,7 @@ export async function startRelay(opts: RelayOptions): Promise<RelayHandle> {
         // --- Pairing WebSocket endpoint ---
         const pairMatch = url.pathname.match(/^\/v1\/pair\/(.+)$/);
         if (pairMatch) {
-          const enrollId = pairMatch[1]!;
+          const enrollId = pairMatch[1] ?? "";
 
           const validationError = pairingRouter.validateEnrollId(enrollId);
           if (validationError) {
@@ -293,8 +293,8 @@ export async function startRelay(opts: RelayOptions): Promise<RelayHandle> {
             "orka.role": data.role,
             "orka.node.id": data.nodeId ?? "",
           }, () => {
-            if (data.role === "node") {
-              state.registerNode(data.accountId, data.nodeId!, ws as ServerWebSocket<SocketData>);
+            if (data.role === "node" && data.nodeId) {
+              state.registerNode(data.accountId, data.nodeId, ws as ServerWebSocket<SocketData>);
               metrics.connectionsOpened.inc({ account_id: data.accountId, role: "node" });
               metrics.registeredNodes.inc({ account_id: data.accountId });
               meter.recordConnection(data.accountId, "node_connect", data.nodeId);
@@ -345,7 +345,8 @@ export async function startRelay(opts: RelayOptions): Promise<RelayHandle> {
           }, () => {
             if (data.role === "node") {
               // Notify and clean up transport clients bound to this node
-              const transportClients = state.getTransportClientsForNode(data.accountId, data.nodeId!);
+              const nodeId = data.nodeId ?? "";
+              const transportClients = state.getTransportClientsForNode(data.accountId, nodeId);
               for (const clientWs of transportClients) {
                 try {
                   clientWs.send(JSON.stringify({ t: "transport_error", code: "node_disconnected" }));
@@ -353,7 +354,7 @@ export async function startRelay(opts: RelayOptions): Promise<RelayHandle> {
                 state.removeTransportClient(clientWs);
                 metrics.activeTransportSessions.dec({ account_id: data.accountId });
               }
-              state.removeNode(data.accountId, data.nodeId!);
+              state.removeNode(data.accountId, nodeId);
               metrics.connectionsClosed.inc({ account_id: data.accountId, role: "node" });
               metrics.registeredNodes.dec({ account_id: data.accountId });
               meter.recordConnection(data.accountId, "node_disconnect", data.nodeId);
@@ -418,7 +419,7 @@ function handleClientMessage(
   state: RelayState,
   rateLimiter: RateLimiter,
   globalLimiter: GlobalRateLimiter,
-  config: any,
+  config: RelayConfig,
   meter: UsageMeter,
 ): void {
   // Fast path: client already bound in transport mode → forward all messages
@@ -429,7 +430,7 @@ function handleClientMessage(
   }
 
   // Only accept transport init (client_hello)
-  let parsed: any;
+  let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -437,7 +438,7 @@ function handleClientMessage(
     return;
   }
 
-  if (parsed?.t === "client_hello") {
+  if (parsed?.["t"] === "client_hello") {
     handleTransportInit(ws, parsed, bytes, data, state, rateLimiter, globalLimiter, config, meter);
     return;
   }
@@ -457,7 +458,7 @@ function handleNodeMessage(
   data: SocketData,
   state: RelayState,
 ): void {
-  let envelope: any;
+  let envelope: Record<string, unknown>;
   try {
     envelope = JSON.parse(raw);
   } catch {
@@ -465,13 +466,14 @@ function handleNodeMessage(
   }
 
   // Transport message from node (has _rc field) → route to bound client
-  if (envelope && typeof envelope._rc === "string") {
-    const relayCid: string = envelope._rc;
+  if (envelope && typeof envelope["_rc"] === "string") {
+    const relayCid: string = envelope["_rc"];
     const clientWs = state.getTransportClientWs(data.accountId, relayCid);
     if (!clientWs) return;
 
     // Strip _rc before forwarding to client
-    const { _rc, ...clientMsg } = envelope;
+    const { _rc: _unusedRc, ...clientMsg } = envelope;
+    void _unusedRc;
     try {
       clientWs.send(JSON.stringify(clientMsg));
     } catch { /* client gone */ }
@@ -487,13 +489,13 @@ function handleNodeMessage(
  */
 function handleTransportInit(
   ws: ServerWebSocket<SocketData>,
-  parsed: any,
+  parsed: Record<string, unknown>,
   bytes: number,
   data: SocketData,
   state: RelayState,
   rateLimiter: RateLimiter,
   globalLimiter: GlobalRateLimiter,
-  config: any,
+  config: RelayConfig,
   meter: UsageMeter,
 ): void {
   // Rate limiting
@@ -520,7 +522,7 @@ function handleTransportInit(
   }
 
   // Extract target node from client_hello
-  const nodeId = parsed.node_id;
+  const nodeId = parsed["node_id"];
   if (!nodeId || typeof nodeId !== "string") {
     ws.send(JSON.stringify({ t: "transport_error", code: "missing_node_id" }));
     return;
@@ -543,7 +545,7 @@ function handleTransportInit(
   }, () => {});
 
   // Add _rc and forward to node
-  parsed._rc = relayCid;
+  parsed["_rc"] = relayCid;
   node.ws.send(JSON.stringify(parsed));
 
   metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
@@ -568,13 +570,13 @@ function forwardClientTransport(
     return;
   }
 
-  let parsed: any;
+  let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw);
   } catch {
     return;
   }
-  parsed._rc = binding.relayCid;
+  parsed["_rc"] = binding.relayCid;
   node.ws.send(JSON.stringify(parsed));
 
   metrics.bytesIn.inc({ account_id: data.accountId, direction: "client" }, bytes);
@@ -582,7 +584,7 @@ function forwardClientTransport(
 
 // --- Helpers ---
 
-function jsonResponse(data: any, status: number = 200): Response {
+function jsonResponse(data: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json" },

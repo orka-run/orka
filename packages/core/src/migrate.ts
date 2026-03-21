@@ -38,7 +38,7 @@ export async function runMigrations(
 
   // Kysely instance is used ONLY for migrations — never call destroy()
   // because that would close the underlying bun:sqlite Database.
-  const kysely = new Kysely<any>({
+  const kysely = new Kysely<unknown>({
     dialect: new BunSqliteDialect({ database: db }),
   });
 
@@ -89,7 +89,7 @@ export async function runMigrations(
 
 /** Pre-seed Kysely's migration tracking table based on legacy schema_migrations. */
 async function transitionFromLegacy(
-  kysely: Kysely<any>,
+  kysely: Kysely<unknown>,
   migrations: Record<string, Migration>,
   legacyMigrationCount: number,
 ): Promise<void> {
@@ -124,7 +124,7 @@ async function transitionFromLegacy(
   }
 }
 
-async function getAppliedMigrations(kysely: Kysely<any>): Promise<Set<string>> {
+async function getAppliedMigrations(kysely: Kysely<unknown>): Promise<Set<string>> {
   try {
     const result = await sql<{ name: string }>`SELECT name FROM kysely_migration`.execute(kysely);
     return new Set(result.rows.map((r) => r.name));

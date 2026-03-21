@@ -199,6 +199,6 @@ describe("mapProviderEvent", () => {
     if (mapped.type !== "event.passthrough") {
       throw new Error("expected passthrough event");
     }
-    expect((mapped.rawPayload as any).payload).toBe(rawPayload);
+    expect((mapped.rawPayload as Record<string, unknown>)["payload"]).toBe(rawPayload);
   });
 });

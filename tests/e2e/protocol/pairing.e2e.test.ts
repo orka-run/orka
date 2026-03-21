@@ -37,7 +37,7 @@ import {
 } from "../../../packages/core/src/transport/noise-transport";
 import { canonicalTransportOrigin } from "@orka/core";
 import type { OrkaService } from "@orka/core";
-import type { PairingConfig } from "@orka/daemon";
+import type { PairingConfig, DaemonContext } from "@orka/daemon";
 import { createDaemonContext, createLocalClient, startServer } from "@orka/daemon";
 import { startRelay, type RelayHandle } from "../../../packages/relay/src/index";
 import { waitForOpen } from "./protocol-helpers";
@@ -156,8 +156,8 @@ async function runClientPairing(opts: {
 
 describe("SPAKE2 Pairing Protocol E2E", () => {
   let relay: RelayHandle;
-  let ctx: import("@orka/daemon").DaemonContext;
-  let daemonServer: any;
+  let ctx: DaemonContext;
+  let daemonServer: { port: number | undefined; stop(closeActiveConnections?: boolean): void };
   let svc: OrkaService;
   let relayPort: number;
   let daemonPort: number;
@@ -177,7 +177,9 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
 
     // 1. Start relay
     relay = await startRelay({ port: 0, hostname: "127.0.0.1", inMemoryDb: true });
-    relayPort = relay.server.port!;
+    const assignedPort = relay.server.port;
+    if (assignedPort === undefined) throw new Error("Relay port was not assigned");
+    relayPort = assignedPort;
     relayOrigin = `ws://127.0.0.1:${relayPort}`;
 
     // 2. Sign up and get API keys
@@ -223,6 +225,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
       relayToken: nodeApiKey,
       encrypt: true,
     }));
+    if (!daemonServer.port) throw new Error("expected daemon server port");
     daemonPort = daemonServer.port;
 
     // Wait for relay registration
@@ -386,7 +389,7 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
             // Skip non-RPC payloads (encrypted welcome push, etc.)
             if (payload.kind !== "rpc") return;
             const decrypted = payload.rpc;
-            if ((decrypted as any).jsonrpc === "2.0") {
+            if (decrypted["jsonrpc"] === "2.0") {
               clearTimeout(timer);
               resolve(decrypted);
             }
@@ -400,9 +403,9 @@ describe("SPAKE2 Pairing Protocol E2E", () => {
 
     // Verify we got a valid RPC response
     expect(rpcResponse).toBeTruthy();
-    expect((rpcResponse as any).jsonrpc).toBe("2.0");
-    expect((rpcResponse as any).id).toBe("test-noise-rpc");
-    expect((rpcResponse as any).result.sessions).toBeInstanceOf(Array);
+    expect(rpcResponse["jsonrpc"]).toBe("2.0");
+    expect(rpcResponse["id"]).toBe("test-noise-rpc");
+    expect((rpcResponse["result"] as { sessions: unknown[] }).sessions).toBeInstanceOf(Array);
 
     ws.close();
   }, 30_000);

@@ -160,6 +160,6 @@ export class CheckpointService {
 
   private parseStatValue(stat: string, pattern: RegExp): number {
     const match = stat.match(pattern);
-    return match ? Number.parseInt(match[1]!, 10) : 0;
+    return match?.[1] ? Number.parseInt(match[1], 10) : 0;
   }
 }

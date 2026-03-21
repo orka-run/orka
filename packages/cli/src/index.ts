@@ -41,8 +41,7 @@ import {
   formatLog,
   formatEvent,
   parseLine,
-  type PairingConfig,
-} from "@orka/daemon";
+  type PairingConfig, type DashboardOptions} from "@orka/daemon";
 import {
   command,
   subcommands,
@@ -638,8 +637,8 @@ async function runCliCommand(name: string, fn: () => Promise<void>): Promise<voi
       await fn();
     });
   } finally {
-    if (svc && typeof (svc as any).close === "function") {
-      (svc as any).close();
+    if (svc && typeof (svc as unknown as Record<string, unknown>)["close"] === "function") {
+      (svc as unknown as { close(): void }).close();
     }
   }
 }
@@ -899,8 +898,8 @@ const spawnCmd = command({
     let session;
     try {
       session = await svc.spawn(spawnRequest);
-    } catch (e: any) {
-      fail(`error: ${e.message}`);
+    } catch (e: unknown) {
+      fail(`error: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     console.log(`spawned session ${session.id}`);
@@ -1341,8 +1340,8 @@ const diffCmd = command({
         console.log("\x1b[1mCommitted changes vs parent:\x1b[0m");
         console.log(result.commitDiff);
       }
-    } catch (e: any) {
-      fail(`error: ${e.message}`);
+    } catch (e: unknown) {
+      fail(`error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }),
 });
@@ -1790,8 +1789,8 @@ const sendCmd = command({
     try {
       await svc.sendTurn(session.id, text.join(" "));
       console.log(`sent to ${session.id}`);
-    } catch (e: any) {
-      fail(`error: ${e.message}`);
+    } catch (e: unknown) {
+      fail(`error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }),
 });
@@ -1818,8 +1817,8 @@ const interruptCmd = command({
     try {
       await svc.cancelTurn(session.id);
       console.log(`interrupted turn for ${session.id}`);
-    } catch (e: any) {
-      fail(`error: ${e.message}`);
+    } catch (e: unknown) {
+      fail(`error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }),
 });
@@ -1896,8 +1895,8 @@ const mergeCmd = command({
             console.log(`  cleaned up worktree and branch ${branch}`);
           }
           merged++;
-        } catch (e: any) {
-          console.error(`  failed to merge ${s.id}: ${e.message}`);
+        } catch (e: unknown) {
+          console.error(`  failed to merge ${s.id}: ${e instanceof Error ? e.message : String(e)}`);
           failed++;
         }
       }
@@ -1922,8 +1921,8 @@ const mergeCmd = command({
       if (cleaned) {
         console.log(`cleaned up worktree and branch ${branch}`);
       }
-    } catch (e: any) {
-      fail(`error: ${e.message}`);
+    } catch (e: unknown) {
+      fail(`error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }),
 });
@@ -1953,7 +1952,7 @@ const tracesCmd = command({
       const match = args.since.match(/^(\d+)(m|h|d)$/);
       if (match) {
         const [, num, unit] = match;
-        const ms = parseInt(num!, 10) * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000);
+        const ms = parseInt(num ?? "0", 10) * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000);
         since = new Date(Date.now() - ms).toISOString();
       } else {
         since = args.since;
@@ -1961,7 +1960,7 @@ const tracesCmd = command({
     }
 
     const svc = await getSvc();
-    const traces: any[] = await svc.queryTraces({
+    const traces: Array<Record<string, unknown>> = await svc.queryTraces({
       ...(args.errors ? { errorsOnly: true } : {}),
       ...(args.name ? { namePattern: args.name } : {}),
       ...(args.service ? { service: args.service } : {}),
@@ -1983,21 +1982,26 @@ const tracesCmd = command({
     const c = (code: string, text: string) => noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
 
     for (const t of traces) {
-      const date = new Date(t.startTime).toLocaleTimeString();
-      const dur = `${Math.round(t.durationMs)}ms`;
-      const isErr = t.status?.code === 2;
+      const date = new Date(t["startTime"] as number).toLocaleTimeString();
+      const dur = `${Math.round(t["durationMs"] as number)}ms`;
+      const status = t["status"] as Record<string, unknown> | undefined;
+      const isErr = status?.["code"] === 2;
+      const tName = t["name"] as string;
       const statusStr = isErr ? c("31", "ERR") : c("32", "OK ");
-      const name = isErr ? c("31", t.name) : t.name;
-      const method = t.attributes?.["orka.method"] ? c("36", ` ${t.attributes["orka.method"]}`) : "";
-      const errMsg = isErr && t.status?.message ? c("2", ` ${t.status.message}`) : "";
+      const name = isErr ? c("31", tName) : tName;
+      const attrs = t["attributes"] as Record<string, unknown> | undefined;
+      const method = attrs?.["orka.method"] ? c("36", ` ${attrs["orka.method"]}`) : "";
+      const errMsg = isErr && status?.["message"] ? c("2", ` ${status["message"]}`) : "";
 
       console.log(`${c("2", date)} ${statusStr} ${c("33", dur.padStart(7))} ${name}${method}${errMsg}`);
 
       // Show events if error
-      if (isErr && t.events?.length) {
-        for (const ev of t.events) {
-          if (ev.name === "exception") {
-            const msg = ev.attributes?.["exception.message"] ?? ev.attributes?.message ?? "";
+      const events = t["events"] as Array<Record<string, unknown>> | undefined;
+      if (isErr && events?.length) {
+        for (const ev of events) {
+          if (ev["name"] === "exception") {
+            const evAttrs = ev["attributes"] as Record<string, unknown> | undefined;
+            const msg = evAttrs?.["exception.message"] ?? evAttrs?.["message"] ?? "";
             if (msg) console.log(`  ${c("2", "└")} ${c("31", String(msg))}`);
           }
         }
@@ -2302,7 +2306,7 @@ const serveCmd = command({
       const distExists = existsSync(join(distDir, "index.html"));
       const srcExists = existsSync(join(dashboardDir, "src"));
 
-      let dashboardOpts: import("@orka/daemon").DashboardOptions | undefined;
+      let dashboardOpts: DashboardOptions | undefined;
       if (args.noDashboard) {
         // Explicitly disabled
       } else if (args.dashboardDev) {
@@ -2458,7 +2462,7 @@ const wsUpdateCmd = command({
       fail("usage: orka workspace update <name-or-id> [--name <name>] [--description <desc>] [--color <color>]");
     }
     const ws = await resolveWorkspace(svc, ref);
-    const opts: Record<string, any> = {};
+    const opts: Record<string, unknown> = {};
     if (name !== undefined) opts["name"] = name;
     if (description !== undefined || color !== undefined) {
       const meta = { ...ws.metadata };
@@ -2609,11 +2613,11 @@ const relaySignupCmd = command({
       auth: false,
     });
 
-    saveApiKey(data.apiKey);
+    saveApiKey(data["apiKey"] as string);
 
     console.log("signup successful!");
-    console.log(`  account: ${data.accountId}`);
-    console.log(`  api key: ${data.apiKey}`);
+    console.log(`  account: ${data["accountId"]}`);
+    console.log(`  api key: ${data["apiKey"]}`);
     console.log("");
     console.log(`key saved to ${join(getOrkaHome(), "relay-key")}`);
     console.log("it will be used automatically for future relay commands");
@@ -2628,15 +2632,15 @@ const relayKeysCreateCmd = command({
     permissions: option({ type: optional(str), long: "permissions", description: "Permission level (client or node)" }),
   },
   handler: async ({ label, permissions }) => runCliCommand("relay", async () => {
-    const body: any = {};
-    if (label) body.label = label;
-    if (permissions) body.permissions = permissions;
+    const body: Record<string, string> = {};
+    if (label) body["label"] = label;
+    if (permissions) body["permissions"] = permissions;
 
     const data = await relayFetch("/v1/keys", { method: "POST", body });
     console.log("key created:");
-    console.log(`  id:     ${data.keyId}`);
-    console.log(`  key:    ${data.apiKey}`);
-    console.log(`  prefix: ${data.prefix}`);
+    console.log(`  id:     ${data["keyId"]}`);
+    console.log(`  key:    ${data["apiKey"]}`);
+    console.log(`  prefix: ${data["prefix"]}`);
   }),
 });
 
@@ -2664,19 +2668,20 @@ const relayKeysListCmd = command({
   },
   handler: async () => runCliCommand("relay", async () => {
     const data = await relayFetch("/v1/keys");
-    if (data.keys.length === 0) {
+    const keys = data["keys"] as Array<Record<string, unknown>>;
+    if (keys.length === 0) {
       console.log("no API keys");
       return;
     }
     console.log(padR("ID", 20) + padR("PREFIX", 20) + padR("PERMS", 10) + padR("STATUS", 10) + padR("LABEL", 20) + "LAST USED");
-    for (const k of data.keys) {
+    for (const k of keys) {
       console.log(
-        padR(k.id, 20) +
-        padR(k.prefix, 20) +
-        padR(k.permissions, 10) +
-        padR(k.status, 10) +
-        padR(k.label, 20) +
-        (k.lastUsedAt ?? "never"),
+        padR(String(k["id"]), 20) +
+        padR(String(k["prefix"]), 20) +
+        padR(String(k["permissions"]), 10) +
+        padR(String(k["status"]), 10) +
+        padR(String(k["label"]), 20) +
+        (String(k["lastUsedAt"] ?? "never")),
       );
     }
   }),
@@ -2700,12 +2705,12 @@ const relayAccountCmd = command({
   },
   handler: async () => runCliCommand("relay", async () => {
     const data = await relayFetch("/v1/account");
-    console.log(`account ${data.id}`);
-    console.log(`  email:   ${data.email}`);
-    console.log(`  name:    ${data.name}`);
-    console.log(`  status:  ${data.status}`);
-    console.log(`  tier:    ${data.tier}`);
-    console.log(`  created: ${data.createdAt}`);
+    console.log(`account ${data["id"]}`);
+    console.log(`  email:   ${data["email"]}`);
+    console.log(`  name:    ${data["name"]}`);
+    console.log(`  status:  ${data["status"]}`);
+    console.log(`  tier:    ${data["tier"]}`);
+    console.log(`  created: ${data["createdAt"]}`);
   }),
 });
 
@@ -2726,18 +2731,19 @@ const relayUsageCmd = command({
     const qs = params.toString() ? `?${params.toString()}` : "";
     const data = await relayFetch(`/v1/usage${qs}`);
 
-    if (data.buckets.length === 0) {
+    const buckets = data["buckets"] as Array<Record<string, unknown>>;
+    if (buckets.length === 0) {
       console.log("no usage data for this period");
       return;
     }
 
     console.log(padR("PERIOD", 24) + padR("REQUESTS", 12) + padR("BYTES IN", 12) + "BYTES OUT");
-    for (const b of data.buckets) {
+    for (const b of buckets) {
       console.log(
-        padR(b.period, 24) +
-        padR(String(b.requests), 12) +
-        padR(String(b.bytesIn), 12) +
-        String(b.bytesOut),
+        padR(String(b["period"]), 24) +
+        padR(String(b["requests"]), 12) +
+        padR(String(b["bytesIn"]), 12) +
+        String(b["bytesOut"]),
       );
     }
   }),
@@ -2877,11 +2883,11 @@ const nodePairStartCmd = command({
         ...(ttlSec !== undefined ? { ttlSec } : {}),
         ...(args.nodeName ? { nodeName: args.nodeName } : {}),
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (isMethodNotFound(e)) {
         fail("error: pairing not supported by this daemon (upgrade daemon or configure pairing)");
       }
-      fail(`error: ${e.message}`);
+      fail(`error: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     const expiresIn = Math.max(0, Math.floor((result.expiresAt - Date.now()) / 1000));
@@ -2928,8 +2934,8 @@ const nodeAddCmd = command({
         let parsed;
         try {
           parsed = parsePairingCode(code);
-        } catch (e: any) {
-          fail(`error: invalid pairing code: ${e.message}`);
+        } catch (e: unknown) {
+          fail(`error: invalid pairing code: ${e instanceof Error ? e.message : String(e)}`);
         }
 
         // Derive enroll_id from the secret
@@ -2985,7 +2991,7 @@ const nodeAddCmd = command({
                 // Do NOT send pair_done yet — verify node identity first
                 resolve({ result, pairingWs: ws });
               }
-            } catch (e: any) {
+            } catch (e: unknown) {
               ws.close();
               reject(e);
             }
@@ -3094,10 +3100,10 @@ const nodeAddCmd = command({
               };
             });
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
           // Verification failed — do NOT save trust, do NOT send pair_done
           pairingWs.close();
-          fail(`error: node identity verification failed: ${err.message}\nThe node could not prove ownership of the claimed key. Trust was NOT saved.`);
+          fail(`error: node identity verification failed: ${err instanceof Error ? err.message : String(err)}\nThe node could not prove ownership of the claimed key. Trust was NOT saved.`);
         }
 
         // Verification succeeded — send pair_done and close pairing WS
@@ -3429,7 +3435,7 @@ function saveApiKey(key: string): void {
   writeFileSync(keyFile, key + "\n", { mode: 0o600 });
 }
 
-async function relayFetch(path: string, opts?: { method?: string; body?: any; auth?: boolean }): Promise<any> {
+async function relayFetch(path: string, opts?: { method?: string; body?: unknown; auth?: boolean }): Promise<Record<string, unknown>> {
   const base = getRelayHttpUrl();
   const url = `${base}${path}`;
   const headers: Record<string, string> = { "content-type": "application/json" };
@@ -3443,10 +3449,11 @@ async function relayFetch(path: string, opts?: { method?: string; body?: any; au
   if (opts?.body) fetchOpts.body = JSON.stringify(opts.body);
 
   const resp = await fetch(url, fetchOpts);
-  const data = await resp.json() as any;
+  const data = await resp.json() as Record<string, unknown>;
 
   if (!resp.ok) {
-    const msg = data?.error?.message ?? data?.error ?? `HTTP ${resp.status}`;
+    const errObj = data?.["error"];
+    const msg = (typeof errObj === 'object' && errObj !== null && 'message' in errObj ? (errObj as Record<string, unknown>)["message"] : errObj) ?? `HTTP ${resp.status}`;
     console.error(`error: ${msg}`);
     process.exit(1);
   }
@@ -3507,12 +3514,16 @@ async function resolveSessionId(input: string): Promise<string> {
     if (sessions.length === 0) {
       fail("no sessions found");
     }
-    return sessions[0]!.id;
+    const first = sessions[0];
+    if (!first) {
+      fail("no sessions found");
+    }
+    return first.id;
   }
 
   const nthMatch = input.match(/^@(\d+)$/);
   if (nthMatch) {
-    const n = parseInt(nthMatch[1]!, 10);
+    const n = parseInt(nthMatch[1] ?? "0", 10);
     if (n < 1) {
       fail("session index must be >= 1 (e.g. @1 for most recent)");
     }
@@ -3520,7 +3531,11 @@ async function resolveSessionId(input: string): Promise<string> {
     if (n > sessions.length) {
       fail(`only ${sessions.length} session(s) exist, requested @${n}`);
     }
-    return sessions[n - 1]!.id;
+    const session = sessions[n - 1];
+    if (!session) {
+      fail(`only ${sessions.length} session(s) exist, requested @${n}`);
+    }
+    return session.id;
   }
 
   return input;
@@ -3536,7 +3551,9 @@ async function findSession(query: string) {
   const matches = all.filter((s) => s.id.includes(resolved));
   if (matches.length === 1) {
     // Fetch full detail for the matched session
-    return svc.getSession(matches[0]!.id);
+    const match = matches[0];
+    if (!match) return null;
+    return svc.getSession(match.id);
   }
   if (matches.length > 1) {
     console.error(`ambiguous session id "${resolved}", matches:`);

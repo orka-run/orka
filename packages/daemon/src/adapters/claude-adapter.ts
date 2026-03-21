@@ -370,7 +370,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
     // Emit session.exited from the last "result" line (exit mode)
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i]!;
+      const line = lines[i];
+      if (!line) continue;
       if (line.direction !== "out") continue;
       try {
         const raw = JSON.parse(line.data);

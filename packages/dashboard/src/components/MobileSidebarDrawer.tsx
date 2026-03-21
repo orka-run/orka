@@ -30,12 +30,14 @@ export function MobileSidebarDrawer({ open, onClose, children }: MobileSidebarDr
   }, [open, onClose]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0]!.clientX;
+    touchStartX.current = e.touches[0]?.clientX ?? null;
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (touchStartX.current === null) return;
-    const deltaX = e.changedTouches[0]!.clientX - touchStartX.current;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    const deltaX = touch.clientX - touchStartX.current;
     // Swipe left to close (threshold: 80px)
     if (deltaX < -80) onClose();
     touchStartX.current = null;

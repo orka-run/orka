@@ -23,6 +23,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
 const orkaHome = mkdtempSync(join(tmpdir(), "orka-e2e-noise-"));
 
+import type { TransportPayload } from "@orka/core";
 import {
   startDaemonWithNoise,
   performNoiseHandshake,
@@ -251,7 +252,7 @@ describe("Noise NK Transport", () => {
 
           // After SECURE: look for encrypted data frames
           if (msg["t"] === "data" && typeof msg["ct"] === "string") {
-            let payload: import("@orka/core").TransportPayload;
+            let payload: TransportPayload;
             try {
               payload = transport.decryptFrame(msg);
             } catch {

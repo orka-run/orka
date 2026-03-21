@@ -1,7 +1,7 @@
 import type { Kysely } from "@orka/core/migrate";
 import { sql } from "@orka/core/migrate";
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     CREATE TABLE checkpoints (
       id TEXT PRIMARY KEY,

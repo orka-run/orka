@@ -177,7 +177,8 @@ describe("mapCodexEvent", () => {
 
     const pending = meta.pendingServerRequests.get("req-1");
     expect(pending).toBeDefined();
-    pending!.decision = "approve";
+    if (!pending) throw new Error("expected pending request");
+    pending.decision = "approve";
 
     const resolved = mapCodexEvent(
       "thread-1",
@@ -302,7 +303,7 @@ describe("CodexAdapter", () => {
   test("startSession records the codex start_session span", async () => {
     const spawnCalls: Array<{ command: string[]; options: Record<string, unknown> }> = [];
     const stdout = createControlledTextStream();
-    const writes: Array<{ id?: string | number; method?: string; params?: any }> = [];
+    const writes: Array<{ id?: string | number; method?: string; params?: unknown }> = [];
     const stdin = new MockWritableSink((value) => {
       const message = JSON.parse(value) as { id?: string; method?: string };
       writes.push(message);
@@ -361,7 +362,7 @@ describe("CodexAdapter", () => {
     ).toBe("test-key");
 
     const turnStart = writes.find((message) => message.method === "turn/start");
-    expect(turnStart?.params?.input).toEqual([
+    expect((turnStart?.params as Record<string, unknown> | undefined)?.["input"]).toEqual([
       {
         type: "text",
         text: "Focus on correctness.\n\nFix the tests",
@@ -399,12 +400,12 @@ describe("CodexAdapter", () => {
 });
 
 async function runIdleDetectionSession(order: "ready-before-completed" | "completed-before-ready"): Promise<
-  Array<{ id?: string | number; method?: string; params?: any }>
+  Array<{ id?: string | number; method?: string; params?: unknown }>
 > {
   const stdout = createControlledTextStream();
-  const writes: Array<{ id?: string | number; method?: string; params?: any }> = [];
+  const writes: Array<{ id?: string | number; method?: string; params?: unknown }> = [];
   const stdin = new MockWritableSink((value) => {
-    const message = JSON.parse(value) as { id?: string | number; method?: string; params?: any };
+    const message = JSON.parse(value) as { id?: string | number; method?: string; params?: unknown };
     writes.push(message);
 
     if (message.method === "initialize") {

@@ -156,7 +156,7 @@ export async function startServer(ctx: DaemonContext, svc: OrkaService, opts: Se
         // Long-polls until the dashboard resolves the approval request.
         const toolApprovalMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/tool-approval$/);
         if (toolApprovalMatch && req.method === "POST") {
-          const sessionId = toolApprovalMatch[1]!;
+          const sessionId = toolApprovalMatch[1] ?? "";
           try {
             const body = (await req.json()) as {
               toolName: string;
@@ -559,7 +559,7 @@ function registerWithRelay(
 
       ws.onmessage = async (event) => {
         const raw = typeof event.data === "string" ? event.data : "";
-        let parsed: any;
+        let parsed: Record<string, unknown>;
         try {
           parsed = JSON.parse(raw);
         } catch {
@@ -567,8 +567,8 @@ function registerWithRelay(
         }
 
         // --- Transport message from relay (has _rc field) ---
-        if (parsed && typeof parsed._rc === "string" && typeof parsed.t === "string") {
-          const relayCid: string = parsed._rc;
+        if (parsed && typeof parsed["_rc"] === "string" && typeof parsed["t"] === "string") {
+          const relayCid: string = parsed["_rc"] as string;
 
           // Helper: send response back through relay with _rc attached.
           // IMPORTANT: spread to avoid mutating the original object (e.g. stored serverHello).
@@ -582,7 +582,7 @@ function registerWithRelay(
           let transport = transportSessions.get(relayCid);
 
           // New client_hello → create Noise transport session
-          if (!transport && msg.t === "client_hello" && noiseKeyInfo) {
+          if (!transport && msg["t"] === "client_hello" && noiseKeyInfo) {
             transport = new NoiseServerTransport({
               nodeId,
               keyId: noiseKeyInfo.keyId,
@@ -602,7 +602,7 @@ function registerWithRelay(
 
           // SECURE state: decrypt data frame, handle RPC
           if (transport.isSecure) {
-            if (msg.t !== "data" || typeof msg.ct !== "string") return;
+            if (msg["t"] !== "data" || typeof msg["ct"] !== "string") return;
             let payload: TransportPayload;
             try {
               payload = transport.decryptFrame(msg as DataFrame);

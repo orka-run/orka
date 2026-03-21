@@ -1,6 +1,6 @@
 // PTY management inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
 
-import type { IPty } from "node-pty";
+import type { IPty, spawn as ptySpawnFn } from "node-pty";
 import { generateId } from "@orka/core";
 
 const MAX_HISTORY_BYTES = 100 * 1024; // 100KB
@@ -37,9 +37,9 @@ export class TerminalManager {
   private dataHandlers = new Map<string, Set<(data: string) => void>>();
 
   /** Spawn function — injectable for testing */
-  private ptySpawn: typeof import("node-pty").spawn;
+  private ptySpawn: typeof ptySpawnFn;
 
-  constructor(ptySpawn?: typeof import("node-pty").spawn) {
+  constructor(ptySpawn?: typeof ptySpawnFn) {
     if (ptySpawn) {
       this.ptySpawn = ptySpawn;
     } else {
@@ -165,7 +165,7 @@ export class TerminalManager {
     handlers.add(handler);
 
     return () => {
-      handlers!.delete(handler);
+      handlers?.delete(handler);
     };
   }
 }

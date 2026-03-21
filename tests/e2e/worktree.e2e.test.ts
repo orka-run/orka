@@ -16,6 +16,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-wt-"));
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
+import type { DaemonContext } from "@orka/daemon";
 import type { OrkaService, SessionDetailResponse } from "@orka/core";
 import { registerTestAdapter } from "./helpers/test-adapter";
 import { waitFor } from "./helpers/polling";
@@ -33,11 +34,12 @@ async function waitForTerminal(
     if (s && terminal.has(s.status)) { result = s; return true; }
     return false;
   }, { timeoutMs });
-  return result!;
+  if (!result) throw new Error(`Session ${sessionId} did not reach terminal status`);
+  return result;
 }
 
 describe("Worktree Management", () => {
-  let ctx: import("@orka/daemon").DaemonContext;
+  let ctx: DaemonContext;
   let client: OrkaService;
   let testRepo: string;
   const sessionIds: string[] = [];
@@ -77,15 +79,15 @@ describe("Worktree Management", () => {
     sessionIds.push(result.id);
 
     const session = await client.getSession(result.id);
-    expect(session).not.toBeNull();
+    if (!session) throw new Error("expected session");
 
     // Worktree path is under ORKA_HOME/worktrees/
     const wtDir = join(testHome, "worktrees");
-    expect(session!.workingDir).toStartWith(wtDir);
-    expect(existsSync(session!.workingDir)).toBe(true);
+    expect(session.workingDir).toStartWith(wtDir);
+    expect(existsSync(session.workingDir)).toBe(true);
 
     // Branch should be orka/<session-id>
-    const branch = (await $`git -C ${session!.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+    const branch = (await $`git -C ${session.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
     expect(branch).toBe(`orka/${result.id}`);
 
     await waitForTerminal(client, result.id);
@@ -101,10 +103,10 @@ describe("Worktree Management", () => {
     sessionIds.push(result.id);
 
     const session = await client.getSession(result.id);
-    expect(session).not.toBeNull();
+    if (!session) throw new Error("expected session");
 
     // Interactive sessions use the project dir directly
-    expect(session!.workingDir).toBe(testRepo);
+    expect(session.workingDir).toBe(testRepo);
     await waitForTerminal(client, result.id);
   });
 
@@ -118,9 +120,9 @@ describe("Worktree Management", () => {
     sessionIds.push(result.id);
 
     const session = await client.getSession(result.id);
-    expect(session).not.toBeNull();
+    if (!session) throw new Error("expected session");
 
-    const branch = (await $`git -C ${session!.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
+    const branch = (await $`git -C ${session.workingDir} rev-parse --abbrev-ref HEAD`.quiet().text()).trim();
     expect(branch).toBe("feat/custom-test");
 
     await waitForTerminal(client, result.id);
@@ -137,7 +139,8 @@ describe("Worktree Management", () => {
 
     // Wait for the file to be created in the worktree
     const session = await client.getSession(result.id);
-    const diffFilePath = join(session!.workingDir, "test-file.txt");
+    if (!session) throw new Error("expected session");
+    const diffFilePath = join(session.workingDir, "test-file.txt");
     await waitFor(async () => existsSync(diffFilePath), { timeoutMs: 5000 });
 
     const diff = await client.getDiff(result.id);
@@ -157,16 +160,16 @@ describe("Worktree Management", () => {
     sessionIds.push(result.id);
 
     const session = await client.getSession(result.id);
-    expect(session).not.toBeNull();
+    if (!session) throw new Error("expected session");
 
     // Wait for the commit to be made
     await waitFor(async () => {
-      const log = (await $`git -C ${session!.workingDir} log --oneline -1`.quiet().text()).trim();
+      const log = (await $`git -C ${session.workingDir} log --oneline -1`.quiet().text()).trim();
       return log.includes("merge-test");
     }, { timeoutMs: 5000 });
 
     // Verify the commit was made in the worktree
-    const wtLog = (await $`git -C ${session!.workingDir} log --oneline -1`.quiet().text()).trim();
+    const wtLog = (await $`git -C ${session.workingDir} log --oneline -1`.quiet().text()).trim();
     expect(wtLog).toContain("merge-test");
 
     // Stop the session first (merge needs the worktree intact)
@@ -228,6 +231,7 @@ describe("Worktree Management", () => {
     await waitForTerminal(client, result.id);
 
     // Worktree should still exist
-    expect(existsSync(session!.workingDir)).toBe(true);
+    if (!session) throw new Error("expected session after stop");
+    expect(existsSync(session.workingDir)).toBe(true);
   });
 });

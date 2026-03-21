@@ -4,7 +4,7 @@ export interface RpcRequest {
   jsonrpc: "2.0";
   id: string | number;
   method: string;
-  params?: any;
+  params?: Record<string, unknown>;
   traceparent?: string;
   /** Routing hint for relay — ignored by direct server. */
   node?: string;
@@ -13,14 +13,14 @@ export interface RpcRequest {
 export interface RpcResponse {
   jsonrpc: "2.0";
   id: string | number | null;
-  result?: any;
+  result?: unknown;
   error?: RpcError;
 }
 
 export interface RpcError {
   code: number;
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 // Standard JSON-RPC error codes

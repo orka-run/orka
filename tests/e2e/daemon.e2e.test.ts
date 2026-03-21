@@ -17,6 +17,7 @@ const testHome = mkdtempSync(join(tmpdir(), "orka-e2e-daemon-"));
 writeFileSync(join(testHome, "config.toml"), "[limits]\nmax_concurrent = 0\n");
 
 import { createDaemonContext, createLocalClient } from "@orka/daemon";
+import type { DaemonContext } from "@orka/daemon";
 import type { OrkaService, SessionDetailResponse } from "@orka/core";
 import { registerTestAdapter } from "./helpers/test-adapter";
 
@@ -35,11 +36,12 @@ async function waitForTerminal(
     if (s && terminal.has(s.status)) { result = s; return true; }
     return false;
   }, { timeoutMs });
-  return result!;
+  if (!result) throw new Error(`Session ${sessionId} did not reach terminal status`);
+  return result;
 }
 
 describe("Daemon Session Lifecycle", () => {
-  let ctx: import("@orka/daemon").DaemonContext;
+  let ctx: DaemonContext;
   let client: OrkaService;
   let testRepo: string;
   const sessionIds: string[] = [];
@@ -86,11 +88,11 @@ describe("Daemon Session Lifecycle", () => {
 
     // Full session details available via getSession
     const session = await client.getSession(result.id);
-    expect(session).not.toBeNull();
-    expect(session!.backend).toBe("claude-code");
-    expect(session!.projectPath).toBe(testRepo);
-    expect(session!.startedAt).toBeTruthy();
-    expect(session!.tags).toEqual(["e2e", "test"]);
+    if (!session) throw new Error("expected session");
+    expect(session.backend).toBe("claude-code");
+    expect(session.projectPath).toBe(testRepo);
+    expect(session.startedAt).toBeTruthy();
+    expect(session.tags).toEqual(["e2e", "test"]);
   });
 
   // ---- Queries ----
@@ -105,12 +107,11 @@ describe("Daemon Session Lifecycle", () => {
     sessionIds.push(spawned.id);
 
     const session = await client.getSession(spawned.id);
-
-    expect(session).not.toBeNull();
-    expect(session!.id).toBe(spawned.id);
-    expect(session!.backend).toBe("claude-code");
-    expect(session!.status).toBe("running");
-    expect(session!.projectPath).toBe(testRepo);
+    if (!session) throw new Error("expected session");
+    expect(session.id).toBe(spawned.id);
+    expect(session.backend).toBe("claude-code");
+    expect(session.status).toBe("running");
+    expect(session.projectPath).toBe(testRepo);
   });
 
   test("listSessions returns all sessions", async () => {
@@ -181,13 +182,13 @@ describe("Daemon Session Lifecycle", () => {
 
     await client.setKept(spawned.id, true);
     const updated = await client.getSession(spawned.id);
-    expect(updated).not.toBeNull();
-    expect(updated!.kept).toBe(true);
+    if (!updated) throw new Error("expected session");
+    expect(updated.kept).toBe(true);
 
     await client.setKept(spawned.id, false);
     const reverted = await client.getSession(spawned.id);
-    expect(reverted).not.toBeNull();
-    expect(reverted!.kept).toBe(false);
+    if (!reverted) throw new Error("expected session");
+    expect(reverted.kept).toBe(false);
   });
 
   // ---- Stop ----

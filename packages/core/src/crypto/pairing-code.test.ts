@@ -88,11 +88,11 @@ describe("Pairing Code", () => {
     const { code } = generatePairingCode();
     const parts = code.split("-");
     expect(parts.length).toBe(5);
-    expect(parts[0]!.length).toBe(4);
-    expect(parts[1]!.length).toBe(4);
-    expect(parts[2]!.length).toBe(4);
-    expect(parts[3]!.length).toBe(4);
-    expect(parts[4]!.length).toBe(5);
+    expect(parts[0]?.length).toBe(4);
+    expect(parts[1]?.length).toBe(4);
+    expect(parts[2]?.length).toBe(4);
+    expect(parts[3]?.length).toBe(4);
+    expect(parts[4]?.length).toBe(5);
     // Total chars (without dashes) = 21
     expect(code.replace(/-/g, "").length).toBe(21);
   });
@@ -159,7 +159,7 @@ describe("Pairing Code", () => {
     // Flip a character in the SECRET portion (not the CRC suffix) to guarantee checksum mismatch.
     // Flipping the last char could land on the CRC itself and accidentally produce a valid code.
     const idx = 2; // well inside the secret portion
-    const origChar = stripped[idx]!;
+    const origChar = stripped[idx] ?? "0";
     const altChar = origChar === "0" ? "1" : "0";
 
     const tampered = stripped.slice(0, idx) + altChar + stripped.slice(idx + 1);

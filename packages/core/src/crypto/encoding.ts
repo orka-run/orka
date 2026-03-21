@@ -8,7 +8,7 @@
 export function toBase64url(data: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < data.length; i++) {
-    binary += String.fromCharCode(data[i]!);
+    binary += String.fromCharCode(data[i] ?? 0);
   }
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }

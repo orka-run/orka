@@ -51,14 +51,13 @@ export function createDrainableWorker<T>(
         await process(item);
       } catch {
         // Keep draining even if an item-level handler fails.
-      } finally {
-        isProcessing = false;
+      }
 
-        if (queue.length > 0) {
-          runNext();
-          return;
-        }
+      isProcessing = false;
 
+      if (queue.length > 0) {
+        runNext();
+      } else {
         resolveDrainsIfIdle();
       }
     })();

@@ -76,7 +76,8 @@ export async function startDaemonWithNoise(opts: {
     encrypt: true,
   });
 
-  const port = server.port!;
+  const port = server.port;
+  if (port === undefined) throw new Error("Server port was not assigned");
   return {
     server: {
       port,
@@ -188,7 +189,7 @@ export async function performNoiseHandshake(
   ws.send(JSON.stringify(clientHello));
 
   // Wait for server_hello from the queue
-  const serverHello = await waitForQueued(messageQueue, (m: any) => m?.t === "server_hello");
+  const serverHello = await waitForQueued(messageQueue, (m) => (m as Record<string, unknown>)?.["t"] === "server_hello");
 
   // processMessage returns noise_1 messages to send
   const noise1Msgs = transport.processMessage(serverHello);
@@ -197,7 +198,7 @@ export async function performNoiseHandshake(
   }
 
   // Wait for noise_2 from the queue
-  const noise2 = await waitForQueued(messageQueue, (m: any) => m?.t === "noise_2");
+  const noise2 = await waitForQueued(messageQueue, (m) => (m as Record<string, unknown>)?.["t"] === "noise_2");
 
   // Process noise_2 — should transition to SECURE
   transport.processMessage(noise2);
@@ -211,7 +212,7 @@ export async function performNoiseHandshake(
   // then consume all queued data frames to keep the nonce in sync.
   await waitForQueued(
     messageQueue,
-    (m: any) => m?.t === "data" && typeof m?.ct === "string",
+    (m) => { const r = m as Record<string, unknown>; return r?.["t"] === "data" && typeof r?.["ct"] === "string"; },
     5000,
   ).then((welcomeFrame) => {
     // Put it back so the drain loop processes it

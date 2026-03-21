@@ -61,9 +61,9 @@ describe("startServer", () => {
     // Noise transport: publicKey is base64url raw X25519 public key
     expect(body.publicKey).toEqual(expect.any(String));
     // key_id is "sha256:<hex>"
-    expect((body as any).keyId).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}$/));
+    expect((body as Record<string, unknown>)["keyId"]).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}$/));
     // nodeId is exposed
-    expect((body as any).nodeId).toEqual(expect.any(String));
+    expect((body as Record<string, unknown>)["nodeId"]).toEqual(expect.any(String));
   });
 
   test("pushes protocol metadata and capabilities in server.welcome", async () => {
@@ -77,7 +77,8 @@ describe("startServer", () => {
     }));
 
     const message = await new Promise<string>((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${server!.port}`);
+      if (!server) throw new Error("expected server");
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}`);
       const timeout = setTimeout(() => {
         ws.close();
         reject(new Error("Timed out waiting for server.welcome"));

@@ -150,7 +150,7 @@ export function extractToolInfo(request: ApprovalRequest): {
   if (request.detail) {
     const colonMatch = request.detail.match(/^(\w+):\s/);
     if (colonMatch) {
-      const tool = colonMatch[1]!;
+      const tool = colonMatch[1] ?? "";
       // If the detail contains the full command, inject it as 'command' for Bash matching
       if (tool === "Bash" && !args["command"]) {
         const cmd = request.detail.slice(request.detail.indexOf(":") + 1).trim();

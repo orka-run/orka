@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 
 import {
   type PairClientHello,
+  type PairServerHello,
   PAIR_SUITE,
   computePairContext,
   computePairAad,
@@ -32,6 +33,13 @@ function toBase64Url(data: Uint8Array): string {
 
 function fromBase64Url(s: string): Uint8Array {
   return new Uint8Array(Buffer.from(s, "base64url"));
+}
+
+/** Helper to safely get response message at index, throwing if missing. */
+function msgAt(resp: unknown[], idx: number): Record<string, unknown> {
+  const m = resp[idx];
+  if (!m) throw new Error(`expected response message at index ${idx}`);
+  return m as Record<string, unknown>;
 }
 
 /**
@@ -73,7 +81,10 @@ class PairingClient {
    * Must be called with the actual serverHello received, so we can compute context/aad.
    */
   makePairInit(clientHello: PairClientHello, serverHello: Record<string, unknown>) {
-    const pairContext = computePairContext(clientHello, serverHello as any);
+    const pairContext = computePairContext(
+      clientHello,
+      serverHello as unknown as PairServerHello,
+    );
     const pairAad = computePairAad(this.relayOrigin, pairContext);
 
     // idA = raw bytes of client_instance_id (matching real PairingClient)
@@ -111,12 +122,14 @@ class PairingClient {
 
   /** Verify the server's confirm2 MAC. */
   verifyConfirm2(macBase64Url: string): boolean {
-    return this.result!.verifyConfirmB(fromBase64Url(macBase64Url));
+    if (!this.result) throw new Error("expected SPAKE2 result");
+    return this.result.verifyConfirmB(fromBase64Url(macBase64Url));
   }
 
   /** Get the shared key Ke for bootstrap decryption. */
   get Ke(): Uint8Array {
-    return this.result!.Ke;
+    if (!this.result) throw new Error("expected SPAKE2 result");
+    return this.result.Ke;
   }
 
   /** Decrypt bootstrap ciphertext. */
@@ -125,7 +138,10 @@ class PairingClient {
     clientHello: PairClientHello,
     serverHello: Record<string, unknown>,
   ): Record<string, unknown> {
-    const pairContext = computePairContext(clientHello, serverHello as any);
+    const pairContext = computePairContext(
+      clientHello,
+      serverHello as unknown as PairServerHello,
+    );
     const aad = sha256(pairContext);
 
     // Derive boot_s2c key
@@ -191,7 +207,8 @@ function createTestEnrollment(
     ttlMs: overrides?.ttlMs ?? 600_000,
     maxAttempts: overrides?.maxAttempts ?? 8,
   });
-  const enrollment = store.get(enrollId)!;
+  const enrollment = store.get(enrollId);
+  if (!enrollment) throw new Error("expected enrollment");
   return { enrollId, enrollment };
 }
 
@@ -241,8 +258,9 @@ describe("PairingServer", () => {
       const resp1 = server.processMessage(clientHello);
 
       expect(resp1).toHaveLength(1);
-      expect(resp1[0]!.t).toBe("pair_server_hello");
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const msg0 = msgAt(resp1, 0);
+      expect(msg0["t"]).toBe("pair_server_hello");
+      const serverHello = msg0;
       expect(serverHello["v"]).toBe(1);
       expect(serverHello["pair_suite"]).toBe(PAIR_SUITE);
       expect(serverHello["enroll_id"]).toBeDefined();
@@ -254,8 +272,8 @@ describe("PairingServer", () => {
       const resp2 = server.processMessage(pairInit);
 
       expect(resp2).toHaveLength(1);
-      expect(resp2[0]!.t).toBe("pair_resp");
-      const pairResp = resp2[0]! as Record<string, unknown>;
+      const pairResp = msgAt(resp2, 0);
+      expect(pairResp["t"]).toBe("pair_resp");
       expect(typeof pairResp["pB"]).toBe("string");
 
       // Step 3: pair_confirm1
@@ -263,11 +281,10 @@ describe("PairingServer", () => {
       const resp3 = server.processMessage(confirm1);
 
       expect(resp3).toHaveLength(2);
-      expect(resp3[0]!.t).toBe("pair_confirm2");
-      expect(resp3[1]!.t).toBe("pair_bootstrap");
-
-      const confirm2 = resp3[0]! as Record<string, unknown>;
-      const bootstrap = resp3[1]! as Record<string, unknown>;
+      const confirm2 = msgAt(resp3, 0);
+      const bootstrap = msgAt(resp3, 1);
+      expect(confirm2["t"]).toBe("pair_confirm2");
+      expect(bootstrap["t"]).toBe("pair_bootstrap");
 
       // Verify server MAC
       expect(client.verifyConfirm2(confirm2["mac"] as string)).toBe(true);
@@ -301,22 +318,23 @@ describe("PairingServer", () => {
       // Run through the full handshake
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       const resp2 = server.processMessage(pairInit);
-      const pairResp = resp2[0]! as Record<string, unknown>;
+      const pairResp = msgAt(resp2, 0);
 
       const confirm1 = client.makePairConfirm1(pairResp["pB"] as string);
       server.processMessage(confirm1);
 
       // boot_export should be available after confirm phase
-      expect(server.bootExport).not.toBeNull();
-      expect(server.bootExport!.length).toBe(32);
+      const bootExport = server.bootExport;
+      if (!bootExport) throw new Error("expected bootExport");
+      expect(bootExport.length).toBe(32);
 
       // Verify it matches the client-derived export key
       const clientExport = client.bootExport;
-      expect(Buffer.from(server.bootExport!).toString("hex")).toBe(
+      expect(Buffer.from(bootExport).toString("hex")).toBe(
         Buffer.from(clientExport).toString("hex"),
       );
     });
@@ -342,8 +360,9 @@ describe("PairingServer", () => {
       });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("bad_version");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("bad_version");
       expect(server.isErrored).toBe(true);
     });
   });
@@ -363,8 +382,9 @@ describe("PairingServer", () => {
       });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("bad_suite");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("bad_suite");
       expect(server.isErrored).toBe(true);
     });
 
@@ -380,8 +400,9 @@ describe("PairingServer", () => {
       });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("bad_suite");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("bad_suite");
     });
   });
 
@@ -396,7 +417,7 @@ describe("PairingServer", () => {
       // Get through hello and init
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       server.processMessage(pairInit);
@@ -406,8 +427,9 @@ describe("PairingServer", () => {
       const resp = server.processMessage({ t: "pair_confirm1", mac: badMac });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
       expect(server.isErrored).toBe(true);
 
       // Enrollment should still exist with decremented attempts
@@ -427,7 +449,7 @@ describe("PairingServer", () => {
       // Get through hello and init
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       server.processMessage(pairInit);
@@ -437,10 +459,9 @@ describe("PairingServer", () => {
       const resp = server.processMessage({ t: "pair_confirm1", mac: badMac });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe(
-        "attempts_exhausted",
-      );
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("attempts_exhausted");
       expect(server.isErrored).toBe(true);
     });
   });
@@ -457,8 +478,9 @@ describe("PairingServer", () => {
       });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
       expect(server.isErrored).toBe(true);
     });
 
@@ -476,8 +498,9 @@ describe("PairingServer", () => {
       });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
     });
 
     test("pair_done before confirm sends protocol_error", () => {
@@ -485,7 +508,7 @@ describe("PairingServer", () => {
 
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       server.processMessage(pairInit);
@@ -494,8 +517,9 @@ describe("PairingServer", () => {
       const resp = server.processMessage({ t: "pair_done" });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
     });
 
     test("message after completion sends protocol_error", () => {
@@ -504,11 +528,11 @@ describe("PairingServer", () => {
       // Run full handshake
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       const resp2 = server.processMessage(pairInit);
-      const pairResp = resp2[0]! as Record<string, unknown>;
+      const pairResp = msgAt(resp2, 0);
 
       const confirm1 = client.makePairConfirm1(pairResp["pB"] as string);
       server.processMessage(confirm1);
@@ -519,8 +543,9 @@ describe("PairingServer", () => {
       // Send another message
       const resp = server.processMessage({ t: "pair_done" });
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
     });
 
     test("message after error sends protocol_error", () => {
@@ -540,8 +565,9 @@ describe("PairingServer", () => {
       });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
     });
   });
 
@@ -554,27 +580,27 @@ describe("PairingServer", () => {
       // Full handshake
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       const resp2 = server.processMessage(pairInit);
-      const pairResp = resp2[0]! as Record<string, unknown>;
+      const pairResp = msgAt(resp2, 0);
 
       const confirm1 = client.makePairConfirm1(pairResp["pB"] as string);
       server.processMessage(confirm1);
 
       // Before done: enrollment should not be used
       const enrollBefore = store.get(enrollId);
-      expect(enrollBefore).not.toBeNull();
-      expect(enrollBefore!.used).toBe(false);
+      if (!enrollBefore) throw new Error("expected enrollment");
+      expect(enrollBefore.used).toBe(false);
 
       // Send done
       server.processMessage({ t: "pair_done" });
 
       // After done: enrollment should be marked used
       const enrollAfter = store.get(enrollId);
-      expect(enrollAfter).not.toBeNull();
-      expect(enrollAfter!.used).toBe(true);
+      if (!enrollAfter) throw new Error("expected enrollment");
+      expect(enrollAfter.used).toBe(true);
     });
   });
 
@@ -587,16 +613,16 @@ describe("PairingServer", () => {
       // Full handshake through confirm
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       const resp2 = server.processMessage(pairInit);
-      const pairResp = resp2[0]! as Record<string, unknown>;
+      const pairResp = msgAt(resp2, 0);
 
       const confirm1 = client.makePairConfirm1(pairResp["pB"] as string);
       const resp3 = server.processMessage(confirm1);
 
-      const bootstrap = resp3[1]! as Record<string, unknown>;
+      const bootstrap = msgAt(resp3, 1);
 
       // Decrypt and verify payload
       const payload = client.decryptBootstrap(
@@ -622,22 +648,25 @@ describe("PairingServer", () => {
       // Full handshake through confirm
       const clientHello = client.makeClientHello();
       const resp1 = server.processMessage(clientHello);
-      const serverHello = resp1[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp1, 0);
 
       const pairInit = client.makePairInit(clientHello, serverHello);
       const resp2 = server.processMessage(pairInit);
-      const pairResp = resp2[0]! as Record<string, unknown>;
+      const pairResp = msgAt(resp2, 0);
 
       const confirm1 = client.makePairConfirm1(pairResp["pB"] as string);
       const resp3 = server.processMessage(confirm1);
 
-      const bootstrap = resp3[1]! as Record<string, unknown>;
+      const bootstrap = msgAt(resp3, 1);
       const ct = fromBase64Url(bootstrap["ct"] as string);
 
       // Try to decrypt with wrong key
       const wrongKey = new Uint8Array(32).fill(0xaa);
       const nonce = new Uint8Array(12);
-      const pairContext = computePairContext(clientHello, serverHello as any);
+      const pairContext = computePairContext(
+        clientHello,
+        serverHello as unknown as PairServerHello,
+      );
       const aad = sha256(pairContext);
 
       expect(() => {
@@ -674,8 +703,9 @@ describe("PairingServer", () => {
       });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("expired");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("expired");
       expect(server.isErrored).toBe(true);
     });
   });
@@ -688,8 +718,9 @@ describe("PairingServer", () => {
       const resp = server.processMessage("not an object");
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
     });
 
     test("rejects null message", () => {
@@ -697,8 +728,9 @@ describe("PairingServer", () => {
       const resp = server.processMessage(null);
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
     });
 
     test("rejects message with missing type", () => {
@@ -706,8 +738,9 @@ describe("PairingServer", () => {
       const resp = server.processMessage({ foo: "bar" });
 
       expect(resp).toHaveLength(1);
-      expect(resp[0]!.t).toBe("pair_error");
-      expect((resp[0]! as Record<string, unknown>)["code"]).toBe("protocol_error");
+      const msg = msgAt(resp, 0);
+      expect(msg["t"]).toBe("pair_error");
+      expect(msg["code"]).toBe("protocol_error");
     });
   });
 
@@ -733,7 +766,7 @@ describe("PairingServer", () => {
         features: [],
       });
 
-      const serverHello = resp[0]! as Record<string, unknown>;
+      const serverHello = msgAt(resp, 0);
       const expiresSec = serverHello["expires_in_sec"] as number;
 
       // Should be approximately 120 seconds (allow 5 seconds margin for test execution)
@@ -758,10 +791,10 @@ describe("PairingServer", () => {
 
       const ch1 = client1.makeClientHello();
       const r1 = server1.processMessage(ch1);
-      const sh1 = r1[0]! as Record<string, unknown>;
+      const sh1 = msgAt(r1, 0);
       const pi1 = client1.makePairInit(ch1, sh1);
       const r2 = server1.processMessage(pi1);
-      const pr1 = r2[0]! as Record<string, unknown>;
+      const pr1 = msgAt(r2, 0);
       const c1 = client1.makePairConfirm1(pr1["pB"] as string);
       server1.processMessage(c1);
 
@@ -774,16 +807,19 @@ describe("PairingServer", () => {
 
       const ch2 = client2.makeClientHello();
       const r3 = server2.processMessage(ch2);
-      const sh2 = r3[0]! as Record<string, unknown>;
+      const sh2 = msgAt(r3, 0);
       const pi2 = client2.makePairInit(ch2, sh2);
       const r4 = server2.processMessage(pi2);
-      const pr2 = r4[0]! as Record<string, unknown>;
+      const pr2 = msgAt(r4, 0);
       const c2 = client2.makePairConfirm1(pr2["pB"] as string);
       server2.processMessage(c2);
 
       // boot_export should differ
-      expect(Buffer.from(server1.bootExport!).toString("hex")).not.toBe(
-        Buffer.from(server2.bootExport!).toString("hex"),
+      const export1 = server1.bootExport;
+      const export2 = server2.bootExport;
+      if (!export1 || !export2) throw new Error("expected bootExport");
+      expect(Buffer.from(export1).toString("hex")).not.toBe(
+        Buffer.from(export2).toString("hex"),
       );
 
       store1.shutdown();

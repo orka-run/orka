@@ -69,30 +69,30 @@ function parseClaudeCodeResult(lines: string[]): SessionResult | null {
     const line = rawLine.trim();
     if (!line) continue;
 
-    let parsed: any;
+    let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(line);
     } catch {
       continue;
     }
 
-    if (parsed.type === "result") {
-      const usage = parsed.usage ?? {};
-      const modelUsage = parsed.modelUsage ?? {};
+    if (parsed["type"] === "result") {
+      const usage = (parsed["usage"] ?? {}) as Record<string, unknown>;
+      const modelUsage = (parsed["modelUsage"] ?? {}) as Record<string, Record<string, unknown>>;
       const firstModel = Object.keys(modelUsage)[0] ?? null;
-      const modelStats = firstModel ? modelUsage[firstModel] : {};
+      const modelStats = firstModel ? (modelUsage[firstModel] ?? {}) : {} as Record<string, unknown>;
 
       return {
-        result: parsed.result ?? "",
-        isError: parsed.is_error ?? false,
-        durationMs: parsed.duration_ms ?? 0,
-        costUsd: parsed.total_cost_usd ?? null,
-        inputTokens: modelStats.inputTokens ?? usage.input_tokens ?? 0,
-        outputTokens: modelStats.outputTokens ?? usage.output_tokens ?? 0,
-        cacheReadTokens: modelStats.cacheReadInputTokens ?? usage.cache_read_input_tokens ?? 0,
-        cacheCreateTokens: modelStats.cacheCreationInputTokens ?? usage.cache_creation_input_tokens ?? 0,
+        result: (parsed["result"] as string) ?? "",
+        isError: (parsed["is_error"] as boolean) ?? false,
+        durationMs: (parsed["duration_ms"] as number) ?? 0,
+        costUsd: (parsed["total_cost_usd"] as number) ?? null,
+        inputTokens: (modelStats as Record<string, unknown>)["inputTokens"] as number ?? (usage["input_tokens"] as number) ?? 0,
+        outputTokens: (modelStats as Record<string, unknown>)["outputTokens"] as number ?? (usage["output_tokens"] as number) ?? 0,
+        cacheReadTokens: (modelStats as Record<string, unknown>)["cacheReadInputTokens"] as number ?? (usage["cache_read_input_tokens"] as number) ?? 0,
+        cacheCreateTokens: (modelStats as Record<string, unknown>)["cacheCreationInputTokens"] as number ?? (usage["cache_creation_input_tokens"] as number) ?? 0,
         model: firstModel,
-        numTurns: parsed.num_turns ?? 0,
+        numTurns: (parsed["num_turns"] as number) ?? 0,
       };
     }
   }
@@ -120,26 +120,29 @@ function parseCodexResult(lines: string[]): SessionResult | null {
       continue;
     }
 
-    let parsed: any;
+    let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(trimmed);
     } catch {
       continue;
     }
 
-    if (parsed.type === "turn.completed") {
+    if (parsed["type"] === "turn.completed") {
       numTurns++;
-      const usage = parsed.usage ?? {};
-      totalInput += usage.input_tokens ?? 0;
-      totalOutput += usage.output_tokens ?? 0;
-      totalCachedInput += usage.cached_input_tokens ?? 0;
+      const usage = (parsed["usage"] ?? {}) as Record<string, unknown>;
+      totalInput += (usage["input_tokens"] as number) ?? 0;
+      totalOutput += (usage["output_tokens"] as number) ?? 0;
+      totalCachedInput += (usage["cached_input_tokens"] as number) ?? 0;
     }
 
-    if (parsed.type === "item.completed" && parsed.item?.type === "agent_message") {
-      lastAgentMessage = parsed.item.text ?? "";
+    if (parsed["type"] === "item.completed") {
+      const item = parsed["item"] as Record<string, unknown> | undefined;
+      if (item?.["type"] === "agent_message") {
+        lastAgentMessage = (item["text"] as string) ?? "";
+      }
     }
 
-    if (parsed.type === "error") {
+    if (parsed["type"] === "error") {
       hasRuntimeError = true;
     }
   }

@@ -76,8 +76,10 @@ describe("Noise NK Transport — Advanced", () => {
     // Every response should succeed with a valid session array
     expect(results.length).toBe(count);
     for (let i = 0; i < count; i++) {
-      expect(results[i]!["error"]).toBeUndefined();
-      expect(Array.isArray((results[i]!["result"] as { sessions: unknown[] }).sessions)).toBe(true);
+      const r = results[i];
+      if (!r) throw new Error(`expected result at index ${i}`);
+      expect(r["error"]).toBeUndefined();
+      expect(Array.isArray((r["result"] as { sessions: unknown[] }).sessions)).toBe(true);
     }
 
     // All response IDs should be unique (each RPC got its own response)
@@ -281,7 +283,7 @@ describe("Noise NK Transport — Advanced", () => {
               // Wait briefly for server_hello
               const serverHello = await waitForMessage(
                 ws,
-                (m: any) => m?.t === "server_hello",
+                (m) => (m as Record<string, unknown>)?.["t"] === "server_hello",
                 2000,
               );
               const noise1Msgs = transport.processMessage(serverHello);

@@ -60,8 +60,8 @@ describe("parseSessionResult", () => {
     test("returns 0 duration when no session timestamps provided", () => {
       const logFile = writeLog("codex-no-session.jsonl", codexLines);
       const result = parseSessionResult(logFile);
-      expect(result).not.toBeNull();
-      expect(result!.durationMs).toBe(0);
+      if (!result) throw new Error("expected result");
+      expect(result.durationMs).toBe(0);
     });
 
     test("calculates duration from session timestamps when backend reports 0", () => {
@@ -71,24 +71,24 @@ describe("parseSessionResult", () => {
         finishedAt: "2026-01-01T00:05:30.000Z",
       };
       const result = parseSessionResult(logFile, session);
-      expect(result).not.toBeNull();
-      expect(result!.durationMs).toBe(330_000); // 5m30s
+      if (!result) throw new Error("expected result");
+      expect(result.durationMs).toBe(330_000); // 5m30s
     });
 
     test("does not override when startedAt is null", () => {
       const logFile = writeLog("codex-null-start.jsonl", codexLines);
       const session = { startedAt: null, finishedAt: "2026-01-01T00:05:00.000Z" };
       const result = parseSessionResult(logFile, session);
-      expect(result).not.toBeNull();
-      expect(result!.durationMs).toBe(0);
+      if (!result) throw new Error("expected result");
+      expect(result.durationMs).toBe(0);
     });
 
     test("does not override when finishedAt is null", () => {
       const logFile = writeLog("codex-null-end.jsonl", codexLines);
       const session = { startedAt: "2026-01-01T00:00:00.000Z", finishedAt: null };
       const result = parseSessionResult(logFile, session);
-      expect(result).not.toBeNull();
-      expect(result!.durationMs).toBe(0);
+      if (!result) throw new Error("expected result");
+      expect(result.durationMs).toBe(0);
     });
 
     test("reports non-zero session exit code as error", () => {
@@ -106,9 +106,9 @@ describe("parseSessionResult", () => {
       ]);
 
       const result = parseSessionResult(logFile);
-      expect(result).not.toBeNull();
-      expect(result!.isError).toBe(true);
-      expect(result!.result).toBe("Failed at the end.");
+      if (!result) throw new Error("expected result");
+      expect(result.isError).toBe(true);
+      expect(result.result).toBe("Failed at the end.");
     });
 
     test("falls back to explicit codex runtime errors when no exit code footer is present", () => {
@@ -126,9 +126,9 @@ describe("parseSessionResult", () => {
       ]);
 
       const result = parseSessionResult(logFile);
-      expect(result).not.toBeNull();
-      expect(result!.isError).toBe(true);
-      expect(result!.result).toBe("Partial output");
+      if (!result) throw new Error("expected result");
+      expect(result.isError).toBe(true);
+      expect(result.result).toBe("Partial output");
     });
   });
 
@@ -150,8 +150,8 @@ describe("parseSessionResult", () => {
         finishedAt: "2026-01-01T01:00:00.000Z",
       };
       const result = parseSessionResult(logFile, session);
-      expect(result).not.toBeNull();
-      expect(result!.durationMs).toBe(42000);
+      if (!result) throw new Error("expected result");
+      expect(result.durationMs).toBe(42000);
     });
 
     test("preserves claude result parsing", () => {

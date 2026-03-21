@@ -29,8 +29,9 @@ describe("known-hosts", () => {
 
     const entry = lookupKnownHost(orkaHome, "127.0.0.1:7394");
     expect(entry).not.toBeNull();
-    expect(entry!.keyId).toBe("sha256:abc123");
-    expect(entry!.publicKey).toEqual(fakeKey);
+    if (!entry) throw new Error("expected entry");
+    expect(entry.keyId).toBe("sha256:abc123");
+    expect(entry.publicKey).toEqual(fakeKey);
   });
 
   test("lookupKnownHost returns null for unknown host", () => {
@@ -46,8 +47,12 @@ describe("known-hosts", () => {
 
     const hosts = loadKnownHosts(orkaHome);
     expect(hosts.size).toBe(2);
-    expect(hosts.get("host1:7394")!.keyId).toBe("sha256:aaa");
-    expect(hosts.get("host2:7394")!.keyId).toBe("sha256:bbb");
+    const h1 = hosts.get("host1:7394");
+    const h2 = hosts.get("host2:7394");
+    if (!h1) throw new Error("expected host1");
+    if (!h2) throw new Error("expected host2");
+    expect(h1.keyId).toBe("sha256:aaa");
+    expect(h2.keyId).toBe("sha256:bbb");
   });
 
   test("saveKnownHost replaces existing entry for same host", () => {
@@ -56,8 +61,9 @@ describe("known-hosts", () => {
 
     const entry = lookupKnownHost(orkaHome, "127.0.0.1:7394");
     expect(entry).not.toBeNull();
-    expect(entry!.keyId).toBe("sha256:new");
-    expect(entry!.publicKey).toEqual(fakeKey2);
+    if (!entry) throw new Error("expected entry");
+    expect(entry.keyId).toBe("sha256:new");
+    expect(entry.publicKey).toEqual(fakeKey2);
 
     // Should have only one entry for this host
     const hosts = loadKnownHosts(orkaHome);
@@ -82,7 +88,9 @@ describe("known-hosts", () => {
 
     const hosts = loadKnownHosts(orkaHome);
     expect(hosts.size).toBe(1);
-    expect(hosts.get("host1:7394")!.keyId).toBe("sha256:aaa");
+    const h = hosts.get("host1:7394");
+    if (!h) throw new Error("expected host1");
+    expect(h.keyId).toBe("sha256:aaa");
   });
 
   test("file has restrictive permissions (0o600)", () => {
@@ -102,7 +110,11 @@ describe("known-hosts", () => {
 
     const hosts = loadKnownHosts(orkaHome);
     expect(hosts.size).toBe(2);
-    expect(hosts.get("host1:7394")!.keyId).toBe("sha256:ccc");
-    expect(hosts.get("host2:7394")!.keyId).toBe("sha256:bbb");
+    const hp1 = hosts.get("host1:7394");
+    const hp2 = hosts.get("host2:7394");
+    if (!hp1) throw new Error("expected host1");
+    if (!hp2) throw new Error("expected host2");
+    expect(hp1.keyId).toBe("sha256:ccc");
+    expect(hp2.keyId).toBe("sha256:bbb");
   });
 });

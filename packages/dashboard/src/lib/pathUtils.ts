@@ -38,7 +38,7 @@ export function resolvePath(
   // Check for worktree pattern first
   const worktreeMatch = absolutePath.match(WORKTREE_PREFIX_RE);
   if (worktreeMatch) {
-    const prefix = worktreeMatch[1]! + "/";
+    const prefix = (worktreeMatch[1] ?? "") + "/";
     return {
       display: absolutePath.slice(prefix.length),
       kind: "worktree",

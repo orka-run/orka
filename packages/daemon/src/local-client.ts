@@ -371,8 +371,11 @@ class LocalClient implements OrkaService {
    * to complete the SPAKE2 handshake with the connecting client.
    */
   private connectPairingRelay(enrollId: string, ttlMs: number): void {
-    const config = this.pairingConfig!;
-    const store = this.enrollmentStore!;
+    if (!this.pairingConfig || !this.enrollmentStore) {
+      throw new Error("Pairing not configured");
+    }
+    const config = this.pairingConfig;
+    const store = this.enrollmentStore;
 
     void withSpan("orka.pairing.relay_connect", {
       "orka.pairing.enroll_id": enrollId,
@@ -809,7 +812,9 @@ class LocalClient implements OrkaService {
         this.ctx.db.addWorkspacePath(id, resolve(p.path), p.nodeId);
       }
     }
-    return this.ctx.db.getWorkspace(id)!;
+    const ws = this.ctx.db.getWorkspace(id);
+    if (!ws) throw new Error(`Workspace not found after creation: ${id}`);
+    return ws;
   }
 
   async updateWorkspace(id: string, opts: Partial<{ name: string; settings: WorkspaceSettings; metadata: WorkspaceMetadata; archivedAt: string | null }>): Promise<void> {

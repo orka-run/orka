@@ -458,11 +458,11 @@ export async function resolveProjectEnv(
  */
 export function writeBypassConsent(orkaHome: string): void {
   const configPath = join(orkaHome, "config.toml");
-  let toml: Record<string, any> = {};
+  let toml: Record<string, unknown> = {};
 
   if (existsSync(configPath)) {
     try {
-      toml = parse(readFileSync(configPath, "utf-8")) as Record<string, any>;
+      toml = parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
     } catch {
       // If parse fails, start fresh
     }
@@ -471,9 +471,9 @@ export function writeBypassConsent(orkaHome: string): void {
   if (!toml["permissions"] || typeof toml["permissions"] !== "object") {
     toml["permissions"] = {};
   }
-  (toml["permissions"] as Record<string, any>)["bypass_consent"] = true;
+  (toml["permissions"] as Record<string, unknown>)["bypass_consent"] = true;
 
-  writeFileSync(configPath, stringify(toml as any), "utf-8");
+  writeFileSync(configPath, stringify(toml as TomlTable), "utf-8");
 }
 
 /** camelCase → snake_case for TOML keys. */
@@ -491,11 +491,11 @@ export function updateConfigSection(
   values: Record<string, unknown>,
 ): void {
   const configPath = join(orkaHome, "config.toml");
-  let toml: Record<string, any> = {};
+  let toml: Record<string, unknown> = {};
 
   if (existsSync(configPath)) {
     try {
-      toml = parse(readFileSync(configPath, "utf-8")) as Record<string, any>;
+      toml = parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
     } catch {
       // If parse fails, start fresh
     }
@@ -505,7 +505,7 @@ export function updateConfigSection(
     toml[section] = {};
   }
 
-  const table = toml[section] as Record<string, any>;
+  const table = toml[section] as Record<string, unknown>;
   for (const [key, value] of Object.entries(values)) {
     const snakeKey = toSnakeCase(key);
     if (value === undefined || value === null || value === "") {
@@ -515,7 +515,7 @@ export function updateConfigSection(
     }
   }
 
-  writeFileSync(configPath, stringify(toml as any), "utf-8");
+  writeFileSync(configPath, stringify(toml as TomlTable), "utf-8");
 }
 
 /**

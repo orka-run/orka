@@ -166,7 +166,9 @@ export function ComposerToolbar({
   isSending,
 }: ComposerToolbarProps) {
   const models = MODELS_BY_BACKEND[backend];
-  const permConfig = PERMISSION_MODES.find((p) => p.value === permissionMode) ?? PERMISSION_MODES[0]!;
+  const defaultPerm = PERMISSION_MODES[0];
+  if (!defaultPerm) throw new Error("PERMISSION_MODES is empty");
+  const permConfig = PERMISSION_MODES.find((p) => p.value === permissionMode) ?? defaultPerm;
 
   return (
     <div className="border-t border-border/50 px-2 py-1.5">

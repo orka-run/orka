@@ -101,7 +101,7 @@ export function DevOverlay({ open, onClose }: DevOverlayProps) {
   const connectionIcon = getConnectionIcon(connectionState);
   const orderedStats = Object.entries(stats).sort(
     ([leftMethod, _left], [rightMethod, right]) =>
-      right.count - stats[leftMethod]!.count || leftMethod.localeCompare(rightMethod),
+      right.count - (stats[leftMethod]?.count ?? 0) || leftMethod.localeCompare(rightMethod),
   );
 
   useEffect(() => {

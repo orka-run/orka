@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { $ } from "bun";
-import { createEvent, type ProviderRuntimeEvent, type SessionStatus, type UsageRecord } from "@orka/core";
+import { createEvent, type ProviderRuntimeEvent, type Session, type SessionStatus, type UsageRecord } from "@orka/core";
 import { ApprovalManager } from "../approval-manager";
 import { initTracingForTest } from "../test-helpers";
 import { worktreeCreate } from "../worktree";
@@ -217,8 +217,9 @@ describe("consumeProviderEvents", () => {
     expect(approvals.getPendingForSession("sess-1")).toEqual([]);
     const resolved = approvals.getRequest("req-1");
     expect(resolved).toBeTruthy();
-    expect(resolved!.status).toBe("resolved");
-    expect(resolved!.decision).toBe("deny");
+    if (!resolved) throw new Error("expected resolved request");
+    expect(resolved.status).toBe("resolved");
+    expect(resolved.decision).toBe("deny");
     expect(usageRecords).toEqual([
       {
         sessionId: "sess-1",
@@ -411,7 +412,7 @@ describe("consumeProviderEvents", () => {
       projectPath: repoPath,
       autoMerge: true,
       orkaHome: testHome,
-      getSession: () => ({ status: currentStatus } as any),
+      getSession: () => ({ status: currentStatus } as unknown as Session),
     });
 
     // Auto-merge fires on first turn.completed (idle transition)
@@ -525,7 +526,7 @@ describe("consumeProviderEvents", () => {
         getSession: () => ({
           startedAt: "2026-03-11T00:00:00.000Z",
           status: "running",
-        } as any),
+        } as unknown as Session),
         rememberRateLimitEvent: () => {},
         consumePendingRateLimit: () => ({
           rateLimitType: "five_hour",

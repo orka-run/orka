@@ -49,7 +49,8 @@ describe("node-registry", () => {
       registry.save(node);
       const loaded = registry.load("node-abc123");
       expect(loaded).toEqual(node);
-      expect(loaded!.relayToken).toBe("secret-token");
+      if (!loaded) throw new Error("expected loaded node");
+      expect(loaded.relayToken).toBe("secret-token");
     } finally {
       cleanup(testHome);
     }
@@ -125,8 +126,9 @@ describe("node-registry", () => {
       registry.save(updated);
 
       const loaded = registry.load("node-abc123");
-      expect(loaded!.nodeName).toBe("Updated Name");
-      expect(loaded!.autoConnect).toBe(false);
+      if (!loaded) throw new Error("expected loaded node");
+      expect(loaded.nodeName).toBe("Updated Name");
+      expect(loaded.autoConnect).toBe(false);
     } finally {
       cleanup(testHome);
     }

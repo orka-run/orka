@@ -6,7 +6,7 @@ export interface AbuseSignal {
   type: string;
   severity: "low" | "medium" | "high";
   accountId: string;
-  details: Record<string, any>;
+  details: Record<string, unknown>;
   timestamp: string;
 }
 
@@ -31,7 +31,7 @@ export class AbuseDetector {
   constructor() {
     this.pruneTimer = setInterval(() => this.prune(), 60_000);
     if (typeof this.pruneTimer === "object" && "unref" in this.pruneTimer) {
-      (this.pruneTimer as any).unref();
+      (this.pruneTimer as unknown as { unref(): void }).unref();
     }
   }
 

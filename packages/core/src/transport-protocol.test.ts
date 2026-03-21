@@ -550,8 +550,8 @@ describe("forward compatibility", () => {
     const ch = { ...makeClientHello(), future_field: "hello", another: 42 };
     const parsed = ClientHelloSchema.parse(ch);
     expect(parsed.t).toBe("client_hello");
-    expect((parsed as any).future_field).toBe("hello");
-    expect((parsed as any).another).toBe(42);
+    expect((parsed as Record<string, unknown>)["future_field"]).toBe("hello");
+    expect((parsed as Record<string, unknown>)["another"]).toBe(42);
   });
 
   test("ServerHelloSchema accepts extra fields via passthrough", () => {
@@ -567,32 +567,32 @@ describe("forward compatibility", () => {
       experimental: true,
     };
     const parsed = ServerHelloSchema.parse(sh);
-    expect((parsed as any).experimental).toBe(true);
+    expect((parsed as Record<string, unknown>)["experimental"]).toBe(true);
   });
 
   test("TransportErrorSchema accepts extra fields via passthrough", () => {
     const te = { t: "transport_error" as const, code: "unsupported_version", details: "v2 not supported" };
     const parsed = TransportErrorSchema.parse(te);
-    expect((parsed as any).details).toBe("v2 not supported");
+    expect((parsed as Record<string, unknown>)["details"]).toBe("v2 not supported");
   });
 
   test("Noise1Schema accepts extra fields via passthrough", () => {
     const n1 = { t: "noise_1" as const, msg: "abc", extra: "data" };
     const parsed = Noise1Schema.parse(n1);
-    expect((parsed as any).extra).toBe("data");
+    expect((parsed as Record<string, unknown>)["extra"]).toBe("data");
   });
 
   test("DataFrameSchema accepts extra fields via passthrough", () => {
     const df = { t: "data" as const, ct: "abc", seq: 42 };
     const parsed = DataFrameSchema.parse(df);
-    expect((parsed as any).seq).toBe(42);
+    expect((parsed as Record<string, unknown>)["seq"]).toBe(42);
   });
 
   test("TransportMessageSchema preserves extra fields through union", () => {
     const msg = { ...makeClientHello(), extensionV2: true };
     const parsed = TransportMessageSchema.parse(msg);
     expect(parsed.t).toBe("client_hello");
-    expect((parsed as any).extensionV2).toBe(true);
+    expect((parsed as Record<string, unknown>)["extensionV2"]).toBe(true);
   });
 });
 

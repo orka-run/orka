@@ -165,7 +165,7 @@ describe("WireOrchestrationEventSchema", () => {
       throw new Error("expected invalid known type to wrap as passthrough");
     }
     expect((result.data as { type: string }).type).toBe("event.passthrough");
-    expect((result.data as any).originalType).toBe("session.created");
+    expect((result.data as Record<string, unknown>)["originalType"]).toBe("session.created");
   });
 
   test("passes through unknown event types with base fields intact", () => {
@@ -188,7 +188,7 @@ describe("WireOrchestrationEventSchema", () => {
       customField: "preserved",
     });
     expect(result.success).toBe(true);
-    expect((result.data as any).customField).toBe("preserved");
+    expect((result.data as Record<string, unknown>)["customField"]).toBe("preserved");
   });
 
   test("rejects events missing base fields", () => {
@@ -209,19 +209,21 @@ describe("WireOrchestrationEventSchema", () => {
 describe("parseWireEvent", () => {
   test("parses a valid session.started event", () => {
     const event = parseWireEvent({ ...BASE, type: "session.started" });
-    expect(event).not.toBeNull();
-    expect(event!.type).toBe("session.started");
-    expect(event!.sessionId).toBe("sess-abc123");
+    if (!event) throw new Error("expected event");
+    expect(event.type).toBe("session.started");
+    expect(event.sessionId).toBe("sess-abc123");
   });
 
   test("sets v to 1 when absent", () => {
     const event = parseWireEvent({ ...BASE, type: "session.started" });
-    expect(event!.v).toBe(1);
+    if (!event) throw new Error("expected event");
+    expect(event.v).toBe(1);
   });
 
   test("preserves existing v value", () => {
     const event = parseWireEvent({ ...BASE, type: "session.started", v: 2 });
-    expect(event!.v).toBe(2);
+    if (!event) throw new Error("expected event");
+    expect(event.v).toBe(2);
   });
 
   test("wraps unknown event type as event.passthrough", () => {
@@ -231,9 +233,10 @@ describe("parseWireEvent", () => {
       customData: { foo: "bar" },
     });
     expect(event).not.toBeNull();
-    expect(event!.type).toBe("event.passthrough");
-    expect((event as any).originalType).toBe("brand.new.event");
-    expect((event as any).rawPayload).toHaveProperty("customData");
+    if (!event) throw new Error("expected event");
+    expect(event.type).toBe("event.passthrough");
+    expect((event as unknown as Record<string, unknown>)["originalType"]).toBe("brand.new.event");
+    expect((event as unknown as Record<string, unknown>)["rawPayload"]).toHaveProperty("customData");
   });
 
   test("returns null for non-object input", () => {
@@ -257,8 +260,9 @@ describe("parseWireEvent", () => {
       terminal: true,
     });
     expect(event).not.toBeNull();
-    expect(event!.type).toBe("runtime.error");
-    expect((event as any).error).toBe("something broke");
+    if (!event) throw new Error("expected event");
+    expect(event.type).toBe("runtime.error");
+    expect((event as unknown as Record<string, unknown>)["error"]).toBe("something broke");
   });
 
   test("parses user.input event", () => {
@@ -269,9 +273,10 @@ describe("parseWireEvent", () => {
       queued: true,
     });
     expect(event).not.toBeNull();
-    expect(event!.type).toBe("user.input");
-    expect((event as any).text).toBe("hello agent");
-    expect((event as any).queued).toBe(true);
+    if (!event) throw new Error("expected event");
+    expect(event.type).toBe("user.input");
+    expect((event as unknown as Record<string, unknown>)["text"]).toBe("hello agent");
+    expect((event as unknown as Record<string, unknown>)["queued"]).toBe(true);
   });
 
   test("parses event.passthrough directly", () => {
@@ -281,8 +286,8 @@ describe("parseWireEvent", () => {
       originalType: "vendor.custom",
       rawPayload: { x: 1 },
     });
-    expect(event).not.toBeNull();
-    expect(event!.type).toBe("event.passthrough");
+    if (!event) throw new Error("expected event");
+    expect(event.type).toBe("event.passthrough");
   });
 
   test("parses item.started with all fields", () => {
@@ -296,8 +301,8 @@ describe("parseWireEvent", () => {
       title: "Running bash",
       detail: "ls -la",
     });
-    expect(event).not.toBeNull();
-    expect(event!.type).toBe("item.started");
+    if (!event) throw new Error("expected event");
+    expect(event.type).toBe("item.started");
   });
 });
 
@@ -324,8 +329,8 @@ describe("normalizeEvent", () => {
       extra: "data",
     });
     expect(result.type).toBe("event.passthrough");
-    expect((result as any).originalType).toBe("exotic.new.type");
-    expect((result as any).rawPayload).toHaveProperty("extra");
+    expect((result as unknown as Record<string, unknown>)["originalType"]).toBe("exotic.new.type");
+    expect((result as unknown as Record<string, unknown>)["rawPayload"]).toHaveProperty("extra");
   });
 
   test("preserves turnId in passthrough wrapper when present", () => {
@@ -336,7 +341,7 @@ describe("normalizeEvent", () => {
       detail: "something",
     });
     expect(result.type).toBe("event.passthrough");
-    expect((result as any).turnId).toBe("turn-42");
+    expect((result as unknown as Record<string, unknown>)["turnId"]).toBe("turn-42");
   });
 
   test("omits turnId in passthrough wrapper when absent", () => {
@@ -345,6 +350,6 @@ describe("normalizeEvent", () => {
       type: "unknown.type",
     });
     expect(result.type).toBe("event.passthrough");
-    expect((result as any).turnId).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>)["turnId"]).toBeUndefined();
   });
 });

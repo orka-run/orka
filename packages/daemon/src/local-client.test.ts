@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { ProviderSessionHandle } from "@orka/core";
+import type { ProviderSessionHandle, SessionStatus } from "@orka/core";
 import { createDaemonContext, type DaemonContext } from "./daemon-context";
 import { createLocalClient } from "./local-client";
 
@@ -39,7 +39,7 @@ describe("LocalClient provider runtime support", () => {
       meta: {},
     };
     const originalGetHandle = ctx.providerService.getHandle;
-    (ctx.providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-idle" ? handle : undefined);
+    (ctx.providerService as unknown as Record<string, unknown>)["getHandle"] = (sessionId: string) => (sessionId === "sess-idle" ? handle : undefined);
 
     try {
       const client = createLocalClient(ctx);
@@ -50,7 +50,7 @@ describe("LocalClient provider runtime support", () => {
       expect(completed?.allowedActions).toEqual(["sendTurn", "archive", "delete"]);
       expect(idle?.allowedActions).toEqual(["sendTurn", "stop"]);
     } finally {
-      (ctx.providerService as any).getHandle = originalGetHandle;
+      (ctx.providerService as unknown as Record<string, unknown>)["getHandle"] = originalGetHandle;
     }
   });
 
@@ -106,8 +106,8 @@ describe("LocalClient provider runtime support", () => {
     const sendTurnCalls: Array<{ sessionId: string; input: { input: string } }> = [];
     const broadcasts: Array<{ channel: string; data: unknown }> = [];
 
-    (ctx.providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
-    (ctx.providerService as any).sendTurn = async (sessionId: string, input: { input: string }) => {
+    (ctx.providerService as unknown as Record<string, unknown>)["getHandle"] = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
+    (ctx.providerService as unknown as Record<string, unknown>)["sendTurn"] = async (sessionId: string, input: { input: string }) => {
       sendTurnCalls.push({ sessionId, input });
     };
     (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = ((channel: string, data: unknown) => {
@@ -146,8 +146,8 @@ describe("LocalClient provider runtime support", () => {
         },
       });
     } finally {
-      (ctx.providerService as any).getHandle = originalGetHandle;
-      (ctx.providerService as any).sendTurn = originalSendTurn;
+      (ctx.providerService as unknown as Record<string, unknown>)["getHandle"] = originalGetHandle;
+      (ctx.providerService as unknown as Record<string, unknown>)["sendTurn"] = originalSendTurn;
       (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = originalBroadcast;
     }
   });
@@ -168,8 +168,8 @@ describe("LocalClient provider runtime support", () => {
     const sendTurnCalls: Array<{ sessionId: string; input: { input: string } }> = [];
     const broadcasts: Array<{ channel: string; data: unknown }> = [];
 
-    (ctx.providerService as any).getHandle = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
-    (ctx.providerService as any).sendTurn = async (sessionId: string, input: { input: string }) => {
+    (ctx.providerService as unknown as Record<string, unknown>)["getHandle"] = (sessionId: string) => (sessionId === "sess-live" ? handle : undefined);
+    (ctx.providerService as unknown as Record<string, unknown>)["sendTurn"] = async (sessionId: string, input: { input: string }) => {
       sendTurnCalls.push({ sessionId, input });
     };
     (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = ((channel: string, data: unknown) => {
@@ -205,8 +205,8 @@ describe("LocalClient provider runtime support", () => {
         },
       ]);
     } finally {
-      (ctx.providerService as any).getHandle = originalGetHandle;
-      (ctx.providerService as any).sendTurn = originalSendTurn;
+      (ctx.providerService as unknown as Record<string, unknown>)["getHandle"] = originalGetHandle;
+      (ctx.providerService as unknown as Record<string, unknown>)["sendTurn"] = originalSendTurn;
       (ctx.pushHub as { broadcast: typeof ctx.pushHub.broadcast }).broadcast = originalBroadcast;
     }
   });
@@ -226,7 +226,7 @@ function seedSession(sessionId: string, overrides?: { status?: string }): void {
     id: sessionId,
     taskId: `task-${sessionId}`,
     workspaceId: `ws-${sessionId}`,
-    status: (overrides?.status ?? "completed") as any,
+    status: (overrides?.status ?? "completed") as SessionStatus,
     backend: "codex",
     projectPath: "/tmp/project",
     workingDir: "/tmp/project",

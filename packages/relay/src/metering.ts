@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { type UsageEvent, insertUsageEvents as defaultInsert, deleteOldUsageEvents as defaultDelete } from "./db";
 import { withSpanSync } from "./tracing";
 
@@ -21,13 +21,13 @@ export class UsageMeter {
     this.deleteFn = deps?.deleteOldUsageEvents ?? defaultDelete;
     this.flushTimer = setInterval(() => this.flush(), flushIntervalMs);
     if (typeof this.flushTimer === "object" && "unref" in this.flushTimer) {
-      (this.flushTimer as any).unref();
+      (this.flushTimer as unknown as { unref(): void }).unref();
     }
 
     // Daily retention cleanup: delete events older than 90 days
     this.retentionTimer = setInterval(() => this.cleanOld(), 24 * 3_600_000);
     if (typeof this.retentionTimer === "object" && "unref" in this.retentionTimer) {
-      (this.retentionTimer as any).unref();
+      (this.retentionTimer as unknown as { unref(): void }).unref();
     }
     // Run once at startup too
     setTimeout(() => this.cleanOld(), 10_000);

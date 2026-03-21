@@ -60,8 +60,8 @@ export function createNodeRegistry(orkaHome: string): NodeRegistry {
     remove(nodeId: string): void {
       try {
         unlinkSync(nodePath(nodeId));
-      } catch (err: any) {
-        if (err.code !== "ENOENT") {
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
           console.error(`[node-registry] failed to remove ${nodeId}:`, err);
         }
       }

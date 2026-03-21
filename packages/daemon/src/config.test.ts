@@ -301,12 +301,12 @@ describe("loadProjectConfig", () => {
 
     try {
       const config = loadProjectConfig(testDir);
-      expect(config).not.toBeNull();
-      expect(config!.defaults.backend).toBe("codex");
-      expect(config!.defaults.model).toBe("gpt-5.4");
-      expect(config!.defaults.tags).toEqual(["my-project"]);
-      expect(config!.limits.maxConcurrent).toBe(2);
-      expect(config!.hooks.postWorktreeCreate).toEqual(["npm install"]);
+      if (!config) throw new Error("expected config");
+      expect(config.defaults.backend).toBe("codex");
+      expect(config.defaults.model).toBe("gpt-5.4");
+      expect(config.defaults.tags).toEqual(["my-project"]);
+      expect(config.limits.maxConcurrent).toBe(2);
+      expect(config.hooks.postWorktreeCreate).toEqual(["npm install"]);
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -326,8 +326,8 @@ describe("loadProjectConfig", () => {
 
     try {
       const config = loadProjectConfig(testDir);
-      expect(config).not.toBeNull();
-      expect(config!.backendDefaults["codex"]).toEqual({
+      if (!config) throw new Error("expected config");
+      expect(config.backendDefaults["codex"]).toEqual({
         model: "gpt-5.4",
         reasoningEffort: "high",
         systemPrompt: undefined,
@@ -352,8 +352,8 @@ describe("loadProjectConfig", () => {
 
     try {
       const config = loadProjectConfig(testDir);
-      expect(config).not.toBeNull();
-      expect(config!.env).toEqual({
+      if (!config) throw new Error("expected config");
+      expect(config.env).toEqual({
         NODE_ENV: "development",
         BEADS_DOLT_HOST: "127.0.0.1",
       });
@@ -379,9 +379,9 @@ describe("loadProjectConfig", () => {
 
     try {
       const config = loadProjectConfig(testDir);
-      expect(config).not.toBeNull();
-      expect(config!.env).toEqual({ STATIC: "value" });
-      expect(config!.envDynamic).toEqual({
+      if (!config) throw new Error("expected config");
+      expect(config.env).toEqual({ STATIC: "value" });
+      expect(config.envDynamic).toEqual({
         BRANCH: "git rev-parse --abbrev-ref HEAD",
         PORT: "echo 14003",
       });
@@ -407,10 +407,10 @@ describe("loadProjectConfig", () => {
 
     try {
       const config = loadProjectConfig(testDir);
-      expect(config).not.toBeNull();
-      expect(config!.backendDefaults["codex"]?.model).toBe("gpt-5.4");
-      expect(config!.backendDefaults["codex"]?.reasoningEffort).toBe("high");
-      expect(config!.backendDefaults["claude-code"]?.model).toBe("opus");
+      if (!config) throw new Error("expected config");
+      expect(config.backendDefaults["codex"]?.model).toBe("gpt-5.4");
+      expect(config.backendDefaults["codex"]?.reasoningEffort).toBe("high");
+      expect(config.backendDefaults["claude-code"]?.model).toBe("opus");
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -430,9 +430,9 @@ describe("loadProjectConfig", () => {
 
     try {
       const config = loadProjectConfig(testDir);
-      expect(config).not.toBeNull();
-      expect(config!.hooks.beforeSpawn).toBe("echo starting");
-      expect(config!.hooks.afterComplete).toBe("bd dolt push 2>/dev/null");
+      if (!config) throw new Error("expected config");
+      expect(config.hooks.beforeSpawn).toBe("echo starting");
+      expect(config.hooks.afterComplete).toBe("bd dolt push 2>/dev/null");
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }

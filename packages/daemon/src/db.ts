@@ -1,7 +1,10 @@
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { z } from "zod/v4";
+
+/** SQLite-compatible parameter map for dynamic query building. */
+type SqlParams = Record<string, string | number | boolean | bigint | null>;
 import type {
   Checkpoint,
   OrchestrationEvent,
@@ -219,7 +222,7 @@ export class DatabaseRepository {
 
   getTask(id: string): Task | null {
     return withSpanSync("orka.db.getTask", { "orka.task.id": id }, () => {
-      const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
+      const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as unknown;
       return row ? rowToTask(row) : null;
     });
   }
@@ -278,7 +281,7 @@ export class DatabaseRepository {
       }
 
       const sets = ["status = $status"];
-      const params: Record<string, any> = { $id: id, $status: status };
+      const params: SqlParams = { $id: id, $status: status };
 
       if (extra?.startedAt) {
         sets.push("started_at = $startedAt");
@@ -409,7 +412,7 @@ export class DatabaseRepository {
     return withSpanSync("orka.db.getSession", { "orka.session.id": id }, () => {
       const row = this.db
         .prepare("SELECT * FROM sessions WHERE id = ?")
-        .get(id) as any;
+        .get(id) as unknown;
       return row ? rowToSession(row) : null;
     });
   }
@@ -433,10 +436,10 @@ export class DatabaseRepository {
       const rows = status
         ? (this.db
             .prepare(`SELECT * FROM sessions WHERE status = ?${archiveFilter} ORDER BY created_at DESC`)
-            .all(status) as any[])
+            .all(status) as unknown[])
         : (this.db
             .prepare(`SELECT * FROM sessions WHERE 1=1${archiveFilter} ORDER BY created_at DESC`)
-            .all() as any[]);
+            .all() as unknown[]);
       return rows.map(rowToSession);
     });
   }
@@ -449,8 +452,8 @@ export class DatabaseRepository {
         ? `SELECT s.*, t.title, t.model, t.prompt FROM sessions s LEFT JOIN tasks t ON s.task_id = t.id WHERE s.status = ?${archiveFilter} ORDER BY s.created_at DESC`
         : `SELECT s.*, t.title, t.model, t.prompt FROM sessions s LEFT JOIN tasks t ON s.task_id = t.id WHERE 1=1${archiveFilter} ORDER BY s.created_at DESC`;
       const rows = status
-        ? (this.db.prepare(query).all(status) as any[])
-        : (this.db.prepare(query).all() as any[]);
+        ? (this.db.prepare(query).all(status) as unknown[])
+        : (this.db.prepare(query).all() as unknown[]);
       return rows.map(rowToSessionListItem);
     });
   }
@@ -537,7 +540,7 @@ export class DatabaseRepository {
            WHERE session_id = ?
            ORDER BY recorded_at DESC`,
         )
-        .all(sessionId) as any[];
+        .all(sessionId) as unknown[];
       return rows.map(rowToUsageRecord);
     });
   }
@@ -545,7 +548,7 @@ export class DatabaseRepository {
   getUsageSummary(opts: { since?: string; backend?: string } = {}): UsageSummary {
     return withSpanSync("orka.db.getUsageSummary", {}, () => {
       const clauses: string[] = [];
-      const params: any[] = [];
+      const params: SQLQueryBindings[] = [];
 
       if (opts.since) {
         clauses.push("recorded_at >= ?");
@@ -661,7 +664,7 @@ export class DatabaseRepository {
   getOrchestrationEvents(sessionId: string, offset?: number, limit?: number): OrchestrationEvent[] {
     return withSpanSync("orka.db.getOrchestrationEvents", { "orka.session.id": sessionId }, () => {
       let sql = `SELECT payload FROM orchestration_events WHERE session_id = ? ORDER BY seq ASC`;
-      const args: any[] = [sessionId];
+      const args: SQLQueryBindings[] = [sessionId];
       if (limit !== undefined) {
         sql += ` LIMIT ?`;
         args.push(limit);
@@ -778,7 +781,7 @@ export class DatabaseRepository {
            WHERE t.tag = ?
            ORDER BY s.created_at DESC`,
         )
-        .all(tag) as any[];
+        .all(tag) as unknown[];
       return rows.map(rowToSession);
     });
   }
@@ -794,7 +797,7 @@ export class DatabaseRepository {
            WHERE t.tag = ?
            ORDER BY s.created_at DESC`,
         )
-        .all(tag) as any[];
+        .all(tag) as unknown[];
       return rows.map(rowToSessionListItem);
     });
   }
@@ -834,7 +837,7 @@ export class DatabaseRepository {
     return withSpanSync("orka.db.getChildSessions", { "orka.session.parent_id": parentId }, () => {
       const rows = this.db
         .prepare("SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY created_at DESC")
-        .all(parentId) as any[];
+        .all(parentId) as unknown[];
       return rows.map(rowToSession);
     });
   }
@@ -849,7 +852,7 @@ export class DatabaseRepository {
            WHERE s.parent_session_id = ?
            ORDER BY s.created_at DESC`,
         )
-        .all(parentId) as any[];
+        .all(parentId) as unknown[];
       return rows.map(rowToSessionListItem);
     });
   }
@@ -887,7 +890,7 @@ export class DatabaseRepository {
   updateWorkspace(id: string, opts: { name?: string; settings?: string | null; metadata?: string | null; archivedAt?: string | null }): void {
     withSpanSync("orka.db.updateWorkspace", { "orka.workspace.id": id }, () => {
       const sets: string[] = [];
-      const params: any[] = [];
+      const params: SQLQueryBindings[] = [];
       if (opts.name !== undefined) { sets.push("name = ?"); params.push(opts.name); }
       if (opts.settings !== undefined) { sets.push("settings = ?"); params.push(opts.settings); }
       if (opts.metadata !== undefined) { sets.push("metadata = ?"); params.push(opts.metadata); }

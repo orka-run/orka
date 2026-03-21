@@ -255,7 +255,6 @@ export class PairingClient {
     const result = PairServerHelloSchema.safeParse(parsed);
     if (!result.success) {
       this._fail("Invalid pair_server_hello message");
-      throw this._error!;
     }
 
     const serverHello = result.data;
@@ -263,13 +262,11 @@ export class PairingClient {
     // Validate version
     if (serverHello.v !== 1) {
       this._fail("Unsupported protocol version");
-      throw this._error!;
     }
 
     // Validate selected suite
     if (serverHello.pair_suite !== PAIR_SUITE) {
       this._fail(`Unsupported pairing suite: ${serverHello.pair_suite}`);
-      throw this._error!;
     }
 
     // Compute pair_context and pair_aad
@@ -305,17 +302,18 @@ export class PairingClient {
     const result = PairRespSchema.safeParse(parsed);
     if (!result.success) {
       this._fail("Invalid pair_resp message");
-      throw this._error!;
     }
 
     const pBBytes = fromBase64url(result.data.pB);
 
     // Finish SPAKE2 exchange
+    if (!this._spake2Finish) {
+      this._fail("SPAKE2 not initialized");
+    }
     try {
-      this._spake2Result = this._spake2Finish!(pBBytes);
+      this._spake2Result = this._spake2Finish(pBBytes);
     } catch (e) {
       this._fail("SPAKE2 exchange failed");
-      throw this._error!;
     }
 
     // Send pair_confirm1 with confirmA MAC
@@ -332,19 +330,20 @@ export class PairingClient {
     const result = PairConfirm2Schema.safeParse(parsed);
     if (!result.success) {
       this._fail("Invalid pair_confirm2 message");
-      throw this._error!;
     }
 
     const macBytes = fromBase64url(result.data.mac);
 
     // Verify confirmB MAC
-    if (!this._spake2Result!.verifyConfirmB(macBytes)) {
+    if (!this._spake2Result) {
+      this._fail("SPAKE2 result not available");
+    }
+    if (!this._spake2Result.verifyConfirmB(macBytes)) {
       this._fail("SPAKE2 confirmation failed: wrong password or tampered exchange");
-      throw this._error!;
     }
 
     // Derive bootstrap keys via HKDF
-    const Ke = this._spake2Result!.Ke;
+    const Ke = this._spake2Result.Ke;
     const info_c2s = encoder.encode("orka-pair/v1 boot c2s");
     const info_s2c = encoder.encode("orka-pair/v1 boot s2c");
     const info_export = encoder.encode("orka-pair/v1 export");
@@ -365,22 +364,26 @@ export class PairingClient {
     const result = PairBootstrapSchema.safeParse(parsed);
     if (!result.success) {
       this._fail("Invalid pair_bootstrap message");
-      throw this._error!;
     }
 
     const ct = fromBase64url(result.data.ct);
 
     // Decrypt with ChaCha20-Poly1305 under boot_s2c
     const nonce = new Uint8Array(12); // zeros
-    const aad = sha256(this._pairContext!);
+    if (!this._pairContext) {
+      this._fail("Pair context not available");
+    }
+    const aad = sha256(this._pairContext);
 
     let plaintext: Uint8Array;
     try {
-      const cipher = chacha20poly1305(this._bootS2c!, nonce, aad);
+      if (!this._bootS2c) {
+        this._fail("Bootstrap key not available");
+      }
+      const cipher = chacha20poly1305(this._bootS2c, nonce, aad);
       plaintext = cipher.decrypt(ct);
     } catch (e) {
       this._fail("Bootstrap decryption failed: tampered ciphertext or wrong keys");
-      throw this._error!;
     }
 
     // Parse the decrypted bootstrap payload
@@ -389,13 +392,11 @@ export class PairingClient {
       payloadJson = JSON.parse(new TextDecoder().decode(plaintext));
     } catch (e) {
       this._fail("Bootstrap payload is not valid JSON");
-      throw this._error!;
     }
 
     const payloadResult = PairBootstrapPayloadSchema.safeParse(payloadJson);
     if (!payloadResult.success) {
       this._fail("Bootstrap payload has invalid structure");
-      throw this._error!;
     }
 
     const payload = payloadResult.data;
@@ -408,7 +409,7 @@ export class PairingClient {
       noiseKeyId: payload.noise_key_id,
       nodePaths: payload.node_paths,
       rpc: payload.rpc,
-      bootExport: this._bootExport!,
+      bootExport: this._bootExport ?? new Uint8Array(0),
     };
 
     this._state = "AWAIT_NOISE_VERIFY";
@@ -419,8 +420,9 @@ export class PairingClient {
   // Internal helpers
   // -----------------------------------------------------------------------
 
-  private _fail(message: string): void {
+  private _fail(message: string): never {
     this._state = "FAILED";
     this._error = new PairingError(message);
+    throw this._error;
   }
 }

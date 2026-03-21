@@ -148,10 +148,11 @@ describe("client-pairing delegate operations", () => {
 
       const loaded = registry.load(node.nodeId);
       expect(loaded).not.toBeNull();
-      await remoteNodes.connect(loaded!);
+      if (!loaded) throw new Error("expected loaded node");
+      await remoteNodes.connect(loaded);
 
       expect(remoteNodes.connected).toHaveLength(1);
-      expect(remoteNodes.connected[0]!.nodeId).toBe(node.nodeId);
+      expect(remoteNodes.connected[0]?.nodeId).toBe(node.nodeId);
     });
 
     it("throws when node not in registry", () => {
