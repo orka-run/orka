@@ -6,7 +6,7 @@ import type {
   ProviderSessionStartInput,
 } from "@orka/core";
 import type { ProviderAdapterRegistry } from "./provider-registry";
-import { withSpan, withSpanSync } from "./tracing";
+import { withSpan } from "./tracing";
 
 export class ProviderService {
   private sessions = new Map<string, ProviderSessionHandle>();
@@ -111,17 +111,15 @@ export class ProviderService {
   }
 
   getHandle(threadId: string): ProviderSessionHandle | undefined {
-    return withSpanSync("orka.provider.get_handle", { "orka.session.id": threadId }, () => this.sessions.get(threadId));
+    return this.sessions.get(threadId);
   }
 
   clearHandle(threadId: string): void {
-    withSpanSync("orka.provider.clear_handle", { "orka.session.id": threadId }, () => {
-      this.sessions.delete(threadId);
-    });
+    this.sessions.delete(threadId);
   }
 
   listActiveSessions(): ProviderSessionHandle[] {
-    return withSpanSync("orka.provider.list_active_sessions", {}, () => Array.from(this.sessions.values()));
+    return Array.from(this.sessions.values());
   }
 
   private requireHandle(threadId: string): ProviderSessionHandle {
