@@ -389,10 +389,14 @@ export function eventsToEntries(
         taskProgressByToolUseId.set(event.itemId, [item]);
       }
     }
-    // Collect itemIds that have a subagent.spawned so we can skip the
-    // duplicate ToolEntry from item.started/item.completed — the BackgroundTaskCard covers it.
+    // Collect itemIds that have a subagent.spawned or task.started so we can
+    // skip the duplicate ToolEntry from item.started/item.completed — the
+    // BackgroundTaskCard covers it.
     if (event.type === "subagent.spawned" && event.itemId) {
       subagentItemIds.add(event.itemId);
+    }
+    if (event.type === "task.started" && event.toolUseId) {
+      subagentItemIds.add(event.toolUseId);
     }
     // Also collect subagent.tool_use events into the same progress map
     if (event.type === "subagent.tool_use" && event.itemId && event.toolName) {
