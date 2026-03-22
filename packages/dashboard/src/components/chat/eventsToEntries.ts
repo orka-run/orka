@@ -14,6 +14,8 @@ export interface ToolEntry {
   details: string[];
   args?: unknown;
   inProgress?: boolean;
+  /** Nested sub-tool calls for agent items */
+  subTools?: ToolEntry[];
 }
 
 export interface SystemEntry {
@@ -393,18 +395,16 @@ export function eventsToEntries(
         taskProgressByToolUseId.set(event.itemId, [item]);
       }
     }
-    // Collect parent agent itemIds so we skip their ToolEntry —
-    // the BackgroundTaskCard from task.started covers it.
+    // For subagent.spawned (Codex path), skip the parent ToolEntry since
+    // a BackgroundTaskCard is rendered instead.
     if (event.type === "subagent.spawned" && event.itemId) {
       subagentItemIds.add(event.itemId);
     }
-    if (event.type === "task.started") {
-      if (event.toolUseId) {
-        subagentItemIds.add(event.toolUseId);
-      }
-      if (event.taskId) {
-        taskStartedTaskIds.add(event.taskId);
-      }
+    // For task.started (Claude Code path), DON'T add toolUseId to subagentItemIds —
+    // the agent's own ToolEntry should remain visible (it shows description, prompt, etc.).
+    // Sub-tool items are hidden by the second-pass range scan below.
+    if (event.type === "task.started" && event.taskId) {
+      taskStartedTaskIds.add(event.taskId);
     }
     // Also collect subagent.tool_use events into the same progress map
     if (event.type === "subagent.tool_use" && event.itemId && event.toolName) {
@@ -424,37 +424,57 @@ export function eventsToEntries(
   }
 
   // Second pass: collect sub-tool itemIds within task.started → task.completed
-  // ranges so they are hidden from the main timeline (already shown as
-  // tool.progress inside BackgroundTaskCard).
+  // ranges. Sub-tools are hidden from the main timeline and attached to the
+  // agent's ToolEntry as nested subTools.
+  const agentSubTools = new Map<string, ToolEntry[]>(); // agent toolUseId → sub-tools
   {
-    const openTasks = new Map<string, number>(); // taskId → startIndex
+    const openTasks = new Map<string, { startIndex: number; toolUseId: string | undefined }>(); // taskId → info
+    function collectSubTools(startIdx: number, endIdx: number, toolUseId: string | undefined) {
+      const subTools: ToolEntry[] = [];
+      for (let j = startIdx + 1; j < endIdx; j++) {
+        const inner = events[j];
+        if (!inner) continue;
+        if (inner.type === "item.started" || inner.type === "item.completed") {
+          subagentItemIds.add(inner.itemId);
+        }
+        if (inner.type === "item.started") {
+          const completed = completedItemIds.has(inner.itemId);
+          const meta = startedMeta.get(inner.itemId);
+          const icon = itemIcon(inner.itemType);
+          const title = shortenPath(meta?.title ?? inner.itemType, workDir);
+          subTools.push({
+            id: `sub-${inner.itemId}`,
+            timestamp: inner.timestamp,
+            title,
+            summary: completed ? "Completed" : "Running…",
+            icon,
+            details: [],
+            inProgress: !completed,
+          });
+        }
+      }
+      if (toolUseId && subTools.length > 0) {
+        agentSubTools.set(toolUseId, subTools);
+      }
+    }
+
     for (let i = 0; i < events.length; i++) {
       const ev = events[i];
       if (!ev) continue;
       if (ev.type === "task.started" && ev.taskId) {
-        openTasks.set(ev.taskId, i);
+        openTasks.set(ev.taskId, { startIndex: i, toolUseId: ev.toolUseId });
       }
       if (ev.type === "task.completed" && ev.taskId) {
-        const startIdx = openTasks.get(ev.taskId);
-        if (startIdx !== undefined) {
-          for (let j = startIdx + 1; j < i; j++) {
-            const inner = events[j];
-            if (inner && (inner.type === "item.started" || inner.type === "item.completed")) {
-              subagentItemIds.add(inner.itemId);
-            }
-          }
+        const info = openTasks.get(ev.taskId);
+        if (info) {
+          collectSubTools(info.startIndex, i, info.toolUseId);
           openTasks.delete(ev.taskId);
         }
       }
     }
     // Still-running tasks: mark all subsequent items as sub-agent
-    for (const [, startIdx] of openTasks) {
-      for (let j = startIdx + 1; j < events.length; j++) {
-        const inner = events[j];
-        if (inner && (inner.type === "item.started" || inner.type === "item.completed")) {
-          subagentItemIds.add(inner.itemId);
-        }
-      }
+    for (const [, info] of openTasks) {
+      collectSubTools(info.startIndex, events.length, info.toolUseId);
     }
   }
 
@@ -587,15 +607,19 @@ export function eventsToEntries(
       const detailsList = isAgent ? [] : (detail && detail !== title ? [detail] : []);
       const args = isAgent ? stripAgentArgs(event.args, title) : event.args;
 
+      const subTools = isAgent ? agentSubTools.get(event.itemId) : undefined;
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
         title,
-        summary,
+        summary: isAgent && subTools
+          ? `${String(subTools.length)} tool call${subTools.length !== 1 ? "s" : ""}`
+          : summary,
         icon: itemIcon(event.itemType),
         details: detailsList,
         ...(args !== undefined ? { args } : {}),
         ...(isInProgress ? { inProgress: true } : {}),
+        ...(subTools ? { subTools } : {}),
       });
       continue;
     }
@@ -619,15 +643,19 @@ export function eventsToEntries(
         : (outputDetail || (startedDetail !== title ? startedDetail : ""));
       const rawArgs = meta?.args ?? event.args;
       const args = isAgentCompleted ? stripAgentArgs(rawArgs, title) : rawArgs;
+      const completedSubTools = isAgentCompleted ? agentSubTools.get(event.itemId) : undefined;
 
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
         title,
-        summary,
+        summary: isAgentCompleted && completedSubTools
+          ? `${String(completedSubTools.length)} tool call${completedSubTools.length !== 1 ? "s" : ""}`
+          : summary,
         icon: itemIcon(itemType),
         details: detailContent ? [detailContent] : [],
         ...(args !== undefined ? { args } : {}),
+        ...(completedSubTools ? { subTools: completedSubTools } : {}),
       });
       continue;
     }
@@ -695,6 +723,13 @@ export function eventsToEntries(
     }
 
     if (event.type === "task.started") {
+      // When toolUseId links to an agent item, the agent's own ToolEntry
+      // (item.started with itemType="agent") already represents this task —
+      // skip the duplicate BackgroundTaskCard.
+      const linkedMeta = event.toolUseId ? startedMeta.get(event.toolUseId) : undefined;
+      if (linkedMeta?.itemType === "agent") {
+        continue;
+      }
       flushAssistant();
       flushToolGroup();
       const taskId = event.taskId ?? event.toolUseId ?? `task-${event.timestamp}`;

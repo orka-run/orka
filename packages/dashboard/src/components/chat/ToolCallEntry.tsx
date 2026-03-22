@@ -153,6 +153,11 @@ export const ToolCallGroup = memo(function ToolCallGroup({
             />
           </div>
         ) : null}
+        {tool.subTools && tool.subTools.length > 0 ? (
+          <div className="border-t border-border/30">
+            <ToolCallDetails tools={tool.subTools} {...(projectPath ? { projectPath } : {})} />
+          </div>
+        ) : null}
       </details>
     );
   }
