@@ -322,17 +322,17 @@ services:
 
 ### Option C: In-Browser Trace Viewer (Embedded in Dashboard)
 
-There's no mature, embeddable React trace viewer component. Options:
+Options for embedding trace visualization directly in the dashboard:
 
-1. **Jaeger UI components** — Jaeger's UI is a standalone React app but not packaged as reusable components. You could fork/extract the trace timeline component, but it's significant work.
+1. **AgentPrism** (`@evilmartians/agent-prism`) — React components specifically designed for visualizing AI agent traces. Shows hierarchical timelines with LLM calls, tool executions, and agent workflows. Built on the OTel data model. UI distributed as copyable source (shadcn-style). This is the strongest candidate for our use case since we're tracing agent sessions. ([GitHub](https://github.com/evilmartians/agent-prism))
 
-2. **Perfetto UI** — Google's trace viewer (`ui.perfetto.dev`) can render custom trace formats but is designed for system traces, not OTel.
+2. **`jaeger-react-trace-component`** — Community package extracting the Jaeger TraceTimelineViewer as a standalone React component. Older project; the official Jaeger UI has not been published as embeddable npm components ([jaeger-ui#248](https://github.com/jaegertracing/jaeger-ui/issues/248)).
 
-3. **Custom minimal viewer** — Render `traces.jsonl` data as a timeline using something like `react-chrono` or a custom canvas/SVG component. We already have the data format and query function (`queryTraceLog`).
+3. **Custom minimal viewer** — Render `traces.jsonl` data as a timeline using a custom canvas/SVG component. We already have `queryTraceLog()` and `TraceLogEntry` types with `traceId`/`spanId`/`parentSpanId`/`startTime`/`endTime` — everything needed to build a span tree and render a waterfall.
 
-4. **Grafana embedded panel** — Grafana supports embedding individual panels via iframe. If using Option B, you could embed a trace waterfall panel in the dashboard.
+4. **Grafana embedded panel** — If using Option B, you could embed a Grafana trace panel via iframe.
 
-**Recommendation**: Start with Jaeger (Option A) for development. It's zero-effort once the docker-compose is up. Consider embedding a trace link in the dashboard that opens the Jaeger UI for a specific trace.
+**Recommendation**: Start with Jaeger (Option A) for development — zero-effort once the docker-compose is up. For dashboard-embedded traces, evaluate AgentPrism first since it's purpose-built for AI agent trace visualization. We could expose `queryTraceLog()` via RPC and feed the results to AgentPrism components — no external backend needed.
 
 ### OpenTelemetry Collector
 
