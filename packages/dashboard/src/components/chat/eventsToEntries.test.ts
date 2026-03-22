@@ -306,6 +306,161 @@ describe("eventsToEntries", () => {
     );
   });
 
+  test("agent ToolEntry contains nested subTools from task range", () => {
+    const events: OrchestrationEvent[] = [
+      // Agent tool call
+      {
+        type: "item.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "agent-tool-1",
+        itemType: "agent",
+        title: "Agent: Research topic",
+        detail: "Research topic",
+        args: { prompt: "Find all files", description: "Research topic" },
+        timestamp: "2026-03-11T00:00:01Z",
+      },
+      {
+        type: "item.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "agent-tool-1",
+        itemType: "agent",
+        title: "Agent: Research topic",
+        timestamp: "2026-03-11T00:00:02Z",
+      },
+      // Task started for the agent
+      {
+        type: "task.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-abc",
+        toolUseId: "agent-tool-1",
+        title: "Research topic",
+        timestamp: "2026-03-11T00:00:03Z",
+      },
+      // Sub-tool 1: Read
+      {
+        type: "item.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "sub-read-1",
+        itemType: "file_read",
+        title: "Read src/index.ts",
+        timestamp: "2026-03-11T00:00:04Z",
+      },
+      {
+        type: "item.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "sub-read-1",
+        itemType: "file_read",
+        title: "Read src/index.ts",
+        timestamp: "2026-03-11T00:00:05Z",
+      },
+      // Sub-tool 2: Grep
+      {
+        type: "item.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "sub-grep-1",
+        itemType: "search",
+        title: "Grep pattern in src/",
+        timestamp: "2026-03-11T00:00:06Z",
+      },
+      {
+        type: "item.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "sub-grep-1",
+        itemType: "search",
+        title: "Grep pattern in src/",
+        timestamp: "2026-03-11T00:00:07Z",
+      },
+      // Task completed
+      {
+        type: "task.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-abc",
+        toolUseId: "agent-tool-1",
+        status: "completed",
+        timestamp: "2026-03-11T00:00:08Z",
+      },
+    ];
+
+    const entries = eventsToEntries(events);
+
+    // Agent ToolEntry should exist with subTools
+    const toolGroups = entries.filter((e) => e.type === "tool-group");
+    const agentTools = toolGroups.flatMap((g) => g.tools).filter((t) => t.icon === "agent");
+    expect(agentTools).toHaveLength(1);
+    expect(agentTools[0]!.title).toBe("Agent: Research topic");
+    expect(agentTools[0]!.summary).toBe("2 tool calls");
+    expect(agentTools[0]!.subTools).toHaveLength(2);
+    expect(agentTools[0]!.subTools![0]!.icon).toBe("read");
+    expect(agentTools[0]!.subTools![0]!.title).toBe("Read src/index.ts");
+    expect(agentTools[0]!.subTools![1]!.icon).toBe("search");
+
+    // No BackgroundTaskCard for agent-linked task
+    const bgTasks = entries.filter((e) => e.type === "background-task");
+    expect(bgTasks).toHaveLength(0);
+
+    // Sub-tool items should NOT appear as separate ToolEntries
+    const allToolIds = toolGroups.flatMap((g) => g.tools.map((t) => t.id));
+    expect(allToolIds).not.toContain("sub-read-1");
+    expect(allToolIds).not.toContain("sub-grep-1");
+  });
+
+  test("non-agent task.started still renders BackgroundTaskCard", () => {
+    const events: OrchestrationEvent[] = [
+      // A Bash command item (not agent)
+      {
+        type: "item.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "bash-tool-1",
+        itemType: "command_execution",
+        title: "npm test",
+        timestamp: "2026-03-11T00:00:01Z",
+      },
+      {
+        type: "item.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: "bash-tool-1",
+        itemType: "command_execution",
+        timestamp: "2026-03-11T00:00:02Z",
+      },
+      // task.started linked to the Bash item (not an agent)
+      {
+        type: "task.started",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-xyz",
+        toolUseId: "bash-tool-1",
+        title: "Running tests",
+        timestamp: "2026-03-11T00:00:03Z",
+      },
+      {
+        type: "task.completed",
+        sessionId: "s1",
+        turnId: "turn-1",
+        taskId: "task-xyz",
+        toolUseId: "bash-tool-1",
+        status: "completed",
+        timestamp: "2026-03-11T00:00:05Z",
+      },
+    ];
+
+    const entries = eventsToEntries(events);
+
+    // Non-agent task should still render BackgroundTaskCard
+    const bgTasks = entries.filter((e) => e.type === "background-task");
+    expect(bgTasks).toHaveLength(1);
+    expect(bgTasks[0]!.title).toBe("Running tests");
+  });
+
   test("skips subagent.tool_use, subagent.completed, and subagent.output as standalone entries", () => {
     const entries = eventsToEntries([
       {
