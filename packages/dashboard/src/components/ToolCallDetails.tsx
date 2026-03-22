@@ -827,9 +827,6 @@ function synthesizeEditDiff(args: Record<string, unknown> | null): ParsedDetail 
   const oldLines = oldStr.split("\n");
   const newLines = newStr.split("\n");
   const diffLines: string[] = [];
-  diffLines.push(`--- ${path ?? "a"}`);
-  diffLines.push(`+++ ${path ?? "b"}`);
-  diffLines.push(`@@ -1,${String(oldLines.length)} +1,${String(newLines.length)} @@`);
   for (const line of oldLines) diffLines.push(`-${line}`);
   for (const line of newLines) diffLines.push(`+${line}`);
 
