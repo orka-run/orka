@@ -97,6 +97,8 @@ export class WsTransport {
   private messagesSent = 0;
   private messagesReceived = 0;
   private connectStartedAt = 0;
+  private visibilityHandler: (() => void) | null = null;
+  private onlineHandler: (() => void) | null = null;
 
   constructor(
     private url: string,
@@ -107,6 +109,7 @@ export class WsTransport {
     if (this.disposed) return;
 
     this.shouldReconnect = true;
+    this.attachPageLifecycleListeners();
 
     if (
       this.ws &&
@@ -198,6 +201,7 @@ export class WsTransport {
 
   disconnect(): void {
     this.shouldReconnect = false;
+    this.detachPageLifecycleListeners();
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -233,6 +237,58 @@ export class WsTransport {
 
   get isDisposed(): boolean {
     return this.disposed;
+  }
+
+  /**
+   * Immediately attempt reconnection if the WebSocket is dead.
+   * Called on page visibility change and network online events
+   * to recover from mobile browser background throttling.
+   */
+  private tryImmediateReconnect(): void {
+    if (this.disposed || !this.shouldReconnect) return;
+    // Already connected or connecting — nothing to do
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
+    // Cancel any pending backoff timer and reconnect immediately
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectDelay = 500;
+    this.connect();
+  }
+
+  private attachPageLifecycleListeners(): void {
+    if (typeof document === "undefined" && typeof window === "undefined") return;
+    if (this.visibilityHandler) return; // already attached
+
+    this.visibilityHandler = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        this.tryImmediateReconnect();
+      }
+    };
+    this.onlineHandler = () => {
+      this.tryImmediateReconnect();
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", this.visibilityHandler);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", this.onlineHandler);
+    }
+  }
+
+  private detachPageLifecycleListeners(): void {
+    if (this.visibilityHandler && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+    }
+    if (this.onlineHandler && typeof window !== "undefined") {
+      window.removeEventListener("online", this.onlineHandler);
+    }
+    this.visibilityHandler = null;
+    this.onlineHandler = null;
   }
 
   async request<M extends RpcMethodName>(method: M, params?: RpcParams<M>, options?: RequestOptions): Promise<RpcResult<M>> {
