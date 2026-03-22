@@ -95,13 +95,15 @@ class LocalClient implements OrkaService {
   }
 
   async spawn(req: SpawnRequest): Promise<SpawnResult> {
-    const session = await spawnSession(this.ctx, req);
-    const task = this.ctx.db.getTask(session.taskId);
-    return {
-      id: session.id,
-      status: session.status,
-      title: task?.title ?? req.title ?? req.prompt.slice(0, 80),
-    };
+    return withSpan("orka.local.spawn", { "orka.backend": req.backend ?? "claude" }, async () => {
+      const session = await spawnSession(this.ctx, req);
+      const task = this.ctx.db.getTask(session.taskId);
+      return {
+        id: session.id,
+        status: session.status,
+        title: task?.title ?? req.title ?? req.prompt.slice(0, 80),
+      };
+    });
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -109,7 +111,9 @@ class LocalClient implements OrkaService {
   }
 
   async stop(sessionId: string): Promise<void> {
-    return stopSession(this.ctx, sessionId);
+    return withSpan("orka.local.stop", { "orka.session.id": sessionId }, async () => {
+      return stopSession(this.ctx, sessionId);
+    });
   }
 
   async reap(): Promise<number> {
@@ -169,38 +173,44 @@ class LocalClient implements OrkaService {
   }
 
   async getResult(sessionId: string): Promise<SessionResult | null> {
-    const session = this.ctx.db.getSession(sessionId);
-    if (!session) return null;
+    return withSpan("orka.local.get_result", { "orka.session.id": sessionId }, async () => {
+      const session = this.ctx.db.getSession(sessionId);
+      if (!session) return null;
 
-    const result = this.buildProviderSessionResult(sessionId, session);
-    const parsedResult =
-      result ?? (session.logFile ? parseSessionResult(session.logFile, session) : null);
-    if (parsedResult) {
-      this.ctx.db.insertUsageRecord({
-        sessionId: session.id,
-        backend: session.backend,
-        inputTokens: parsedResult.inputTokens,
-        outputTokens: parsedResult.outputTokens,
-        cacheReadTokens: parsedResult.cacheReadTokens,
-        costUsd: parsedResult.costUsd,
-        model: parsedResult.model,
-        recordedAt: session.finishedAt ?? new Date().toISOString(),
-      });
-    }
-    return parsedResult;
+      const result = this.buildProviderSessionResult(sessionId, session);
+      const parsedResult =
+        result ?? (session.logFile ? parseSessionResult(session.logFile, session) : null);
+      if (parsedResult) {
+        this.ctx.db.insertUsageRecord({
+          sessionId: session.id,
+          backend: session.backend,
+          inputTokens: parsedResult.inputTokens,
+          outputTokens: parsedResult.outputTokens,
+          cacheReadTokens: parsedResult.cacheReadTokens,
+          costUsd: parsedResult.costUsd,
+          model: parsedResult.model,
+          recordedAt: session.finishedAt ?? new Date().toISOString(),
+        });
+      }
+      return parsedResult;
+    });
   }
 
   async getSessionTimeline(params: TimelineParams): Promise<TimelineResponse> {
-    const events = this.ctx.db.getOrchestrationEvents(params.sessionId, params.offset, params.limit);
-    const total = (params.offset !== undefined || params.limit !== undefined)
-      ? this.ctx.db.getOrchestrationEventCount(params.sessionId)
-      : events.length;
-    return { events, total };
+    return withSpan("orka.local.get_session_timeline", { "orka.session.id": params.sessionId }, async () => {
+      const events = this.ctx.db.getOrchestrationEvents(params.sessionId, params.offset, params.limit);
+      const total = (params.offset !== undefined || params.limit !== undefined)
+        ? this.ctx.db.getOrchestrationEventCount(params.sessionId)
+        : events.length;
+      return { events, total };
+    });
   }
 
   async getChatMessages(sessionId: string): Promise<ChatEntry[]> {
-    const events = this.ctx.db.getOrchestrationEvents(sessionId);
-    return eventsToChat(events);
+    return withSpan("orka.local.get_chat_messages", { "orka.session.id": sessionId }, async () => {
+      const events = this.ctx.db.getOrchestrationEvents(sessionId);
+      return eventsToChat(events);
+    });
   }
 
   async getUsage(opts?: { sessionId?: string; since?: string; backend?: string }): Promise<UsageSummary> {
@@ -284,11 +294,15 @@ class LocalClient implements OrkaService {
   }
 
   async sendTurn(sessionId: string, text: string): Promise<void> {
-    await sendTurnToSession(this.ctx, sessionId, text);
+    return withSpan("orka.local.send_turn", { "orka.session.id": sessionId }, async () => {
+      await sendTurnToSession(this.ctx, sessionId, text);
+    });
   }
 
   async cancelTurn(sessionId: string): Promise<void> {
-    await cancelTurnInSession(this.ctx, sessionId);
+    return withSpan("orka.local.cancel_turn", { "orka.session.id": sessionId }, async () => {
+      await cancelTurnInSession(this.ctx, sessionId);
+    });
   }
 
   async cancelQueuedMessage(sessionId: string, text: string): Promise<void> {
@@ -488,65 +502,71 @@ class LocalClient implements OrkaService {
   }
 
   async getDiff(sessionId: string): Promise<DiffResult> {
-    const session = this.ctx.db.getSession(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    return withSpan("orka.local.get_diff", { "orka.session.id": sessionId }, async () => {
+      const session = this.ctx.db.getSession(sessionId);
+      if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    try {
-      const dir = session.workingDir;
-      const status = (await $`git -C ${dir} status`.text()).trim();
-      const diff = (await $`git -C ${dir} diff`.text()).trim();
-      // In-place sessions have no separate branch, so skip branch diff
-      const branchDiff = session.noWorktree ? {} : await captureBranchDiff(dir, session.projectPath);
-      return { status, diff, ...branchDiff };
-    } catch {
-      const saved = this.ctx.db.getSessionDiff(sessionId);
-      if (saved) return saved;
-      throw new Error(`Cannot read git status in ${session.workingDir} (worktree may have been cleaned up)`);
-    }
+      try {
+        const dir = session.workingDir;
+        const status = (await $`git -C ${dir} status`.text()).trim();
+        const diff = (await $`git -C ${dir} diff`.text()).trim();
+        // In-place sessions have no separate branch, so skip branch diff
+        const branchDiff = session.noWorktree ? {} : await captureBranchDiff(dir, session.projectPath);
+        return { status, diff, ...branchDiff };
+      } catch {
+        const saved = this.ctx.db.getSessionDiff(sessionId);
+        if (saved) return saved;
+        throw new Error(`Cannot read git status in ${session.workingDir} (worktree may have been cleaned up)`);
+      }
+    });
   }
 
   async merge(sessionId: string, cleanup = true): Promise<MergeResult> {
-    const session = this.ctx.db.getSession(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    return withSpan("orka.local.merge", { "orka.session.id": sessionId }, async () => {
+      const session = this.ctx.db.getSession(sessionId);
+      if (!session) throw new Error(`Session not found: ${sessionId}`);
 
-    if (session.noWorktree) {
-      throw new Error(`Session ${sessionId} ran in-place — no merge needed, changes are already in the project directory`);
-    }
-
-    const wtDir = getWorktreeDir(this.ctx.orkaHome);
-    if (!session.workingDir.startsWith(wtDir)) {
-      throw new Error(`Session ${sessionId} is not using a worktree`);
-    }
-
-    const { branch, commits } = await worktreeMerge(session.projectPath, session.workingDir);
-    let cleaned = false;
-
-    if (cleanup) {
-      try {
-        await worktreeRemove(session.projectPath, session.workingDir);
-        await deleteBranch(session.projectPath, branch);
-        cleaned = true;
-      } catch {
-        // Cleanup failure is non-fatal
+      if (session.noWorktree) {
+        throw new Error(`Session ${sessionId} ran in-place — no merge needed, changes are already in the project directory`);
       }
-    }
 
-    return { branch, commits, cleaned };
+      const wtDir = getWorktreeDir(this.ctx.orkaHome);
+      if (!session.workingDir.startsWith(wtDir)) {
+        throw new Error(`Session ${sessionId} is not using a worktree`);
+      }
+
+      const { branch, commits } = await worktreeMerge(session.projectPath, session.workingDir);
+      let cleaned = false;
+
+      if (cleanup) {
+        try {
+          await worktreeRemove(session.projectPath, session.workingDir);
+          await deleteBranch(session.projectPath, branch);
+          cleaned = true;
+        } catch {
+          // Cleanup failure is non-fatal
+        }
+      }
+
+      return { branch, commits, cleaned };
+    });
   }
 
   async deleteSessions(ids: string[]): Promise<void> {
-    const sessions = ids
-      .map((id) => this.ctx.db.getSession(id))
-      .filter((session): session is Session => session !== null);
+    return withSpan("orka.local.delete_sessions", { "orka.count": ids.length }, async () => {
+      const sessions = ids
+        .map((id) => this.ctx.db.getSession(id))
+        .filter((session): session is Session => session !== null);
 
-    for (const session of sessions) {
-      await pruneCheckpointRefsForSession(session);
-      this.ctx.sessionRuntime.idleTimers.delete(session.id);
-      this.ctx.sessionRuntime.autoMergeFired.delete(session.id);
-      this.ctx.sessionRuntime.turnCounts.delete(session.id);
-      this.ctx.sessionRuntime.checkpointCaptureChains.delete(session.id);
-    }
-    this.ctx.db.deleteSessions(ids);
+      for (const session of sessions) {
+        await pruneCheckpointRefsForSession(session);
+        this.ctx.sessionRuntime.idleTimers.delete(session.id);
+        this.ctx.sessionRuntime.autoMergeFired.delete(session.id);
+        this.ctx.sessionRuntime.turnCounts.delete(session.id);
+        this.ctx.sessionRuntime.checkpointCaptureChains.delete(session.id);
+      }
+      this.ctx.db.deleteSessions(ids);
+    });
   }
 
   async archiveSession(sessionId: string): Promise<void> {
@@ -558,56 +578,58 @@ class LocalClient implements OrkaService {
   }
 
   async pruneSessions(opts: PruneOptions): Promise<PruneResult> {
-    const cutoff = new Date(Date.now() - opts.maxAgeMs).toISOString();
-    const pruneStatuses = new Set(["completed", "cancelled", "failed"]);
+    return withSpan("orka.local.prune_sessions", {}, async () => {
+      const cutoff = new Date(Date.now() - opts.maxAgeMs).toISOString();
+      const pruneStatuses = new Set(["completed", "cancelled", "failed"]);
 
-    let sessions = this.ctx.db.listSessions().filter(
-      (s) => pruneStatuses.has(s.status) && s.createdAt < cutoff,
-    );
+      let sessions = this.ctx.db.listSessions().filter(
+        (s) => pruneStatuses.has(s.status) && s.createdAt < cutoff,
+      );
 
-    if (opts.projectPath) {
-      sessions = sessions.filter((s) => s.projectPath === opts.projectPath);
-    }
+      if (opts.projectPath) {
+        sessions = sessions.filter((s) => s.projectPath === opts.projectPath);
+      }
 
-    if (!opts.confirm) {
-      return {
-        pruned: sessions.length,
-        orphansCleaned: 0,
-        dryRun: true,
-      };
-    }
+      if (!opts.confirm) {
+        return {
+          pruned: sessions.length,
+          orphansCleaned: 0,
+          dryRun: true,
+        };
+      }
 
-    let logsDeleted = 0;
-    if (opts.purgeLogs) {
-      const scriptsDir = join(this.ctx.orkaHome, "scripts");
-      for (const s of sessions) {
-        if (s.logFile && existsSync(s.logFile)) {
-          unlinkSync(s.logFile);
-          logsDeleted += 1;
-        }
-        const scriptFile = join(scriptsDir, `${s.id}.sh`);
-        if (existsSync(scriptFile)) {
-          unlinkSync(scriptFile);
-          logsDeleted += 1;
+      let logsDeleted = 0;
+      if (opts.purgeLogs) {
+        const scriptsDir = join(this.ctx.orkaHome, "scripts");
+        for (const s of sessions) {
+          if (s.logFile && existsSync(s.logFile)) {
+            unlinkSync(s.logFile);
+            logsDeleted += 1;
+          }
+          const scriptFile = join(scriptsDir, `${s.id}.sh`);
+          if (existsSync(scriptFile)) {
+            unlinkSync(scriptFile);
+            logsDeleted += 1;
+          }
         }
       }
-    }
 
-    let dbRecordsDeleted = 0;
-    if (opts.purgeDb) {
-      await this.deleteSessions(sessions.map((s) => s.id));
-      dbRecordsDeleted = sessions.length;
-    }
+      let dbRecordsDeleted = 0;
+      if (opts.purgeDb) {
+        await this.deleteSessions(sessions.map((s) => s.id));
+        dbRecordsDeleted = sessions.length;
+      }
 
-    const orphansCleaned = await cleanupOrphanedWorktrees(this.ctx);
+      const orphansCleaned = await cleanupOrphanedWorktrees(this.ctx);
 
-    return {
-      pruned: sessions.length,
-      orphansCleaned,
-      dryRun: false,
-      ...(opts.purgeLogs ? { logsDeleted } : {}),
-      ...(opts.purgeDb ? { dbRecordsDeleted } : {}),
-    };
+      return {
+        pruned: sessions.length,
+        orphansCleaned,
+        dryRun: false,
+        ...(opts.purgeLogs ? { logsDeleted } : {}),
+        ...(opts.purgeDb ? { dbRecordsDeleted } : {}),
+      };
+    });
   }
 
   async getPendingApprovals(sessionId?: string): Promise<ApprovalRequest[]> {

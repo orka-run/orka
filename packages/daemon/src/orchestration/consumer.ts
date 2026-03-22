@@ -184,36 +184,44 @@ async function handleRequestOpened(
   event: ProviderRuntimeEventOf<"request.opened">,
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
-  const request = toApprovalRequest(sessionId, handle, event);
+  await withSpan("orka.orchestration.handle_request_opened", {
+    "orka.session.id": sessionId,
+    "orka.request.type": event.payload.requestType,
+  }, async (span) => {
+    const request = toApprovalRequest(sessionId, handle, event);
 
-  if (callbacks.permissionRules && callbacks.respondToRequest) {
-    const { tool, input } = extractToolInfo(request);
-    const decision = evaluatePermission(callbacks.permissionRules, tool, input);
+    if (callbacks.permissionRules && callbacks.respondToRequest) {
+      const { tool, input } = extractToolInfo(request);
+      const decision = evaluatePermission(callbacks.permissionRules, tool, input);
 
-    if (decision === "auto_approve") {
-      await callbacks.respondToRequest(handle.threadId, request.id, "approve");
-      callbacks.pushHub?.broadcast("orchestration.event", {
-        sessionId,
-        type: "permission.auto_approved",
-        tool,
-        detail: event.payload.detail,
-      });
-      return;
+      if (decision === "auto_approve") {
+        span.setAttribute("orka.permission.decision", "auto_approve");
+        await callbacks.respondToRequest(handle.threadId, request.id, "approve");
+        callbacks.pushHub?.broadcast("orchestration.event", {
+          sessionId,
+          type: "permission.auto_approved",
+          tool,
+          detail: event.payload.detail,
+        });
+        return;
+      }
+
+      if (decision === "auto_deny") {
+        span.setAttribute("orka.permission.decision", "auto_deny");
+        await callbacks.respondToRequest(handle.threadId, request.id, "deny");
+        callbacks.pushHub?.broadcast("orchestration.event", {
+          sessionId,
+          type: "permission.auto_denied",
+          tool,
+          detail: event.payload.detail,
+        });
+        return;
+      }
     }
 
-    if (decision === "auto_deny") {
-      await callbacks.respondToRequest(handle.threadId, request.id, "deny");
-      callbacks.pushHub?.broadcast("orchestration.event", {
-        sessionId,
-        type: "permission.auto_denied",
-        tool,
-        detail: event.payload.detail,
-      });
-      return;
-    }
-  }
-
-  callbacks.approvalManager.addRequest(request);
+    span.setAttribute("orka.permission.decision", "pending_manual");
+    callbacks.approvalManager.addRequest(request);
+  });
 }
 
 function persistUsageRecord(
@@ -242,44 +250,46 @@ async function handleTurnCompleted(
   sessionId: string,
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
-  callbacks.clearPendingRateLimit?.(sessionId);
-  const workingDir = callbacks.workingDir;
-  const turnSeq = callbacks.getNextTurnSeq?.(sessionId);
-  if (workingDir && turnSeq !== undefined) {
-    callbacks.onTurnCheckpoint?.(sessionId, turnSeq, workingDir);
-  }
+  await withSpan("orka.orchestration.handle_turn_completed", { "orka.session.id": sessionId }, async () => {
+    callbacks.clearPendingRateLimit?.(sessionId);
+    const workingDir = callbacks.workingDir;
+    const turnSeq = callbacks.getNextTurnSeq?.(sessionId);
+    if (workingDir && turnSeq !== undefined) {
+      callbacks.onTurnCheckpoint?.(sessionId, turnSeq, workingDir);
+    }
 
-  // Transition session to "idle" — the turn is done, process is still alive
-  callbacks.updateSessionStatus(sessionId, "idle");
-  callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
-    sessionId,
-    status: "idle",
-  });
+    // Transition session to "idle" — the turn is done, process is still alive
+    callbacks.updateSessionStatus(sessionId, "idle");
+    callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
+      sessionId,
+      status: "idle",
+    });
 
-  const deliveredPendingMessages = await callbacks.deliverPendingMessages?.(sessionId);
-  if (deliveredPendingMessages) {
-    return;
-  }
-
-  // Auto-merge fires on first idle transition (preserves old "background completes and merges" behavior)
-  if (callbacks.autoMerge && !callbacks.autoMergeFired?.has(sessionId)) {
-    callbacks.autoMergeFired?.add(sessionId);
-    await tryAutoMerge(sessionId, callbacks);
-    // After successful auto-merge, mark session as completed
-    const session = callbacks.getSession?.(sessionId);
-    if (session?.status === "idle") {
-      // Auto-merge succeeded — session is done
-      callbacks.updateSessionStatus(sessionId, "completed", { finishedAt: new Date().toISOString() });
-      callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
-        sessionId,
-        status: "completed",
-      });
+    const deliveredPendingMessages = await callbacks.deliverPendingMessages?.(sessionId);
+    if (deliveredPendingMessages) {
       return;
     }
-  }
 
-  // Notify orchestrator to start idle timer
-  await callbacks.onSessionIdle?.(sessionId);
+    // Auto-merge fires on first idle transition (preserves old "background completes and merges" behavior)
+    if (callbacks.autoMerge && !callbacks.autoMergeFired?.has(sessionId)) {
+      callbacks.autoMergeFired?.add(sessionId);
+      await tryAutoMerge(sessionId, callbacks);
+      // After successful auto-merge, mark session as completed
+      const session = callbacks.getSession?.(sessionId);
+      if (session?.status === "idle") {
+        // Auto-merge succeeded — session is done
+        callbacks.updateSessionStatus(sessionId, "completed", { finishedAt: new Date().toISOString() });
+        callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
+          sessionId,
+          status: "completed",
+        });
+        return;
+      }
+    }
+
+    // Notify orchestrator to start idle timer
+    await callbacks.onSessionIdle?.(sessionId);
+  });
 }
 
 async function finalizeSession(
@@ -287,60 +297,64 @@ async function finalizeSession(
   event: ProviderRuntimeEventOf<"session.exited">,
   callbacks: ProviderEventConsumerCallbacks,
 ): Promise<void> {
-  callbacks.clearPendingMessages?.(sessionId);
+  await withSpan("orka.orchestration.finalize_session", { "orka.session.id": sessionId }, async (span) => {
+    callbacks.clearPendingMessages?.(sessionId);
 
-  // Clean up auto-merge tracking
-  callbacks.autoMergeFired?.delete(sessionId);
+    // Clean up auto-merge tracking
+    callbacks.autoMergeFired?.delete(sessionId);
 
-  // Check current session state — if already hibernated (by idle timer), don't overwrite
-  const currentSession = callbacks.getSession?.(sessionId);
-  if (currentSession?.status === "hibernated" || currentSession?.status === "completed" || currentSession?.status === "interrupted") {
-    // Process was killed for hibernation, session was already closed, or daemon restart interrupted it — don't change status
-    return;
-  }
-
-  const status = getTerminalStatus(event);
-  const finishedAt = event.createdAt;
-
-  await captureSessionDiff(sessionId, callbacks);
-
-  if (status === "failed") {
-    const rateLimit = callbacks.consumePendingRateLimit?.(sessionId);
-    if (rateLimit) {
-      callbacks.onSessionRateLimited?.(sessionId, rateLimit, finishedAt);
-      recordSessionTerminalMetrics(currentSession?.startedAt ?? null, finishedAt, "rate_limited");
-
-      const pending = callbacks.approvalManager.getPendingForSession(sessionId);
-      for (const req of pending) {
-        callbacks.approvalManager.resolve(req.id, "deny");
-      }
-      callbacks.denyHookApprovals?.(sessionId);
+    // Check current session state — if already hibernated (by idle timer), don't overwrite
+    const currentSession = callbacks.getSession?.(sessionId);
+    if (currentSession?.status === "hibernated" || currentSession?.status === "completed" || currentSession?.status === "interrupted") {
+      // Process was killed for hibernation, session was already closed, or daemon restart interrupted it — don't change status
+      span.addEvent("orka.orchestration.finalize_skipped", { "orka.reason": `already_${currentSession.status}` });
       return;
     }
-  }
 
-  callbacks.updateSessionStatus(sessionId, status, { finishedAt });
-  recordSessionTerminalMetrics(currentSession?.startedAt ?? null, finishedAt, status);
+    const status = getTerminalStatus(event);
+    const finishedAt = event.createdAt;
+    span.setAttribute("orka.terminal_status", status);
 
-  // Auto-deny any pending approvals — session is done, no one can approve anymore
-  const pending = callbacks.approvalManager.getPendingForSession(sessionId);
-  for (const req of pending) {
-    callbacks.approvalManager.resolve(req.id, "deny");
-  }
-  // Also deny pending hook-based approvals (unblocks long-polling hook scripts)
-  callbacks.denyHookApprovals?.(sessionId);
+    await captureSessionDiff(sessionId, callbacks);
 
-  callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
-    sessionId,
-    status,
+    if (status === "failed") {
+      const rateLimit = callbacks.consumePendingRateLimit?.(sessionId);
+      if (rateLimit) {
+        callbacks.onSessionRateLimited?.(sessionId, rateLimit, finishedAt);
+        recordSessionTerminalMetrics(currentSession?.startedAt ?? null, finishedAt, "rate_limited");
+
+        const pending = callbacks.approvalManager.getPendingForSession(sessionId);
+        for (const req of pending) {
+          callbacks.approvalManager.resolve(req.id, "deny");
+        }
+        callbacks.denyHookApprovals?.(sessionId);
+        return;
+      }
+    }
+
+    callbacks.updateSessionStatus(sessionId, status, { finishedAt });
+    recordSessionTerminalMetrics(currentSession?.startedAt ?? null, finishedAt, status);
+
+    // Auto-deny any pending approvals — session is done, no one can approve anymore
+    const pending = callbacks.approvalManager.getPendingForSession(sessionId);
+    for (const req of pending) {
+      callbacks.approvalManager.resolve(req.id, "deny");
+    }
+    // Also deny pending hook-based approvals (unblocks long-polling hook scripts)
+    callbacks.denyHookApprovals?.(sessionId);
+
+    callbacks.pushHub?.broadcast("orchestration.sessionUpdated", {
+      sessionId,
+      status,
+    });
+
+    // Fire-and-forget after_complete hook
+    void callbacks.onAfterComplete?.(sessionId);
+
+    if (status === "cancelled") {
+      await callbacks.cleanupWorktree?.();
+    }
   });
-
-  // Fire-and-forget after_complete hook
-  void callbacks.onAfterComplete?.(sessionId);
-
-  if (status === "cancelled") {
-    await callbacks.cleanupWorktree?.();
-  }
 }
 
 function getTerminalStatus(event: ProviderRuntimeEventOf<"session.exited">): SessionStatus {

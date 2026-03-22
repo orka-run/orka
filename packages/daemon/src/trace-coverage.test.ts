@@ -16,7 +16,6 @@ interface TraceTarget {
 const TRACE_SKIP_ALLOWLIST = new Set([
   "adapters/claude-adapter.ts:ClaudeCodeAdapter.replayRawLog",
   "adapters/claude-adapter.ts:ClaudeCodeAdapter.respondToRequest",
-  "adapters/claude-adapter.ts:ClaudeCodeAdapter.sendTurn",
   "adapters/claude-adapter.ts:ClaudeCodeAdapter.steerTurn",
   "adapters/codex-adapter.ts:CodexAdapter.replayRawLog",
   "config.ts:evaluateDynamicEnv",

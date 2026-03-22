@@ -233,18 +233,24 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
   }
 
   async sendTurn(handle: ProviderSessionHandle, input: ProviderSendTurnInput): Promise<void> {
-    const meta = getClaudeHandleMeta(handle);
-    const newTurnId = generateId("turn");
-    meta.turnId = newTurnId;
+    return withSpan(
+      "orka.provider.claude_code.send_turn",
+      { "orka.session.id": handle.threadId, "orka.backend": this.kind },
+      async () => {
+        const meta = getClaudeHandleMeta(handle);
+        const newTurnId = generateId("turn");
+        meta.turnId = newTurnId;
 
-    const msg = JSON.stringify({
-      type: "user",
-      message: { role: "user", content: input.input ?? "" },
-      parent_tool_use_id: null,
-    }) + "\n";
+        const msg = JSON.stringify({
+          type: "user",
+          message: { role: "user", content: input.input ?? "" },
+          parent_tool_use_id: null,
+        }) + "\n";
 
-    meta.rawEvents.push({ direction: "in", data: msg.trimEnd(), ts: new Date().toISOString() });
-    await Promise.resolve(meta.stdinWriter.write(msg));
+        meta.rawEvents.push({ direction: "in", data: msg.trimEnd(), ts: new Date().toISOString() });
+        await Promise.resolve(meta.stdinWriter.write(msg));
+      },
+    );
   }
 
   async interruptTurn(handle: ProviderSessionHandle): Promise<void> {
