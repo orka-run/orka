@@ -82,7 +82,7 @@ function ToolCallDetails({
               <span className="ml-auto max-w-[40%] shrink-0 truncate text-[10px] text-ink-muted">{tool.summary}</span>
             ) : null}
           </summary>
-          {tool.details.length > 0 ? (
+          {tool.details.length > 0 || tool.args ? (
             <div className="border-t border-border/30 px-2 py-1">
               <ToolCallDetailsBody
                 title={tool.title}
