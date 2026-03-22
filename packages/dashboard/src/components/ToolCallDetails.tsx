@@ -3,6 +3,7 @@ import { Maximize2 } from "lucide-react";
 import { resolvePath, getPathFromArgs, type ResolvedPath } from "../lib/pathUtils";
 import { highlightCode } from "../lib/syntaxHighlight";
 import { FileContentModal } from "./FileContentModal";
+import { MarkdownContent } from "./MarkdownContent";
 
 interface ToolCallDetailsProps {
   title: string;
@@ -278,6 +279,8 @@ function ArgsDetail({ args, projectPath }: { args: Record<string, unknown>; proj
 
 /** Keys whose string values are file paths. */
 const PATH_ARG_KEYS = new Set(["file_path", "path"]);
+/** Keys whose string values should render as markdown. */
+const MARKDOWN_ARG_KEYS = new Set(["prompt"]);
 
 function ArgEntry({ name, value, projectPath }: { name: string; value: unknown; projectPath?: string | null }) {
   const str = typeof value === "string" ? value : JSON.stringify(value, null, 2);
@@ -288,6 +291,9 @@ function ArgEntry({ name, value, projectPath }: { name: string; value: unknown; 
   const displayStr = resolved ? resolved.display : str;
   const tooltip = resolved ? resolved.full : undefined;
 
+  // Render markdown-capable args (e.g. agent prompt) with MarkdownContent
+  const isMarkdownArg = MARKDOWN_ARG_KEYS.has(name) && typeof value === "string";
+
   if (isLong && !resolved) {
     return (
       <details className="group">
@@ -296,9 +302,15 @@ function ArgEntry({ name, value, projectPath }: { name: string; value: unknown; 
           <span className="truncate font-mono text-[11px] text-ink-muted">{str.slice(0, 80)}…</span>
         </summary>
         <div className="border-t border-border">
-          <pre className="overflow-x-auto px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
-            <code>{str}</code>
-          </pre>
+          {isMarkdownArg ? (
+            <div className="px-2 py-1.5">
+              <MarkdownContent content={str} />
+            </div>
+          ) : (
+            <pre className="overflow-x-auto px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
+              <code>{str}</code>
+            </pre>
+          )}
         </div>
       </details>
     );
