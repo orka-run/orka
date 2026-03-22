@@ -383,9 +383,9 @@ export function eventsToEntries(
         timestamp: event.timestamp,
       });
     }
-    if (event.type === "tool.progress" && event.itemId && event.summary) {
+    if (event.type === "tool.progress" && event.itemId && (event.summary || event.toolName)) {
       const item: ToolProgressItem = {
-        summary: event.summary,
+        summary: event.summary ?? event.toolName ?? "",
         timestamp: event.timestamp,
         ...(event.toolName ? { toolName: event.toolName } : {}),
         ...(event.elapsedSeconds !== undefined ? { elapsedSeconds: event.elapsedSeconds } : {}),
@@ -443,7 +443,11 @@ export function eventsToEntries(
         const inner = events[j];
         if (!inner) continue;
         if (inner.type === "item.started" || inner.type === "item.completed") {
-          subagentItemIds.add(inner.itemId);
+          // Don't mark other agent items as sub-tools — they're peer subagents, not children
+          const innerMeta = startedMeta.get(inner.itemId);
+          if (innerMeta?.itemType !== "agent") {
+            subagentItemIds.add(inner.itemId);
+          }
         }
         if (inner.type === "item.started") {
           const completed = completedItemIds.has(inner.itemId);
