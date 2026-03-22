@@ -134,6 +134,24 @@ function itemIcon(itemType: string): ToolIcon {
   }
 }
 
+/** Strip redundant keys from Agent tool args — description and subagent_type
+ *  are already visible in the title, prompt is too long for inline display. */
+function stripAgentArgs(args: unknown, _title: string): unknown {
+  if (args == null || typeof args !== "object") return args;
+  const record = args as Record<string, unknown>;
+  const kept: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(record)) {
+    if (k === "description" || k === "subagent_type") continue;
+    // Keep prompt but truncate — it's useful context but can be huge
+    if (k === "prompt" && typeof v === "string" && v.length > 200) {
+      kept[k] = `${v.slice(0, 200)}…`;
+      continue;
+    }
+    kept[k] = v;
+  }
+  return Object.keys(kept).length > 0 ? kept : undefined;
+}
+
 function shortenPath(text: string, projectPath?: string): string {
   return shortenPaths(text, projectPath ?? null);
 }
@@ -515,10 +533,17 @@ export function eventsToEntries(
       }
 
       flushAssistant();
+      const isAgent = event.itemType === "agent";
       const title = shortenPath(event.title ?? event.itemType, workDir);
       const detail = shortenPath(event.detail ?? "", workDir);
       const isInProgress = !completedItemIds.has(event.itemId);
-      const summary = detail && detail !== title ? detail : (isInProgress ? "In progress…" : "Completed");
+      const summary = isAgent
+        ? (isInProgress ? "In progress…" : "Completed")
+        : (detail && detail !== title ? detail : (isInProgress ? "In progress…" : "Completed"));
+      // For agent tools, detail duplicates the description already in the title — skip it.
+      // Also strip redundant args (description, subagent_type) that clutter the UI.
+      const detailsList = isAgent ? [] : (detail && detail !== title ? [detail] : []);
+      const args = isAgent ? stripAgentArgs(event.args, title) : event.args;
 
       pendingTools.push({
         id: event.itemId,
@@ -526,8 +551,8 @@ export function eventsToEntries(
         title,
         summary,
         icon: itemIcon(event.itemType),
-        details: detail && detail !== title ? [detail] : [],
-        ...(event.args !== undefined ? { args: event.args } : {}),
+        details: detailsList,
+        ...(args !== undefined ? { args } : {}),
         ...(isInProgress ? { inProgress: true } : {}),
       });
       continue;
@@ -540,12 +565,18 @@ export function eventsToEntries(
       flushAssistant();
       const meta = startedMeta.get(event.itemId);
       const itemType = event.itemType !== "unknown" ? event.itemType : (meta?.itemType ?? event.itemType);
+      const isAgentCompleted = itemType === "agent";
       const title = shortenPath(event.title ?? meta?.title ?? itemType, workDir);
       const startedDetail = meta?.detail ? shortenPath(meta.detail, workDir) : "";
       const outputDetail = event.detail ? shortenPath(event.detail, workDir) : "";
-      const summary = startedDetail && startedDetail !== title ? startedDetail : "Completed";
-      const detailContent = outputDetail || (startedDetail !== title ? startedDetail : "");
-      const args = meta?.args ?? event.args;
+      const summary = isAgentCompleted
+        ? "Completed"
+        : (startedDetail && startedDetail !== title ? startedDetail : "Completed");
+      const detailContent = isAgentCompleted
+        ? ""
+        : (outputDetail || (startedDetail !== title ? startedDetail : ""));
+      const rawArgs = meta?.args ?? event.args;
+      const args = isAgentCompleted ? stripAgentArgs(rawArgs, title) : rawArgs;
 
       pendingTools.push({
         id: event.itemId,
