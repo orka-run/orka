@@ -1,5 +1,5 @@
 // UI patterns inspired by pingdotgg/t3code (MIT, Copyright 2026 T3 Tools Inc.)
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, LoaderCircle } from "lucide-react";
 import type { SessionSummary } from "../stores/sessionStore";
 import { withDashboardSpan } from "../lib/tracing";
@@ -208,20 +208,15 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           {timelineEntries.length === 0 ? (
             <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
           ) : (
-            <div className="min-w-0 space-y-2">
-              {timelineEntries.map((entry) => (
-                <ChatTimelineEntry
-                  key={entry.id}
-                  entry={entry}
-                  isExpanded={expandedGroups.has(entry.id)}
-                  isCollapsed={collapsedGroups.has(entry.id)}
-                  onToggleExpand={handleToggleGroup}
-                  onApprovalResolve={handleApprovalResolve}
-                  onQuote={handleQuote}
-                  {...(session.projectPath ? { projectPath: session.projectPath } : {})}
-                />
-              ))}
-            </div>
+            <ChunkedTimeline
+              entries={timelineEntries}
+              expandedGroups={expandedGroups}
+              collapsedGroups={collapsedGroups}
+              onToggleExpand={handleToggleGroup}
+              onApprovalResolve={handleApprovalResolve}
+              onQuote={handleQuote}
+              projectPath={session.projectPath}
+            />
           )}
           {isRunning(session.status) ? <ThinkingIndicator state={deriveThinkingState(events)} /> : null}
           <div ref={bottomRef} />
@@ -255,6 +250,90 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onClearQuote={handleClearQuote}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Renders timeline entries in chunks: last INITIAL_CHUNK immediately (user sees
+ * most recent content), then progressively adds older entries via requestIdleCallback.
+ * Each entry uses content-visibility:auto so browser skips layout/paint for off-screen nodes.
+ */
+const INITIAL_CHUNK = 40;
+const CHUNK_SIZE = 60;
+
+function ChunkedTimeline({
+  entries,
+  expandedGroups,
+  collapsedGroups,
+  onToggleExpand,
+  onApprovalResolve,
+  onQuote,
+  projectPath,
+}: {
+  entries: ChatEntry[];
+  expandedGroups: Set<string>;
+  collapsedGroups: Set<string>;
+  onToggleExpand: (id: string, isOpen: boolean) => void;
+  onApprovalResolve: (requestId: string, decision: "approve" | "deny") => Promise<void>;
+  onQuote: (text: QuotedText) => void;
+  projectPath?: string;
+}) {
+  // Show tail (most recent) first, progressively reveal older entries
+  const [visibleCount, setVisibleCount] = useState(Math.min(INITIAL_CHUNK, entries.length));
+  const entriesRef = useRef(entries);
+  const idleRef = useRef<number | null>(null);
+
+  // Reset on session change (entries identity changes)
+  if (entriesRef.current !== entries) {
+    entriesRef.current = entries;
+    setVisibleCount(Math.min(INITIAL_CHUNK, entries.length));
+  }
+
+  useEffect(() => {
+    if (visibleCount >= entries.length) return;
+
+    const scheduleChunk = () => {
+      idleRef.current = requestIdleCallback(() => {
+        setVisibleCount((prev) => {
+          const next = Math.min(prev + CHUNK_SIZE, entries.length);
+          if (next < entries.length) scheduleChunk();
+          return next;
+        });
+      });
+    };
+    scheduleChunk();
+
+    return () => {
+      if (idleRef.current != null) cancelIdleCallback(idleRef.current);
+    };
+  }, [entries.length, visibleCount]);
+
+  // Render from the start, but only visibleCount entries
+  // Most recent entries are at the end — render all visible from index 0
+  const startIdx = Math.max(0, entries.length - visibleCount);
+  const visible = startIdx > 0 ? entries.slice(startIdx) : entries;
+
+  return (
+    <div className="min-w-0 space-y-2">
+      {startIdx > 0 && (
+        <div className="py-2 text-center text-[10px] text-ink-muted">
+          Loading {startIdx} older messages…
+        </div>
+      )}
+      {visible.map((entry) => (
+        <div key={entry.id} style={{ contentVisibility: "auto", containIntrinsicSize: "0 80px" }}>
+          <ChatTimelineEntry
+            entry={entry}
+            isExpanded={expandedGroups.has(entry.id)}
+            isCollapsed={collapsedGroups.has(entry.id)}
+            onToggleExpand={onToggleExpand}
+            onApprovalResolve={onApprovalResolve}
+            onQuote={onQuote}
+            {...(projectPath ? { projectPath } : {})}
+          />
+        </div>
+      ))}
     </div>
   );
 }
