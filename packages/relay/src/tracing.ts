@@ -1,4 +1,4 @@
-import { trace, SpanStatusCode, type Span, type Tracer } from "@opentelemetry/api";
+import { context, trace, SpanStatusCode, type Span, type Tracer } from "@opentelemetry/api";
 import {
   BasicTracerProvider,
   SimpleSpanProcessor,
@@ -9,6 +9,7 @@ import { ExportResultCode } from "@opentelemetry/core";
 import type { ExportResult } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRelayHome } from "./db";
@@ -148,7 +149,7 @@ class FileSpanExporter {
       const entry = {
         traceId: span.spanContext().traceId,
         spanId: span.spanContext().spanId,
-        parentSpanId: (span as unknown as Record<string, unknown>)["parentSpanId"] || undefined,
+        parentSpanId: span.parentSpanContext?.spanId || undefined,
         name: span.name,
         kind: span.kind,
         startTime: hrTimeToMs(span.startTime),
@@ -206,6 +207,11 @@ export function initRelayTracing(opts?: { traceFile?: string }): void {
   });
 
   trace.setGlobalTracerProvider(_provider);
+
+  // Enable async context propagation so nested withSpan calls chain into trace trees
+  const ctxManager = new AsyncLocalStorageContextManager();
+  ctxManager.enable();
+  context.setGlobalContextManager(ctxManager);
 }
 
 export async function shutdownRelayTracing(): Promise<void> {

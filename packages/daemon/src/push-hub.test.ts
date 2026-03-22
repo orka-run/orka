@@ -30,7 +30,7 @@ describe("PushHub", () => {
     hub.broadcast("orchestration.event", { sessionId: "sess-1" });
 
     expect(subscribed.sent).toHaveLength(1);
-    expect(JSON.parse(subscribed.sent[0] ?? "{}")).toEqual({
+    expect(JSON.parse(subscribed.sent[0] ?? "{}")).toMatchObject({
       type: "push",
       channel: "orchestration.event",
       sequence: 1,
@@ -82,39 +82,39 @@ describe("PushHub", () => {
     hub.broadcast("orchestration.event", { sessionId: "sess-1" });
     hub.broadcast("orchestration.sessionDeleted", { sessionId: "sess-1" });
 
-    expect(first.sent.map((message) => JSON.parse(message))).toEqual([
-      {
-        type: "push",
-        channel: "orchestration.event",
-        sequence: 1,
-        data: { sessionId: "sess-1" },
-      },
-      {
-        type: "push",
-        channel: "orchestration.event",
-        sequence: 2,
-        data: { sessionId: "sess-1" },
-      },
-      {
-        type: "push",
-        channel: "orchestration.sessionDeleted",
-        sequence: 1,
-        data: { sessionId: "sess-1" },
-      },
-    ]);
-    expect(second.sent.map((message) => JSON.parse(message))).toEqual([
-      {
-        type: "push",
-        channel: "orchestration.event",
-        sequence: 1,
-        data: { sessionId: "sess-1" },
-      },
-      {
-        type: "push",
-        channel: "orchestration.event",
-        sequence: 2,
-        data: { sessionId: "sess-1" },
-      },
-    ]);
+    const firstParsed = first.sent.map((message) => JSON.parse(message));
+    expect(firstParsed).toHaveLength(3);
+    expect(firstParsed[0]).toMatchObject({
+      type: "push",
+      channel: "orchestration.event",
+      sequence: 1,
+      data: { sessionId: "sess-1" },
+    });
+    expect(firstParsed[1]).toMatchObject({
+      type: "push",
+      channel: "orchestration.event",
+      sequence: 2,
+      data: { sessionId: "sess-1" },
+    });
+    expect(firstParsed[2]).toMatchObject({
+      type: "push",
+      channel: "orchestration.sessionDeleted",
+      sequence: 1,
+      data: { sessionId: "sess-1" },
+    });
+    const secondParsed = second.sent.map((message) => JSON.parse(message));
+    expect(secondParsed).toHaveLength(2);
+    expect(secondParsed[0]).toMatchObject({
+      type: "push",
+      channel: "orchestration.event",
+      sequence: 1,
+      data: { sessionId: "sess-1" },
+    });
+    expect(secondParsed[1]).toMatchObject({
+      type: "push",
+      channel: "orchestration.event",
+      sequence: 2,
+      data: { sessionId: "sess-1" },
+    });
   });
 });

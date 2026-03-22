@@ -10,6 +10,8 @@ import {
 } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { getWebAutoInstrumentations } from "@opentelemetry/auto-instrumentations-web";
 import { BatchSpanProcessor, WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 
@@ -40,7 +42,22 @@ export function initDashboardTracing(): void {
     ],
   });
 
-  provider.register();
+  provider.register(); // Sets up StackContextManager + W3CTraceContextPropagator
+
+  registerInstrumentations({
+    tracerProvider: provider,
+    instrumentations: [
+      getWebAutoInstrumentations({
+        "@opentelemetry/instrumentation-fetch": {
+          propagateTraceHeaderCorsUrls: /.*/,
+          clearTimingResources: true,
+        },
+        "@opentelemetry/instrumentation-xml-http-request": {
+          enabled: false,
+        },
+      }),
+    ],
+  });
 }
 
 export function getTracer(): Tracer {

@@ -36,6 +36,7 @@ import {
 import { ExportResultCode, W3CTraceContextPropagator, type ExportResult } from "@opentelemetry/core";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -455,6 +456,11 @@ export function initTracing(options: TracingInitOptions = {}): void {
   });
   trace.setGlobalTracerProvider(_tracerProvider);
 
+  // Enable async context propagation so nested withSpan calls chain into trace trees
+  const ctxManager = new AsyncLocalStorageContextManager();
+  ctxManager.enable();
+  context.setGlobalContextManager(ctxManager);
+
   const metricReaders = [];
   _metricSnapshotExporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
   metricReaders.push(new PeriodicExportingMetricReader({
@@ -501,6 +507,7 @@ export async function shutdownTracing(): Promise<void> {
   trace.disable();
   metrics.disable();
   propagation.disable();
+  context.disable();
   _metricSnapshotExporter = null;
   _daemonMetrics = null;
   _initialized = false;

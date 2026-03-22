@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { context, propagation } from "@opentelemetry/api";
 import type { PushChannel, PushEnvelope } from "@orka/core";
 import { getDaemonMetrics, withSpanSync } from "./tracing";
 
@@ -151,11 +152,14 @@ export class PushHub {
     sequence = this.nextDirectSequence(ws),
   ): PushEnvelope<T> {
     return withSpanSync("orka.push.send", { "orka.channel": channel, "orka.sequence": sequence }, () => {
+      const carrier: Record<string, string> = {};
+      propagation.inject(context.active(), carrier);
       const envelope: PushEnvelope<T> = {
         type: "push",
         channel,
         sequence,
         data,
+        ...(carrier["traceparent"] ? { traceparent: carrier["traceparent"] } : {}),
       };
 
       let payload = JSON.stringify(envelope);

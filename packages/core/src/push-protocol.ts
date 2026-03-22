@@ -20,6 +20,7 @@ export interface PushEnvelope<T = unknown> {
   channel: PushChannel;
   sequence: number;
   data: T;
+  traceparent?: string;
 }
 
 export const PROTOCOL_VERSION = 1;
