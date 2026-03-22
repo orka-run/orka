@@ -59,9 +59,10 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
   // Synthesize a diff from Edit args (old_string + new_string) so the user
   // sees a visual diff instead of raw key-value pairs.
   const editDiff = synthesizeEditDiff(argsRecord);
-  // Filter old_string/new_string out of ArgsDetail when we have a synthetic diff
+  // Filter old_string/new_string/file_path out of ArgsDetail when we have a synthetic diff
+  // (file_path is already in the tool title, old/new strings are shown as diff)
   const filteredArgs = editDiff && argsRecord
-    ? Object.fromEntries(Object.entries(argsRecord).filter(([k]) => k !== "old_string" && k !== "new_string"))
+    ? Object.fromEntries(Object.entries(argsRecord).filter(([k]) => k !== "old_string" && k !== "new_string" && k !== "file_path"))
     : argsRecord;
   const hasFilteredArgs = filteredArgs != null && Object.keys(filteredArgs).length > 0;
 
@@ -832,7 +833,7 @@ function synthesizeEditDiff(args: Record<string, unknown> | null): ParsedDetail 
 
   return {
     kind: "edit",
-    label: path ?? "Edit diff",
+    label: "Changes",
     ...(path ? { path } : {}),
     content: diffLines.join("\n"),
   };
