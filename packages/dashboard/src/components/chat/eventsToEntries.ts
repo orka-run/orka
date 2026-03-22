@@ -599,12 +599,13 @@ export function eventsToEntries(
       const title = shortenPath(event.title ?? event.itemType, workDir);
       const detail = shortenPath(event.detail ?? "", workDir);
       const isInProgress = !completedItemIds.has(event.itemId);
+      const detailIsRedundant = !detail || detail === title || title.includes(detail);
       const summary = isAgent
         ? (isInProgress ? "In progress…" : "Completed")
-        : (detail && detail !== title ? detail : (isInProgress ? "In progress…" : "Completed"));
+        : (detailIsRedundant ? (isInProgress ? "In progress…" : "Completed") : detail);
       // For agent tools, detail duplicates the description already in the title — skip it.
       // Also strip redundant args (description, subagent_type) that clutter the UI.
-      const detailsList = isAgent ? [] : (detail && detail !== title ? [detail] : []);
+      const detailsList = isAgent ? [] : (detailIsRedundant ? [] : [detail]);
       const args = isAgent ? stripAgentArgs(event.args, title) : event.args;
 
       const subTools = isAgent ? agentSubTools.get(event.itemId) : undefined;
@@ -635,12 +636,13 @@ export function eventsToEntries(
       const title = shortenPath(event.title ?? meta?.title ?? itemType, workDir);
       const startedDetail = meta?.detail ? shortenPath(meta.detail, workDir) : "";
       const outputDetail = event.detail ? shortenPath(event.detail, workDir) : "";
+      const startedDetailRedundant = !startedDetail || startedDetail === title || title.includes(startedDetail);
       const summary = isAgentCompleted
         ? "Completed"
-        : (startedDetail && startedDetail !== title ? startedDetail : "Completed");
+        : (startedDetailRedundant ? "Completed" : startedDetail);
       const detailContent = isAgentCompleted
         ? ""
-        : (outputDetail || (startedDetail !== title ? startedDetail : ""));
+        : (outputDetail && !title.includes(outputDetail) ? outputDetail : (startedDetailRedundant ? "" : startedDetail));
       const rawArgs = meta?.args ?? event.args;
       const args = isAgentCompleted ? stripAgentArgs(rawArgs, title) : rawArgs;
       const completedSubTools = isAgentCompleted ? agentSubTools.get(event.itemId) : undefined;
