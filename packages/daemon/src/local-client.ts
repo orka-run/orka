@@ -1128,6 +1128,7 @@ function sessionItemToListResponse(
   tags: string[],
   orkaHome: string,
   hasLiveHandle: boolean,
+  eventCount: number,
 ): SessionListResponse {
   const allowedActions = computeAllowedActions(item, hasLiveHandle, hasSessionWorktree(item, orkaHome));
   return {
@@ -1149,18 +1150,20 @@ function sessionItemToListResponse(
     permissionMode: item.permissionMode ?? null,
     noWorktree: item.noWorktree ?? false,
     tags,
+    eventCount,
   };
 }
 
 function sessionItemsToListResponse(
-  db: { getSessionTagsBatch(ids: string[]): Map<string, string[]> },
+  db: { getSessionTagsBatch(ids: string[]): Map<string, string[]>; getEventCountBatch(ids: string[]): Map<string, number> },
   orkaHome: string,
   hasHandle: (sessionId: string) => boolean,
   items: SessionListItem[],
 ): SessionListResponse[] {
   const ids = items.map((i) => i.id);
   const tagMap = db.getSessionTagsBatch(ids);
-  return items.map((item) => sessionItemToListResponse(item, tagMap.get(item.id) ?? [], orkaHome, hasHandle(item.id)));
+  const countMap = db.getEventCountBatch(ids);
+  return items.map((item) => sessionItemToListResponse(item, tagMap.get(item.id) ?? [], orkaHome, hasHandle(item.id), countMap.get(item.id) ?? 0));
 }
 
 /** Capture committed changes on the session branch vs the parent branch. */

@@ -184,6 +184,7 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
           permissionMode: request.permissionMode ?? null,
           // SpawnRequest.tags is optional — fallback to empty array for the optimistic summary
           tags: request.tags ?? [],
+          eventCount: 0,
           nodeId: request.nodeId ?? null,
           allowedActions,
         };

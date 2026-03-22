@@ -751,6 +751,22 @@ export class DatabaseRepository {
     });
   }
 
+  /** Batch-fetch event counts for multiple sessions. Returns a map of sessionId → count. */
+  getEventCountBatch(sessionIds: string[]): Map<string, number> {
+    if (sessionIds.length === 0) return new Map();
+    return withSpanSync("orka.db.getEventCountBatch", { "orka.session.count": sessionIds.length }, () => {
+      const placeholders = sessionIds.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(`SELECT session_id, COUNT(*) as cnt FROM orchestration_events WHERE session_id IN (${placeholders}) GROUP BY session_id`)
+        .all(...sessionIds) as { session_id: string; cnt: number }[];
+      const map = new Map<string, number>();
+      for (const row of rows) {
+        map.set(row.session_id, row.cnt);
+      }
+      return map;
+    });
+  }
+
   /** Batch-fetch tags for multiple sessions. Returns a map of sessionId → tags[]. */
   getSessionTagsBatch(sessionIds: string[]): Map<string, string[]> {
     if (sessionIds.length === 0) return new Map();

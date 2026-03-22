@@ -166,6 +166,7 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
       : connectionStatus === "reconnecting"
         ? "Reconnecting…"
         : "Connecting…";
+    const eventCount = session?.eventCount;
     return (
       <div className="flex h-full items-center justify-center rounded-sm border border-border bg-surface">
         <div className="flex flex-col items-center gap-1.5 text-[12px] text-ink-muted">
@@ -173,6 +174,9 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
             <LoaderCircle className="h-4 w-4 animate-spin" />
             {label}
           </div>
+          {isConnected && eventCount != null && eventCount > 0 ? (
+            <span className="text-[10px] text-ink-muted/60">{String(eventCount)} events</span>
+          ) : null}
         </div>
       </div>
     );

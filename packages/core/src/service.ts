@@ -77,6 +77,8 @@ export interface SessionListResponse {
   tags: string[];
   /** True if session runs in-place (no worktree). */
   noWorktree: boolean;
+  /** Number of orchestration events for this session (for loading progress). */
+  eventCount: number;
   // No: workspaceId, logFile, rawLogFile, taskId, workingDir, systemPrompt, allowedTools, env
 }
 

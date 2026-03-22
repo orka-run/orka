@@ -75,6 +75,7 @@ function mockListResponse(overrides: Partial<SessionListResponse> = {}): Session
     permissionMode: null,
     noWorktree: false,
     tags: [],
+    eventCount: 0,
     ...overrides,
   };
 }

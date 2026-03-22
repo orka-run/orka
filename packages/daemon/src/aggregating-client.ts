@@ -278,6 +278,7 @@ export function createAggregatingClient(
       permissionMode: null,
       noWorktree: false,
       tags: [],
+      eventCount: 0,
     };
   }
 

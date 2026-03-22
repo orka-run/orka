@@ -51,6 +51,7 @@ function makeSession(overrides: Partial<SessionListResponse> = {}): SessionListR
     permissionMode: null,
     noWorktree: false,
     tags: [],
+    eventCount: 0,
     ...overrides,
   };
 }
@@ -91,6 +92,7 @@ describe("sessionStore", () => {
         parentSessionId: null,
         permissionMode: null,
         tags: [],
+        eventCount: 0,
         nodeId: null,
         allowedActions: [],
       },
@@ -130,6 +132,7 @@ describe("sessionStore", () => {
           parentSessionId: null,
           permissionMode: null,
           tags: [],
+          eventCount: 0,
           nodeId: null,
           allowedActions: [],
         },
@@ -165,6 +168,7 @@ describe("sessionStore", () => {
           parentSessionId: null,
           permissionMode: null,
           tags: [],
+          eventCount: 0,
           nodeId: null,
           allowedActions: [],
         },
