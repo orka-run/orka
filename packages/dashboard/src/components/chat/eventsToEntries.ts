@@ -142,11 +142,6 @@ function stripAgentArgs(args: unknown, _title: string): unknown {
   const kept: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(record)) {
     if (k === "description" || k === "subagent_type") continue;
-    // Keep prompt but truncate — it's useful context but can be huge
-    if (k === "prompt" && typeof v === "string" && v.length > 200) {
-      kept[k] = `${v.slice(0, 200)}…`;
-      continue;
-    }
     kept[k] = v;
   }
   return Object.keys(kept).length > 0 ? kept : undefined;
