@@ -240,16 +240,32 @@ export class WsTransport {
   }
 
   /**
-   * Immediately attempt reconnection if the WebSocket is dead.
+   * Immediately attempt reconnection if the WebSocket is dead or stale.
    * Called on page visibility change and network online events
    * to recover from mobile browser background throttling.
    */
   private tryImmediateReconnect(): void {
     if (this.disposed || !this.shouldReconnect) return;
-    // Already connected or connecting — nothing to do
-    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-      return;
+
+    if (this.ws) {
+      if (this.ws.readyState === WebSocket.OPEN) {
+        // Connection looks alive — nothing to do
+        return;
+      }
+      if (this.ws.readyState === WebSocket.CONNECTING) {
+        // WS stuck in CONNECTING from a background reconnect attempt.
+        // If it's been connecting for >5s, it's likely a zombie — kill it.
+        const elapsed = now() - this.connectStartedAt;
+        if (elapsed < 5_000) return;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.close();
+        this.ws = null;
+      }
     }
+
     // Cancel any pending backoff timer and reconnect immediately
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
