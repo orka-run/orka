@@ -21,6 +21,7 @@ export function useChatTimeline({
   const client = useRpcClient();
   const getCachedTimeline = useTimelineCache((state) => state.get);
   const setCachedTimeline = useTimelineCache((state) => state.set);
+  const hydrateTimeline = useTimelineCache((state) => state.hydrate);
 
   const [events, setEvents] = useState<OrchestrationEvent[]>([]);
   const [entries, setEntries] = useState<ChatEntry[]>([]);
@@ -37,18 +38,28 @@ export function useChatTimeline({
 
   const seenIdsRef = useRef(new Set<string>());
 
+  /** Apply a complete event list to all state (events, entries, seenIds). */
+  const applyEvents = useCallback((evts: OrchestrationEvent[]) => {
+    eventsRef.current = evts;
+    seenIdsRef.current = new Set<string>();
+    for (const e of evts) if (e.eventId) seenIdsRef.current.add(e.eventId);
+    setEvents(evts);
+    setEntries(eventsToEntries(evts, initialPromptRef.current, projectPathRef.current));
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Effect 1: Initial load — memory → IDB hydration → delta/full server fetch
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
     eventsRef.current = [];
     seenIdsRef.current = new Set();
 
-    const cached = getCachedTimeline(sessionId);
-    if (cached) {
-      const filtered = cached.filter((event) => event.sessionId === sessionId);
-      eventsRef.current = filtered;
-      for (const e of filtered) if (e.eventId) seenIdsRef.current.add(e.eventId);
-      setEvents(filtered);
-      setEntries(eventsToEntries(filtered, initialPromptRef.current, projectPathRef.current));
+    // Step 1: Try in-memory cache for instant render
+    const memCached = getCachedTimeline(sessionId);
+    if (memCached) {
+      const filtered = memCached.filter((event) => event.sessionId === sessionId);
+      applyEvents(filtered);
       setIsLoading(false);
       onSelectionLoadSettledRef.current?.("ok");
     } else {
@@ -60,40 +71,55 @@ export function useChatTimeline({
 
     async function load() {
       try {
-        const response = await client.getSessionTimeline({ sessionId });
-        if (cancelled) {
-          return;
+        // Step 2: If not in memory, try IDB hydration
+        let cachedEvents = memCached;
+        if (!cachedEvents) {
+          const hydrated = await hydrateTimeline(sessionId);
+          if (cancelled) return;
+          if (hydrated) {
+            cachedEvents = hydrated.filter((e) => e.sessionId === sessionId);
+            applyEvents(cachedEvents);
+            setIsLoading(false);
+          }
         }
 
-        const timeline = response.events;
-        const filtered = timeline.filter((event: OrchestrationEvent) => event.sessionId === sessionId);
+        // Step 3: Delta fetch (offset = cached count) or full fetch
+        const cachedCount = cachedEvents?.length ?? 0;
+        const response = await client.getSessionTimeline({
+          sessionId,
+          ...(cachedCount > 0 ? { offset: cachedCount } : {}),
+        });
+        if (cancelled) return;
 
-        // Merge: fetched events + any WS events that arrived during fetch
-        const fetchedIds = new Set<string>();
-        for (const e of filtered) if (e.eventId) fetchedIds.add(e.eventId);
-        const wsOnly = eventsRef.current.filter((e) => e.eventId && !fetchedIds.has(e.eventId));
-        const merged = [...filtered, ...wsOnly];
+        if (cachedCount > 0 && response.total < cachedCount) {
+          // Cache stale (events deleted server-side, e.g. session retry) — full refetch
+          const full = await client.getSessionTimeline({ sessionId });
+          if (cancelled) return;
+          const merged = mergeServerWithWs(full.events, sessionId, eventsRef.current);
+          applyEvents(merged);
+          setCachedTimeline(sessionId, merged);
+        } else if (cachedCount > 0 && response.events.length > 0) {
+          // Delta — append new server events
+          const merged = appendDelta(response.events, sessionId, eventsRef.current, seenIdsRef.current);
+          applyEvents(merged);
+          setCachedTimeline(sessionId, merged);
+        } else if (cachedCount === 0) {
+          // Full fetch (no prior cache)
+          const merged = mergeServerWithWs(response.events, sessionId, eventsRef.current);
+          applyEvents(merged);
+          setCachedTimeline(sessionId, response.events);
+        }
+        // else: cachedCount > 0 && no new events — cache is current
 
-        seenIdsRef.current = new Set<string>();
-        for (const e of merged) if (e.eventId) seenIdsRef.current.add(e.eventId);
-
-        eventsRef.current = merged;
-        setEvents(merged);
-        setEntries(eventsToEntries(merged, initialPromptRef.current, projectPathRef.current));
-        setCachedTimeline(sessionId, timeline);
         onSelectionLoadSettledRef.current?.("ok");
       } catch (cause) {
-        if (cancelled) {
-          return;
-        }
-        if (!cached) {
+        if (cancelled) return;
+        if (eventsRef.current.length === 0) {
           setError(cause instanceof Error ? cause.message : "Failed to load chat timeline");
           onSelectionLoadSettledRef.current?.("error", cause);
         }
       } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+        if (!cancelled) setIsLoading(false);
       }
     }
 
@@ -101,8 +127,11 @@ export function useChatTimeline({
     return () => {
       cancelled = true;
     };
-  }, [client, getCachedTimeline, sessionId, setCachedTimeline]);
+  }, [applyEvents, client, getCachedTimeline, hydrateTimeline, sessionId, setCachedTimeline]);
 
+  // ---------------------------------------------------------------------------
+  // Effect 2: Live WS events
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     return transport.subscribe("orchestration.event", (data) => {
       const event = data as OrchestrationEvent;
@@ -120,6 +149,69 @@ export function useChatTimeline({
     });
   }, [sessionId, transport]);
 
+  // ---------------------------------------------------------------------------
+  // Effect 3: Delta fetch on WS reconnect
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let wasDisconnected = false;
+
+    const unsub = transport.onStateChange((snapshot) => {
+      if (snapshot.state === "connected" && wasDisconnected) {
+        void deltaFetchOnReconnect();
+      }
+      wasDisconnected = snapshot.state === "reconnecting" || snapshot.state === "disconnected";
+    });
+
+    async function deltaFetchOnReconnect() {
+      const current = eventsRef.current;
+      const offset = current.length;
+      try {
+        const response = await client.getSessionTimeline({
+          sessionId,
+          ...(offset > 0 ? { offset } : {}),
+        });
+
+        if (offset > 0 && response.total < offset) {
+          // Stale — full refetch
+          const full = await client.getSessionTimeline({ sessionId });
+          const merged = mergeServerWithWs(full.events, sessionId, eventsRef.current);
+          applyEvents(merged);
+          setCachedTimeline(sessionId, merged);
+        } else if (offset > 0 && response.events.length > 0) {
+          // Delta merge
+          const merged = appendDelta(response.events, sessionId, eventsRef.current, seenIdsRef.current);
+          applyEvents(merged);
+          setCachedTimeline(sessionId, merged);
+        } else if (offset === 0) {
+          // No prior events — full fetch
+          const merged = mergeServerWithWs(response.events, sessionId, eventsRef.current);
+          applyEvents(merged);
+          setCachedTimeline(sessionId, response.events);
+        }
+      } catch {
+        // Silent failure on reconnect — live WS events will fill gaps
+      }
+    }
+
+    return unsub;
+  }, [applyEvents, client, sessionId, setCachedTimeline, transport]);
+
+  // ---------------------------------------------------------------------------
+  // Effect 4: Persist accumulated WS events on session change / unmount
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const sid = sessionId;
+    return () => {
+      const current = eventsRef.current;
+      if (current.length > 0 && current[0]?.sessionId === sid) {
+        setCachedTimeline(sid, current);
+      }
+    };
+  }, [sessionId, setCachedTimeline]);
+
+  // ---------------------------------------------------------------------------
+  // Approval handling (unchanged)
+  // ---------------------------------------------------------------------------
   const handleApprovalResolve = useCallback(async (requestId: string, decision: "approve" | "deny") => {
     setEntries((prev) =>
       prev.map((entry) =>
@@ -151,4 +243,34 @@ export function useChatTimeline({
     error,
     handleApprovalResolve,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/** Merge server events with any WS events that arrived during the fetch. */
+function mergeServerWithWs(
+  serverEvents: OrchestrationEvent[],
+  sessionId: string,
+  currentEvents: OrchestrationEvent[],
+): OrchestrationEvent[] {
+  const filtered = serverEvents.filter((e) => e.sessionId === sessionId);
+  const fetchedIds = new Set<string>();
+  for (const e of filtered) if (e.eventId) fetchedIds.add(e.eventId);
+  const wsOnly = currentEvents.filter((e) => e.eventId && !fetchedIds.has(e.eventId));
+  return [...filtered, ...wsOnly];
+}
+
+/** Append new events from a delta fetch, deduplicating by eventId. */
+function appendDelta(
+  newServerEvents: OrchestrationEvent[],
+  sessionId: string,
+  currentEvents: OrchestrationEvent[],
+  seenIds: Set<string>,
+): OrchestrationEvent[] {
+  const filtered = newServerEvents.filter((e) => e.sessionId === sessionId);
+  const fresh = filtered.filter((e) => !e.eventId || !seenIds.has(e.eventId));
+  if (fresh.length === 0) return currentEvents;
+  return [...currentEvents, ...fresh];
 }

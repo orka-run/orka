@@ -20,6 +20,7 @@
     "@tanstack/react-query": "^5.90.0",
     "@tanstack/react-virtual": "^3.13.23",
     "highlight.js": "^11.11.1",
+    "idb-keyval": "^6.2.2",
     "lexical": "^0.41.0",
     "lucide-react": "^0.500.0",
     "react": "^19.0.0",
