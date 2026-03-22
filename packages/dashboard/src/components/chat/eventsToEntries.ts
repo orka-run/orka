@@ -329,6 +329,9 @@ export function eventsToEntries(
       .map((event) => `${event.rateLimitType}:${String(event.resetsAt)}`),
   );
   const completedItemIds = new Set<string>();
+  // Items that are represented by a BackgroundTaskCard (subagent.spawned) —
+  // skip their item.started/item.completed ToolEntry to avoid duplication.
+  const subagentItemIds = new Set<string>();
   const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
   const completedTaskIds = new Map<string, { summary?: string; status?: string; timestamp: string }>();
   const taskProgressByToolUseId = new Map<string, ToolProgressItem[]>();
@@ -372,6 +375,11 @@ export function eventsToEntries(
       } else {
         taskProgressByToolUseId.set(event.itemId, [item]);
       }
+    }
+    // Collect itemIds that have a subagent.spawned so we can skip the
+    // duplicate ToolEntry from item.started/item.completed — the BackgroundTaskCard covers it.
+    if (event.type === "subagent.spawned" && event.itemId) {
+      subagentItemIds.add(event.itemId);
     }
     // Also collect subagent.tool_use events into the same progress map
     if (event.type === "subagent.tool_use" && event.itemId && event.toolName) {
@@ -502,7 +510,7 @@ export function eventsToEntries(
     }
 
     if (event.type === "item.started") {
-      if (completedItemIds.has(event.itemId)) {
+      if (completedItemIds.has(event.itemId) || subagentItemIds.has(event.itemId)) {
         continue;
       }
 
@@ -526,6 +534,9 @@ export function eventsToEntries(
     }
 
     if (event.type === "item.completed") {
+      if (subagentItemIds.has(event.itemId)) {
+        continue;
+      }
       flushAssistant();
       const meta = startedMeta.get(event.itemId);
       const itemType = event.itemType !== "unknown" ? event.itemType : (meta?.itemType ?? event.itemType);
@@ -642,7 +653,6 @@ export function eventsToEntries(
         timestamp: event.timestamp,
         taskId: event.agentId,
         title: event.description ?? "Subagent",
-        ...(event.prompt ? { detail: event.prompt } : {}),
         status: completed ? "completed" : "running",
         toolCalls,
       });
