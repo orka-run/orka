@@ -2,6 +2,7 @@ import type { Session, SessionAction, SessionListResponse, SpawnRequest } from "
 import type { SessionDeletedData, SessionUpdatedData } from "@orka/core";
 import { create } from "zustand";
 import type { RpcClient } from "../lib/rpcClient";
+import { withDashboardSpan } from "../lib/tracing";
 
 const FALLBACK_TITLE_LENGTH = 80;
 const SELECTED_SESSION_KEY = "orka:selectedSession";
@@ -117,36 +118,42 @@ function createSessionState(set: (partial: Partial<SessionState> | ((state: Sess
       set((state) => ({ isLoading: state.sessions.length === 0, error: null }));
 
       try {
-        let allSummaries: SessionSummary[];
-        let nextSnapshotSequence = 0;
+        await withDashboardSpan("orka.dashboard.store.fetch_sessions", {
+          "orka.multi_node": !!(nodeIds && nodeIds.length > 0),
+        }, async (span) => {
+          let allSummaries: SessionSummary[];
+          let nextSnapshotSequence = 0;
 
-        if (nodeIds && nodeIds.length > 0) {
-          // Multi-node: fetch from each node in parallel, tag with nodeId
-          const results = await Promise.all(
-            nodeIds.map(async (nodeId) => {
-              const sessions = await client.listSessions(undefined, { node: nodeId });
-              return sessions.map((session) => toSessionSummary(session, { nodeId }));
-            }),
-          );
-          allSummaries = results.flat();
-        } else {
-          const snapshot = await client.listSessionsSnapshot();
-          allSummaries = snapshot.sessions.map((session) => toSessionSummary(session));
-          nextSnapshotSequence = snapshot.snapshotSequence;
-        }
+          if (nodeIds && nodeIds.length > 0) {
+            // Multi-node: fetch from each node in parallel, tag with nodeId
+            const results = await Promise.all(
+              nodeIds.map(async (nodeId) => {
+                const sessions = await client.listSessions(undefined, { node: nodeId });
+                return sessions.map((session) => toSessionSummary(session, { nodeId }));
+              }),
+            );
+            allSummaries = results.flat();
+          } else {
+            const snapshot = await client.listSessionsSnapshot();
+            allSummaries = snapshot.sessions.map((session) => toSessionSummary(session));
+            nextSnapshotSequence = snapshot.snapshotSequence;
+          }
 
-        set((state) => {
-          // Merge instead of replace — keeps existing data stable while updating
-          const merged = mergeSessions(state.sessions, allSummaries);
-          return {
-            sessions: merged,
-            selectedId: state.selectedId && merged.some((session) => session.id === state.selectedId)
-              ? state.selectedId
-              : null,
-            snapshotSequence: Math.max(state.snapshotSequence, nextSnapshotSequence),
-            isLoading: false,
-            error: null,
-          };
+          span.setAttribute("orka.session_count", allSummaries.length);
+
+          set((state) => {
+            // Merge instead of replace — keeps existing data stable while updating
+            const merged = mergeSessions(state.sessions, allSummaries);
+            return {
+              sessions: merged,
+              selectedId: state.selectedId && merged.some((session) => session.id === state.selectedId)
+                ? state.selectedId
+                : null,
+              snapshotSequence: Math.max(state.snapshotSequence, nextSnapshotSequence),
+              isLoading: false,
+              error: null,
+            };
+          });
         });
       } catch (error) {
         set({

@@ -27,7 +27,7 @@ import { SettingsView } from "./components/SettingsView";
 import { StatusBar } from "./components/StatusBar";
 import { WorkspaceDetailView } from "./components/WorkspaceDetailView";
 import { useMobileBreakpoint } from "./hooks/useMobileBreakpoint";
-import { getTracer, initDashboardTracing } from "./lib/tracing";
+import { getTracer, initDashboardTracing, startDashboardSpan, finishDashboardSpan } from "./lib/tracing";
 import { TransportContext, RpcClientContext } from "./lib/transportContext";
 import { RpcClient } from "./lib/rpcClient";
 import { loadNoiseKey, hexToBytes } from "./lib/noiseKeys";
@@ -308,8 +308,24 @@ function AppShell({ transport, client }: AppShellProps) {
     transport.connect();
 
     let wasReconnecting = false;
+    let reconnectSpan: { span: import("@opentelemetry/api").Span; startedAt: number } | null = null;
     const unsubscribeState = transport.onStateChange((connection) => {
       setConnectionStatus(connection.state, connection.reconnectAttempts);
+
+      if (connection.state === "reconnecting" && !reconnectSpan) {
+        reconnectSpan = startDashboardSpan("orka.dashboard.ws_reconnect", {
+          "orka.reconnect_attempt": connection.reconnectAttempts,
+        });
+      }
+      if (connection.state === "connected" && reconnectSpan) {
+        finishDashboardSpan(reconnectSpan.span, reconnectSpan.startedAt, "ok");
+        reconnectSpan = null;
+      }
+      if (connection.state === "disconnected" && reconnectSpan) {
+        finishDashboardSpan(reconnectSpan.span, reconnectSpan.startedAt, "error");
+        reconnectSpan = null;
+      }
+
       // On reconnect: fetch snapshot in background — merge keeps existing data visible
       if (connection.state === "connected" && wasReconnecting) {
         fetchSessionsWithNodes();
@@ -373,8 +389,12 @@ function AppShell({ transport, client }: AppShellProps) {
     });
 
     // Fire sessions + workspaces fetch immediately for faster first paint
+    const { span: loadSpan, startedAt: loadStart } = startDashboardSpan("orka.dashboard.initial_load");
     void fetchSessions(client).then(() => {
+      finishDashboardSpan(loadSpan, loadStart, "ok");
       setInitialLoadDone(true);
+    }).catch((err) => {
+      finishDashboardSpan(loadSpan, loadStart, "error", err);
     });
     void fetchWorkspaces(client);
 
