@@ -64,9 +64,16 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
   const filteredArgs = editDiff && argsRecord
     ? Object.fromEntries(Object.entries(argsRecord).filter(([k]) => k !== "old_string" && k !== "new_string" && k !== "file_path"))
     : argsRecord;
-  const hasFilteredArgs = filteredArgs != null && Object.keys(filteredArgs).length > 0;
 
-  if (details.length === 0 && !hasArgs && !editDiff) {
+  // Command tool: extract command string and show as code block
+  const commandStr = argsRecord && typeof argsRecord["command"] === "string" ? argsRecord["command"] : null;
+  const commandDesc = argsRecord && typeof argsRecord["description"] === "string" ? argsRecord["description"] as string : null;
+  const displayArgs = commandStr && filteredArgs
+    ? Object.fromEntries(Object.entries(filteredArgs).filter(([k]) => k !== "command" && k !== "description"))
+    : filteredArgs;
+  const hasFilteredArgs = displayArgs != null && Object.keys(displayArgs).length > 0;
+
+  if (details.length === 0 && !hasArgs && !editDiff && !commandStr) {
     return (
       <div className="rounded-sm border border-border bg-surface-alt px-2 py-1.5 font-mono text-[11px] text-ink-muted">
         No tool details recorded.
@@ -96,7 +103,10 @@ export function ToolCallDetails({ title, details, args, projectPath }: ToolCallD
 
   return (
     <div className="space-y-2">
-      {hasFilteredArgs ? <ArgsDetail args={filteredArgs} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
+      {commandStr ? (
+        <CommandBlock command={commandStr} description={commandDesc} />
+      ) : null}
+      {hasFilteredArgs ? <ArgsDetail args={displayArgs!} {...(projectPath !== undefined ? { projectPath } : {})} /> : null}
       {parsedDetails.map((detail, index) => (
         <ExpandableDetail
           key={`${detail.kind}-${detail.label}-${String(index)}`}
@@ -258,6 +268,20 @@ function DefaultDetail({ detail }: { detail: Extract<ParsedDetail, { kind: "defa
   );
 }
 
+/** Render a command as a shell code block with optional description. */
+function CommandBlock({ command, description }: { command: string; description: string | null }) {
+  return (
+    <div>
+      {description ? (
+        <div className="px-2 py-1 text-[10px] text-ink-muted">{description}</div>
+      ) : null}
+      <pre className="overflow-x-auto bg-surface px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-secondary">
+        <code>{command}</code>
+      </pre>
+    </div>
+  );
+}
+
 /** Render tool input args as key-value pairs with syntax-aware formatting. */
 function ArgsDetail({ args, projectPath }: { args: Record<string, unknown>; projectPath?: string | null }) {
   // Filter out very long values for summary, show them expandable
@@ -265,15 +289,10 @@ function ArgsDetail({ args, projectPath }: { args: Record<string, unknown>; proj
   if (entries.length === 0) return null;
 
   return (
-    <div className="overflow-hidden rounded-sm border border-border bg-surface">
-      <div className="border-b border-border px-2 py-1">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Input</span>
-      </div>
-      <div className="divide-y divide-border">
-        {entries.map(([key, value]) => (
-          <ArgEntry key={key} name={key} value={value} {...(projectPath !== undefined ? { projectPath } : {})} />
-        ))}
-      </div>
+    <div className="divide-y divide-border/50">
+      {entries.map(([key, value]) => (
+        <ArgEntry key={key} name={key} value={value} {...(projectPath !== undefined ? { projectPath } : {})} />
+      ))}
     </div>
   );
 }
