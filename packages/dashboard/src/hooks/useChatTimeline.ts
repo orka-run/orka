@@ -4,6 +4,9 @@ import { useTransport, useRpcClient } from "../lib/transportContext";
 import { useTimelineCache } from "../lib/timelineCache";
 import { eventsToEntries, type ChatEntry } from "../components/chat/eventsToEntries";
 
+/** Minimum interval between eventsToEntries rebuilds (ms). */
+const REBUILD_DEBOUNCE_MS = 80;
+
 interface UseChatTimelineOptions {
   sessionId: string;
   initialPrompt?: string;
@@ -37,6 +40,19 @@ export function useChatTimeline({
   onSelectionLoadSettledRef.current = onSelectionLoadSettled;
 
   const seenIdsRef = useRef(new Set<string>());
+  const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rebuildRafRef = useRef<number | null>(null);
+
+  /** Rebuild entries from current events (runs in rAF to avoid blocking input). */
+  const rebuildEntries = useCallback(() => {
+    const evts = eventsRef.current;
+    // Use rAF so the browser can process pending input/paint first
+    if (rebuildRafRef.current !== null) cancelAnimationFrame(rebuildRafRef.current);
+    rebuildRafRef.current = requestAnimationFrame(() => {
+      rebuildRafRef.current = null;
+      setEntries(eventsToEntries(evts, initialPromptRef.current, projectPathRef.current));
+    });
+  }, []);
 
   /** Apply a complete event list to all state (events, entries, seenIds). */
   const applyEvents = useCallback((evts: OrchestrationEvent[]) => {
@@ -44,8 +60,18 @@ export function useChatTimeline({
     seenIdsRef.current = new Set<string>();
     for (const e of evts) if (e.eventId) seenIdsRef.current.add(e.eventId);
     setEvents(evts);
-    setEntries(eventsToEntries(evts, initialPromptRef.current, projectPathRef.current));
-  }, []);
+    rebuildEntries();
+  }, [rebuildEntries]);
+
+  /** Schedule a debounced rebuild — used for high-frequency WS events. */
+  const scheduleRebuild = useCallback(() => {
+    if (rebuildTimerRef.current !== null) return; // already scheduled
+    rebuildTimerRef.current = setTimeout(() => {
+      rebuildTimerRef.current = null;
+      setEvents(eventsRef.current);
+      rebuildEntries();
+    }, REBUILD_DEBOUNCE_MS);
+  }, [rebuildEntries]);
 
   // ---------------------------------------------------------------------------
   // Effect 1: Initial load — memory → IDB hydration → delta/full server fetch
@@ -130,7 +156,7 @@ export function useChatTimeline({
   }, [applyEvents, client, getCachedTimeline, hydrateTimeline, sessionId, setCachedTimeline]);
 
   // ---------------------------------------------------------------------------
-  // Effect 2: Live WS events
+  // Effect 2: Live WS events — accumulate and debounce rebuild
   // ---------------------------------------------------------------------------
   useEffect(() => {
     return transport.subscribe("orchestration.event", (data) => {
@@ -144,10 +170,9 @@ export function useChatTimeline({
       if (event.eventId) seenIdsRef.current.add(event.eventId);
 
       eventsRef.current = [...eventsRef.current, event];
-      setEvents(eventsRef.current);
-      setEntries(eventsToEntries(eventsRef.current, initialPromptRef.current, projectPathRef.current));
+      scheduleRebuild();
     });
-  }, [sessionId, transport]);
+  }, [scheduleRebuild, sessionId, transport]);
 
   // ---------------------------------------------------------------------------
   // Effect 3: Delta fetch on WS reconnect
@@ -197,11 +222,21 @@ export function useChatTimeline({
   }, [applyEvents, client, sessionId, setCachedTimeline, transport]);
 
   // ---------------------------------------------------------------------------
-  // Effect 4: Persist accumulated WS events on session change / unmount
+  // Effect 4: Persist + cleanup timers on session change / unmount
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const sid = sessionId;
     return () => {
+      // Cancel pending debounce/rAF
+      if (rebuildTimerRef.current !== null) {
+        clearTimeout(rebuildTimerRef.current);
+        rebuildTimerRef.current = null;
+      }
+      if (rebuildRafRef.current !== null) {
+        cancelAnimationFrame(rebuildRafRef.current);
+        rebuildRafRef.current = null;
+      }
+      // Persist accumulated events
       const current = eventsRef.current;
       if (current.length > 0 && current[0]?.sessionId === sid) {
         setCachedTimeline(sid, current);
