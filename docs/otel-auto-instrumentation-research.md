@@ -4,7 +4,11 @@ _Date: 2026-03-22_
 
 ## Executive Summary
 
-We currently have 278 manual `withSpan`/`withSpanSync` calls across 48 files — but 98% of spans are root spans (no parent-child relationships), making traces nearly useless for debugging request flows. The biggest wins come from **fixing trace context propagation** (not adding more spans) and **adding browser auto-instrumentation** (zero-code traces for every fetch call and page load).
+We currently have 278 manual `withSpan`/`withSpanSync` calls across 48 files — but 98% of spans are root spans (no parent-child relationships), making traces nearly useless for debugging request flows.
+
+**Root cause found**: The daemon and relay use `BasicTracerProvider` but never register a `ContextManager`. Without one, `context.active()` always returns `ROOT_CONTEXT`, so every span becomes a root. The fix is 3 lines: register `AsyncLocalStorageContextManager` (works in Bun). This instantly fixes all 278 existing spans.
+
+The next biggest win is **browser auto-instrumentation** — zero-code traces for every fetch call and page load.
 
 ---
 
@@ -61,97 +65,61 @@ We currently have 278 manual `withSpan`/`withSpanSync` calls across 48 files —
 
 ## 2. The 98% Root Span Problem: Diagnosis and Fix
 
-### Why 98% of Spans Are Roots
+### Root Cause: Missing Context Manager Registration
 
-The trace context propagation chain has **three breaks**:
+**Confirmed experimentally**: The daemon's `initTracing()` uses `BasicTracerProvider` but **never registers a `ContextManager`**. Without one, `@opentelemetry/api` falls back to `NoopContextManager`, which always returns `ROOT_CONTEXT`. This means `startActiveSpan` never knows about any parent span — every `withSpan` call creates a root span.
 
-#### Break 1: Dashboard → Daemon (ALREADY FIXED)
-- `WsTransport` injects `traceparent` into outgoing RPC requests ✅
-- `rpc-handler.ts` extracts `traceparent` and creates child spans ✅
-- Tests verify this works ✅
+The same bug exists in the relay (`packages/relay/src/tracing.ts`).
 
-#### Break 2: RPC Handler → LocalClient (PARTIALLY BROKEN)
-- `rpc-handler.ts` line 53 starts `orka.rpc.handle` span with the extracted parent context ✅
-- `dispatch()` at line 105 calls `withSpan("orka.rpc.dispatch", ...)` which uses `context.active()` — this **should** chain because `startActiveSpan` sets the span as active ✅
-- But the actual service calls (e.g., `svc.spawn(params)` at line 112) happen inside the `withSpan` callback, so they should inherit the active context...
-- **IF `AsyncLocalStorage` works correctly across async boundaries in Bun** ⚠️
+**Why the dashboard works**: `WebTracerProvider` (from `@opentelemetry/sdk-trace-web`) calls `.register()` which sets up the browser's `StackContextManager`. The daemon uses `BasicTracerProvider` (from `@opentelemetry/sdk-trace-base`) which is platform-agnostic and does NOT auto-register any context manager.
 
-#### Break 3: LocalClient → Orchestrator (MOSTLY WORKING)
-- `LocalClient` methods use `withSpan` which uses `context.active()` — should chain if async context works ✅
-- Orchestrator methods also use `withSpan` with `context.active()` ✅
+**Why not `NodeTracerProvider`?** `NodeTracerProvider` from `@opentelemetry/sdk-trace-node` would have auto-registered `AsyncLocalStorageContextManager` — but that package is not installed, and the code calls `trace.setGlobalTracerProvider()` directly instead of `.register()`.
 
-### Root Cause: Likely AsyncLocalStorage Issues in Bun
+**Bun compatibility confirmed**: Bun fully supports `AsyncLocalStorage` from `node:async_hooks`. No special flags needed. The `@opentelemetry/context-async-hooks` package works correctly in Bun — verified with 3-level async nesting producing correct parent-child span chains.
 
-Bun supports `AsyncLocalStorage` but has had historical issues with context loss across certain async patterns:
-- `Bun.spawn` callbacks may not preserve async context
-- Some `setTimeout`/`setInterval` patterns can lose context
-- WebSocket message handlers may start with fresh context (not inheriting from the connection setup)
+### Fix: Register AsyncLocalStorageContextManager (3 lines)
 
-**The most likely culprit**: When the daemon's WebSocket server receives an RPC message via Bun's WS `message` handler, the handler starts with a fresh async context (no parent). Even though `rpc-handler.ts` extracts `traceparent` from the message and creates a child span, the `startActiveSpan` sets up context correctly — but any async operations inside may lose it if Bun's `AsyncLocalStorage` doesn't propagate through certain code paths.
-
-### Fix: Explicit Context Propagation (3 changes)
-
-Instead of relying on `context.active()` (which depends on `AsyncLocalStorage` working perfectly), explicitly pass context through the call chain:
-
-**Change 1: Pass context from dispatch to service methods**
-
-The `dispatch` function already receives `parentContext` and creates a span. The span context should be explicitly passed to LocalClient methods:
+**Daemon** (`packages/daemon/src/tracing.ts`, after line 456):
 
 ```typescript
-// rpc-handler.ts dispatch — current
-case "spawn":
-  return svc.spawn(params);
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 
-// rpc-handler.ts dispatch — fixed
-case "spawn":
-  return svc.spawn(params, { traceContext: context.active() });
+// In initTracing(), after trace.setGlobalTracerProvider():
+const ctxManager = new AsyncLocalStorageContextManager();
+ctxManager.enable();
+context.setGlobalContextManager(ctxManager);
 ```
 
-This requires adding an optional `traceContext` parameter to OrkaService methods (or using a context object).
+**Relay** (`packages/relay/src/tracing.ts`): Same change.
 
-**Change 2: Thread context in LocalClient**
+**Dependency**: `bun add @opentelemetry/context-async-hooks` (v2.6.0 matches existing OTel SDK versions).
+
+**Alternative — inline the context manager** (~15 lines, no extra dependency):
 
 ```typescript
-// local-client.ts — current
-async spawn(params: SpawnParams): Promise<SpawnResult> {
-  return withSpan("orka.local.spawn", { ... }, async (span) => {
-    // ...
-  });
-}
+import { AsyncLocalStorage } from "node:async_hooks";
+import { ROOT_CONTEXT, context, type Context, type ContextManager } from "@opentelemetry/api";
 
-// local-client.ts — fixed
-async spawn(params: SpawnParams, opts?: { traceContext?: Context }): Promise<SpawnResult> {
-  return withSpan("orka.local.spawn", { ... }, async (span) => {
-    // ...
-  }, opts?.traceContext);
+class BunContextManager implements ContextManager {
+  private _als = new AsyncLocalStorage<Context>();
+  active(): Context { return this._als.getStore() ?? ROOT_CONTEXT; }
+  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
+    ctx: Context, fn: F, thisArg?: ThisParameterType<F>, ...args: A
+  ): ReturnType<F> {
+    const cb = thisArg == null ? fn : fn.bind(thisArg);
+    return this._als.run(ctx, cb as never, ...args);
+  }
+  bind<T>(_ctx: Context, target: T): T { return target; }
+  enable(): this { return this; }
+  disable(): this { this._als.disable(); return this; }
 }
 ```
 
-**Change 3: Alternative — inject context at the WS message handler level**
+**Effort estimate**: 15 minutes. This single change fixes all 278 existing `withSpan` calls — they'll automatically chain into proper trace trees.
 
-Instead of modifying every service method signature, set the async context at the WS message boundary:
+### Secondary Bug: Relay FileSpanExporter parentSpanId
 
-```typescript
-// server.ts — wrap message handler
-import { context, trace } from "@opentelemetry/api";
-
-ws.on("message", (raw: string) => {
-  // Extract traceparent from message, set as active context
-  const req = JSON.parse(raw);
-  const parentCtx = req.traceparent
-    ? propagation.extract(ROOT_CONTEXT, { traceparent: req.traceparent })
-    : ROOT_CONTEXT;
-
-  // Run entire RPC handling within this context
-  context.with(parentCtx, () => {
-    handleRpcRequest(ctx, svc, raw);
-  });
-});
-```
-
-This is the **cleanest fix** — wrap the message handler with `context.with()` so ALL downstream code inherits the correct parent via `context.active()`. No signature changes needed.
-
-**Effort estimate**: ~2 hours for Change 3 (WS message handler context injection). This single change should fix most root span issues for CLI→daemon traces.
+The relay's `FileSpanExporter` accesses `(span as unknown as Record<string, unknown>)["parentSpanId"]` which doesn't exist on OTel SDK v2.x `ReadableSpan` objects. The correct property is `span.parentSpanContext?.spanId` (which the daemon's serializer already uses at line 278). This should be fixed when addressing the relay context manager.
 
 ---
 
@@ -348,12 +316,15 @@ Our daemon already exports OTLP directly to the backend. Adding a Collector woul
 
 ## 6. Priority-Ordered Action Items
 
-### P0: Fix Root Span Problem (2 hours)
+### P0: Register AsyncLocalStorageContextManager (15 min)
 
 **The single highest-value change.** Goes from 98% root spans to proper trace trees.
 
-1. Wrap the WS `message` handler in `server.ts` with `context.with(extractedContext, ...)` so all downstream code inherits the trace context from the incoming RPC request.
-2. Verify with a test: spawn a session from CLI, check `traces.jsonl` — the `orka.cli.spawn` → `orka.rpc.handle` → `orka.rpc.dispatch` → `orka.local.spawn` → `orka.orchestrator.spawn` chain should all share one `traceId`.
+1. `bun add @opentelemetry/context-async-hooks`
+2. In daemon `initTracing()`: register `AsyncLocalStorageContextManager` via `context.setGlobalContextManager()`.
+3. Same change in relay `initTracing()`.
+4. Fix relay `FileSpanExporter` to use `span.parentSpanContext?.spanId` instead of `span["parentSpanId"]`.
+5. Verify: spawn a session from CLI, check `traces.jsonl` — the `orka.cli.spawn` → `orka.rpc.handle` → `orka.rpc.dispatch` → `orka.local.spawn` → `orka.orchestrator.spawn` chain should all share one `traceId`.
 
 ### P1: Dashboard Auto-Instrumentation (1 hour)
 
