@@ -29,6 +29,8 @@ export function useChatTimeline({
   const [events, setEvents] = useState<OrchestrationEvent[]>([]);
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  /** True when cache is rendered but delta fetch is still in flight. */
+  const [isFetchingDelta, setIsFetchingDelta] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const eventsRef = useRef<OrchestrationEvent[]>([]);
@@ -111,6 +113,7 @@ export function useChatTimeline({
 
         // Step 3: Delta fetch (offset = cached count) or full fetch
         const cachedCount = cachedEvents?.length ?? 0;
+        if (cachedCount > 0) setIsFetchingDelta(true);
         const response = await client.getSessionTimeline({
           sessionId,
           ...(cachedCount > 0 ? { offset: cachedCount } : {}),
@@ -145,7 +148,10 @@ export function useChatTimeline({
           onSelectionLoadSettledRef.current?.("error", cause);
         }
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          setIsLoading(false);
+          setIsFetchingDelta(false);
+        }
       }
     }
 
@@ -275,6 +281,7 @@ export function useChatTimeline({
     entries,
     setEntries,
     isLoading,
+    isFetchingDelta,
     error,
     handleApprovalResolve,
   };

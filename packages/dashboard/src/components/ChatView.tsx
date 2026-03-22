@@ -10,6 +10,7 @@ import { useChatTimeline } from "../hooks/useChatTimeline";
 import { useSessionStore } from "../stores/sessionStore";
 import { useRpcClient } from "../lib/transportContext";
 import { useChatUiStore } from "../stores/chatUiStore";
+import { useConnectionStore } from "../stores/connectionStore";
 import { ChatTimelineEntry, ThinkingIndicator } from "./chat/TimelineEntry";
 import { QueuedMessageBar } from "./chat/QueuedMessageBar";
 import { deriveThinkingState, type ChatEntry, type UserEntry } from "./chat/eventsToEntries";
@@ -35,9 +36,10 @@ function canCancelTurn(allowedActions: SessionSummary["allowedActions"]): boolea
 export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isMobile = false }: ChatViewProps) {
   const session = useSessionStore((state) => state.sessions.find((item) => item.id === sessionId) ?? null);
   const client = useRpcClient();
+  const connectionStatus = useConnectionStore((state) => state.status);
   const expandedGroups = useChatUiStore((state) => state.sessions[sessionId]?.expandedGroups ?? EMPTY_SET);
   const collapsedGroups = useChatUiStore((state) => state.sessions[sessionId]?.collapsedGroups ?? EMPTY_SET);
-  const { events, entries, setEntries, isLoading, error, handleApprovalResolve } = useChatTimeline({
+  const { events, entries, setEntries, isLoading, isFetchingDelta, error, handleApprovalResolve } = useChatTimeline({
     sessionId,
     ...(initialPrompt !== undefined ? { initialPrompt } : {}),
     ...(session?.projectPath ? { projectPath: session.projectPath } : {}),
@@ -158,11 +160,19 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
   }
 
   if (isLoading) {
+    const isConnected = connectionStatus === "connected";
+    const label = isConnected
+      ? "Loading timeline…"
+      : connectionStatus === "reconnecting"
+        ? "Reconnecting…"
+        : "Connecting…";
     return (
       <div className="flex h-full items-center justify-center rounded-sm border border-border bg-surface">
-        <div className="flex items-center gap-2 text-[12px] text-ink-muted">
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-          Loading chat timeline…
+        <div className="flex flex-col items-center gap-1.5 text-[12px] text-ink-muted">
+          <div className="flex items-center gap-2">
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+            {label}
+          </div>
         </div>
       </div>
     );
@@ -185,6 +195,12 @@ export function ChatView({ sessionId, initialPrompt, onSelectionLoadSettled, isM
           onScroll={handleScroll}
           className={`h-full overflow-y-auto ${isMobile ? "px-1 py-1" : "px-2 py-2"}`}
         >
+          {isFetchingDelta ? (
+            <div className="flex items-center justify-center gap-1.5 py-1 text-[10px] text-ink-muted">
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              Syncing new events…
+            </div>
+          ) : null}
           {timelineEntries.length === 0 ? (
             <div className="py-8 text-center text-[12px] text-ink-muted">No messages yet.</div>
           ) : (
