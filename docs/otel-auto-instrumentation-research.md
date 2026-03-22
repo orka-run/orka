@@ -23,10 +23,10 @@ The next biggest win is **browser auto-instrumentation** — zero-code traces fo
 | `@opentelemetry/instrumentation-document-load` | Navigation timing, resource loading, DOMContentLoaded, LCP | **Yes** | **Add** — free page load metrics |
 | `@opentelemetry/instrumentation-user-interaction` | Spans for click/input events on DOM elements | **Yes** | Nice-to-have — links user clicks to resulting fetch calls |
 | `@opentelemetry/instrumentation-xml-http-request` | Auto-traces `XMLHttpRequest` | Yes but irrelevant | **Skip** — dashboard only uses `fetch` |
-| `@opentelemetry/auto-instrumentations-web` | Meta-package bundling all four above | Yes | Can use instead of individual packages |
-| `@opentelemetry/context-zone` | `ZoneContextManager` — Zone.js-based async context tracking in browser | Yes (adds ~50KB) | **Required** for linking fetch spans to parent user-interaction spans |
+| `@opentelemetry/auto-instrumentations-web` | Meta-package bundling all four above | Yes | **Use this** — simpler than individual packages |
+| `@opentelemetry/context-zone` | `ZoneContextManager` — Zone.js-based async context tracking in browser | Yes but **not recommended** (~1MB, poorly maintained, breaks ES2017+ async/await) | **Skip** — `StackContextManager` (default) is sufficient |
 
-**Key insight from OTel demo**: The demo frontend uses `@opentelemetry/auto-instrumentations-web` with `ZoneContextManager` and `propagateTraceHeaderCorsUrls: /.*/` to inject `traceparent` headers on ALL outbound fetch requests. This is what connects frontend traces to backend traces automatically.
+**Key insight from OTel demo**: The demo frontend uses `@opentelemetry/auto-instrumentations-web` with `propagateTraceHeaderCorsUrls: /.*/` to inject `traceparent` headers on ALL outbound fetch requests. This is what connects frontend traces to backend traces automatically. The demo uses `ZoneContextManager` for async context in the browser, but this is a legacy approach — the default `StackContextManager` works for all auto-instrumentation features except linking user-interaction spans to the fetch calls they trigger.
 
 ### Server/Daemon (Bun)
 
@@ -132,22 +132,21 @@ The dashboard has a `WebTracerProvider` configured but only 6 spans in 37k total
 - Registers it globally ✅
 - Provides `withDashboardSpan` wrapper ✅
 - **Does NOT register auto-instrumentations** ❌
-- **Does NOT use `ZoneContextManager`** ❌ (uses default `StackContextManager` which doesn't propagate across async boundaries in browsers)
+- **Does NOT register auto-instrumentations** ❌
 
 ### Recommended Changes
 
-**Step 1: Add dependencies**
+**Step 1: Add dependency**
 
 ```bash
-bun add @opentelemetry/auto-instrumentations-web @opentelemetry/context-zone-peer-dep zone.js
+bun add @opentelemetry/auto-instrumentations-web @opentelemetry/instrumentation
 ```
 
-(`context-zone-peer-dep` lets you control the Zone.js version separately)
+**Do NOT add Zone.js / `@opentelemetry/context-zone`.** Zone.js is ~1MB, poorly maintained, and doesn't work with ES2017+ async/await (requires transpiling to ES2015). The default `StackContextManager` (auto-registered by `WebTracerProvider.register()`) is sufficient — fetch auto-instrumentation and `traceparent` injection work without Zone.js. You only lose parent-child linking between user-interaction spans and the fetch spans they trigger, which is a minor loss.
 
 **Step 2: Update `initDashboardTracing()`**
 
 ```typescript
-import { ZoneContextManager } from "@opentelemetry/context-zone-peer-dep";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { getWebAutoInstrumentations } from "@opentelemetry/auto-instrumentations-web";
 
@@ -166,12 +165,7 @@ export function initDashboardTracing(): void {
     ],
   });
 
-  provider.register({
-    contextManager: new ZoneContextManager(),
-    propagator: new CompositePropagator({
-      propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
-    }),
-  });
+  provider.register();  // Uses default StackContextManager + W3CTraceContextPropagator
 
   registerInstrumentations({
     tracerProvider: provider,
@@ -194,12 +188,11 @@ export function initDashboardTracing(): void {
 - Every `fetch()` call from the dashboard creates a span with: HTTP method, URL, status code, duration
 - `traceparent` headers are automatically injected into all fetch requests → daemon RPC handler picks them up → **full CLI/dashboard → daemon trace chains**
 - Page load timing spans: `documentFetch`, `documentLoad`, `resourceFetch`
-- User interaction spans: click events linked to resulting fetch calls
-- All spans properly parented via `ZoneContextManager`
+- User interaction spans for click events (not linked to fetch without Zone.js, but still useful)
 
 **Effort estimate**: ~1 hour. Most of this is adding packages and updating the init function.
 
-**Size impact**: Zone.js adds ~50KB gzipped to the bundle. This is the only significant cost. If bundle size is critical, you can skip Zone.js and use `StackContextManager` (default) — you lose parent-child linking between user interactions and fetch calls, but the fetch auto-instrumentation still works.
+**Size impact**: Minimal — the auto-instrumentations-web package is lightweight. No Zone.js bloat.
 
 ---
 
@@ -409,4 +402,4 @@ registerInstrumentations({
 | `@opentelemetry/auto-instrumentations-node` | ❌ No | Depends on `node:http` monkey-patching |
 | `@opentelemetry/sdk-trace-web` | ✅ Full | Browser-only, already using |
 | `@opentelemetry/auto-instrumentations-web` | ✅ Full | Browser-only, recommended |
-| `@opentelemetry/context-zone` | ✅ Full | Browser-only, recommended |
+| `@opentelemetry/context-zone` | ✅ Works but not recommended | ~1MB, poorly maintained, breaks ES2017+ async/await — use default StackContextManager instead |
