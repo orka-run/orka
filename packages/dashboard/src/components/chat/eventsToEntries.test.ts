@@ -306,7 +306,7 @@ describe("eventsToEntries", () => {
     );
   });
 
-  test("agent ToolEntry contains nested subTools from task range", () => {
+  test("agent item.completed creates subagent entry with nested subTools from task range", () => {
     const events: OrchestrationEvent[] = [
       // Agent tool call
       {
@@ -391,25 +391,70 @@ describe("eventsToEntries", () => {
 
     const entries = eventsToEntries(events);
 
-    // Agent ToolEntry should exist with subTools
+    // Agent should be a subagent entry, not in a tool-group
+    const subagents = entries.filter((e) => e.type === "subagent");
+    expect(subagents).toHaveLength(1);
+    const agent = subagents[0]!;
+    expect(agent.title).toBe("Agent: Research topic");
+    expect(agent.status).toBe("completed");
+    expect(agent.taskId).toBe("task-abc");
+    expect(agent.subTools).toHaveLength(2);
+    expect(agent.subTools![0]!.title).toBe("Read src/index.ts");
+    expect(agent.subTools![1]!.title).toBe("Grep pattern in src/");
+
+    // No tool-groups should contain agent tools
     const toolGroups = entries.filter((e) => e.type === "tool-group");
     const agentTools = toolGroups.flatMap((g) => g.tools).filter((t) => t.icon === "agent");
-    expect(agentTools).toHaveLength(1);
-    expect(agentTools[0]!.title).toBe("Agent: Research topic");
-    expect(agentTools[0]!.summary).toBe("2 tool calls");
-    expect(agentTools[0]!.subTools).toHaveLength(2);
-    expect(agentTools[0]!.subTools![0]!.icon).toBe("read");
-    expect(agentTools[0]!.subTools![0]!.title).toBe("Read src/index.ts");
-    expect(agentTools[0]!.subTools![1]!.icon).toBe("search");
+    expect(agentTools).toHaveLength(0);
 
     // No TaskCard for agent-linked task
     const bgTasks = entries.filter((e) => e.type === "task");
     expect(bgTasks).toHaveLength(0);
 
-    // Sub-tool items should NOT appear as separate ToolEntries
+    // Sub-tool items should NOT appear as separate entries
     const allToolIds = toolGroups.flatMap((g) => g.tools.map((t) => t.id));
     expect(allToolIds).not.toContain("sub-read-1");
     expect(allToolIds).not.toContain("sub-grep-1");
+  });
+
+  test("parallel agent items render as individual subagent entries, not grouped", () => {
+    const events: OrchestrationEvent[] = [
+      // 5 parallel agent tool_use calls — all started then all completed
+      ...Array.from({ length: 5 }, (_, i) => ({
+        type: "item.started" as const,
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: `agent-${String(i)}`,
+        itemType: "agent" as const,
+        title: `Agent ${String(i)}: Task ${String(i)}`,
+        detail: `Task ${String(i)}`,
+        timestamp: `2026-03-11T00:00:0${String(i)}Z`,
+      })),
+      ...Array.from({ length: 5 }, (_, i) => ({
+        type: "item.completed" as const,
+        sessionId: "s1",
+        turnId: "turn-1",
+        itemId: `agent-${String(i)}`,
+        itemType: "agent" as const,
+        title: `Agent ${String(i)}: Task ${String(i)}`,
+        timestamp: `2026-03-11T00:00:1${String(i)}Z`,
+      })),
+    ];
+
+    const entries = eventsToEntries(events);
+
+    // Each agent should be a separate subagent entry
+    const subagents = entries.filter((e) => e.type === "subagent");
+    expect(subagents).toHaveLength(5);
+
+    // No tool-groups should contain agents
+    const toolGroups = entries.filter((e) => e.type === "tool-group");
+    const agentTools = toolGroups.flatMap((g) => g.tools).filter((t) => t.icon === "agent");
+    expect(agentTools).toHaveLength(0);
+
+    // Each subagent should have a unique title
+    const titles = subagents.map((s) => s.type === "subagent" ? s.title : "");
+    expect(new Set(titles).size).toBe(5);
   });
 
   test("non-agent task.started renders TaskCard", () => {

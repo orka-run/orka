@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Bot, LoaderCircle, Scissors } from "lucide-react";
 import { ApprovalCard } from "../ApprovalCard";
+import { SubagentCard } from "./SubagentCard";
 import { TaskCard } from "./TaskCard";
 import { AssistantMessage, SystemMessage, UserMessage, type QuotedText } from "./MessageEntry";
 import { ApiRetryEntry, ErrorEntry, RateLimitEntry } from "./StatusEntries";
@@ -46,6 +47,9 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
   }
   if (entry.type === "task") {
     return <TaskCard entry={entry} />;
+  }
+  if (entry.type === "subagent") {
+    return <SubagentCard entry={entry} />;
   }
   if (entry.type === "compaction") {
     return <CompactionDivider entry={entry} />;

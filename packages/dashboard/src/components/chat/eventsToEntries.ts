@@ -94,6 +94,19 @@ export interface TaskEntry {
   toolCalls: ToolProgressItem[];
 }
 
+export interface SubagentEntry {
+  id: string;
+  type: "subagent";
+  timestamp: string;
+  title: string;
+  detail?: string;
+  status: "running" | "completed";
+  toolCalls: ToolProgressItem[];
+  subTools?: ToolEntry[];
+  taskId?: string;
+  inProgress?: boolean;
+}
+
 export interface CompactionEntry {
   id: string;
   type: "compaction";
@@ -113,6 +126,7 @@ export type ChatEntry =
   | ErrorEntry
   | ApprovalEntry
   | TaskEntry
+  | SubagentEntry
   | CompactionEntry;
 
 export type ThinkingState = "thinking" | "tools" | "writing" | "idle" | "background";
@@ -134,19 +148,6 @@ function itemIcon(itemType: string): ToolIcon {
     default:
       return "command";
   }
-}
-
-/** Strip redundant keys from Agent tool args — description and subagent_type
- *  are already visible in the title, prompt is too long for inline display. */
-function stripAgentArgs(args: unknown, _title: string): unknown {
-  if (args == null || typeof args !== "object") return args;
-  const record = args as Record<string, unknown>;
-  const kept: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(record)) {
-    if (k === "description" || k === "subagent_type") continue;
-    kept[k] = v;
-  }
-  return Object.keys(kept).length > 0 ? kept : undefined;
 }
 
 function shortenPath(text: string, projectPath?: string): string {
@@ -354,6 +355,7 @@ export function eventsToEntries(
   const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
   const completedTaskIds = new Map<string, { summary?: string; status?: string; timestamp: string }>();
   const taskProgressByToolUseId = new Map<string, ToolProgressItem[]>();
+  const taskStartedByToolUseId = new Map<string, string>();
 
   for (const event of events) {
     if (event.type === "item.completed") {
@@ -405,6 +407,12 @@ export function eventsToEntries(
     // Sub-tool items are hidden by the second-pass range scan below.
     if (event.type === "task.started" && event.taskId) {
       taskStartedTaskIds.add(event.taskId);
+      if (event.toolUseId) {
+        const linkedMeta = startedMeta.get(event.toolUseId);
+        if (linkedMeta?.itemType === "agent") {
+          taskStartedByToolUseId.set(event.toolUseId, event.taskId);
+        }
+      }
     }
     // Also collect subagent.tool_use events into the same progress map
     if (event.type === "subagent.tool_use" && event.itemId && event.toolName) {
@@ -595,32 +603,42 @@ export function eventsToEntries(
       }
 
       flushAssistant();
-      const isAgent = event.itemType === "agent";
+
+      if (event.itemType === "agent") {
+        flushToolGroup();
+        const taskId = taskStartedByToolUseId.get(event.itemId);
+        const toolCalls = taskProgressByToolUseId.get(event.itemId) ?? [];
+        const subTools = agentSubTools.get(event.itemId);
+        entries.push({
+          id: `subagent-${event.itemId}`,
+          type: "subagent",
+          timestamp: event.timestamp,
+          title: shortenPath(event.title ?? event.itemType, workDir),
+          ...(event.detail ? { detail: shortenPath(event.detail, workDir) } : {}),
+          status: "running",
+          toolCalls,
+          ...(taskId ? { taskId } : {}),
+          inProgress: true,
+          ...(subTools ? { subTools } : {}),
+        });
+        continue;
+      }
+
       const title = shortenPath(event.title ?? event.itemType, workDir);
       const detail = shortenPath(event.detail ?? "", workDir);
       const isInProgress = !completedItemIds.has(event.itemId);
       const detailIsRedundant = !detail || detail === title || title.includes(detail);
-      const summary = isAgent
-        ? (isInProgress ? "In progress…" : "Completed")
-        : (detailIsRedundant ? (isInProgress ? "In progress…" : "Completed") : detail);
-      // For agent tools, detail duplicates the description already in the title — skip it.
-      // Also strip redundant args (description, subagent_type) that clutter the UI.
-      const detailsList = isAgent ? [] : (detailIsRedundant ? [] : [detail]);
-      const args = isAgent ? stripAgentArgs(event.args, title) : event.args;
-
-      const subTools = isAgent ? agentSubTools.get(event.itemId) : undefined;
+      const summary = detailIsRedundant ? (isInProgress ? "In progress…" : "Completed") : detail;
+      const detailsList = detailIsRedundant ? [] : [detail];
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
         title,
-        summary: isAgent && subTools
-          ? `${String(subTools.length)} tool call${subTools.length !== 1 ? "s" : ""}`
-          : summary,
+        summary,
         icon: itemIcon(event.itemType),
         details: detailsList,
-        ...(args !== undefined ? { args } : {}),
+        ...(event.args !== undefined ? { args: event.args } : {}),
         ...(isInProgress ? { inProgress: true } : {}),
-        ...(subTools ? { subTools } : {}),
       });
       continue;
     }
@@ -632,32 +650,44 @@ export function eventsToEntries(
       flushAssistant();
       const meta = startedMeta.get(event.itemId);
       const itemType = event.itemType !== "unknown" ? event.itemType : (meta?.itemType ?? event.itemType);
-      const isAgentCompleted = itemType === "agent";
+
+      if (itemType === "agent") {
+        flushToolGroup();
+        const title = shortenPath(event.title ?? meta?.title ?? itemType, workDir);
+        const startedDetail = meta?.detail ? shortenPath(meta.detail, workDir) : undefined;
+        const taskId = taskStartedByToolUseId.get(event.itemId);
+        const toolCalls = taskProgressByToolUseId.get(event.itemId) ?? [];
+        const subTools = agentSubTools.get(event.itemId);
+        entries.push({
+          id: `subagent-${event.itemId}`,
+          type: "subagent",
+          timestamp: event.timestamp,
+          title,
+          ...(startedDetail ? { detail: startedDetail } : {}),
+          status: "completed",
+          toolCalls,
+          ...(taskId ? { taskId } : {}),
+          ...(subTools ? { subTools } : {}),
+        });
+        continue;
+      }
+
       const title = shortenPath(event.title ?? meta?.title ?? itemType, workDir);
       const startedDetail = meta?.detail ? shortenPath(meta.detail, workDir) : "";
       const outputDetail = event.detail ? shortenPath(event.detail, workDir) : "";
       const startedDetailRedundant = !startedDetail || startedDetail === title || title.includes(startedDetail);
-      const summary = isAgentCompleted
-        ? "Completed"
-        : (startedDetailRedundant ? "Completed" : startedDetail);
-      const detailContent = isAgentCompleted
-        ? ""
-        : (outputDetail && !title.includes(outputDetail) ? outputDetail : (startedDetailRedundant ? "" : startedDetail));
+      const summary = startedDetailRedundant ? "Completed" : startedDetail;
+      const detailContent = outputDetail && !title.includes(outputDetail) ? outputDetail : (startedDetailRedundant ? "" : startedDetail);
       const rawArgs = meta?.args ?? event.args;
-      const args = isAgentCompleted ? stripAgentArgs(rawArgs, title) : rawArgs;
-      const completedSubTools = isAgentCompleted ? agentSubTools.get(event.itemId) : undefined;
 
       pendingTools.push({
         id: event.itemId,
         timestamp: event.timestamp,
         title,
-        summary: isAgentCompleted && completedSubTools
-          ? `${String(completedSubTools.length)} tool call${completedSubTools.length !== 1 ? "s" : ""}`
-          : summary,
+        summary,
         icon: itemIcon(itemType),
         details: detailContent ? [detailContent] : [],
-        ...(args !== undefined ? { args } : {}),
-        ...(completedSubTools ? { subTools: completedSubTools } : {}),
+        ...(rawArgs !== undefined ? { args: rawArgs } : {}),
       });
       continue;
     }
@@ -1033,6 +1063,10 @@ export function eventsToEntries(
       }
       if (entry.type === "task" && entry.status === "running") {
         entry.status = "completed";
+      }
+      if (entry.type === "subagent" && entry.status === "running") {
+        entry.status = "completed";
+        entry.inProgress = false;
       }
       if (entry.type === "user" && entry.queued) {
         entry.queued = false;
