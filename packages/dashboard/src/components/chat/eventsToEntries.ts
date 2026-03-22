@@ -342,9 +342,13 @@ export function eventsToEntries(
       .map((event) => `${event.rateLimitType}:${String(event.resetsAt)}`),
   );
   const completedItemIds = new Set<string>();
-  // Items that are represented by a BackgroundTaskCard (subagent.spawned) —
-  // skip their item.started/item.completed ToolEntry to avoid duplication.
+  // Items that are represented by a BackgroundTaskCard — skip their
+  // item.started/item.completed ToolEntry to avoid duplication.
+  // Includes: the parent agent item AND all sub-tool items within the task range.
   const subagentItemIds = new Set<string>();
+  // taskIds that have a task.started event — used to skip duplicate
+  // subagent.spawned BackgroundTaskCards (the adapter emits both).
+  const taskStartedTaskIds = new Set<string>();
   const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
   const completedTaskIds = new Map<string, { summary?: string; status?: string; timestamp: string }>();
   const taskProgressByToolUseId = new Map<string, ToolProgressItem[]>();
@@ -389,14 +393,18 @@ export function eventsToEntries(
         taskProgressByToolUseId.set(event.itemId, [item]);
       }
     }
-    // Collect itemIds that have a subagent.spawned or task.started so we can
-    // skip the duplicate ToolEntry from item.started/item.completed — the
-    // BackgroundTaskCard covers it.
+    // Collect parent agent itemIds so we skip their ToolEntry —
+    // the BackgroundTaskCard from task.started covers it.
     if (event.type === "subagent.spawned" && event.itemId) {
       subagentItemIds.add(event.itemId);
     }
-    if (event.type === "task.started" && event.toolUseId) {
-      subagentItemIds.add(event.toolUseId);
+    if (event.type === "task.started") {
+      if (event.toolUseId) {
+        subagentItemIds.add(event.toolUseId);
+      }
+      if (event.taskId) {
+        taskStartedTaskIds.add(event.taskId);
+      }
     }
     // Also collect subagent.tool_use events into the same progress map
     if (event.type === "subagent.tool_use" && event.itemId && event.toolName) {
@@ -411,6 +419,41 @@ export function eventsToEntries(
         existing.push(item);
       } else {
         taskProgressByToolUseId.set(event.itemId, [item]);
+      }
+    }
+  }
+
+  // Second pass: collect sub-tool itemIds within task.started → task.completed
+  // ranges so they are hidden from the main timeline (already shown as
+  // tool.progress inside BackgroundTaskCard).
+  {
+    const openTasks = new Map<string, number>(); // taskId → startIndex
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i];
+      if (!ev) continue;
+      if (ev.type === "task.started" && ev.taskId) {
+        openTasks.set(ev.taskId, i);
+      }
+      if (ev.type === "task.completed" && ev.taskId) {
+        const startIdx = openTasks.get(ev.taskId);
+        if (startIdx !== undefined) {
+          for (let j = startIdx + 1; j < i; j++) {
+            const inner = events[j];
+            if (inner && (inner.type === "item.started" || inner.type === "item.completed")) {
+              subagentItemIds.add(inner.itemId);
+            }
+          }
+          openTasks.delete(ev.taskId);
+        }
+      }
+    }
+    // Still-running tasks: mark all subsequent items as sub-agent
+    for (const [, startIdx] of openTasks) {
+      for (let j = startIdx + 1; j < events.length; j++) {
+        const inner = events[j];
+        if (inner && (inner.type === "item.started" || inner.type === "item.completed")) {
+          subagentItemIds.add(inner.itemId);
+        }
       }
     }
   }
@@ -672,6 +715,11 @@ export function eventsToEntries(
     }
 
     if (event.type === "subagent.spawned") {
+      // Skip if task.started already created a BackgroundTaskCard for this agent
+      // (the Claude adapter emits both task.started and subagent.spawned).
+      if (taskStartedTaskIds.has(event.agentId)) {
+        continue;
+      }
       flushAssistant();
       flushToolGroup();
       const completed = completedTaskIds.get(event.agentId);
@@ -683,6 +731,7 @@ export function eventsToEntries(
         timestamp: event.timestamp,
         taskId: event.agentId,
         title: event.description ?? "Subagent",
+        ...(event.prompt ? { detail: event.prompt } : {}),
         status: completed ? "completed" : "running",
         toolCalls,
       });
