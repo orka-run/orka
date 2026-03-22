@@ -1,12 +1,12 @@
 import { memo, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react";
 import { formatRelativeTime } from "../../lib/sessionUi";
-import type { BackgroundTaskEntry } from "./eventsToEntries";
+import type { TaskEntry } from "./eventsToEntries";
 
-export const BackgroundTaskCard = memo(function BackgroundTaskCard({
+export const TaskCard = memo(function TaskCard({
   entry,
 }: {
-  entry: BackgroundTaskEntry;
+  entry: TaskEntry;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isRunning = entry.status === "running";

@@ -148,7 +148,7 @@ describe("eventsToEntries", () => {
       },
     ]);
 
-    // tool.progress is collected into background task entries, not standalone
+    // tool.progress is collected into task entries, not standalone
     expect(entries).not.toContainEqual(
       expect.objectContaining({ id: "tool-progress-2026-03-11T00:00:01Z-turn-1" }),
     );
@@ -171,7 +171,7 @@ describe("eventsToEntries", () => {
     });
   });
 
-  test("renders task.started as background-task entry with status and progress", () => {
+  test("renders task.started as task entry with status and progress", () => {
     const entries = eventsToEntries([
       {
         type: "task.started",
@@ -205,7 +205,7 @@ describe("eventsToEntries", () => {
 
     expect(entries).toContainEqual({
       id: "bg-task-task-1",
-      type: "background-task",
+      type: "task",
       timestamp: "2026-03-11T00:00:02Z",
       taskId: "task-1",
       title: "Explore dashboard structure",
@@ -215,7 +215,7 @@ describe("eventsToEntries", () => {
     });
   });
 
-  test("renders running background task when no task.completed exists", () => {
+  test("renders running task when no task.completed exists", () => {
     const entries = eventsToEntries([
       {
         type: "task.started",
@@ -229,7 +229,7 @@ describe("eventsToEntries", () => {
 
     expect(entries).toContainEqual(
       expect.objectContaining({
-        type: "background-task",
+        type: "task",
         taskId: "task-2",
         status: "running",
         title: "Running tests",
@@ -237,7 +237,7 @@ describe("eventsToEntries", () => {
     );
   });
 
-  test("renders subagent.spawned as background-task entry", () => {
+  test("renders subagent.spawned as task entry", () => {
     const entries = eventsToEntries([
       {
         type: "subagent.spawned",
@@ -273,7 +273,7 @@ describe("eventsToEntries", () => {
 
     expect(entries).toContainEqual({
       id: "bg-task-agent-abc",
-      type: "background-task",
+      type: "task",
       timestamp: "2026-03-11T00:00:02Z",
       taskId: "agent-abc",
       title: "Explore codebase",
@@ -298,7 +298,7 @@ describe("eventsToEntries", () => {
 
     expect(entries).toContainEqual(
       expect.objectContaining({
-        type: "background-task",
+        type: "task",
         taskId: "agent-xyz",
         status: "running",
         title: "Code analysis",
@@ -402,8 +402,8 @@ describe("eventsToEntries", () => {
     expect(agentTools[0]!.subTools![0]!.title).toBe("Read src/index.ts");
     expect(agentTools[0]!.subTools![1]!.icon).toBe("search");
 
-    // No BackgroundTaskCard for agent-linked task
-    const bgTasks = entries.filter((e) => e.type === "background-task");
+    // No TaskCard for agent-linked task
+    const bgTasks = entries.filter((e) => e.type === "task");
     expect(bgTasks).toHaveLength(0);
 
     // Sub-tool items should NOT appear as separate ToolEntries
@@ -412,7 +412,7 @@ describe("eventsToEntries", () => {
     expect(allToolIds).not.toContain("sub-grep-1");
   });
 
-  test("non-agent task.started still renders BackgroundTaskCard", () => {
+  test("non-agent task.started renders TaskCard", () => {
     const events: OrchestrationEvent[] = [
       // A Bash command item (not agent)
       {
@@ -455,8 +455,8 @@ describe("eventsToEntries", () => {
 
     const entries = eventsToEntries(events);
 
-    // Non-agent task should still render BackgroundTaskCard
-    const bgTasks = entries.filter((e) => e.type === "background-task");
+    // Non-agent task should render TaskCard
+    const bgTasks = entries.filter((e) => e.type === "task");
     expect(bgTasks).toHaveLength(1);
     expect(bgTasks[0]!.title).toBe("Running tests");
   });

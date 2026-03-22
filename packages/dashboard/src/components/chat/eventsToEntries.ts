@@ -83,9 +83,9 @@ export interface ToolProgressItem {
   elapsedSeconds?: number;
 }
 
-export interface BackgroundTaskEntry {
+export interface TaskEntry {
   id: string;
-  type: "background-task";
+  type: "task";
   timestamp: string;
   taskId: string;
   title: string;
@@ -112,7 +112,7 @@ export type ChatEntry =
   | ApiRetryEntry
   | ErrorEntry
   | ApprovalEntry
-  | BackgroundTaskEntry
+  | TaskEntry
   | CompactionEntry;
 
 export type ThinkingState = "thinking" | "tools" | "writing" | "idle" | "background";
@@ -287,8 +287,8 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
     }
   }
 
-  // Check for background tasks still running
-  const hasRunningBackgroundTask = events.some(
+  // Check for tasks still running
+  const hasRunningTask = events.some(
     (event) =>
       (event.type === "task.started" && event.taskId && !completedTaskIds.has(event.taskId)) ||
       (event.type === "subagent.spawned" && !completedTaskIds.has(event.agentId)),
@@ -311,13 +311,13 @@ export function deriveThinkingState(events: OrchestrationEvent[]): ThinkingState
       case "subagent.spawned":
       case "subagent.tool_use":
       case "subagent.completed":
-        return hasRunningBackgroundTask ? "background" : "tools";
+        return hasRunningTask ? "background" : "tools";
       case "turn.completed":
       case "turn.aborted":
       case "session.completed":
       case "session.failed":
       case "session.cancelled":
-        return hasRunningBackgroundTask ? "background" : "idle";
+        return hasRunningTask ? "background" : "idle";
       case "item.completed":
       case "item.updated":
         return "thinking";
@@ -344,12 +344,12 @@ export function eventsToEntries(
       .map((event) => `${event.rateLimitType}:${String(event.resetsAt)}`),
   );
   const completedItemIds = new Set<string>();
-  // Items that are represented by a BackgroundTaskCard — skip their
+  // Items that are represented by a TaskCard — skip their
   // item.started/item.completed ToolEntry to avoid duplication.
   // Includes: the parent agent item AND all sub-tool items within the task range.
   const subagentItemIds = new Set<string>();
   // taskIds that have a task.started event — used to skip duplicate
-  // subagent.spawned BackgroundTaskCards (the adapter emits both).
+  // subagent.spawned TaskCards (the adapter emits both).
   const taskStartedTaskIds = new Set<string>();
   const startedMeta = new Map<string, { title?: string; detail?: string; itemType: string; args?: unknown }>();
   const completedTaskIds = new Map<string, { summary?: string; status?: string; timestamp: string }>();
@@ -396,7 +396,7 @@ export function eventsToEntries(
       }
     }
     // For subagent.spawned (Codex path), skip the parent ToolEntry since
-    // a BackgroundTaskCard is rendered instead.
+    // a TaskCard is rendered instead.
     if (event.type === "subagent.spawned" && event.itemId) {
       subagentItemIds.add(event.itemId);
     }
@@ -725,7 +725,7 @@ export function eventsToEntries(
     if (event.type === "task.started") {
       // When toolUseId links to an agent item, the agent's own ToolEntry
       // (item.started with itemType="agent") already represents this task —
-      // skip the duplicate BackgroundTaskCard.
+      // skip the duplicate TaskCard.
       const linkedMeta = event.toolUseId ? startedMeta.get(event.toolUseId) : undefined;
       if (linkedMeta?.itemType === "agent") {
         continue;
@@ -738,7 +738,7 @@ export function eventsToEntries(
 
       entries.push({
         id: `bg-task-${taskId}`,
-        type: "background-task",
+        type: "task",
         timestamp: event.timestamp,
         taskId,
         title: event.title ?? event.taskKind ?? "Background task",
@@ -750,7 +750,7 @@ export function eventsToEntries(
     }
 
     if (event.type === "subagent.spawned") {
-      // Skip if task.started already created a BackgroundTaskCard for this agent
+      // Skip if task.started already created a TaskCard for this agent
       // (the Claude adapter emits both task.started and subagent.spawned).
       if (taskStartedTaskIds.has(event.agentId)) {
         continue;
@@ -762,7 +762,7 @@ export function eventsToEntries(
 
       entries.push({
         id: `bg-task-${event.agentId}`,
-        type: "background-task",
+        type: "task",
         timestamp: event.timestamp,
         taskId: event.agentId,
         title: event.description ?? "Subagent",
@@ -777,11 +777,11 @@ export function eventsToEntries(
       event.type === "session.created" ||
       event.type === "session.started" ||
       event.type === "turn.started" ||
-      // tool.progress is collected into background task entries — skip standalone rendering
+      // tool.progress is collected into task entries — skip standalone rendering
       event.type === "tool.progress" ||
       // task.completed is merged into task.started entries — skip standalone rendering
       event.type === "task.completed" ||
-      // subagent.tool_use is collected into background task entries — skip standalone rendering
+      // subagent.tool_use is collected into task entries — skip standalone rendering
       event.type === "subagent.tool_use" ||
       // subagent.completed is merged into subagent.spawned entries — skip standalone rendering
       event.type === "subagent.completed" ||
@@ -1029,7 +1029,7 @@ export function eventsToEntries(
           tool.inProgress = false;
         }
       }
-      if (entry.type === "background-task" && entry.status === "running") {
+      if (entry.type === "task" && entry.status === "running") {
         entry.status = "completed";
       }
       if (entry.type === "user" && entry.queued) {

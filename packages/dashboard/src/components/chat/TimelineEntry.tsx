@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Bot, LoaderCircle, Scissors } from "lucide-react";
 import { ApprovalCard } from "../ApprovalCard";
-import { BackgroundTaskCard } from "./BackgroundTaskCard";
+import { TaskCard } from "./TaskCard";
 import { AssistantMessage, SystemMessage, UserMessage, type QuotedText } from "./MessageEntry";
 import { ApiRetryEntry, ErrorEntry, RateLimitEntry } from "./StatusEntries";
 import { ToolCallGroup } from "./ToolCallEntry";
@@ -44,8 +44,8 @@ export const ChatTimelineEntry = memo(function ChatTimelineEntry({
       />
     );
   }
-  if (entry.type === "background-task") {
-    return <BackgroundTaskCard entry={entry} />;
+  if (entry.type === "task") {
+    return <TaskCard entry={entry} />;
   }
   if (entry.type === "compaction") {
     return <CompactionDivider entry={entry} />;
