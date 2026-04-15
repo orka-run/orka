@@ -233,8 +233,8 @@ bun test packages/
 # E2E tests only
 bun test tests/e2e/
 
-# Start dashboard dev server
-cd packages/dashboard && bunx vite
+# Start daemon + dashboard (auto-spawns Vite dev server when no dist/)
+orka serve
 ```
 
 ## Documentation

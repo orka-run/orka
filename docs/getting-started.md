@@ -178,16 +178,23 @@ post_worktree_create = [
 
 ## Dashboard
 
-### Dev mode
-
-Run the daemon, then start the dashboard dev server:
+`orka serve` serves the dashboard on the daemon's own port. If
+`packages/dashboard/dist/` exists, it is served as static files from
+`http://localhost:7394`. Otherwise the daemon spawns `bunx vite` as a
+child process for live dev (HMR) and Vite proxies `/ws` back to the
+daemon on 7394.
 
 ```bash
-orka serve
-cd packages/dashboard && bun run dev
-```
+# Prod: build once, then serve statically
+cd packages/dashboard && bunx vite build && cd -
+orka serve                    # → http://localhost:7394
 
-Open `http://localhost:3773`. Vite proxies `/ws` to `ws://localhost:7394`.
+# Dev: HMR + auto-spawned Vite
+orka serve --dashboard-dev    # daemon on 7394, Vite on 5173
+
+# Disable dashboard entirely
+orka serve --no-dashboard
+```
 
 ### Docker
 
@@ -195,7 +202,7 @@ Open `http://localhost:3773`. Vite proxies `/ws` to `ws://localhost:7394`.
 docker compose up
 ```
 
-This starts both daemon and dashboard. The dashboard is available at `http://localhost:3773`.
+This starts both daemon and dashboard.
 
 ### What it shows
 
