@@ -345,7 +345,7 @@ describe("loadProjectConfig", () => {
       [
         "[env]",
         'NODE_ENV = "development"',
-        'BEADS_DOLT_HOST = "127.0.0.1"',
+        'ORKA_TEST_HOST = "127.0.0.1"',
       ].join("\n"),
       "utf8",
     );
@@ -355,7 +355,7 @@ describe("loadProjectConfig", () => {
       if (!config) throw new Error("expected config");
       expect(config.env).toEqual({
         NODE_ENV: "development",
-        BEADS_DOLT_HOST: "127.0.0.1",
+        ORKA_TEST_HOST: "127.0.0.1",
       });
     } finally {
       rmSync(testDir, { recursive: true, force: true });
@@ -423,7 +423,7 @@ describe("loadProjectConfig", () => {
       [
         "[hooks]",
         'before_spawn = "echo starting"',
-        'after_complete = "bd dolt push 2>/dev/null"',
+        'after_complete = "br sync --flush-only 2>/dev/null"',
       ].join("\n"),
       "utf8",
     );
@@ -432,7 +432,7 @@ describe("loadProjectConfig", () => {
       const config = loadProjectConfig(testDir);
       if (!config) throw new Error("expected config");
       expect(config.hooks.beforeSpawn).toBe("echo starting");
-      expect(config.hooks.afterComplete).toBe("bd dolt push 2>/dev/null");
+      expect(config.hooks.afterComplete).toBe("br sync --flush-only 2>/dev/null");
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }

@@ -3,7 +3,7 @@ dist/
 *.tsbuildinfo
 .orka/
 
-# Dolt database files (added by bd init)
+# Local br SQLite database and legacy Dolt metadata
 .dolt/
 *.db
 .claude/worktrees/

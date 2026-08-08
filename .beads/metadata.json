@@ -1,7 +1,4 @@
 {
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "server",
-  "dolt_database": "orka",
-  "project_id": "9d8dc825-58e6-46eb-ace7-0859aff277a1"
+  "database": "beads.db",
+  "jsonl_export": "issues.jsonl"
 }

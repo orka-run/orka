@@ -129,7 +129,7 @@ ORKA_REMOTE=ws://relay:7390/ws ORKA_TOKEN=<client_api_key> ORKA_ENCRYPT=1 orka p
 - **Config**: ~/.orka/config.toml (optional, TOML with [defaults], [limits], and [hooks] sections)
 - **Dashboard transport**: dashboard uses same-origin `/ws` in both Vite dev proxy and nginx prod proxy
 - **Tracing**: OpenTelemetry (see Observability section)
-- **Issue tracking**: beads (`bd` CLI)
+- **Issue tracking**: beads (`br` CLI)
 
 ## Architecture: OrkaService Interface
 
@@ -324,8 +324,8 @@ orka serve --port 7394 --relay ws://127.0.0.1:7390 --node-id local &
 orka --remote ws://127.0.0.1:7390/ws ps
 
 # Check issues
-bd ready
-bd list --status=open
+br ready
+br list --status open
 ```
 
 ## Waiting for Agent Sessions

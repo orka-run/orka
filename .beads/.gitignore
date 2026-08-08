@@ -1,32 +1,32 @@
-# Dolt database (managed by Dolt, not git)
-dolt/
-dolt-access.lock
+# br local SQLite database and runtime files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.lock
+.write.lock
+.local_version
+last-touched
+*.tmp
 
-# Runtime files
+# br local recovery/history state
+.br_history/
+.br_recovery/
+.sync.lock
+sync_base.jsonl
+beads.base.jsonl
+beads.base.meta.json
+beads.left.jsonl
+beads.left.meta.json
+beads.right.jsonl
+beads.right.meta.json
+
+# Legacy bd/Dolt state kept only for rollback
+dolt/
+dolt-wal
+dolt-access.lock
 bd.sock
 bd.sock.startlock
-sync-state.json
-last-touched
-
-# Local version tracking (prevents upgrade notification spam after git ops)
-.local_version
-
-# Worktree redirect file (contains relative path to main repo's .beads/)
-# Must not be committed as paths would be wrong in other clones
-redirect
-
-# Sync state (local-only, per-machine)
-# These files are machine-specific and should not be shared across clones
-.sync.lock
-export-state/
-
-# Ephemeral store (SQLite - wisps/molecules, intentionally not versioned)
-ephemeral.sqlite3
-ephemeral.sqlite3-journal
-ephemeral.sqlite3-wal
-ephemeral.sqlite3-shm
-
-# Dolt server management (auto-started by bd)
 dolt-server.pid
 dolt-server.log
 dolt-server.lock
@@ -34,18 +34,16 @@ dolt-server.port
 dolt-server.activity
 dolt-monitor.pid
 
-# Backup data (auto-exported JSONL, local-only)
+# Local backup data and ephemeral stores
 backup/
+ephemeral.sqlite3
+ephemeral.sqlite3-journal
+ephemeral.sqlite3-wal
+ephemeral.sqlite3-shm
 
-# Legacy files (from pre-Dolt versions)
-*.db
-*.db?*
-*.db-journal
-*.db-wal
-*.db-shm
-db.sqlite
-bd.db
-# NOTE: Do NOT add negation patterns here.
-# They would override fork protection in .git/info/exclude.
-# Config files (metadata.json, config.yaml) are tracked by git by default
-# since no pattern above ignores them.
+# Worktree redirect file
+redirect
+
+# Config files, README.md, and issues.jsonl are intentionally tracked.
+# Do not add negation patterns here: they override fork protection in
+# .git/info/exclude.

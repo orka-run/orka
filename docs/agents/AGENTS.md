@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+This project uses **br** (beads) for issue tracking. Run `br capabilities --format json` and `br ready --json` to get started.
 
 ## Spawning Agent Sessions
 
@@ -22,11 +22,11 @@ orka spawn -m interactive --backend claude-code --title "chat session" "hello"
 ## Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd sync               # Sync with git
+br ready              # Find available work
+br show <id>          # View issue details
+br update <id> --claim  # Claim work atomically
+br close <id>         # Complete work
+br sync --flush-only  # Export SQLite state to JSONL
 ```
 
 ## Architecture Snapshot
@@ -122,14 +122,14 @@ const result = await withSpan("orka.something", {
 - **OTLP**: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`
 
 <!-- BEGIN BEADS INTEGRATION -->
-## Issue Tracking with bd (beads)
+## Issue Tracking with br (beads)
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+**IMPORTANT**: This project uses **br (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
 
-### Why bd?
+### Why br?
 
 - Dependency-aware: Track blockers and relationships between issues
-- Version-controlled: Built on Dolt with cell-level merge
+- Local-first: SQLite database with tracked JSONL handoff
 - Agent-optimized: JSON output, ready work detection, discovered-from links
 - Prevents duplicate tracking systems and confusion
 
@@ -138,27 +138,27 @@ const result = await withSpan("orka.something", {
 **Check for ready work:**
 
 ```bash
-bd ready --json
+br ready --json
 ```
 
 **Create new issues:**
 
 ```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
+br create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
+br create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:orka-123 --json
 ```
 
 **Claim and update:**
 
 ```bash
-bd update <id> --claim --json
-bd update bd-42 --priority 1 --json
+br update <id> --claim --json
+br update <id> --priority 1 --json
 ```
 
 **Complete work:**
 
 ```bash
-bd close bd-42 --reason "Completed" --json
+br close <id> --reason "Completed: <proof>" --json
 ```
 
 ### Issue Types
@@ -179,27 +179,27 @@ bd close bd-42 --reason "Completed" --json
 
 ### Workflow for AI Agents
 
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task atomically**: `bd update <id> --claim`
+1. **Check ready work**: `br ready` shows unblocked issues
+2. **Claim your task atomically**: `br update <id> --claim`
 3. **Work on it**: Implement, test, document
 4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
+   - `br create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
+5. **Complete**: `br close <id> --reason "Done"`
 
 ### Auto-Sync
 
-bd automatically syncs with git:
+br keeps local SQLite state and exports a git-friendly JSONL file:
 
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
+- Exports to `.beads/issues.jsonl` with `br sync --flush-only`
+- Imports from JSONL with `br sync --import-only` (e.g., after `git pull`)
+- Run the explicit sync commands when handing changes to git or another clone.
 
 ### Important Rules
 
-- ✅ Use bd for ALL task tracking
+- ✅ Use br for ALL task tracking
 - ✅ Always use `--json` flag for programmatic use
 - ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
+- ✅ Check `br ready` before asking "what should I work on?"
 - ❌ Do NOT create markdown TODO lists
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
@@ -218,7 +218,7 @@ For more details, see README.md and docs/QUICKSTART.md.
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
+   br sync --flush-only
    git push
    git status  # MUST show "up to date with origin"
    ```

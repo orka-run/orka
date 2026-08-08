@@ -4,12 +4,6 @@
 backend = "claude-code"
 model = "opus"
 
-[env]
-BEADS_DOLT_HOST = "127.0.0.1"
-
-[env.dynamic]
-BEADS_DOLT_PORT = "cat .beads/dolt-server.port 2>/dev/null || echo 14003"
-
 [backends.codex]
 model = "gpt-5.4"
 reasoning_effort = "high"
