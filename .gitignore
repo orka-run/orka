@@ -3,8 +3,7 @@ dist/
 *.tsbuildinfo
 .orka/
 
-# Local br SQLite database and legacy Dolt metadata
-.dolt/
+# Local br SQLite database
 *.db
 .claude/worktrees/
 coverage/

@@ -21,19 +21,6 @@ beads.left.meta.json
 beads.right.jsonl
 beads.right.meta.json
 
-# Legacy bd/Dolt state kept only for rollback
-dolt/
-dolt-wal
-dolt-access.lock
-bd.sock
-bd.sock.startlock
-dolt-server.pid
-dolt-server.log
-dolt-server.lock
-dolt-server.port
-dolt-server.activity
-dolt-monitor.pid
-
 # Local backup data and ephemeral stores
 backup/
 ephemeral.sqlite3

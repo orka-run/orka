@@ -18,6 +18,7 @@ br close <id> --reason "Completed: <proof>" --json
 br sync --flush-only
 ```
 
-The former `bd`/Dolt data is retained in `.beads/backup/` for rollback and
-historical reference. The legacy graph contained 13 cyclic `parent-child`
-edges; `br` intentionally does not import those invalid edges.
+The migration to `br` is complete; legacy database files and backups have
+been removed. Historical issue records remain in `issues.jsonl` and Git.
+The legacy graph contained 13 cyclic `parent-child` edges, which were not
+imported because `br` rejects invalid dependency cycles.

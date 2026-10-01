@@ -2,11 +2,12 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|MultiEdit|Write",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/docs/agents/claude-eslint-changed.sh"
+            "command": "bun /home/ilyagulya/prj/orka/packages/daemon/src/hooks/supervised-hook.ts",
+            "timeout": 300
           }
         ]
       }
