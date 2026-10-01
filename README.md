@@ -3,6 +3,8 @@
 Agent session orchestrator for AI coding agents. Run Claude Code or Codex
 as isolated sessions, watch them live, and merge results back into your repo.
 
+![Orka dashboard showing agent sessions and the conversation timeline](docs/dashboard-screenshot.png)
+
 > **WARNING: Early development — no security hardening yet.**
 >
 > - **No local auth.** Anyone with network access to the daemon port (default 7394)
